@@ -96,5 +96,13 @@
     "@anthropic-ai/mcpb": {
       "tmp": "0.2.7"
     }
-  }
+  },
+  "trustedDependencies": [
+    "electron-winstaller",
+    "esbuild",
+    "koffi",
+    "node-pty",
+    "tree-sitter",
+    "tree-sitter-bash"
+  ]
 }
