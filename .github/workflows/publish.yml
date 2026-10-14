@@ -1,12 +1,16 @@
 name: Publish release
 
-# Dispatch this at the tag you want released:
-#   gh workflow run publish.yml --ref v2.0.2
+# Automatically build and publish a stable Marks release when a version tag is pushed,
+# or dispatch manually at the tag if GitHub Actions was not enabled yet:
+#   gh workflow run publish.yml --ref v2.1.37
 #
 # It builds the candidate itself rather than adopting one from an earlier run, so the
 # installers attached to a release are provably the ones produced from that tag by the
 # pipeline in that tag's own tree.
 on:
+  push:
+    tags:
+      - 'v[0-9]*'
   workflow_dispatch:
 
 permissions:
@@ -159,18 +163,18 @@ jobs:
           npm run verify:tunnel-current
           node scripts/check-release-absent.mjs
           gh release create "$TAG" \
-            publish/Chat-On-Steroids-Setup-x64.exe \
-            publish/Chat-On-Steroids-Setup-arm64.exe \
-            publish/Chat-On-Steroids-macOS-x64.dmg \
-            publish/Chat-On-Steroids-macOS-x64.zip \
-            publish/Chat-On-Steroids-macOS-arm64.dmg \
-            publish/Chat-On-Steroids-macOS-arm64.zip \
-            publish/Chat-On-Steroids-Linux-x64.AppImage \
-            publish/Chat-On-Steroids-Linux-x64.deb \
-            publish/Chat-On-Steroids-Linux-arm64.AppImage \
-            publish/Chat-On-Steroids-Linux-arm64.deb \
-            publish/Chat-On-Steroids-Extension.zip \
-            publish/Chat-On-Steroids-Native-Sources.tar.gz \
+            publish/Chat-Marks-Local-GPT-Setup-x64.exe \
+            publish/Chat-Marks-Local-GPT-Setup-arm64.exe \
+            publish/Chat-Marks-Local-GPT-macOS-x64.dmg \
+            publish/Chat-Marks-Local-GPT-macOS-x64.zip \
+            publish/Chat-Marks-Local-GPT-macOS-arm64.dmg \
+            publish/Chat-Marks-Local-GPT-macOS-arm64.zip \
+            publish/Chat-Marks-Local-GPT-Linux-x64.AppImage \
+            publish/Chat-Marks-Local-GPT-Linux-x64.deb \
+            publish/Chat-Marks-Local-GPT-Linux-arm64.AppImage \
+            publish/Chat-Marks-Local-GPT-Linux-arm64.deb \
+            publish/Chat-Marks-Local-GPT-Extension.zip \
+            publish/Chat-Marks-Local-GPT-Native-Sources.tar.gz \
             publish/SHA256SUMS.txt \
             --title "$(sed -n 's/^## //p' "docs/release-notes/$TAG.md" | head -n 1)" \
             --notes-file "docs/release-notes/$TAG.md"

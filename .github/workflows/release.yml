@@ -53,7 +53,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: package-native-sources
-          path: release/Chat-On-Steroids-Native-Sources.tar.gz
+          path: release/Chat-Marks-Local-GPT-Native-Sources.tar.gz
           if-no-files-found: error
           retention-days: 30
 
@@ -110,8 +110,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dmg="$PWD/release/Chat-On-Steroids-macOS-${{ matrix.arch }}.dmg"
-          zip="$PWD/release/Chat-On-Steroids-macOS-${{ matrix.arch }}.zip"
+          dmg="$PWD/release/Chat-Marks-Local-GPT-macOS-${{ matrix.arch }}.dmg"
+          zip="$PWD/release/Chat-Marks-Local-GPT-macOS-${{ matrix.arch }}.zip"
           test -f "$dmg"
           test -f "$zip"
           hdiutil verify "$dmg"
@@ -143,18 +143,18 @@ jobs:
           }
           trap cleanup EXIT
           hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg" >/dev/null
-          test -d "$mount_dir/Chat On Steroids.app"
+          test -d "$mount_dir/Chat Marks Local GPT.app"
           test -L "$mount_dir/Applications"
           test "$(readlink "$mount_dir/Applications")" = /Applications
-          test -x "$mount_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
-          test -f "$mount_dir/Chat On Steroids.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/Chat On Steroids.app"
+          test -x "$mount_dir/Chat Marks Local GPT.app/Contents/MacOS/Chat Marks Local GPT"
+          test -f "$mount_dir/Chat Marks Local GPT.app/Contents/Info.plist"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/Chat Marks Local GPT.app"
           # ditto is the macOS-native ZIP extractor and preserves executable modes/metadata.
           ditto -x -k "$zip" "$zip_dir"
-          test -d "$zip_dir/Chat On Steroids.app"
-          test -x "$zip_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
-          test -f "$zip_dir/Chat On Steroids.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/Chat On Steroids.app"
+          test -d "$zip_dir/Chat Marks Local GPT.app"
+          test -x "$zip_dir/Chat Marks Local GPT.app/Contents/MacOS/Chat Marks Local GPT"
+          test -f "$zip_dir/Chat Marks Local GPT.app/Contents/Info.plist"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/Chat Marks Local GPT.app"
 
       - name: Launch packaged macOS app normally
         if: matrix.platform == 'darwin'
@@ -165,7 +165,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deb="$PWD/release/Chat-On-Steroids-Linux-${{ matrix.arch }}.deb"
+          deb="$PWD/release/Chat-Marks-Local-GPT-Linux-${{ matrix.arch }}.deb"
           test -f "$deb"
           echo "Generated control metadata:"
           dpkg-deb --field "$deb" Package Version Architecture Depends
@@ -183,15 +183,15 @@ jobs:
           dpkg-query -W -f='${Status}\n' chat-on-steroids | grep -Fxq 'install ok installed'
           desktop=/usr/share/applications/com.chatonsteroids.app.desktop
           test -f "$desktop"
-          grep -Fxq 'Name=Chat On Steroids' "$desktop"
-          grep -Fxq 'Icon=chat-on-steroids' "$desktop"
+          grep -Fxq 'Name=Chat Marks Local GPT' "$desktop"
+          grep -Fxq 'Icon=chat-marks-local-gpt' "$desktop"
           grep -Fxq 'StartupWMClass=com.chatonsteroids.app' "$desktop"
           # electron-builder's DEB postinstall registers /usr/bin through update-alternatives.
           # Prove package integration is present, then anchor the full runtime smoke at the
           # package-owned resolved binary rather than assuming an /opt product-directory spelling.
-          test -L /usr/bin/chat-on-steroids
-          ELECTRON_RUN_AS_NODE=1 /usr/bin/chat-on-steroids -e "if(process.platform!=='linux'||process.arch!=='${{ matrix.arch }}')process.exit(9); console.log('deb-runtime-ok')" | grep -Fxq 'deb-runtime-ok'
-          installed_executable="$(readlink -f /usr/bin/chat-on-steroids)"
+          test -L /usr/bin/chat-marks-local-gpt
+          ELECTRON_RUN_AS_NODE=1 /usr/bin/chat-marks-local-gpt -e "if(process.platform!=='linux'||process.arch!=='${{ matrix.arch }}')process.exit(9); console.log('deb-runtime-ok')" | grep -Fxq 'deb-runtime-ok'
+          installed_executable="$(readlink -f /usr/bin/chat-marks-local-gpt)"
           test -x "$installed_executable"
           dpkg-query -S "$installed_executable" | grep -Eq '^chat-on-steroids:'
           node scripts/smoke-packaged-runtime.mjs --platform linux --arch '${{ matrix.arch }}' --root "$(dirname "$installed_executable")"
@@ -229,7 +229,7 @@ jobs:
           XDG_CACHE_HOME="$deb_smoke_root/cache" \
           XDG_DATA_HOME="$deb_smoke_root/data" \
           XDG_STATE_HOME="$deb_smoke_root/state" \
-          CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids >deb-gui.log 2>&1
+          CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-marks-local-gpt >deb-gui.log 2>&1
           status=$?
           set -e
           cat deb-gui.log
@@ -250,7 +250,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          appimage="$PWD/release/Chat-On-Steroids-Linux-${{ matrix.arch }}.AppImage"
+          appimage="$PWD/release/Chat-Marks-Local-GPT-Linux-${{ matrix.arch }}.AppImage"
           test -x "$appimage"
           # Exercise the actual static-runtime artifact through Chromium/Electron startup and
           # require renderer-state proof rather than accepting a process that merely hangs.
@@ -335,11 +335,11 @@ jobs:
           set -euo pipefail
           # Same stamp as the packaged app, so a ZIP-loaded extension reports its build (#568).
           node scripts/write-extension-stamp.mjs
-          (cd extension && zip -qr ../release/Chat-On-Steroids-Extension.zip . -x '*.map')
-          zip -q release/Chat-On-Steroids-Extension.zip LICENSE
+          (cd extension && zip -qr ../release/Chat-Marks-Local-GPT-Extension.zip . -x '*.map')
+          zip -q release/Chat-Marks-Local-GPT-Extension.zip LICENSE
           node -e "const m=require('./extension/manifest.json'),p=require('./package.json');if(m.version!==p.version)throw new Error('Extension '+m.version+' does not match app '+p.version)"
           for required in manifest.json build-stamp.txt background.js chatgpt-dom.js content.js fiber.js overlay.css popup.html popup.css popup.js icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png LICENSE; do
-            unzip -Z1 release/Chat-On-Steroids-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
+            unzip -Z1 release/Chat-Marks-Local-GPT-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
           done
 
       - name: Create SHA-256 checksums
@@ -360,7 +360,7 @@ jobs:
           # fail after all six package jobs. A run id is filesystem-safe and caller-stable.
           name: chat-on-steroids-candidate-${{ github.run_id }}
           path: |
-            release/Chat-On-Steroids-*
+            release/Chat-Marks-Local-GPT-*
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30

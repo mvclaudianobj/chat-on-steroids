@@ -293,7 +293,7 @@ describe('staging the new version', () => {
   });
 
   it('stages nothing when the release does not publish an artifact for this installation', async () => {
-    github({ checksums: `${sha256('x')}  Chat-On-Steroids-Extension.zip\n` });
+    github({ checksums: `${sha256('x')}  Chat-Marks-Local-GPT-Extension.zip\n` });
     await asPlatform('win32', undefined, () => checkForUpdates());
     expect(updateStatus().stage).toBe('failed');
     expect(updateStatus().error).toContain(`publishes no ${WINDOWS_ASSET}`);

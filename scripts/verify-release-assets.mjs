@@ -6,20 +6,20 @@ import { strFromU8, unzipSync } from 'fflate';
 
 /** The files release.yml publishes, in its SHA256SUMS.txt order. */
 export const RELEASE_FILES = [
-  'Chat-On-Steroids-Setup-x64.exe',
-  'Chat-On-Steroids-Setup-arm64.exe',
-  'Chat-On-Steroids-macOS-x64.dmg',
-  'Chat-On-Steroids-macOS-x64.zip',
-  'Chat-On-Steroids-macOS-arm64.dmg',
-  'Chat-On-Steroids-macOS-arm64.zip',
-  'Chat-On-Steroids-Linux-x64.AppImage',
-  'Chat-On-Steroids-Linux-x64.deb',
-  'Chat-On-Steroids-Linux-arm64.AppImage',
-  'Chat-On-Steroids-Linux-arm64.deb',
-  'Chat-On-Steroids-Extension.zip',
-  'Chat-On-Steroids-Native-Sources.tar.gz'
+  'Chat-Marks-Local-GPT-Setup-x64.exe',
+  'Chat-Marks-Local-GPT-Setup-arm64.exe',
+  'Chat-Marks-Local-GPT-macOS-x64.dmg',
+  'Chat-Marks-Local-GPT-macOS-x64.zip',
+  'Chat-Marks-Local-GPT-macOS-arm64.dmg',
+  'Chat-Marks-Local-GPT-macOS-arm64.zip',
+  'Chat-Marks-Local-GPT-Linux-x64.AppImage',
+  'Chat-Marks-Local-GPT-Linux-x64.deb',
+  'Chat-Marks-Local-GPT-Linux-arm64.AppImage',
+  'Chat-Marks-Local-GPT-Linux-arm64.deb',
+  'Chat-Marks-Local-GPT-Extension.zip',
+  'Chat-Marks-Local-GPT-Native-Sources.tar.gz'
 ];
-const EXTENSION = 'Chat-On-Steroids-Extension.zip';
+const EXTENSION = 'Chat-Marks-Local-GPT-Extension.zip';
 
 function sha256(file) {
   return new Promise((resolve, reject) => {
