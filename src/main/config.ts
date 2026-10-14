@@ -1,6 +1,6 @@
 import { DEFAULT_HELPER_CHAT_MODEL, SUPERSEDED_HELPER_CHAT_MODELS } from '../shared/chat-models.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
-import { REASONING_EFFORTS } from '../shared/session.js';
+import { DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB } from '../shared/session.js';
 import { appearanceSchema } from './appearance-schema.js';
 import { BROWSER_BRIDGE_PORTS } from '../shared/browser-bridge.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
@@ -95,6 +95,11 @@ export const browserBridgePortSchema = z.union([z.literal('auto'), z.literal(BRO
  * and the size of what is attached.
  */
 const DEFAULT_CONTEXT_WINDOW = 400_000;
+/** Only the sizes Settings offers; anything else in a hand-edited file falls back to the default. */
+const recordingStorageLimit = z.number()
+  .refine(size => (RECORDING_STORAGE_LIMITS_GIB as readonly number[]).includes(size))
+  .transform(size => size as RecordingStorageLimitGiB);
+
 const DEFAULT_SESSIONS: SessionSettings = {
   record: true,
   retainDays: 0,
@@ -102,7 +107,8 @@ const DEFAULT_SESSIONS: SessionSettings = {
   // Derived, never typed. The Chat panel writes `limit = threshold × 4/3` on every save,
   // so a default that did not already satisfy that relation would be a state the UI cannot
   // produce: the red line would move the first time anyone opened the panel and saved.
-  limitTokens: Math.round((DEFAULT_CONTEXT_WINDOW * 4) / 3)
+  limitTokens: Math.round((DEFAULT_CONTEXT_WINDOW * 4) / 3),
+  storageLimitGiB: DEFAULT_RECORDING_STORAGE_GIB
 };
 
 /**
@@ -182,7 +188,9 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   autoWorktrees: false,
   // Off: ending an OS process is a real side effect even though the worker identity survives.
   // The user must opt in before sleeping-worker runtime maintenance can terminate anything.
-  endSleepingWorkerProcesses: false
+  endSleepingWorkerProcesses: false,
+  // Off: archiving changes the user's ChatGPT chat list, so it is opt-in (#1460).
+  archiveWorkerChats: false
 };
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
@@ -340,14 +348,20 @@ const configSchema = z.object({
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional().default(true),
     backgroundPlacement: z.enum(['window', 'group']).optional().default('window').catch('window'),
+    followUp: z.enum(['steer', 'queue']).optional().default('steer').catch('steer'),
+    enterSends: z.boolean().optional().default(true),
     browserBridgePort: browserBridgePortSchema.optional().default('auto'),
     browserOnly: z.boolean().optional().default(false),
     autoRefreshPlugins: z.boolean().optional().default(false),
+    autoRefreshPluginsAsked: z.boolean().optional().default(false),
     autoSelectSkills: z.boolean().optional().default(false),
     tabsToKeepOpen: z.number().int().min(1).max(50).optional(),
     minimizeToTray: z.boolean(),
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional().default(false),
+    turnNotifications: z.boolean().optional().default(true),
+    keepAwake: z.boolean().optional().default(true),
+    keepScreenAwake: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
@@ -368,14 +382,15 @@ const configSchema = z.object({
         .max(4_000_000)
         .optional()
         .default(DEFAULT_SESSIONS.advisoryTokens),
-      limitTokens: z.number().int().min(10_000).max(4_000_000).optional().default(DEFAULT_SESSIONS.limitTokens)
+      limitTokens: z.number().int().min(10_000).max(4_000_000).optional().default(DEFAULT_SESSIONS.limitTokens),
+      storageLimitGiB: recordingStorageLimit.catch(DEFAULT_RECORDING_STORAGE_GIB)
     })
     // `record` and `retainDays` remain readable for old configs and wire compatibility, but
     // they are no longer user choices. Normalizing here covers disk load, renderer saves,
     // extension/config writers and direct updateConfig callers at one boundary.
     .transform((sessions) => ({ ...sessions, record: true, retainDays: 0 }))
     .optional()
-    .default({ ...DEFAULT_SESSIONS }),
+    .default({ ...DEFAULT_SESSIONS, storageLimitGiB: DEFAULT_RECORDING_STORAGE_GIB }),
   compaction: z
     .object({
       auto: z.boolean().optional().default(DEFAULT_COMPACTION.auto),
@@ -414,7 +429,8 @@ const configSchema = z.object({
       recoverAgentTabs: z.boolean().optional().default(DEFAULT_MULTI_AGENT.recoverAgentTabs),
       waitForSubAgents: z.boolean().optional().default(DEFAULT_MULTI_AGENT.waitForSubAgents ?? false),
       autoWorktrees: z.boolean().optional().default(DEFAULT_MULTI_AGENT.autoWorktrees ?? false),
-      endSleepingWorkerProcesses: z.boolean().optional().default(DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false)
+      endSleepingWorkerProcesses: z.boolean().optional().default(DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false),
+      archiveWorkerChats: z.boolean().optional().default(DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false)
     })
     .optional()
     .default({
@@ -426,7 +442,8 @@ const configSchema = z.object({
       recoverAgentTabs: DEFAULT_MULTI_AGENT.recoverAgentTabs,
       waitForSubAgents: DEFAULT_MULTI_AGENT.waitForSubAgents ?? false,
       autoWorktrees: DEFAULT_MULTI_AGENT.autoWorktrees ?? false,
-      endSleepingWorkerProcesses: DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false
+      endSleepingWorkerProcesses: DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false,
+      archiveWorkerChats: DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false
     }),
   // An empty model id is repaired rather than rejected: the id is free text from a
   // provider listing that changes weekly, and a config that lost it must still load with
@@ -559,7 +576,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
+    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, turnNotifications: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },

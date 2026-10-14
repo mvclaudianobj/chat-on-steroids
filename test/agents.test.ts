@@ -53,6 +53,7 @@ const {
   offerMessagesForConversation,
   onSpawnRequest,
   onSwarmEnd,
+  onWorkerChatsRetired,
   onSwarmPersist,
   onSwarmPersistNow,
   pendingCount,
@@ -5432,4 +5433,59 @@ it('archives accepted renamed assignments before broker expiry and restores save
     resetSessionStoreForTests();
     expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' });
   } finally { vi.useRealTimers(); }
+});
+
+/** Worker chats the broker will never use again, for archiving them in ChatGPT (#1460). */
+describe('retired worker chats', () => {
+  it('names every worker chat of a cleared run, and none while a run is only parked', () => {
+    const retired: string[][] = [];
+    onWorkerChatsRetired((ids) => retired.push([...ids]));
+    startSwarm(2);
+    startWorker('worker-1');
+    startWorker('worker-2');
+    resetSwarm();
+    expect(retired).toEqual([['c-worker-1', 'c-worker-2']]);
+  });
+
+  it('names the workers of a parked run once that run is cleared', () => {
+    const retired: string[][] = [];
+    onWorkerChatsRetired((ids) => retired.push([...ids]));
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    fillContext('c-worker-1');
+    finishAgent(worker.caller, 'done');
+    expect(releaseQuiescentRun()).toBe(true);
+    // Parked: the prime can still come back to its workers.
+    expect(retired).toEqual([]);
+    resetSwarm();
+    expect(retired).toEqual([['c-worker-1']]);
+  });
+
+  it('names the workers of a parked run when its history expires after a week (polish 2.1.37)', () => {
+    const retired: string[][] = [];
+    startSwarm(1);
+    const worker = startWorker('worker-1');
+    fillContext('c-worker-1');
+    finishAgent(worker.caller, 'done');
+    expect(releaseQuiescentRun()).toBe(true);
+    const saved = structuredClone(snapshotSwarm());
+    resetAgentsForTests();
+    // Registered before the app restores its saved runs, as index.ts does.
+    onWorkerChatsRetired((ids) => retired.push([...ids]));
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      restoreSwarm(saved);
+      expect(retired).toEqual([['c-worker-1']]);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('names the workers when clearing the prime row ends its run', () => {
+    const retired: string[][] = [];
+    onWorkerChatsRetired((ids) => retired.push([...ids]));
+    startSwarm(1);
+    startWorker('worker-1');
+    clearAgent(PRIME_ID);
+    expect(retired).toEqual([['c-worker-1']]);
+  });
 });

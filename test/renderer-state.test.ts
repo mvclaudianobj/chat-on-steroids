@@ -2692,6 +2692,19 @@ it('offers the handoff length, starting at the thorough default, and saves a sho
   expect(mounted.calls.at(-1)?.compaction.handoffPrompt).toBe(DEFAULT_HANDOFF_PROMPT);
 });
 
+// #1406: the recording store's size used to be fixed at 2 GB.
+it('offers the recording storage sizes, starting at 2 GB, and saves a larger choice', async () => {
+  const mounted = await mountChat({ hasGoalKey: true });
+  const size = mounted.window.document.getElementById('recordingStorageLimit') as HTMLSelectElement;
+  expect(size.value).toBe('2');
+  expect([...size.options].map(option => option.value)).toEqual(['2', '5', '10', '20', '50']);
+  size.value = '10';
+  size.dispatchEvent(new mounted.window.Event('change'));
+  await settle();
+  await settle();
+  expect(mounted.calls.at(-1)?.sessions.storageLimitGiB).toBe(10);
+});
+
 /**
  * The catalogue is a network request to somebody else's service, so it happens when a person
  * asks for it and not when the settings tab is opened.
@@ -3142,4 +3155,68 @@ it('shows unreadable refresh state and allows one explicit reset, including fail
   finish({ ok: true, data: { ...mounted.state, pluginRefreshUnreadable: false } }); await settle();
   expect(recovery.hidden).toBe(true);
   button.click(); expect(reset).toHaveBeenCalledTimes(2);
+});
+
+// Codex's turn-completion notifications: on unless switched off in General.
+it('notifies when a chat finishes unless switched off', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const notify = w.document.getElementById('turnNotifications') as HTMLInputElement;
+  expect(notify.checked).toBe(true);
+  notify.checked = false;
+  notify.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.turnNotifications).toBe(false);
+});
+
+// Codex's "Follow-up behavior", in General.
+it('offers the follow-up behavior, starting at joining the running turn, and saves waiting', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const followUp = w.document.getElementById('followUp') as HTMLSelectElement;
+  expect(followUp.value).toBe('steer');
+  expect([...followUp.options].map(option => option.value)).toEqual(['steer', 'queue']);
+  followUp.value = 'queue';
+  followUp.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.followUp).toBe('queue');
+});
+
+// Codex's "Prevent sleep while running": the computer by default, the screen too on request, or off.
+it('keeps the computer awake while a chat works, the screen too when chosen, or neither', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const keepAwake = w.document.getElementById('keepAwake') as HTMLSelectElement;
+  expect(keepAwake.value).toBe('computer');
+  for (const [value, saved] of [['screen', { keepAwake: true, keepScreenAwake: true }], ['off', { keepAwake: false, keepScreenAwake: false }],
+    ['computer', { keepAwake: true, keepScreenAwake: false }]] as const) {
+    keepAwake.value = value;
+    keepAwake.dispatchEvent(new w.Event('change', { bubbles: true }));
+    await settle();
+    expect(mounted.calls.at(-1)?.ui, value).toMatchObject(saved);
+  }
+});
+
+// Codex's "Enter key behavior", in General.
+it('offers which key sends, starting at Enter, and saves Cmd/Ctrl+Enter', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const enter = w.document.getElementById('enterSends') as HTMLSelectElement;
+  expect(enter.value).toBe('enter');
+  enter.value = 'modifier';
+  enter.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.enterSends).toBe(false);
+});
+
+// #1460: worker chats leave ChatGPT's chat list once retired, only when switched on.
+it('offers archiving retired worker chats, off by default, and saves it', async () => {
+  const mounted = await mountChat({});
+  const w = mounted.window;
+  const archive = w.document.getElementById('archiveWorkerChats') as HTMLInputElement;
+  expect(archive.checked).toBe(false);
+  archive.checked = true;
+  archive.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.multiAgent.archiveWorkerChats).toBe(true);
 });

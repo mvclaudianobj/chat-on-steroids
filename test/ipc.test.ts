@@ -64,6 +64,7 @@ const {
 } = await import('../src/main/agents.js');
 const { registerIpc, cleanSessionName } = await import('../src/main/ipc.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
+const bridgeModule = await import('../src/main/bridge.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
 const { extensionDownloadUrl } = await import('../src/main/version.js');
 const { resetWorkspaces, setWorkspaceFor, workspaceEntries } = await import('../src/main/workspace.js');
@@ -651,6 +652,7 @@ describe('explicit settings replace the published tool contract', () => {
       const before = snapshot();
       const beforeState = await handlers.get('state:get')!(null, undefined) as any;
       expect(beforeState.data.connectorSchemas.core).toBe(before.schemaId);
+      expect(beforeState.data.connectorRefresh.core).toEqual({ schemaId: before.schemaId, state: 'unknown' });
       const tool = kind === 'finish' ? 'session_finish' : 'exec_command';
       expect(before.tools.map(row => row.name)).toContain(tool);
       expect(before.tools.map(row => row.name)).not.toContain('session');
@@ -2022,6 +2024,47 @@ describe('session IPC contracts', () => {
     expect(refused.ok).toBe(false);
     expect(refused.error).toMatch(/no valid ChatGPT conversation/i);
   });
+
+  it.each([
+    ['cos', true],
+    ['cos', false],
+    ['chrome', true],
+    ['chrome', false],
+    ['edge', true],
+    ['edge', false],
+    ['brave', true],
+    ['brave', false]
+  ] as const)(
+    'routes history chat with preference %s when extension claim is %s',
+    async (browser, extensionClaimsChat) => {
+      const original = getConfig();
+      const conversationId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const session = await createSession({ title: 'route by browser preference', conversationId });
+      const reveal = vi.spyOn(bridgeModule, 'revealChatInBrowser').mockResolvedValue(extensionClaimsChat);
+      try {
+        await saveConfig({ ...original, ui: { ...original.ui, chatBrowser: browser } });
+        vi.mocked(openInPreferredBrowser).mockClear();
+
+        const reply = await handlers.get('sessions:openChat')!(null, { id: session.id }) as any;
+
+        expect(reply.ok, reply.error).toBe(true);
+        const url = `https://chatgpt.com/c/${conversationId}`;
+        if (browser === 'cos') {
+          expect(reveal).not.toHaveBeenCalled();
+          expect(openInPreferredBrowser).toHaveBeenCalledWith(url, { reveal: true });
+        } else if (extensionClaimsChat) {
+          expect(reveal).toHaveBeenCalledWith(conversationId);
+          expect(openInPreferredBrowser).not.toHaveBeenCalled();
+        } else {
+          expect(reveal).toHaveBeenCalledWith(conversationId);
+          expect(openInPreferredBrowser).toHaveBeenCalledWith(url, { reveal: true });
+        }
+      } finally {
+        reveal.mockRestore();
+        await saveConfig(original);
+      }
+    }
+  );
 });
 
 it('follows only the newest chat selection when an earlier lookup finishes last (#1249, #1267)', async () => {
@@ -2274,4 +2317,34 @@ it('projects reloaded unreadable ledger health through state:get and recovers on
   expect(await readDurable('plugin-refresh')).toEqual([]);
   const backups = (await fs.readdir(path.dirname(file))).filter(name => name.startsWith('plugin-refresh.recovery-'));
   expect(await fs.readFile(path.join(path.dirname(file), backups.at(-1)!), 'utf8')).toBe('{broken');
+});
+
+// #1406: the recording store held a fixed 2 GB. Settings now offers larger sizes, applied at once.
+it('saves the recording storage size and applies it to the store', async () => {
+  const store = await import('../src/main/session/store.js');
+  await save({ ...getConfig(), sessions: { ...getConfig().sessions, storageLimitGiB: 10 } });
+  expect(getConfig().sessions.storageLimitGiB).toBe(10);
+  expect(await store.getImageStorage()).toMatchObject({ limitBytes: 10 * 2 ** 30 });
+  // Only offered sizes are accepted.
+  expect(await save({ ...getConfig(), sessions: { ...getConfig().sessions, storageLimitGiB: 3 } })).toMatchObject({ ok: false, error: 'Invalid input' });
+  expect(getConfig().sessions.storageLimitGiB).toBe(10);
+  await save({ ...getConfig(), sessions: { ...getConfig().sessions, storageLimitGiB: 2 } });
+  expect(await store.getImageStorage()).toMatchObject({ limitBytes: 2 * 2 ** 30 });
+});
+
+// Most installs from before Automatic plugin refresh existed have it saved as off without ever
+// choosing that. The app asks once; the answer is kept either way, and a settings save keeps it.
+it('records the one-time answer to the automatic plugin refresh offer', async () => {
+  await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: false } });
+  expect(getConfig().ui.autoRefreshPluginsAsked).toBe(false);
+  const declined: any = await handlers.get('pluginRefresh:offer')!(null, { turnOn: false });
+  expect(declined).toMatchObject({ ok: true, data: { config: { ui: { autoRefreshPlugins: false, autoRefreshPluginsAsked: true } } } });
+  // A later settings save from the window does not bring the question back.
+  await save({ ...getConfig(), ui: { ...getConfig().ui, theme: 'light' } });
+  expect(getConfig().ui.autoRefreshPluginsAsked).toBe(true);
+
+  await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoRefreshPlugins: false } });
+  const accepted: any = await handlers.get('pluginRefresh:offer')!(null, { turnOn: true });
+  expect(accepted).toMatchObject({ ok: true, data: { config: { ui: { autoRefreshPlugins: true, autoRefreshPluginsAsked: true } } } });
+  expect(await handlers.get('pluginRefresh:offer')!(null, { turnOn: 'yes' })).toMatchObject({ ok: false });
 });

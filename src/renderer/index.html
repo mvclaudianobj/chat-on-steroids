@@ -147,6 +147,15 @@
         <button class="btn btn-quiet" id="updateInstall" type="button" hidden>Install now</button>
         <button class="btn btn-quiet" id="updateExtension" type="button" hidden>Update extension</button>
       </div>
+      <div class="notice offer-card" id="pluginRefreshOffer" role="region" aria-labelledby="pluginRefreshOfferTitle" hidden>
+        <div class="offer-icon"><i class="ico ph ph-arrows-clockwise" aria-hidden="true"></i></div>
+        <div class="offer-text">
+          <b id="pluginRefreshOfferTitle">Keep plugins up to date in ChatGPT</b>
+          <em>When an update changes a plugin's tools, Chat Marks Local GPT refreshes it in ChatGPT for you. You can change this later in Settings.</em>
+        </div>
+        <button class="offer-later" id="pluginRefreshOfferLater" type="button">Not now</button>
+        <button class="offer-accept" id="pluginRefreshOfferAccept" type="button">Turn on</button>
+      </div>
       <div class="notice" id="pluginRefreshReminder" role="status" hidden>
         <i class="ico ph ph-activity" aria-hidden="true"></i>
         <span>The tools of a Chat Marks Local GPT plugin changed. Refresh that plugin in ChatGPT; this is separate from the browser extension.</span>
@@ -160,7 +169,7 @@
       <div class="notice" id="recordingStorageFull" role="status" hidden>
         <i class="ico ph ph-warning" aria-hidden="true"></i>
         <span>Recording storage is full. New images and long texts are no longer saved in your chats.</span>
-        <button class="btn btn-quiet" id="freeRecordingStorage" type="button">Free image storage</button>
+        <button class="btn btn-quiet" id="freeRecordingStorage" type="button">Free storage</button>
         <button class="btn btn-icon" id="dismissRecordingStorageFull" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
       </div>
       </div>
@@ -180,6 +189,10 @@
               <header class="settings-section-head"><div><h2>Chats</h2><p>What you see while ChatGPT answers, and what your messages carry.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Follow new output</b><em>Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</em></span><input id="followOutput" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Notify when a chat finishes</b><em>A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.</em></span><input id="turnNotifications" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em>What a message you send while ChatGPT works does by default. ⌘⇧Enter (Ctrl+Shift+Enter on Windows and Linux) sends it the other way.</em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Send messages with</b><em>Which key sends what you type. With ⌘Enter (Ctrl+Enter on Windows and Linux), Enter starts a new line.</em></span><select id="enterSends"><option value="enter">Enter</option><option value="modifier">⌘Enter / Ctrl+Enter</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Keep awake while a chat works</b><em>Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.</em></span><select id="keepAwake"><option value="off">Off</option><option value="computer">The computer</option><option value="screen">The computer and screen</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Mention Chat Marks Local GPT Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
               </div>
@@ -900,7 +913,15 @@
                 <button data-view="compact" type="button">Handoff</button>
               </span>
               <span class="subhead-note" id="chatState"></span>
-
+              <!-- Find in chat (⌘F / Ctrl+F): searches the whole recording of the open chat. -->
+              <div class="chat-find" id="chatFind" role="search" aria-label="Find in chat" hidden>
+                <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>
+                <input id="chatFindField" type="text" placeholder="Find in chat" aria-label="Find in chat" spellcheck="false" autocomplete="off" />
+                <span class="chat-find-count" id="chatFindCount" aria-live="polite"></span>
+                <button class="btn btn-icon" id="chatFindPrev" type="button" title="Previous match" aria-label="Previous match"><i class="ico ph ph-caret-up" aria-hidden="true"></i></button>
+                <button class="btn btn-icon" id="chatFindNext" type="button" title="Next match" aria-label="Next match"><i class="ico ph ph-caret-down" aria-hidden="true"></i></button>
+                <button class="btn btn-icon" id="chatFindClose" type="button" title="Close" aria-label="Close"><i class="ico ph ph-x" aria-hidden="true"></i></button>
+              </div>
             </div>
 
             <div class="scroll" id="chatBody">
@@ -1034,6 +1055,14 @@
                     <input id="endSleepingWorkerProcesses" type="checkbox" />
                   </label>
 
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Archive worker chats in ChatGPT when they are retired</b>
+                      <em>Once a worker can't be used again (you cleared the workers, the main chat closed, or its finished task sat for a week), its chat is archived in ChatGPT and leaves your chat list. You can restore it from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
+                    </span>
+                    <input id="archiveWorkerChats" type="checkbox" />
+                  </label>
+
                   <div id="swarmList"></div>
                   <div class="step-actions">
                     <button class="btn" id="swarmReset" type="button">Clear workers</button>
@@ -1098,8 +1127,21 @@
                     </select>
                   </div>
                   <div class="setting">
-                    <span class="setting-text"><b>Recording storage</b><em id="recordingStorageUsage">Images and long texts recorded from your chats, up to 2 GB.</em></span>
-                    <button class="btn" id="settingsFreeImageStorage" type="button">Free image storage</button>
+                    <span class="setting-text"><b>Recording storage</b><em id="recordingStorageUsage">Images and long texts recorded from your chats.</em></span>
+                    <button class="btn" id="settingsFreeImageStorage" type="button">Free storage</button>
+                  </div>
+                  <div class="setting">
+                    <span class="setting-text">
+                      <b id="recordingStorageLimitTitle">Storage size</b>
+                      <em>How much space recordings may use on this computer. When it is full, new images and the full copies of long texts are no longer kept.</em>
+                    </span>
+                    <select id="recordingStorageLimit" aria-labelledby="recordingStorageLimitTitle">
+                      <option value="2">2 GB</option>
+                      <option value="5">5 GB</option>
+                      <option value="10">10 GB</option>
+                      <option value="20">20 GB</option>
+                      <option value="50">50 GB</option>
+                    </select>
                   </div>
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">API provider</h2><p>Set the provider, model, and credentials for API-based decisions.</p></div></header>
