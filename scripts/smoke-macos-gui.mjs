@@ -12,10 +12,10 @@ const unpackedDir = arch === 'arm64' ? 'mac-arm64' : 'mac';
 const executable = path.resolve(
   'release',
   unpackedDir,
-  'Chat On Steroids.app',
+  'Chat Marks Local GPT.app',
   'Contents',
   'MacOS',
-  'Chat On Steroids'
+  'Chat Marks Local GPT'
 );
 if (!existsSync(executable)) throw new Error(`Could not find unpacked macOS ${arch} app executable`);
 

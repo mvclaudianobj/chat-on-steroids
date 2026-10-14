@@ -274,13 +274,13 @@ function paintAlert(status, info) {
   const text = incompatible
     ? t(
       'popup_version_mismatch_help',
-      "App v$1 (protocol $2); extension v$3 (protocol $4). Open your browser's Extensions page, enable Developer mode, then Update / Reload this extension. If the mismatch remains, use Open extension folder in Chat On Steroids and load that folder. Reload ChatGPT tabs when their active work is finished.",
+      "App v$1 (protocol $2); extension v$3 (protocol $4). Open your browser's Extensions page, enable Developer mode, then Update / Reload this extension. If the mismatch remains, use Open extension folder in Chat Marks Local GPT and load that folder. Reload ChatGPT tabs when their active work is finished.",
       [status.appVersion || '?', status.appProtocol ?? '?', status.extensionVersion || '?', status.extensionProtocol ?? '?']
     )
     : pairError && pairError.message
       ? pairError.message
       : pairError && pairError.error === 'secure_storage_unavailable'
-        ? t('popup_secure_storage_unavailable', 'Secure credential storage is unavailable. Open Chat On Steroids for setup instructions.')
+        ? t('popup_secure_storage_unavailable', 'Secure credential storage is unavailable. Open Chat Marks Local GPT for setup instructions.')
     : error && Date.now() - error.at < 10 * 60 * 1000
       ? error.text
       : '';

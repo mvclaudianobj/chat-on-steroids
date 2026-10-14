@@ -4553,7 +4553,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       } else if (workingDirectory) {
         // Revivals carry the prime's latest user-authored message, without repeating Core or
         // source AGENTS. Reassert the same checkout after a restart or worker reuse.
-        described.text += `\n\n(Chat On Steroids worker working directory: ${workingDirectory}. Keep worker task changes in this allocated Git worktree; the source project only supplies instructions.)`;
+        described.text += `\n\n(Chat Marks Local GPT worker working directory: ${workingDirectory}. Keep worker task changes in this allocated Git worktree; the source project only supplies instructions.)`;
       }
     }
     if (!commands.includes(command) || command.owner !== client) return json(res, 409, { error: 'command_taken' }, origin);
@@ -10314,7 +10314,7 @@ function bootstrapText(spec: CommandSpec, summary: string): string {
     // think before it starts.
     return (
       `${spec.task}\n\n` +
-      `(Chat On Steroids: you are ${spec.agent}, a worker. Report to prime through the agents tool${ownCoreHint()} — ` +
+      `(Chat Marks Local GPT: you are ${spec.agent}, a worker. Report to prime through the agents tool${ownCoreHint()} — ` +
       'action=message to="prime" as you go, action=finish once at the end. Workers cannot reach each other. ' +
       'The prime assigns your task; its later messages may update the task and assigned files, including a read-only audit becoming an edit task. ' +
       'Follow that latest assignment within the user’s permissions and standing constraints. ' +

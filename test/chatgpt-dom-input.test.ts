@@ -652,7 +652,7 @@ describe('one native Send and bounded acceptance observation', () => {
 });
 
 describe('Core app mention on app-owned sends (#861)', () => {
-  const mention = { path: 'app://asdk_app_TESTCORE123', name: 'Chat On Steroids Core' };
+  const mention = { path: 'app://asdk_app_TESTCORE123', name: 'Chat Marks Local GPT Core' };
   beforeEach(() => {
     // The editor turns the pasted mention element into its own non-editable token.
     document.execCommand = (command, _ui, value) => {

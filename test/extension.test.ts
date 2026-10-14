@@ -1196,8 +1196,8 @@ describe('this install\'s Core app for fresh tabs (#1086)', () => {
   it('hands a redeeming page this install\'s Core identity with its command', async () => {
     // A tab the app opened runs its command before its first status reply, so the command
     // carries what the page needs to mention this install's own Core rather than another's.
-    const names = { core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' };
-    const ownCoreApp = { appId: 'asdk_app_win2222', name: 'Chat On Steroids Core (Windows)' };
+    const names = { core: 'Chat Marks Local GPT Core (Windows)', desktop: 'Chat Marks Local GPT Desktop (Windows)', plugins: 'Chat Marks Local GPT Plugins (Windows)' };
+    const ownCoreApp = { appId: 'asdk_app_win2222', name: 'Chat Marks Local GPT Core (Windows)' };
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token', connectorNames: names, ownCoreApp });
     const worker = loadWorker({
       local, session: new FakeStorageArea(),
@@ -1213,7 +1213,7 @@ describe('this install\'s Core app for fresh tabs (#1086)', () => {
   });
 
   it('remembers the Core app a page lists under this install\'s name, and forgets it when it goes missing', async () => {
-    const names = { core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' };
+    const names = { core: 'Chat Marks Local GPT Core (Windows)', desktop: 'Chat Marks Local GPT Desktop (Windows)', plugins: 'Chat Marks Local GPT Plugins (Windows)' };
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token', connectorNames: names });
     const worker = loadWorker({
       local, session: new FakeStorageArea(),
@@ -1223,7 +1223,7 @@ describe('this install\'s Core app for fresh tabs (#1086)', () => {
     await worker.registerTab(1);
     expect((await worker.send({ type: 'status' }, 1)).ownCoreApp).toBeNull();
     expect((await worker.send({ type: 'core_plugin', appId: 'asdk_app_win2222' }, 1)).ok).toBe(true);
-    const remembered = { appId: 'asdk_app_win2222', name: 'Chat On Steroids Core (Windows)' };
+    const remembered = { appId: 'asdk_app_win2222', name: 'Chat Marks Local GPT Core (Windows)' };
     expect((await worker.send({ type: 'status' }, 1)).ownCoreApp).toEqual(remembered);
     expect((await local.get(['ownCoreApp'])).ownCoreApp).toEqual(remembered);
     // The page's complete plugin list without this install's Core takes the sighting back.
@@ -2085,7 +2085,7 @@ describe('active agent tab discard protection', () => {
 
   describe('keep-awake in the app tab group (#128)', () => {
     type GroupTab = { id: number; windowId: number; groupId: number; url: string; status: string; active: boolean; frozen: boolean };
-    const GROUP = { id: 50, windowId: 7, title: 'Chat On Steroids', collapsed: true };
+    const GROUP = { id: 50, windowId: 7, title: 'Chat Marks Local GPT', collapsed: true };
     const groupWorker = (tabs: GroupTab[], placement: () => string = () => 'group', groups = [GROUP]) => loadWorker({
       local: new FakeStorageArea({ ...paired, backgroundPlacement: 'group' }),
       session: new FakeStorageArea({ chatBackgroundGroup: 50 }),
@@ -5918,7 +5918,7 @@ it('replaces the usage observer of an open tab only once it is not streaming', a
 
 describe('this install\'s connector names', () => {
   const windows = {
-    core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)'
+    core: 'Chat Marks Local GPT Core (Windows)', desktop: 'Chat Marks Local GPT Desktop (Windows)', plugins: 'Chat Marks Local GPT Plugins (Windows)'
   };
   const paired = { port: 8765, token: 'paired-token' };
   it('keeps the app\'s proven connector apps across a worker restart, drops malformed ones and hands them to pages', async () => {
@@ -5970,16 +5970,16 @@ describe('this install\'s connector names', () => {
     expect((await restarted.send({ type: 'status' }) as any).connectorNames).toEqual(windows);
 
     for (const foreign of [
-      { ...windows, core: 'Chat On Steroids Backup' },
-      { ...windows, core: 'Chat On Steroids Desktop (Windows)' },
-      { ...windows, plugins: 'Chat On Steroids Plugins (Win/VM)' },
-      'Chat On Steroids Core'
+      { ...windows, core: 'Chat Marks Local GPT Backup' },
+      { ...windows, core: 'Chat Marks Local GPT Desktop (Windows)' },
+      { ...windows, plugins: 'Chat Marks Local GPT Plugins (Win/VM)' },
+      'Chat Marks Local GPT Core'
     ]) {
       names = foreign;
       await worker.fireAlarm();
       expect((await worker.send({ type: 'status' }) as any).connectorNames).toEqual(windows);
     }
-    names = { core: 'Chat On Steroids Core', desktop: 'Chat On Steroids Desktop', plugins: 'Chat On Steroids Plugins' };
+    names = { core: 'Chat Marks Local GPT Core', desktop: 'Chat Marks Local GPT Desktop', plugins: 'Chat Marks Local GPT Plugins' };
     await worker.fireAlarm();
     expect((await worker.send({ type: 'status' }) as any).connectorNames).toEqual(names);
   });

@@ -2140,7 +2140,7 @@ it('saves a diagnostics report through the renderer channel without personal det
     (app as { getPath: typeof getPath }).getPath = getPath;
   }
   const report = await fs.readFile(target, 'utf8');
-  expect(report).toContain('# Chat On Steroids diagnostics report');
+  expect(report).toContain('# Chat Marks Local GPT diagnostics report');
   expect(report).toContain('did not report back in time');
   expect(report).toMatch(/open '~[\\/]<p:[0-9a-f]{4}>[\\/]<p:[0-9a-f]{4}>\.xlsx'/);
   for (const personal of ['home-jane', 'Acme', 'invoice', 'jane@example.com', 'Quarterly tax return']) expect(report).not.toContain(personal);

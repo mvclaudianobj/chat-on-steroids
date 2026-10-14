@@ -4,7 +4,7 @@
   "description": "Local coding bridge for ChatGPT over MCP, with native desktop control and approved-folder capability limits.",
   "license": "MIT",
   "author": "Chat On Steroids",
-  "homepage": "https://github.com/totec448-spec/chat-on-steroids",
+  "homepage": "https://github.com/mvclaudianobj/chat-on-steroids",
   "desktopName": "com.chatonsteroids.app.desktop",
   "main": "out/main/index.js",
   "scripts": {

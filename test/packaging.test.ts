@@ -358,8 +358,8 @@ describe('cross-platform packaging targets', () => {
     expect(workflow).toContain('test -L "$mount_dir/Applications"');
     expect(workflow).toContain('test "$(readlink "$mount_dir/Applications")" = /Applications');
     expect(workflow).toContain('ditto -x -k "$zip" "$zip_dir"');
-    expect(workflow).toContain("node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' \"$mount_dir/Chat On Steroids.app\"");
-    expect(workflow).toContain("node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' \"$zip_dir/Chat On Steroids.app\"");
+    expect(workflow).toContain("node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' \"$mount_dir/Chat Marks Local GPT.app\"");
+    expect(workflow).toContain("node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' \"$zip_dir/Chat Marks Local GPT.app\"");
     expect(workflow).toContain('Audit packaged macOS bundle metadata and Mach-O payloads');
     expect(workflow).toContain('node scripts/smoke-macos-bundle.mjs ${{ matrix.arch }}');
     expect(workflow).toContain('Launch packaged macOS app normally');
@@ -391,7 +391,7 @@ describe('cross-platform packaging targets', () => {
       workflow.indexOf('      - name: Execute generated static-runtime AppImage')
     );
     expect(workflow).toContain('sudo apt-get install -y --no-install-recommends xvfb xauth');
-    expect(workflow).toContain("grep -Fxq 'Name=Chat On Steroids' \"$desktop\"");
+    expect(workflow).toContain("grep -Fxq 'Name=Chat Marks Local GPT' \"$desktop\"");
     expect(workflow).toContain("grep -Fxq 'Icon=chat-on-steroids' \"$desktop\"");
     expect(debGui).toContain('deb_smoke_root="$(mktemp -d)"');
     // Same shape the AppImage smoke below is held to: the teardown may retry, and may fail,
@@ -518,7 +518,7 @@ describe('cross-platform packaging targets', () => {
     expect(builder.deb.depends).toContain('libgtk-3-0 | libgtk-3-0t64');
     expect(builder.deb.depends).toContain('libatspi2.0-0 | libatspi2.0-0t64');
     expect(builder.linux.syncDesktopName).toBe(true);
-    expect(builder.linux.maintainer).toMatch(/^Chat On Steroids <[^>]+@users\.noreply\.github\.com>$/);
+    expect(builder.linux.maintainer).toMatch(/^Chat Marks Local GPT <[^>]+@users\.noreply\.github\.com>$/);
     expect(pkg.desktopName).toBe('com.chatonsteroids.app.desktop');
     expect(pkg.homepage).toBe('https://github.com/totec448-spec/chat-on-steroids');
     expect(iconScript).toContain("build', 'icon.png'), pngFor(1024)");
@@ -591,9 +591,9 @@ describe('cross-platform packaging targets', () => {
     expect(nativePrep).toContain("await chmod(path.join(payloadRoot, 'node-pty', 'prebuilds', prebuildDir, 'spawn-helper'), 0o755)");
     for (const marker of [
       "CFBundleIdentifier: 'com.chatonsteroids.app'",
-      "CFBundleExecutable: 'Chat On Steroids'",
-      "CFBundleName: 'Chat On Steroids'",
-      "CFBundleDisplayName: 'Chat On Steroids'",
+      "CFBundleExecutable: 'Chat Marks Local GPT'",
+      "CFBundleName: 'Chat Marks Local GPT'",
+      "CFBundleDisplayName: 'Chat Marks Local GPT'",
       "CFBundleIconFile: 'icon.icns'",
       'CFBundleShortVersionString: packageVersion',
       'CFBundleVersion: packageVersion',
@@ -637,7 +637,7 @@ describe('cross-platform packaging targets', () => {
   });
 
   it('hides Electron helper parentheses from otool-classic without changing the inspected file', () => {
-    const file = '/Applications/Chat On Steroids.app/Contents/Frameworks/Chat On Steroids Helper (GPU).app/Contents/MacOS/Chat On Steroids Helper (GPU)';
+    const file = '/Applications/Chat Marks Local GPT.app/Contents/Frameworks/Chat Marks Local GPT Helper (GPU).app/Contents/MacOS/Chat Marks Local GPT Helper (GPU)';
     const calls: Array<{ kind: string; args: unknown[] }> = [];
     const result = withOtoolSafePath(
       file,

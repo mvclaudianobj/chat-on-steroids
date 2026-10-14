@@ -49,7 +49,8 @@ import { logInfo, logWarn } from './logger.js';
 import { APP_VERSION } from './version.js';
 import { isNewer, type UpdateStatus } from '../shared/types.js';
 
-const REPO = 'totec448-spec/chat-on-steroids';
+// Fork releases are the only safe update authority for the Marks-branded build.
+const REPO = 'mvclaudianobj/chat-on-steroids';
 const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 const CHECK_TIMEOUT_MS = 15_000;
@@ -102,9 +103,9 @@ export function stagedArtifact(
 ): { name: string; kind: 'installer' | 'appimage'; target: string } | null {
   if (!packaged) return null;
   if (arch !== 'x64' && arch !== 'arm64') return null;
-  if (platform === 'win32') return { name: `Chat-On-Steroids-Setup-${arch}.exe`, kind: 'installer', target: '' };
+  if (platform === 'win32') return { name: `Chat-Marks-Local-GPT-Setup-${arch}.exe`, kind: 'installer', target: '' };
   if (platform === 'linux' && appImage) {
-    return { name: `Chat-On-Steroids-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
+    return { name: `Chat-Marks-Local-GPT-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
   }
   return null;
 }
@@ -124,8 +125,8 @@ export function manualDownloadName(
   packaged: boolean = app.isPackaged
 ): string | null {
   if (!packaged || (arch !== 'x64' && arch !== 'arm64')) return null;
-  if (platform === 'darwin') return `Chat-On-Steroids-macOS-${arch}.dmg`;
-  if (platform === 'linux' && !appImage) return `Chat-On-Steroids-Linux-${arch}.deb`;
+  if (platform === 'darwin') return `Chat-Marks-Local-GPT-macOS-${arch}.dmg`;
+  if (platform === 'linux' && !appImage) return `Chat-Marks-Local-GPT-Linux-${arch}.deb`;
   return null;
 }
 
