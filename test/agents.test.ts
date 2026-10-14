@@ -491,12 +491,13 @@ describe('a worker wake ChatGPT restored as the chat draft (#882)', () => {
     return { dom, box, api: (dom.window as unknown as { CLF_DOM: { clearRevivalResidue(): boolean; composerSubmitReady(): boolean } }).CLF_DOM };
   };
 
-  it('lets the page reclaim an unsent wake, and only that', () => {
+  it.each(['current', 'legacy'] as const)('lets the page reclaim an unsent %s wake, and only that', (brand) => {
     startSwarm(1);
     const worker = startWorker('worker-1');
     finishAgent(worker.caller, 'first round done');
     stageMessages(prime, [{ to: 'worker-1', text: 'Regenerate PAGE-EVID_MASTER_v0.2.csv; keep raw source_status.' }]).commit();
-    const wake = pendingWorkerRevivals()[0]!.text;
+    const currentWake = pendingWorkerRevivals()[0]!.text;
+    const wake = brand === 'legacy' ? currentWake.replace('(Chat Marks:', '(Chat On Steroids:') : currentWake;
 
     const left = domWithDraft(wake);
     expect(left.api.composerSubmitReady()).toBe(false);

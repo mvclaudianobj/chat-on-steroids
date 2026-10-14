@@ -698,7 +698,7 @@ describe('Core app mention on app-owned sends (#861)', () => {
     const row = document.querySelector('[data-message-author-role="user"]')!;
     const body = document.createElement('div'); body.className = 'whitespace-pre-wrap';
     const chip = document.createElement('span'); chip.setAttribute('data-prompt-link-href', mention.path);
-    chip.setAttribute('data-prompt-link-label', '$chat-on-steroids-core'); chip.textContent = mention.name;
+    chip.setAttribute('data-prompt-link-label', '$chat-marks-core'); chip.textContent = mention.name;
     body.append(text + ' ', chip); row.append(body);
   }
   it('adds the token at the end right before Send and recognizes the rendered message without it', async () => {
@@ -713,7 +713,7 @@ describe('Core app mention on app-owned sends (#861)', () => {
     const clicked = document.createElement('div'); clicked.innerHTML = atClick;
     const token = clicked.querySelector('[app-mention-path]')!;
     expect(token.getAttribute('app-mention-path')).toBe(mention.path);
-    expect(token.getAttribute('data-prompt-link-label')).toBe('$chat-on-steroids-core');
+    expect(token.getAttribute('data-prompt-link-label')).toBe('$chat-marks-core');
     expect(clicked.textContent!.trim().startsWith('Exact app prompt')).toBe(true);
     expect(api.messages().find(message => message.role === 'user')?.text).toBe('Exact app prompt');
   });
