@@ -800,6 +800,10 @@ Load command 11
     const manifest = JSON.parse(readFileSync(path.join(root, 'extension', 'manifest.json'), 'utf8'));
     const versionSource = readFileSync(path.join(root, 'src', 'main', 'version.ts'), 'utf8');
     const releaseVersion = pkg.version.replace('+', '.');
+    const builder = yamlFile('electron-builder.yml');
+    expect(builder.extraMetadata.version).toBe(releaseVersion);
+    expect(builder.buildVersion).toBe(releaseVersion);
+    expect(builder.buildNumber).toBe(releaseVersion.split('.')[3]);
     const tag = `v${releaseVersion}`;
     const changelog = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
     const notes = readFileSync(path.join(root, 'docs', 'release-notes', `${tag}.md`), 'utf8');

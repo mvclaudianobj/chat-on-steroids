@@ -4,6 +4,8 @@ copyright: MIT licensed
 # Product revision 2.1.37.1; npm uses the equivalent SemVer build metadata +1.
 buildVersion: 2.1.37.1
 buildNumber: '1'
+extraMetadata:
+  version: 2.1.37.1
 
 directories:
   output: release
