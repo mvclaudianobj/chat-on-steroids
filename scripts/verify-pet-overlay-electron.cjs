@@ -87,6 +87,7 @@ function attachOverlay(win) {
   whenLoaded(() => {
     setTimeout(async () => {
       try {
+        await until(() => win.webContents.executeJavaScript(`Boolean(document.querySelector('.pet-shell .pet-body'))`), 'enabled pet rendered', 10_000);
         const geometry = await win.webContents.executeJavaScript(`(() => {
           const shell = document.querySelector('.pet-shell');
           const body = document.querySelector('.pet-body');
