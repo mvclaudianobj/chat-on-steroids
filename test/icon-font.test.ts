@@ -59,8 +59,8 @@ it('maps exactly the glyphs the renderer draws, at the codepoints the bundled Ph
 });
 
 it('uses the icon font except for explicitly authored interface drawings', () => {
-  // Allowed SVG: the sprite, the product mark, language flags, the context ring, and the one authored
-  // disclosure chevron, which must rotate around its drawn centre (a font caret sits on a baseline).
+  // Allowed SVG: language flags, the context ring, and the authored disclosure chevron.
+  // The product mark is now a PNG derived from icon_marks.png.
   for (const [, tag, rest] of html.matchAll(/(<svg\b[^>]*>)([\s\S]{0,80})/g)) {
     const allowed = /class="(sprite|language-flag|setup-folder-icon|setup-connect-icon|disclosure-chevron\b[^"]*)"/.test(tag!) || /^<use href="#i-mark"/.test(rest!) ||
       /^<circle class="context-track"/.test(rest!.trim());
@@ -73,9 +73,11 @@ it('uses the icon font except for explicitly authored interface drawings', () =>
   expect(drawing).toEqual(['dom.ts']);
 });
 
-it('keeps only the bespoke product mark in the inline sprite', () => {
-  const sprite = html.slice(html.indexOf('<svg class="sprite"'), html.indexOf('</defs>'));
-  expect([...sprite.matchAll(/<g id="(i-[a-z0-9-]+)"/g)].map(match => match[1])).toEqual(['i-mark']);
-  expect([...new Set([...html.matchAll(/href="#(i-[a-z0-9-]+)"/g)].map(match => match[1]))]).toEqual(['i-mark']);
+it('uses the Marks artwork in the UI rather than the old inline SVG product mark', () => {
+  expect(html).not.toContain('id="i-mark"');
+  expect(html).not.toContain('href="#i-mark"');
+  expect(html).not.toContain('class="sprite"');
+  expect(html.match(/class="[^"]*marks-app-icon[^\"]*"/g)?.length).toBe(5);
+  expect(html).toContain('src="./browser-icons/cos.png"');
   expect(html).toContain('href="./icons.css"');
 });

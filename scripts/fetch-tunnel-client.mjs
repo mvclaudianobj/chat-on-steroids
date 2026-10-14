@@ -45,6 +45,17 @@ async function flattenSingleDirectory(outDir) {
   await rm(inner, { recursive: true, force: true });
 }
 
+async function replaceDirectory(directory) {
+  if (!existsSync(directory)) {
+    await mkdir(directory, { recursive: true });
+    return;
+  }
+  const backup = `${directory}.stale-${process.pid}-${Date.now()}`;
+  await rename(directory, backup);
+  await mkdir(directory, { recursive: true });
+  await rm(backup, { recursive: true, force: true }).catch(() => {});
+}
+
 async function main() {
   const { platform, arch } = parseTarget();
   const target = TUNNEL_CLIENT.targets[platform]?.[arch];
@@ -68,8 +79,7 @@ async function main() {
   }
   say(`tunnel-client ${tag} ${platform}-${arch} checksum ok (${actual.slice(0, 16)}...)`);
 
-  await rm(outDir, { recursive: true, force: true });
-  await mkdir(outDir, { recursive: true });
+  await replaceDirectory(outDir);
   extractZip(zipPath, outDir);
   await flattenSingleDirectory(outDir);
 
@@ -86,7 +96,7 @@ async function main() {
   say(`tunnel-client ${tag} ${platform}-${arch} staged`);
 
   if (platform === process.platform && arch === process.arch) {
-    await rm(devOutDir, { recursive: true, force: true });
+    await replaceDirectory(devOutDir);
     await cp(outDir, devOutDir, { recursive: true });
     say(`resources/tunnel mirrors ${platform}-${arch} for development`);
   }

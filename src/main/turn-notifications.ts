@@ -57,7 +57,7 @@ export function createTurnNotifier(deps: TurnNotifierDeps) {
         if (session.origin?.kind === 'worker' || session.origin?.kind === 'helper') continue;
         if (session.conversationId && deps.automated(session.conversationId)) continue;
         if (deps.recentlyNotified(id)) continue;
-        deps.show(session.title || 'Chat On Steroids', noticeText(await deps.lastAnswer(id).catch(() => null)), id);
+        deps.show(session.title || 'Chat Marks', noticeText(await deps.lastAnswer(id).catch(() => null)), id);
       }
     }
   };

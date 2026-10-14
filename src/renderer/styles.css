@@ -367,10 +367,6 @@ html:lang(ja) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFo
   user-select: text;
 }
 
-.sprite {
-  display: none;
-}
-
 /* Author display rules outrank the UA's [hidden], and several things here are
    hidden by setting .hidden from script. Make the attribute win. */
 [hidden] {
@@ -397,7 +393,7 @@ html:lang(ja) body { font-family: var(--ui-font, -apple-system, BlinkMacSystemFo
   font-size: var(--glyph);
 }
 
-/* The product mark is the one stroked drawing left in the sprite. */
+/* Bespoke SVG controls use currentColor; product branding uses the Marks PNG. */
 svg.ico {
   stroke: currentColor;
   fill: none;
@@ -508,7 +504,10 @@ code {
 .sidebar-brand-search .ico { --ico: 16px; }
 .sidebar-brand strong { font-size: calc(15px * var(--text-scale, 1)); font-weight: 600; letter-spacing: -.025em; }
 .sidebar-brand strong span { display: block; color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); font-weight: 400; letter-spacing: .01em; }
-.sidebar-brand .mark { display: none; }
+.sidebar-brand .mark { display: grid; width: 36px; height: 36px; flex: none; }
+.marks-app-icon { display: block; width: 100%; height: 100%; object-fit: contain; }
+.mark:has(> .marks-app-icon) { background: transparent; border-radius: 0; }
+.appearance-preview-sidebar .brand-icon { width: 30px; height: 30px; }
 .sidebar .new-chat { padding: 10px 12px; justify-content: flex-start; background: transparent; border: 0; border-radius: 8px; margin-bottom: 10px; font-size: calc(13px * var(--text-scale, 1)); }
 .sidebar .new-chat:hover { background: var(--hover); }
 .sidebar-primary { display: grid; gap: 2px; margin-bottom: 18px; }
@@ -572,6 +571,8 @@ code {
 .whats-new-tile .ico { --ico: 30px; stroke-width: 1.6; }
 /* The mark's drawing carries its ink a pixel left of its box (the folder tab) and half a pixel low (the speech tail); centred in the tile. */
 .whats-new-tile .ico { translate: 1px -0.5px; }
+.whats-new-tile:has(> .marks-app-icon) { background: transparent; box-shadow: none; }
+.whats-new-tile .marks-app-icon { width: 56px; height: 56px; }
 .whats-new-seal { position: absolute; right: -7px; bottom: -7px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
   background: var(--accent); color: var(--whats-new-surface); box-shadow: 0 0 0 3px var(--whats-new-surface);
   animation: whats-new-pop .45s cubic-bezier(.34, 1.4, .64, 1) .42s both; }
@@ -2369,7 +2370,7 @@ input[readonly] {
 /* Keyed reconciliation owns the reader anchor; avoid a second browser adjustment. */
 #chatBody { overflow-anchor: none; }
 #timelineEmpty { min-height: 100%; display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 24px; padding: 30px 12px 10vh; text-align: center; font-size: clamp(22px, 2.6vw, 29px); font-weight: 450; letter-spacing: -.035em; color: var(--ink); }
-.welcome-mark { --ico: 42px; color: var(--faint); stroke-width: 1.3; }
+.welcome-mark { width: 56px; height: 56px; }
 #chatBody > [data-view='timeline']:has(#timelineEmpty:not([hidden])) { height: 100%; }
 .card.is-session:has(#timelineEmpty:not([hidden])) > h2, .card.is-session:has(#timelineEmpty:not([hidden])) > .subhead { visibility: hidden; }
 .card.is-session:has(#timelineEmpty:not([hidden])) #chatFoot { visibility: hidden; }

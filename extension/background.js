@@ -260,7 +260,7 @@ const COMMAND_TAB_PROTECTION_MS = 30 * 60_000;
 /**
  * This install's connector names in ChatGPT, as the paired app reports them. A computer that
  * shares its ChatGPT account with another one names its connectors with a suffix, e.g.
- * "Chat On Steroids Core (Windows)"; pages recognize exactly these names as this app's traffic.
+ * "Chat Marks Core (Windows)"; pages recognize exactly these names as this app's traffic.
  * Kept in local storage so a restarted service worker does not fall back to the plain names
  * and claim the other computer's calls until the app answers again. Null until the app says.
  */
@@ -276,19 +276,19 @@ let ownCoreApp = null;
 function cleanOwnCoreApp(value) {
   return value && typeof value === 'object' && typeof value.appId === 'string' &&
     /^asdk_app_[A-Za-z0-9_-]{1,160}$/.test(value.appId) && typeof value.name === 'string' &&
-    /^Chat On Steroids Core(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u.test(value.name)
+    /^Chat Marks Core(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u.test(value.name)
     ? { appId: value.appId, name: value.name } : null;
 }
 
-/** The app's names, or null for anything that is not three plain "Chat On Steroids …" strings. */
+/** The app's names, or null for anything that is not three plain "Chat Marks …" strings. */
 function cleanConnectorNames(value) {
   if (!value || typeof value !== 'object') return null;
   const names = {};
   for (const [surface, word] of [['core', 'Core'], ['desktop', 'Desktop'], ['plugins', 'Plugins']]) {
     const name = value[surface];
-    if (typeof name !== 'string' || name.length > 80 || (name !== `Chat On Steroids ${word}` &&
-        !/^Chat On Steroids (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u.test(name)) ||
-        !name.startsWith(`Chat On Steroids ${word}`)) return null;
+    if (typeof name !== 'string' || name.length > 80 || (name !== `Chat Marks ${word}` &&
+        !/^Chat Marks (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u.test(name)) ||
+        !name.startsWith(`Chat Marks ${word}`)) return null;
     names[surface] = name;
   }
   return names;
@@ -1367,7 +1367,7 @@ async function redeemCommand(id, client, conversationId = null, projectEntry = f
   };
   const command = result.data && result.data.command ? result.data.command : null;
   // A tab the app opened runs its command before its first status reply. Without this install's
-  // names it would take the plain "Chat On Steroids Core" for its own, which on a computer with a
+  // names it would take the plain "Chat Marks Core" for its own, which on a computer with a
   // suffix is the other computer's, and mention that Core in the bootstrap.
   return { ok: true, command, ...(command ? { identity: { connectorNames, connectorApps, ownCoreApp } } : {}) };
 }
@@ -1963,7 +1963,7 @@ async function storedBackgroundWindow() {
  * only trusted while the group still carries the app's title: group ids are per browser session,
  * onStartup drops the mirror, and a group the user renamed is theirs now.
  */
-const BACKGROUND_GROUP_TITLE = 'Chat On Steroids';
+const BACKGROUND_GROUP_TITLE = 'Chat Marks';
 const BACKGROUND_GROUP_MIRROR = 'chatBackgroundGroupMirror';
 async function rememberBackgroundGroup(id) {
   await chrome.storage.session.set({ chatBackgroundGroup: id });
@@ -4082,7 +4082,7 @@ const HANDLERS = {
     await persist();
     return { ok: true };
   },
-  /** Ask every eligible ChatGPT tab to rebuild its Chat On Steroids activity stream now. */
+  /** Ask every eligible ChatGPT tab to rebuild its Chat Marks activity stream now. */
   async overwriteNow() {
     await load();
     const known = Object.keys(tabConversations)

@@ -125,7 +125,7 @@ export function renderDiagnosticsReport(sources: DiagnosticsReportSources): stri
         : value;
   const ended = sources.sessions.filter(session => session.endedAt !== null).length;
   const header = [
-    '# Chat On Steroids diagnostics report',
+    '# Chat Marks diagnostics report',
     '',
     `Created ${new Date(sources.now).toISOString()}.`,
     'This file is meant for a bug report. It contains versions, settings (on/off values, numbers and option names),',
