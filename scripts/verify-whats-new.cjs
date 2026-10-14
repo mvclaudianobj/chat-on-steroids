@@ -90,12 +90,17 @@ app.whenReady().then(async () => {
       assert.ok(!view.sideways && !view.clipped,'Nothing scrolls sideways or is cut: '+JSON.stringify(view));
       assert.ok(view.fits,'All highlights fit an ordinary window without scrolling: '+JSON.stringify(view));
       assert.equal(await js('window.seenCalls'),1,'The version is recorded once it has been shown');
-      // Every glyph sits in the middle of its badge, and the sparkle in its mark.
+      // The Marks image and each glyph sit in the middle of their own badge.
       for (const element of ["document.querySelector('.whats-new-tile')","document.querySelector('.whats-new-seal')",...Array.from({length:view.items},(_, i)=>`document.querySelectorAll('.whats-new-icon')[${i}]`)]) {
         // A rounded square's corners show the card through: square it off while measuring; the glyph stays put.
-        // The seal sits over the tile's corner; it is measured on its own, so hide it for the tile.
         const tile=element.includes('whats-new-tile');
-        if (tile) await js(`document.querySelector('.whats-new-seal').style.visibility='hidden'`);
+        // Marks uses the original colour artwork, whose silhouette is intentionally asymmetric.
+        // Check its image box, while retaining pixel-ink centering checks for the actual glyphs.
+        if (tile) {
+          const mark=await js(`(()=>{const tile=document.querySelector('.whats-new-tile'),img=tile.querySelector('img');const t=tile.getBoundingClientRect(),r=img.getBoundingClientRect();return {loaded:img.complete&&img.naturalWidth>0,x:(r.left+r.right-t.left-t.right)/2,y:(r.top+r.bottom-t.top-t.bottom)/2}})()`);
+          assert.ok(mark.loaded && Math.abs(mark.x)<=1 && Math.abs(mark.y)<=1, 'Marks artwork is loaded and centred: '+JSON.stringify(mark));
+          continue;
+        }
         const round=element.includes('whats-new-seal');
         // The seal's disc and ring are accent over the tile; measure only its glyph, in ink on a card-coloured disc.
         if (round) await js(`(s=>{s.style.background='var(--whats-new-surface)';s.style.boxShadow='none';s.style.color='var(--ink)'})(document.querySelector('.whats-new-seal'))`);
@@ -103,7 +108,6 @@ app.whenReady().then(async () => {
         const ink=await inkInsets(element);
         if (!round) await js(`${element}.style.borderRadius=''`);
         if (round) await js(`(s=>{s.style.background='';s.style.boxShadow='';s.style.color=''})(document.querySelector('.whats-new-seal'))`);
-        if (tile) await js(`document.querySelector('.whats-new-seal').style.visibility=''`);
         assert.ok(Math.abs(ink.left-ink.right)<=1.5 && Math.abs(ink.top-ink.bottom)<=1.5,`${element} is centred in ${theme}: ${JSON.stringify(ink)}`);
       }
       // As it opens: measuring scrolled the list; back to its top for the picture.
