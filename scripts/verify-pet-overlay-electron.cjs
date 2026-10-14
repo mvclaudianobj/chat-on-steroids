@@ -374,6 +374,7 @@ function attachOverlay(win) {
         assert.equal(restored.data.visible, true);
         assert.equal(restored.data.activeCount, 1);
         assert.equal(win.isVisible(), true, 'The View visibility command must restore a dismissed active pet.');
+        await until(() => win.webContents.executeJavaScript(`document.querySelectorAll('.pet-shell').length === 1`), 'dismissed pet restored', 10_000);
         assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".pet-shell").length'), 1);
         const restoredRect = await win.webContents.executeJavaScript('document.querySelector(".pet-shell").getBoundingClientRect().toJSON()');
         assert.ok(Math.abs(restoredRect.x - 333) < 2 && Math.abs(restoredRect.y - 444) < 2,
