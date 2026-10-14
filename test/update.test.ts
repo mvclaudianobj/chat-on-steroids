@@ -58,8 +58,8 @@ const {
 } = await import('../src/main/update.js');
 
 const NEXT = '99.0.0';
-const WINDOWS_ASSET = `Chat-Marks-Local-GPT-Setup-${process.arch}.exe`;
-const APPIMAGE_ASSET = `Chat-Marks-Local-GPT-Linux-${process.arch}.AppImage`;
+const WINDOWS_ASSET = `Chat-Marks-Setup-${process.arch}.exe`;
+const APPIMAGE_ASSET = `Chat-Marks-Linux-${process.arch}.AppImage`;
 
 const sha256 = (body: string): string => createHash('sha256').update(body).digest('hex');
 
@@ -139,9 +139,9 @@ afterEach(() => {
 
 describe('the file Get update opens for an installation that cannot update itself', () => {
   it('names the exact macOS disk image or Linux package for this machine', () => {
-    expect(manualDownloadName('darwin', 'arm64', undefined, true)).toBe('Chat-Marks-Local-GPT-macOS-arm64.dmg');
-    expect(manualDownloadName('darwin', 'x64', undefined, true)).toBe('Chat-Marks-Local-GPT-macOS-x64.dmg');
-    expect(manualDownloadName('linux', 'x64', undefined, true)).toBe('Chat-Marks-Local-GPT-Linux-x64.deb');
+    expect(manualDownloadName('darwin', 'arm64', undefined, true)).toBe('Chat-Marks-macOS-arm64.dmg');
+    expect(manualDownloadName('darwin', 'x64', undefined, true)).toBe('Chat-Marks-macOS-x64.dmg');
+    expect(manualDownloadName('linux', 'x64', undefined, true)).toBe('Chat-Marks-Linux-x64.deb');
     // Installations that update themselves, a dev tree and an unpublished architecture get none.
     expect(manualDownloadName('linux', 'x64', '/opt/cos.AppImage', true)).toBeNull();
     expect(manualDownloadName('win32', 'x64', undefined, true)).toBeNull();
@@ -149,9 +149,9 @@ describe('the file Get update opens for an installation that cannot update itsel
     expect(manualDownloadName('darwin', 'ia32', undefined, true)).toBeNull();
   });
   it('links that file for the announced version, and the release page otherwise', () => {
-    expect(manualDownloadUrl('2.1.17', 'Chat-Marks-Local-GPT-macOS-arm64.dmg'))
-      .toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.17/Chat-Marks-Local-GPT-macOS-arm64.dmg');
-    expect(manualDownloadUrl(null, 'Chat-Marks-Local-GPT-macOS-arm64.dmg')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
+    expect(manualDownloadUrl('2.1.17', 'Chat-Marks-macOS-arm64.dmg'))
+      .toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.17/Chat-Marks-macOS-arm64.dmg');
+    expect(manualDownloadUrl(null, 'Chat-Marks-macOS-arm64.dmg')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
     expect(manualDownloadUrl('2.1.17', null)).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
     expect(manualDownloadUrl('../evil', 'x.dmg')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
   });
@@ -159,9 +159,9 @@ describe('the file Get update opens for an installation that cannot update itsel
 
 describe('which installations update themselves', () => {
   it('takes the Windows installer and the Linux AppImage, and nothing else', () => {
-    expect(stagedArtifact('win32', 'x64')).toMatchObject({ name: 'Chat-Marks-Local-GPT-Setup-x64.exe', kind: 'installer' });
+    expect(stagedArtifact('win32', 'x64')).toMatchObject({ name: 'Chat-Marks-Setup-x64.exe', kind: 'installer' });
     expect(stagedArtifact('linux', 'arm64', '/opt/cos.AppImage')).toMatchObject({
-      name: 'Chat-Marks-Local-GPT-Linux-arm64.AppImage',
+      name: 'Chat-Marks-Linux-arm64.AppImage',
       kind: 'appimage',
       target: '/opt/cos.AppImage'
     });
@@ -293,7 +293,7 @@ describe('staging the new version', () => {
   });
 
   it('stages nothing when the release does not publish an artifact for this installation', async () => {
-    github({ checksums: `${sha256('x')}  Chat-Marks-Local-GPT-Extension.zip\n` });
+    github({ checksums: `${sha256('x')}  Chat-Marks-Extension.zip\n` });
     await asPlatform('win32', undefined, () => checkForUpdates());
     expect(updateStatus().stage).toBe('failed');
     expect(updateStatus().error).toContain(`publishes no ${WINDOWS_ASSET}`);

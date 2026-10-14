@@ -1,9 +1,9 @@
-# Chat Marks Local GPT
+# Chat Marks
 
 This fork started at the official Chat On Steroids v2.1.36 tag (`816b5993`)
 and has incorporated the 82 subsequent upstream commits through `cc41c538`.
 Both points declare package version `2.1.36`. This fork uses
-**Chat Marks Local GPT** for its app, connectors, extension and installation labels.
+**Chat Marks** for its app, connectors, extension and installation labels.
 
 The application and Chrome extension icons are generated from `icon_marks.png`
 (the transparent metallic wolf artwork). Run `npm run icon` to regenerate the
@@ -16,7 +16,7 @@ and connector installations. Third-party license, authorship and upstream source
 references remain attributed to their owners.
 
 The customized updater targets `mvclaudianobj/chat-on-steroids` and the fork's
-`Chat-Marks-Local-GPT-*` release assets. A fork release must publish matching
+`Chat-Marks-*` release assets. A fork release must publish matching
 artifacts and checksums before automatic updates can be applied.
 
 ## Automatic releases and application updates

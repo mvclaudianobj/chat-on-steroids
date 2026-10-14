@@ -89,11 +89,11 @@ jobs:
           # release.yml always includes the native-source archive in the candidate so the full
           # candidate can be verified above. Canary intentionally does not attach that archive;
           # do not publish a checksum manifest that names a file users cannot download here.
-          grep -Fq '  Chat-Marks-Local-GPT-Native-Sources.tar.gz' SHA256SUMS.txt || {
+          grep -Fq '  Chat-Marks-Native-Sources.tar.gz' SHA256SUMS.txt || {
             echo 'Candidate checksum manifest is missing the native-source archive.' >&2
             exit 1
           }
-          grep -vF '  Chat-Marks-Local-GPT-Native-Sources.tar.gz' SHA256SUMS.txt > SHA256SUMS.canary.txt
+          grep -vF '  Chat-Marks-Native-Sources.tar.gz' SHA256SUMS.txt > SHA256SUMS.canary.txt
           mv SHA256SUMS.canary.txt SHA256SUMS.txt
           cat SHA256SUMS.txt
 
@@ -113,7 +113,7 @@ jobs:
           - The app does not offer canary builds as updates. It offers the next stable release as usual.
           NOTES
           # Whatever the candidate packaged, without the native sources archive a release keeps.
-          mapfile -t assets < <(find publish -maxdepth 1 -name 'Chat-Marks-Local-GPT-*' ! -name '*Native-Sources*' | sort)
+          mapfile -t assets < <(find publish -maxdepth 1 -name 'Chat-Marks-*' ! -name '*Native-Sources*' | sort)
 
           main_sha="$(gh api "repos/${GITHUB_REPOSITORY}/commits/main" --jq .sha)"
           if [ "$GITHUB_SHA" != "$main_sha" ]; then

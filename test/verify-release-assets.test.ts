@@ -27,7 +27,7 @@ function release(change: { manifest?: object; stamp?: string | null; omit?: stri
   for (const name of EXTENSION_FILES) extensionEntries[name] = strToU8(name);
   const sums: string[] = [];
   for (const name of RELEASE_FILES) {
-    const bytes = name === 'Chat-Marks-Local-GPT-Extension.zip' ? zipSync(extensionEntries) : Buffer.from(`contents of ${name}`);
+    const bytes = name === 'Chat-Marks-Extension.zip' ? zipSync(extensionEntries) : Buffer.from(`contents of ${name}`);
     sums.push(`${createHash('sha256').update(bytes).digest('hex')}  ${name}`);
     if (name !== change.omit) writeFileSync(path.join(dir, name), bytes);
   }
@@ -37,24 +37,24 @@ function release(change: { manifest?: object; stamp?: string | null; omit?: stri
 }
 
 it('accepts a complete release whose files match their checksums and whose extension is the tagged build', async () => {
-  expect(RELEASE_FILES).not.toContain('Chat-Marks-Local-GPT-Firefox.zip');
+  expect(RELEASE_FILES).not.toContain('Chat-Marks-Firefox.zip');
   expect(await verifyReleaseAssets({ dir: release(), tag: 'v2.1.21' })).toEqual([]);
 });
 
 it('reports a file whose bytes differ from the published checksum', async () => {
-  const folder = release({ afterSums: () => writeFileSync(path.join(dir, 'Chat-Marks-Local-GPT-Setup-x64.exe'), 'truncated') });
+  const folder = release({ afterSums: () => writeFileSync(path.join(dir, 'Chat-Marks-Setup-x64.exe'), 'truncated') });
   expect(await verifyReleaseAssets({ dir: folder, tag: 'v2.1.21' })).toEqual([
-    'Chat-Marks-Local-GPT-Setup-x64.exe does not match its SHA256SUMS.txt checksum.'
+    'Chat-Marks-Setup-x64.exe does not match its SHA256SUMS.txt checksum.'
   ]);
 });
 
 it('reports missing files and a Chromium extension whose version or build stamp is wrong', async () => {
-  expect(await verifyReleaseAssets({ dir: release({ omit: 'Chat-Marks-Local-GPT-Linux-arm64.deb' }), tag: 'v2.1.21' }))
-    .toEqual(['Chat-Marks-Local-GPT-Linux-arm64.deb is missing from the release.']);
+  expect(await verifyReleaseAssets({ dir: release({ omit: 'Chat-Marks-Linux-arm64.deb' }), tag: 'v2.1.21' }))
+    .toEqual(['Chat-Marks-Linux-arm64.deb is missing from the release.']);
   rmSync(dir, { recursive: true, force: true });
   expect(await verifyReleaseAssets({ dir: release({ manifest: { version: '2.1.20' }, stamp: null }), tag: 'v2.1.21' })).toEqual([
-    'Chat-Marks-Local-GPT-Extension.zip is missing build-stamp.txt.',
-    'The extension in Chat-Marks-Local-GPT-Extension.zip is version 2.1.20, not 2.1.21.'
+    'Chat-Marks-Extension.zip is missing build-stamp.txt.',
+    'The extension in Chat-Marks-Extension.zip is version 2.1.20, not 2.1.21.'
   ]);
 });
 

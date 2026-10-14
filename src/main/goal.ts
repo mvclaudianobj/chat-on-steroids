@@ -101,7 +101,7 @@ const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
  */
 const ATTRIBUTION_HEADERS: Record<string, string> = {
   'HTTP-Referer': 'https://github.com/chat-on-steroids',
-  'X-Title': 'Chat Marks Local GPT'
+  'X-Title': 'Chat Marks'
 };
 
 /** Which LLM endpoint the Goal/Loop second model runs on, resolved per call from config. */
@@ -2661,7 +2661,7 @@ export async function conversationMessages(sessionId: string, deliveredInput: re
   }
   for (const [turn, at] of lastAnswerOfTurn) {
     const count = callsByTurn.get(turn)!;
-    ordered[at] = { ...ordered[at]!, content: `${ordered[at]!.content}\n\n[Chat Marks Local GPT: ${count} tool call${count === 1 ? '' : 's'} ran in this turn. Arguments and results are not shown.]` };
+    ordered[at] = { ...ordered[at]!, content: `${ordered[at]!.content}\n\n[Chat Marks: ${count} tool call${count === 1 ? '' : 's'} ran in this turn. Arguments and results are not shown.]` };
   }
   for (const text of deliveredInput.slice(-5)) {
     const content = clip(userPromptText(text) ?? text, MAX_USER_MESSAGE_CHARS);

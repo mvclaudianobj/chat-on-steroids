@@ -1457,7 +1457,7 @@ var CLF_DOM = (() => {
   /**
    * Visible assistant activity in the exact DOM order ChatGPT drew it.
    *
-   * Chat Marks Local GPT remains authoritative for its own call labels/results. This only supplies
+   * Chat Marks remains authoritative for its own call labels/results. This only supplies
    * the missing chronology: a visible commentary paragraph can sit between two calls, and
    * the recorder clock cannot recover that after a fast turn. ChatGPT's completed DOM can.
    */
@@ -1657,7 +1657,7 @@ var CLF_DOM = (() => {
    * and in use" as recorded chat errors — 60 of them against 5 real transport failures in
    * one run — and every error count the app showed was inflated by them. An offscreen
    * announcement is not a banner. Neither is this extension's own surface, which was
-   * recording "Chat Marks Local GPT Desktop is now connected" as a ChatGPT failure.
+   * recording "Chat Marks Desktop is now connected" as a ChatGPT failure.
    */
   const acknowledgedAccessNotices = new WeakSet();
   function errors() {
@@ -2675,12 +2675,12 @@ var CLF_DOM = (() => {
    * This install's connector names in ChatGPT (core, desktop, plugins), as the app reports them.
    *
    * A computer that shares its ChatGPT account with another names its connectors with a suffix,
-   * "Chat Marks Local GPT Core (Windows)", and recognizes exactly its own names; the other computer's
+   * "Chat Marks Core (Windows)", and recognizes exactly its own names; the other computer's
    * calls run there. Null until the app has said, which keeps the plain names. Every ask to the
    * page-world helper carries them, so it never judges traffic by names it was not told.
    */
-  const PLAIN_CONNECTORS = ['Chat Marks Local GPT Core', 'Chat Marks Local GPT Desktop', 'Chat Marks Local GPT Plugins'];
-  const SUFFIXED_CONNECTOR = /^Chat Marks Local GPT (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u;
+  const PLAIN_CONNECTORS = ['Chat Marks Core', 'Chat Marks Desktop', 'Chat Marks Plugins'];
+  const SUFFIXED_CONNECTOR = /^Chat Marks (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u;
   let ownConnectors = null;
   function setConnectorNames(names) {
     if (!names || typeof names !== 'object') return false;

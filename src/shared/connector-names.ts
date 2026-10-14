@@ -7,9 +7,9 @@
  * by those exact names, never by prefix, so it never vouches for another connector's calls.
  *
  * One ChatGPT account used on two computers needs two connectors per surface, and they cannot
- * share a name: a suffix names this computer's set, e.g. "Chat Marks Local GPT Core (Windows)".
+ * share a name: a suffix names this computer's set, e.g. "Chat Marks Core (Windows)".
  */
-export const CONNECTOR_BRAND = 'Chat Marks Local GPT';
+export const CONNECTOR_BRAND = 'Chat Marks';
 export const CONNECTOR_SUFFIX_MAX = 32;
 /** Letters, digits, spaces, dots, dashes and underscores; the app adds the parentheses. */
 export const CONNECTOR_SUFFIX_PATTERN = /^[\p{L}\p{N} ._-]*$/u;

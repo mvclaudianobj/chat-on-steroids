@@ -51,12 +51,12 @@ const nativeDir = `${targetPlatform}-${targetArch}`;
 let resourcesDir;
 let appExecutable;
 if (targetPlatform === 'darwin') {
-  const appBundle = path.join(packageRoot, 'Chat Marks Local GPT.app');
+  const appBundle = path.join(packageRoot, 'Chat Marks.app');
   resourcesDir = path.join(appBundle, 'Contents', 'Resources');
-  appExecutable = path.join(appBundle, 'Contents', 'MacOS', 'Chat Marks Local GPT');
+  appExecutable = path.join(appBundle, 'Contents', 'MacOS', 'Chat Marks');
 } else {
   resourcesDir = path.join(packageRoot, 'resources');
-  appExecutable = path.join(packageRoot, targetPlatform === 'win32' ? 'Chat Marks Local GPT.exe' : 'chat-marks-local-gpt');
+  appExecutable = path.join(packageRoot, targetPlatform === 'win32' ? 'Chat Marks.exe' : 'chat-marks');
 }
 
 function required(relative) {

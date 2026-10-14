@@ -163,18 +163,18 @@ jobs:
           npm run verify:tunnel-current
           node scripts/check-release-absent.mjs
           gh release create "$TAG" \
-            publish/Chat-Marks-Local-GPT-Setup-x64.exe \
-            publish/Chat-Marks-Local-GPT-Setup-arm64.exe \
-            publish/Chat-Marks-Local-GPT-macOS-x64.dmg \
-            publish/Chat-Marks-Local-GPT-macOS-x64.zip \
-            publish/Chat-Marks-Local-GPT-macOS-arm64.dmg \
-            publish/Chat-Marks-Local-GPT-macOS-arm64.zip \
-            publish/Chat-Marks-Local-GPT-Linux-x64.AppImage \
-            publish/Chat-Marks-Local-GPT-Linux-x64.deb \
-            publish/Chat-Marks-Local-GPT-Linux-arm64.AppImage \
-            publish/Chat-Marks-Local-GPT-Linux-arm64.deb \
-            publish/Chat-Marks-Local-GPT-Extension.zip \
-            publish/Chat-Marks-Local-GPT-Native-Sources.tar.gz \
+            publish/Chat-Marks-Setup-x64.exe \
+            publish/Chat-Marks-Setup-arm64.exe \
+            publish/Chat-Marks-macOS-x64.dmg \
+            publish/Chat-Marks-macOS-x64.zip \
+            publish/Chat-Marks-macOS-arm64.dmg \
+            publish/Chat-Marks-macOS-arm64.zip \
+            publish/Chat-Marks-Linux-x64.AppImage \
+            publish/Chat-Marks-Linux-x64.deb \
+            publish/Chat-Marks-Linux-arm64.AppImage \
+            publish/Chat-Marks-Linux-arm64.deb \
+            publish/Chat-Marks-Extension.zip \
+            publish/Chat-Marks-Native-Sources.tar.gz \
             publish/SHA256SUMS.txt \
             --title "$(sed -n 's/^## //p' "docs/release-notes/$TAG.md" | head -n 1)" \
             --notes-file "docs/release-notes/$TAG.md"

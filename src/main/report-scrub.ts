@@ -29,6 +29,7 @@ const STRUCTURAL = new Set([
   '~', 'Users', 'home', 'Library', 'Application Support', 'Caches', 'Logs', 'AppData', 'Roaming', 'Local', 'LocalLow',
   'Program Files', 'Program Files (x86)', 'ProgramData', 'Applications', 'Contents', 'Resources', 'MacOS', 'tmp', 'var',
   'private', 'opt', 'usr', 'bin', 'lib', 'etc', 'Temp', 'Windows', 'System32',
+  'Chat Marks', 'chat-marks', 'Chat-Marks',
   'Chat On Steroids', 'chat-on-steroids', 'Chat-On-Steroids', 'sessions', 'extension', 'logs', 'skills', 'pets', 'plugins',
   'workspace', 'state', 'durable', 'app.asar', 'node_modules', 'Google', 'Chrome', 'Chromium', 'Microsoft', 'Edge',
   'BraveSoftware', 'Brave-Browser', 'User Data', 'Default', 'Extensions', '.codex', '.cos',

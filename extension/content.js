@@ -950,7 +950,7 @@
       ? event.data.candidates.slice(0, 16).filter(entry => typeof entry?.name === 'string' && entry.name.length <= 80)
         .map(entry => ({ name: entry.name, path: valid(entry.path) }))
       // An observer from before suffixes names only the plain Core.
-      : event.data.name === 'Chat Marks Local GPT Core' ? [{ name: event.data.name, path: valid(event.data.path) }] : [];
+      : event.data.name === 'Chat Marks Core' ? [{ name: event.data.name, path: valid(event.data.path) }] : [];
     corePluginList = event.data.pluginList === true;
     reportCorePlugin();
   });
@@ -1452,7 +1452,7 @@
     const takeUtf8 = (value, budget) => {
       if (typeof value !== 'string') return value;
       if (utf8Bytes(value) <= budget) return value;
-      const marker = '\n\n[Chat Marks Local GPT: browser observation truncated to fit transport.]';
+      const marker = '\n\n[Chat Marks: browser observation truncated to fit transport.]';
       const markerBytes = utf8Bytes(marker);
       let low = 0;
       let high = value.length;
@@ -6355,10 +6355,10 @@
    * like a stranger's — so it produced no attribution evidence and, worse, local rows were
    * classified as ChatGPT-native activity and re-recorded as the assistant's own captions.
    * The names are this install's: the plain ones, or with this computer's suffix when one
-   * ChatGPT account is used on several computers ("Chat Marks Local GPT Core (Windows)"). The other
+   * ChatGPT account is used on several computers ("Chat Marks Core (Windows)"). The other
    * computer's calls run there, so they are not ours here (CLF_DOM.connectorNames).
    *
-   * Exact names, never a prefix: `Chat Marks Local GPT Backup` would be somebody else's
+   * Exact names, never a prefix: `Chat Marks Backup` would be somebody else's
    * connector, and a prefix test would have this app vouch for its traffic.
    */
   const LEGACY_CONNECTORS = ['TobisComputer'];
@@ -7301,7 +7301,7 @@
       return {
         mode: 'off',
         label: t('content_compact', 'Compact'),
-        hint: t('content_browser_disconnected', 'Browser connection is disconnected in Chat Marks Local GPT.'),
+        hint: t('content_browser_disconnected', 'Browser connection is disconnected in Chat Marks.'),
         action: 'none'
       };
     }
@@ -7309,7 +7309,7 @@
       return {
         mode: 'off',
         label: t('content_compact', 'Compact'),
-        hint: t('content_app_not_running', 'Chat Marks Local GPT is not running on this PC.'),
+        hint: t('content_app_not_running', 'Chat Marks is not running on this PC.'),
         action: 'none'
       };
     }
@@ -7933,7 +7933,7 @@
       'data-clf-tip',
       t(
         'content_chat_blocked_tip',
-        'This chat is blocked in the Chat Marks Local GPT app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open the app’s Chat tab, hover this chat in the sessions list and press its block symbol.'
+        'This chat is blocked in the Chat Marks app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open the app’s Chat tab, hover this chat in the sessions list and press its block symbol.'
       )
     );
     blocked.hidden = true;
@@ -8026,7 +8026,7 @@
     root.className = 'clf-menu';
     root.dataset.clfMenu = '1';
     root.setAttribute('role', 'dialog');
-    root.setAttribute('aria-label', t('content_settings_aria', 'Chat Marks Local GPT settings'));
+    root.setAttribute('aria-label', t('content_settings_aria', 'Chat Marks settings'));
     root.hidden = true;
     (document.body || document.documentElement).append(root);
     return root;
@@ -8788,7 +8788,7 @@
     // Never disabled any more: it opens a sheet, and a sheet that explains why compaction is
     // unavailable is exactly what somebody clicking a dead button wanted to be told.
     control.button.disabled = false;
-    setAttr(control.button, 'aria-label', t('content_settings_aria', 'Chat Marks Local GPT settings'));
+    setAttr(control.button, 'aria-label', t('content_settings_aria', 'Chat Marks settings'));
     setAttr(control.button, 'aria-haspopup', 'dialog');
     if (!control.button.hasAttribute('aria-expanded')) control.button.setAttribute('aria-expanded', 'false');
     // The meter only while the button is a button. During a run the control is saying what
@@ -10237,7 +10237,7 @@
    * the person's draft again, which is preserved (#134).
    */
   // ChatGPT's editor keeps paragraphs as elements, so in its text the marker runs straight into the
-  // instruction ("]]Chat Marks Local GPT…"); CONTINUATION_MARKER, which wants a space, missed it live.
+  // instruction ("]]Chat Marks…"); CONTINUATION_MARKER, which wants a space, missed it live.
   const HANDOFF_MARKED = /^\s*\[\[CLF-HANDOFF:[A-Za-z0-9_-]{16,64}\]\]/;
   /** A composer holding a handoff request this app typed (any attempt's), and no attachment. */
   function handoffMarked(box) {
@@ -11220,7 +11220,7 @@
     if (data.error) return String(data.error).slice(0, 160);
     if (reply.error === 'app_not_found') return t(
       'content_app_not_running',
-      'Chat Marks Local GPT is not running on this PC.'
+      'Chat Marks is not running on this PC.'
     );
     return reply.error ? String(reply.error).slice(0, 160) : '';
   }
@@ -12456,7 +12456,7 @@
     limit.published = limit.retryAt;
     emit({
       kind: 'chat_error',
-      text: t('content_history_rate_limited', 'ChatGPT temporarily rate-limited loading this conversation history. Chat Marks Local GPT is pausing automatic recovery until the retry wait ends.'),
+      text: t('content_history_rate_limited', 'ChatGPT temporarily rate-limited loading this conversation history. Chat Marks is pausing automatic recovery until the retry wait ends.'),
       recoverable: false,
       blocking: true,
       retryAt: limit.retryAt

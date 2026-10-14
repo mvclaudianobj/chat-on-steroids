@@ -140,7 +140,7 @@ const DESKTOP: SurfaceDefinition = {
 const PLUGINS: SurfaceDefinition = {
   id: 'plugins', serverName: 'chat-on-steroids-plugins',
   connectorName: `${CONNECTOR_BRAND} Plugins`,
-  description: 'Tools from external MCP integrations installed and enabled in Chat Marks Local GPT Settings, including Blender and other connected applications and services.',
+  description: 'Tools from external MCP integrations installed and enabled in Chat Marks Settings, including Blender and other connected applications and services.',
   cardSummary: 'One shared connector for your enabled external MCP plugins.',
   required: false,
   // Dynamic declarations are owned and bounded by the plugin manager.

@@ -5,11 +5,11 @@ import { chatgptNameLine } from '../src/renderer/connector-name.js';
 // user the configured name to type, and adds one line with what ChatGPT calls it now.
 describe('the Setup card line for a renamed connector', () => {
   it('names the connector as ChatGPT shows it when that differs from the configured name', () => {
-    expect(chatgptNameLine({ connectorName: 'Chat Marks Local GPT Core', chatgptName: 'My tools' })).toBe('In ChatGPT: My tools');
+    expect(chatgptNameLine({ connectorName: 'Chat Marks Core', chatgptName: 'My tools' })).toBe('In ChatGPT: My tools');
   });
   it('adds nothing when ChatGPT uses the configured name or nothing was learned', () => {
-    expect(chatgptNameLine({ connectorName: 'Chat Marks Local GPT Core', chatgptName: 'Chat Marks Local GPT Core' })).toBeNull();
-    expect(chatgptNameLine({ connectorName: 'Chat Marks Local GPT Core', chatgptName: null })).toBeNull();
-    expect(chatgptNameLine({ connectorName: 'Chat Marks Local GPT Core' })).toBeNull();
+    expect(chatgptNameLine({ connectorName: 'Chat Marks Core', chatgptName: 'Chat Marks Core' })).toBeNull();
+    expect(chatgptNameLine({ connectorName: 'Chat Marks Core', chatgptName: null })).toBeNull();
+    expect(chatgptNameLine({ connectorName: 'Chat Marks Core' })).toBeNull();
   });
 });

@@ -102,19 +102,19 @@ describe('the user’s own connector instructions', () => {
   });
   it('starts with the coding guidance and explains connectors once beside the local tools without a setup link', () => {
     const text = serverInstructions(ctx, 'core', 'win32');
-    expect(text.startsWith('You are a coding agent working with the user through Chat Marks Local GPT.')).toBe(true);
+    expect(text.startsWith('You are a coding agent working with the user through Chat Marks.')).toBe(true);
     const intro = text.split('\n').find(line => line.startsWith('Use the connected tools as needed:'))!;
-    expect(intro).toContain('Chat Marks Local GPT Core for files');
-    expect(intro).toContain('Chat Marks Local GPT Desktop for background browser tabs');
-    expect(intro).toContain('Chat Marks Local GPT Plugins for enabled external apps');
+    expect(intro).toContain('Chat Marks Core for files');
+    expect(intro).toContain('Chat Marks Desktop for background browser tabs');
+    expect(intro).toContain('Chat Marks Plugins for enabled external apps');
     expect(text.indexOf(intro)).toBeGreaterThan(text.indexOf('# Local tools'));
-    expect(text).not.toMatch(/This is Chat Marks Local GPT|https:\/\/chatgpt.com\/#settings\/Plugins/);
-    expect(serverInstructions(ctx, 'core', 'linux')).toContain('Chat Marks Local GPT Desktop');
+    expect(text).not.toMatch(/This is Chat Marks|https:\/\/chatgpt.com\/#settings\/Plugins/);
+    expect(serverInstructions(ctx, 'core', 'linux')).toContain('Chat Marks Desktop');
   });
   it('routes Linux browser users to Core for files without advertising native desktop tools', () => {
     const text = serverInstructions(ctx, 'desktop', 'linux');
     expect(text).toContain('browser_snapshot');
-    expect(text).toContain('Files, patches and shell commands live in the separate "Chat Marks Local GPT Core" connector.');
+    expect(text).toContain('Files, patches and shell commands live in the separate "Chat Marks Core" connector.');
     expect(text).not.toContain('get_window_state');
     expect(text).not.toContain('Do not poll with a batch that only waits');
   });

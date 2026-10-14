@@ -103,9 +103,9 @@ export function stagedArtifact(
 ): { name: string; kind: 'installer' | 'appimage'; target: string } | null {
   if (!packaged) return null;
   if (arch !== 'x64' && arch !== 'arm64') return null;
-  if (platform === 'win32') return { name: `Chat-Marks-Local-GPT-Setup-${arch}.exe`, kind: 'installer', target: '' };
+  if (platform === 'win32') return { name: `Chat-Marks-Setup-${arch}.exe`, kind: 'installer', target: '' };
   if (platform === 'linux' && appImage) {
-    return { name: `Chat-Marks-Local-GPT-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
+    return { name: `Chat-Marks-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
   }
   return null;
 }
@@ -125,8 +125,8 @@ export function manualDownloadName(
   packaged: boolean = app.isPackaged
 ): string | null {
   if (!packaged || (arch !== 'x64' && arch !== 'arm64')) return null;
-  if (platform === 'darwin') return `Chat-Marks-Local-GPT-macOS-${arch}.dmg`;
-  if (platform === 'linux' && !appImage) return `Chat-Marks-Local-GPT-Linux-${arch}.deb`;
+  if (platform === 'darwin') return `Chat-Marks-macOS-${arch}.dmg`;
+  if (platform === 'linux' && !appImage) return `Chat-Marks-Linux-${arch}.deb`;
   return null;
 }
 

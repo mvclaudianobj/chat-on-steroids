@@ -441,7 +441,7 @@ describe('endpoint hardening', () => {
 
   it('counts only successful provider calls as current-publication working evidence', async () => {
     resetPluginRefreshForTests();
-    publishPluginSurface('core', 'Chat Marks Local GPT Core', 'test', '', [{ name: 'read', description: 'Read', inputSchema: { type: 'object' } }]);
+    publishPluginSurface('core', 'Chat Marks Core', 'test', '', [{ name: 'read', description: 'Read', inputSchema: { type: 'object' } }]);
     try {
       await rawPost(endpoint.urls.core, JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'read', arguments: { paths: ['/workspace/notes.txt'] } } }), selfTestHeaders());
       expect((await pluginRefreshStatuses()).core?.responding).toBeUndefined();
@@ -946,7 +946,7 @@ describe('surface boundaries', () => {
     const refusal = JSON.stringify(reply.body.result?.content);
     expect(refusal).toContain('could not tell which chat this save_image call came from');
     // It names the Core that answered, so a call sent to another computer's Core says so (#1097).
-    expect(refusal).toContain('Chat Marks Local GPT Core could not tell');
+    expect(refusal).toContain('Chat Marks Core could not tell');
     expect(refusal).toContain('If the chat belongs to another computer');
   });
 
@@ -1020,7 +1020,7 @@ describe('surface boundaries', () => {
   it('describes both surfaces well enough for a user to set them up and a model to find them', () => {
     for (const surface of SURFACE_LIST) {
       expect(surface.serverName, surface.id).toMatch(/^chat-on-steroids-/);
-      expect(surface.connectorName, surface.id).toContain('Chat Marks Local GPT');
+      expect(surface.connectorName, surface.id).toContain('Chat Marks');
       expect(surface.cardSummary.length, surface.id).toBeGreaterThan(20);
       // The description is the only thing the model has before discovery, so it has to
       // carry real vocabulary rather than a label.

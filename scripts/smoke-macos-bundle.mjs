@@ -19,7 +19,7 @@ const releaseDir = path.resolve('release');
 const unpackedDir = arch === 'arm64' ? 'mac-arm64' : 'mac';
 const app = process.argv[3]
   ? path.resolve(process.argv[3])
-  : path.join(releaseDir, unpackedDir, 'Chat Marks Local GPT.app');
+  : path.join(releaseDir, unpackedDir, 'Chat Marks.app');
 const contents = path.join(app, 'Contents');
 const resources = path.join(contents, 'Resources');
 const plist = path.join(contents, 'Info.plist');
@@ -42,18 +42,18 @@ function plistValue(key) {
 
 const expectedPlist = {
   CFBundleIdentifier: 'com.chatonsteroids.app',
-  CFBundleExecutable: 'Chat Marks Local GPT',
-  CFBundleName: 'Chat Marks Local GPT',
-  CFBundleDisplayName: 'Chat Marks Local GPT',
+  CFBundleExecutable: 'Chat Marks',
+  CFBundleName: 'Chat Marks',
+  CFBundleDisplayName: 'Chat Marks',
   CFBundleIconFile: 'icon.icns',
   CFBundleShortVersionString: packageVersion,
   CFBundleVersion: packageVersion,
   LSApplicationCategoryType: 'public.app-category.developer-tools',
   LSMinimumSystemVersion: '13.0',
   NSScreenCaptureUsageDescription:
-    'Chat Marks Local GPT captures a display or window only when the enabled Desktop connector asks to observe it.',
+    'Chat Marks captures a display or window only when the enabled Desktop connector asks to observe it.',
   NSLocalNetworkUsageDescription:
-    'Chat Marks Local GPT connects to devices and services on your local network when you run approved tools or commands.'
+    'Chat Marks connects to devices and services on your local network when you run approved tools or commands.'
 };
 for (const [key, expected] of Object.entries(expectedPlist)) {
   const actual = plistValue(key);
@@ -110,7 +110,7 @@ function isLaunchedMachO(file) {
 
 const nativeDir = `darwin-${arch}`;
 const nodeModules = path.join(resources, 'app.asar.unpacked', 'node_modules');
-const mainExecutable = path.join(contents, 'MacOS', 'Chat Marks Local GPT');
+const mainExecutable = path.join(contents, 'MacOS', 'Chat Marks');
 const appIcon = requireFile(path.join(resources, 'icon.icns'));
 const desktopAddon = path.join(resources, 'desktop', 'macos-desktop-addon.node');
 const desktopLibrary = path.join(resources, 'desktop', 'libcos-desktop.dylib');

@@ -3,7 +3,7 @@ import { expect, it } from 'vitest';
 const keys = [
   "Update all",
   "Restart to install the update?",
-  "Chat Marks Local GPT will close and restart. Running chats, agents and commands may be interrupted.",
+  "Chat Marks will close and restart. Running chats, agents and commands may be interrupted.",
   "Keep working",
   "Restart and install",
   "Update postponed. You can keep working.",

@@ -4,7 +4,7 @@ vi.mock('node:child_process', () => ({ spawnSync: ports.spawn }));
 vi.mock('node:fs', () => ({ existsSync: ports.exists }));
 // @ts-ignore Build scripts are intentionally plain ESM JavaScript.
 import seal from '../scripts/afterpack-macos-adhoc-seal.mjs';
-const context = { electronPlatformName: 'darwin', appOutDir: '/package', packager: { appInfo: { productFilename: 'Chat Marks Local GPT' } } };
+const context = { electronPlatformName: 'darwin', appOutDir: '/package', packager: { appInfo: { productFilename: 'Chat Marks' } } };
 const mediaKeys = [
   'NSCameraUsageDescription',
   'NSMicrophoneUsageDescription',

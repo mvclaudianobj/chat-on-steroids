@@ -1,6 +1,6 @@
 # App icon artwork
 
-## Chat Marks Local GPT
+## Chat Marks
 
 The Marks fork uses **`/icon_marks.png`** (transparent metallic wolf with blue eyes)
 as its application and extension identity, retaining the original colours. Run

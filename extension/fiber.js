@@ -127,19 +127,19 @@
    * (`server.ts`), so these are this app naming itself rather than labels somebody typed.
    * The pre-1.7.1 name stays so an older chat's evidence still reads.
    *
-   * Exact names, never a prefix: `Chat Marks Local GPT Backup` would be somebody else's
+   * Exact names, never a prefix: `Chat Marks Backup` would be somebody else's
    * connector, and a prefix test would have this app vouch for its traffic.
    *
    * A computer that shares its ChatGPT account with another names its connectors with a suffix
-   * ("Chat Marks Local GPT Core (Windows)"). The content script passes this install's names with
+   * ("Chat Marks Core (Windows)"). The content script passes this install's names with
    * every ask, and only those are ours: the other computer's calls run there, not here. Measured
    * 2026-10-04: the call path, `invocation.server` and `app_name` all carry the name as typed.
    */
-  const PLAIN_APPS = ['Chat Marks Local GPT Core', 'Chat Marks Local GPT Desktop', 'Chat Marks Local GPT Plugins'];
+  const PLAIN_APPS = ['Chat Marks Core', 'Chat Marks Desktop', 'Chat Marks Plugins'];
   const LEGACY_APPS = ['TobisComputer'];
-  const SUFFIXED_APP = /^Chat Marks Local GPT (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u;
+  const SUFFIXED_APP = /^Chat Marks (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u;
   let OUR_APPS = [...PLAIN_APPS, ...LEGACY_APPS];
-  /** Takes the names an ask carries: three "Chat Marks Local GPT …" names, in core/desktop/plugins order. */
+  /** Takes the names an ask carries: three "Chat Marks …" names, in core/desktop/plugins order. */
   function adoptAppNames(names) {
     if (!Array.isArray(names) || names.length !== 3) return;
     const words = ['Core', 'Desktop', 'Plugins'];
@@ -1365,7 +1365,7 @@
     return out;
   }
 
-  /** "/Chat Marks Local GPT Core/link_…/read" -> "read", or null if that is not a name. */
+  /** "/Chat Marks Core/link_…/read" -> "read", or null if that is not a name. */
   function toolName(value) {
     if (typeof value !== 'string' || value.length === 0) return null;
     const tail = value.slice(value.lastIndexOf('/') + 1);

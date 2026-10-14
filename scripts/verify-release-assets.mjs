@@ -6,20 +6,20 @@ import { strFromU8, unzipSync } from 'fflate';
 
 /** The files release.yml publishes, in its SHA256SUMS.txt order. */
 export const RELEASE_FILES = [
-  'Chat-Marks-Local-GPT-Setup-x64.exe',
-  'Chat-Marks-Local-GPT-Setup-arm64.exe',
-  'Chat-Marks-Local-GPT-macOS-x64.dmg',
-  'Chat-Marks-Local-GPT-macOS-x64.zip',
-  'Chat-Marks-Local-GPT-macOS-arm64.dmg',
-  'Chat-Marks-Local-GPT-macOS-arm64.zip',
-  'Chat-Marks-Local-GPT-Linux-x64.AppImage',
-  'Chat-Marks-Local-GPT-Linux-x64.deb',
-  'Chat-Marks-Local-GPT-Linux-arm64.AppImage',
-  'Chat-Marks-Local-GPT-Linux-arm64.deb',
-  'Chat-Marks-Local-GPT-Extension.zip',
-  'Chat-Marks-Local-GPT-Native-Sources.tar.gz'
+  'Chat-Marks-Setup-x64.exe',
+  'Chat-Marks-Setup-arm64.exe',
+  'Chat-Marks-macOS-x64.dmg',
+  'Chat-Marks-macOS-x64.zip',
+  'Chat-Marks-macOS-arm64.dmg',
+  'Chat-Marks-macOS-arm64.zip',
+  'Chat-Marks-Linux-x64.AppImage',
+  'Chat-Marks-Linux-x64.deb',
+  'Chat-Marks-Linux-arm64.AppImage',
+  'Chat-Marks-Linux-arm64.deb',
+  'Chat-Marks-Extension.zip',
+  'Chat-Marks-Native-Sources.tar.gz'
 ];
-const EXTENSION = 'Chat-Marks-Local-GPT-Extension.zip';
+const EXTENSION = 'Chat-Marks-Extension.zip';
 
 function sha256(file) {
   return new Promise((resolve, reject) => {

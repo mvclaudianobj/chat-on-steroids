@@ -4314,7 +4314,7 @@ describe('delivering a bootstrap', () => {
           {
             kind: 'user_message',
             time: Date.now(),
-            text: 'Continue the previous Chat Marks Local GPT session. Read the handoff below.',
+            text: 'Continue the previous Chat Marks session. Read the handoff below.',
             messageId: 'boot-resume'
           }
         ]
@@ -8661,7 +8661,7 @@ describe('unattributed activity recovery', () => {
       {
         kind: 'user_message',
         time: Date.now(),
-        text: '[[CLF-RESUME:O8THi8gMTC6LvH9GLclDIQ]]\n\nContinuing a Chat Marks Local GPT session that was compacted.',
+        text: '[[CLF-RESUME:O8THi8gMTC6LvH9GLclDIQ]]\n\nContinuing a Chat Marks session that was compacted.',
         messageId: 'm-b-bootstrap'
       }
     ]);
@@ -16084,7 +16084,7 @@ describe('worker brief on a computer with its own connector names', () => {
     await saveConfig({ ...previous, connectorSuffix: 'Windows VM' });
     try {
       expect(workerBriefForTests('worker-1', 'Check the tests'))
-        .toContain('Report to prime through the agents tool of Chat Marks Local GPT Core (Windows VM) — ');
+        .toContain('Report to prime through the agents tool of Chat Marks Core (Windows VM) — ');
     } finally { await saveConfig(previous); }
   });
 });
@@ -16102,7 +16102,7 @@ describe('connector identity through the bridge', () => {
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000c1d1';
     await request('POST', '/events', { body: { conversationId, events: [{ kind: 'app_sightings', time: Date.now(), apps: [
       { requestId: 'req-renamed', appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f', appName: 'My tools' },
-      { requestId: 'not-ours', appId: 'asdk_app_foreign', linkId: null, appName: 'Chat Marks Local GPT Core' }
+      { requestId: 'not-ours', appId: 'asdk_app_foreign', linkId: null, appName: 'Chat Marks Core' }
     ] }] } });
     const status = (await request('GET', '/status')).body;
     expect(status.connectorApps.core).toEqual([{ appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f', name: 'My tools' }]);

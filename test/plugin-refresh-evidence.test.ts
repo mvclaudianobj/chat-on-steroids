@@ -13,8 +13,8 @@ const tools: PluginToolSchema[] = [{ name: 'read', description: 'Read a file', i
 let directory = '';
 beforeEach(async () => { vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); wake.mockClear(); resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0); resetDurableForTests(); directory = await makeTempDir(); initDurableStore(directory); });
 afterEach(async () => { resetPluginRefreshForTests(); resetDurableForTests(); await removeTempDir(directory); vi.useRealTimers(); });
-const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat Marks Local GPT Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
-const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Local GPT Core', tools: declarations });
+const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat Marks Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
+const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Core', tools: declarations });
 const consumeStartup = consumeRequestedPluginRefreshStartup;
 it('preserves a legacy click across schema changes and ends a mismatched read-only migration', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!; expect(await claim(request)).toBe(true);
@@ -142,7 +142,7 @@ it('does not read or consume startup state for an already revoked authority', as
 });
 it('carries a requested app update through restart and pins only the first schema of that build', async () => {
   publish(); const original = (await pendingPluginRefreshes())[0]!;
-  await claimPluginRefresh({ ...original, appId, connectorName: 'Chat Marks Local GPT Core', tools, alreadyCurrent: true });
+  await claimPluginRefresh({ ...original, appId, connectorName: 'Chat Marks Core', tools, alreadyCurrent: true });
   await requestPluginRefreshes('99.0.0');
   expect(await pendingPluginRefreshes(false)).toEqual([]); expect(await hasRequestedPluginRefresh()).toBe(false);
   const saved = await readDurable('plugin-refresh') as any[];
@@ -155,7 +155,7 @@ it('carries a requested app update through restart and pins only the first schem
   const changed = [{ ...tools[0]!, description: 'New build declaration' }]; publish('2', changed);
   const resumed = (await pendingPluginRefreshes(false))[0]!;
   expect(resumed.schemaId).not.toBe(original.schemaId); expect(resumed.appId).toBe(appId);
-  expect(await claimPluginRefresh({ ...resumed, appId, connectorName: 'Chat Marks Local GPT Core', tools }, false)).toBe(true);
+  expect(await claimPluginRefresh({ ...resumed, appId, connectorName: 'Chat Marks Core', tools }, false)).toBe(true);
   await completePluginRefresh({ ...resumed, appId, tools: changed });
   expect(await hasRequestedPluginRefresh()).toBe(false);
   publish('2', [{ ...tools[0]!, description: 'Another settings edit' }]);
@@ -172,14 +172,14 @@ it('reobserves manual or already claimed refreshes without authorizing another c
   expect((await readDurable('plugin-refresh') as any[])[0]).toMatchObject({ id: observation.id, attempted: true });
   resetPluginRefreshForTests(); publish(); await writeDurableNow('plugin-refresh', []);
   const manual = (await pendingPluginRefreshes())[0]!;
-  await requireManualPluginRefresh({ ...manual, appId, connectorName: 'Chat Marks Local GPT Core', tools: [{ ...tools[0]!, description: 'Old' }], error: 'Recreate in ChatGPT' });
+  await requireManualPluginRefresh({ ...manual, appId, connectorName: 'Chat Marks Core', tools: [{ ...tools[0]!, description: 'Old' }], error: 'Recreate in ChatGPT' });
   await requestPluginRefreshes(APP_VERSION);
   expect((await pluginRefreshStatuses()).core?.state).toBe('manual');
   expect(await pendingPluginRefreshes(false)).toEqual([expect.objectContaining({ observeOnly: true })]);
   expect(await claim(manual)).toBe(false);
   const recheck = (await pendingPluginRefreshes(false))[0]!;
   expect(await claim(recheck)).toBe(false);
-  expect(await claimPluginRefresh({ ...recheck, appId: 'asdk_app_recreated', connectorName: 'Chat Marks Local GPT Core', tools, alreadyCurrent: true }, false)).toBe(true);
+  expect(await claimPluginRefresh({ ...recheck, appId: 'asdk_app_recreated', connectorName: 'Chat Marks Core', tools, alreadyCurrent: true }, false)).toBe(true);
   expect((await pluginRefreshStatuses()).core?.state).toBe('current');
 });
 it('keeps corrupt or ambiguous stored grants from authorizing explicit refresh', async () => {
@@ -265,11 +265,11 @@ it('waits a full tunnel grace when an identical schema is published for another 
   const original = configOwner.getConfig();
   const get = vi.spyOn(configOwner, 'getConfig').mockImplementation(() => ({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } }));
   try {
-    publishPluginSurface('core', 'Chat Marks Local GPT Core', '1', '', tools);
+    publishPluginSurface('core', 'Chat Marks Core', '1', '', tools);
     vi.advanceTimersByTime(PLUGIN_REFRESH_TUNNEL_GRACE_MS);
     const previous = (await pendingPluginRefreshes())[0]!;
     tunnelId = 'tunnel_bbbbbbbbbbbbbbbb';
-    publishPluginSurface('core', 'Chat Marks Local GPT Core', '1', '', tools);
+    publishPluginSurface('core', 'Chat Marks Core', '1', '', tools);
     expect(await pendingPluginRefreshes()).toEqual([]);
     expect(await claim(previous)).toBe(false);
     vi.advanceTimersByTime(PLUGIN_REFRESH_TUNNEL_GRACE_MS - 1);
@@ -283,7 +283,7 @@ it('waits a full tunnel grace when an identical schema is published for another 
 });
 it('records the current inspection failure while retaining the older consumed click through restart and recovery', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
-  await claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Local GPT Core', tools, alreadyCurrent: true });
+  await claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Core', tools, alreadyCurrent: true });
   expect((await pluginRefreshStatuses()).core?.state).toBe('current');
   await requestPluginRefreshes(APP_VERSION);
   const observation = (await pendingPluginRefreshes(false))[0]!;
@@ -301,7 +301,7 @@ it('records the current inspection failure while retaining the older consumed cl
   expect(await claim(request)).toBe(false);
   const recheck = (await pendingPluginRefreshes(false))[0]!;
   expect(await claim(recheck)).toBe(false);
-  expect(await claimPluginRefresh({ ...recheck, appId, connectorName: 'Chat Marks Local GPT Core', tools, alreadyCurrent: true }, false)).toBe(true);
+  expect(await claimPluginRefresh({ ...recheck, appId, connectorName: 'Chat Marks Core', tools, alreadyCurrent: true }, false)).toBe(true);
   expect((await pluginRefreshStatuses()).core?.state).toBe('current');
   expect((await readDurable('plugin-refresh') as any[])[0]).not.toHaveProperty('failure');
 });
@@ -367,7 +367,7 @@ it('projects refresh evidence without creating, repairing or rearming browser wo
 
 it('keeps manual, corrupt and ambiguous refresh evidence out of the current state', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
-  await requireManualPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Local GPT Core', tools: [{ ...tools[0]!, description: 'Old' }], error: 'Manual action needed' });
+  await requireManualPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Core', tools: [{ ...tools[0]!, description: 'Old' }], error: 'Manual action needed' });
   expect((await pluginRefreshStatuses()).core?.state).toBe('manual');
   await writeDurableNow('plugin-refresh', [{ invalid: true }]);
   expect((await pluginRefreshStatuses()).core?.state).toBe('unknown');
