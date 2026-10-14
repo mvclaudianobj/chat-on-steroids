@@ -5,6 +5,11 @@ and has incorporated the 82 subsequent upstream commits through `cc41c538`.
 Both points declare package version `2.1.36`. This fork uses
 **Chat Marks Local GPT** for its app, connectors, extension and installation labels.
 
+The application and Chrome extension icons are generated from `icon_marks.png`
+(the transparent metallic wolf artwork). Run `npm run icon` to regenerate the
+multi-resolution Windows ICO, macOS/Linux app icons, browser card and extension
+assets without changing the source's colours or alpha details.
+
 The bridge protocol, app ID, internal package name and persistent data locations
 retain their upstream identifiers to preserve compatibility with existing settings
 and connector installations. Third-party license, authorship and upstream source

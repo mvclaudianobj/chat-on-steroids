@@ -9,21 +9,6 @@
     <link rel="stylesheet" href="./dictation.css" />
   </head>
   <body>
-    <!-- Interface icons are Phosphor glyphs (icons.css, dom.ts icon()). Only the bespoke
-         product mark stays here, stroke-based on a 24 grid; every <use> carries a
-         viewBox or the browser shows the top-left corner of that grid. -->
-    <svg class="sprite" aria-hidden="true">
-      <defs>
-        <!-- The product mark: the same folder-behind-a-message shape as the app and
-             extension icons (scripts/make-icon.mjs), drawn in stroke for this grid. -->
-        <g id="i-mark">
-          <path d="M3.5 8.5V5.5a1 1 0 0 1 1-1h3.1L9 6.4h6.5" />
-          <path
-            d="M5.5 8.5h13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-8L7 20v-3.5H5.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z"
-          />
-        </g>
-      </defs>
-    </svg>
 
     <div class="app" data-screen="chat">
       <div class="app-topbar">
@@ -33,7 +18,7 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden><i class="ico ph ph-arrow-left" aria-hidden="true"></i><span>Back to chat</span></button>
-        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat Marks Local GPT</strong><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
+        <div class="sidebar-brand"><span class="mark"><img class="marks-app-icon" src="./browser-icons/cos.png" alt="" /></span><strong>Chat Marks Local GPT</strong><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
         <div class="sidebar-primary" id="sidebarPrimary">
           <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
@@ -223,7 +208,7 @@
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>Preview</h2><p>See changes as you adjust the workspace.</p></div></header>
               <div class="appearance-preview" aria-label="Appearance preview">
-                <div class="appearance-preview-sidebar"><svg class="ico brand-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mark" /></svg><span></span><span class="is-selected"></span><span></span></div>
+                <div class="appearance-preview-sidebar"><img class="marks-app-icon brand-icon" src="./browser-icons/cos.png" alt="" /><span></span><span class="is-selected"></span><span></span></div>
                 <div class="appearance-preview-chat">
                   <div class="appearance-preview-message"><span class="appearance-preview-avatar">You</span><p>Check the build and show what changed.</p></div>
                   <div class="appearance-preview-message"><span class="appearance-preview-avatar is-agent">ChatGPT</span><div><p>Build passed. Here is the updated command:</p><pre><code>npm run build</code></pre><span class="appearance-preview-badge">✓ Complete</span></div></div>
@@ -891,7 +876,7 @@
                 <span aria-hidden="true">/</span>
                 <span id="chatProjectName"></span>
               </span>
-              <span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
+              <span class="mark"><img class="marks-app-icon" src="./browser-icons/cos.png" alt="" /></span>
               <span class="title">
                 Chat Marks Local GPT
                 <span id="headerSub">Not set up yet</span>
@@ -932,7 +917,7 @@
                 <div id="timeline"></div>
                 <div id="inputQueue" class="input-queue" aria-live="polite"></div>
                 <p class="empty" id="timelineEmpty">
-                  <svg class="ico welcome-mark" viewBox="0 0 24 24"><use href="#i-mark" /></svg><span>What would you like to build?</span>
+                  <img class="marks-app-icon welcome-mark" src="./browser-icons/cos.png" alt="" /><span>What would you like to build?</span>
                 </p>
               </div>
 
@@ -1443,7 +1428,7 @@
       <header class="whats-new-head">
         <!-- The app's own tile, sealed with a sparkle: the same language as the browser sign-in card. -->
         <div class="whats-new-hero" aria-hidden="true">
-          <span class="whats-new-tile"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
+          <span class="whats-new-tile"><img class="marks-app-icon" src="./browser-icons/cos.png" alt="" /></span>
           <span class="whats-new-seal"><i class="ico ph ph-sparkle"></i></span>
         </div>
         <span class="whats-new-version" id="whatsNewVersion"></span>

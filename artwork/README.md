@@ -1,5 +1,16 @@
 # App icon artwork
 
+## Chat Marks Local GPT
+
+The Marks fork uses **`/icon_marks.png`** (transparent metallic wolf with blue eyes)
+as its application and extension identity, retaining the original colours. Run
+`npm run icon` to generate the Windows ICO, desktop and Linux PNG files, Chrome
+extension icons, and the in-app browser/brand icon. The build and installer use
+the generated icon files. Do not replace `icon_marks.png` with the older
+`app-icon-source.png`; that image documents upstream branding only.
+
+## Original upstream icon
+
 The production icon is generated from `app-icon-source.png` by
 `scripts/make-icon.mjs`. Run `npm run icon` to regenerate the Windows ICO, its preview,
 and the four Chrome extension PNGs.
