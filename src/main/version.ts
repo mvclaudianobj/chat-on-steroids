@@ -3,7 +3,7 @@
  *
  * `APP_VERSION` is written here rather than imported from package.json so the bundled
  * main process does not have to reach outside its own build. A test asserts that this
- * constant, package.json and extension/manifest.json all agree, so a release cannot ship
+ * constant, package.json (whose fourth revision uses SemVer +N) and extension/manifest.json agree, so a release cannot ship
  * an extension that silently disagrees with the app it pairs to.
  *
  * `BRIDGE_PROTOCOL` is what actually has to match. It moves only when the request or
@@ -12,7 +12,7 @@
  * extension does nothing" into a diagnosable mismatch.
  */
 
-export const APP_VERSION = '2.1.37';
+export const APP_VERSION = '2.1.37.1';
 
 /**
  * Standalone extension recovery must stay on the app's own release. Using GitHub's moving

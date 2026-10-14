@@ -718,7 +718,7 @@ export interface UpdateStatus {
 export const RELEASES_PAGE = 'https://github.com/mvclaudianobj/chat-on-steroids/releases/latest';
 
 /**
- * Whether `candidate` is a later release than `current`, compared as three numbers.
+ * Whether `candidate` is a later release, including an optional fourth revision number.
  *
  * String inequality is not enough: a downgrade published by mistake, or a pre-release tag left
  * as `latest`, would otherwise make this app install an older build over a newer one. It lives
@@ -726,9 +726,10 @@ export const RELEASES_PAGE = 'https://github.com/mvclaudianobj/chat-on-steroids/
  * copies of a comparison are two chances to read a version difference the wrong way round.
  */
 export function isNewer(candidate: string, current: string): boolean {
+  if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(candidate) || !/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(current)) return false;
   const left = candidate.split('.').map(Number);
   const right = current.split('.').map(Number);
-  for (let index = 0; index < 3; index += 1) {
+  for (let index = 0; index < 4; index += 1) {
     const a = left[index] ?? 0;
     const b = right[index] ?? 0;
     if (a !== b) return a > b;

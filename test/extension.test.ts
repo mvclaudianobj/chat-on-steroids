@@ -35,9 +35,9 @@ describe('extension release metadata', () => {
     const manifest = JSON.parse(
       await fs.readFile(path.join(process.cwd(), 'extension', 'manifest.json'), 'utf8')
     ) as { version: string };
-    expect(pkg.version).toBe(APP_VERSION);
-    expect(lock.version).toBe(APP_VERSION);
-    expect(lock.packages?.['']?.version).toBe(APP_VERSION);
+    expect(pkg.version.replace('+', '.')).toBe(APP_VERSION);
+    expect(lock.version).toBe(pkg.version);
+    expect(lock.packages?.['']?.version).toBe(pkg.version);
     expect(manifest.version).toBe(APP_VERSION);
     expect(BRIDGE_PROTOCOL).toBe(14);
     expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 14;');

@@ -151,6 +151,14 @@ app.whenReady().then(async () => {
     await shot('whats-new-short.png');
     win.setContentSize(1180,760);
 
+    // A Marks revision also opens after the corresponding upstream release.
+    await open('lang=pt-BR&seen=2.1.37&version=2.1.37.1');
+    await until(`document.getElementById('whatsNewDialog').open`);
+    await pause(1100);
+    assert.equal(await js(`document.getElementById('whatsNewList').children.length`),1);
+    assert.match(await js(`document.getElementById('whatsNewList').textContent`),/Ative o Marks/);
+    await shot('whats-new-marks.png');
+
     // Nothing on the same version, and nothing (but a record) on a version without highlights.
     await open('seen=2.1.30&version=2.1.30');
     await pause(1200);

@@ -9,6 +9,10 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.37.1] — Marks joins the pets
+
+Marks, the silver robotic wolf with cyan eyes and crystal, now ships in the Pets list. Enable him alongside your other companions. This revision also supports four-part release numbers in the updater; earlier installations must install this revision manually.
+
 ## [2.1.37] — Find in chat, slash commands and Send now
 
 Everyday comforts for working in chats: find text in a chat with ⌘F, reach most actions with `/` commands, choose what Enter does and what a message during a running answer does, send a queued message right away, and get a notification when a chat finishes. Long runs keep your computer awake, the final answer of a long turn shows where it belongs, and worker chats can leave your ChatGPT chat list once they're done.
