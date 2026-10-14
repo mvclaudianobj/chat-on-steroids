@@ -28,7 +28,7 @@ app.whenReady().then(async () => {
     });
     const state = {config,hasApiKey:false,hasGoalKey:false,resolvedBinary:null,
       status:{state:'disconnected',surfaces:[]},bridge:{running:false,paired:false,present:false},
-      update:{current:params.get('version')||'2.1.36',latest:null,stage:'idle'}};
+      update:{current:params.get('version')||'2.1.37',latest:null,stage:'idle'}};
     const ok=data=>Promise.resolve({ok:true,data});
     window.seenCalls=0; window.openedLinks=[];
     window.api=new Proxy({getState:()=>ok(state),getLog:()=>ok([]),listProjects:()=>ok([]),
@@ -69,7 +69,7 @@ app.whenReady().then(async () => {
     const inkInsets=element=>sharedInkInsets(win,js,element);
 
     for (const theme of ['dark','light']) {
-      await open(`theme=${theme}&seen=2.1.35&version=2.1.36`);
+      await open(`theme=${theme}&seen=2.1.36&version=2.1.37`);
       await until(`document.getElementById('whatsNewDialog').open`);
       // Measure only once every entry animation has finished: a row still sliding up reads as an
       // icon sitting low in its badge.
@@ -80,22 +80,27 @@ app.whenReady().then(async () => {
           title:document.getElementById('whatsNewTitle').textContent,version:document.getElementById('whatsNewVersion').textContent,
           lead:document.getElementById('whatsNewLead').textContent,focus:document.activeElement.id,ring:document.activeElement.matches(':focus-visible'),
           sideways:list.scrollWidth>list.clientWidth,fits:list.scrollHeight<=list.clientHeight,clipped:[...list.querySelectorAll('b,span')].some(e=>e.scrollWidth>e.clientWidth+1)}})()`);
-      assert.equal(view.items,5,'Five highlights for 2.1.36');
+      assert.equal(view.items,5,'Five highlights for 2.1.37');
       assert.equal(view.title,"What's new");
-      assert.equal(view.version,'Version 2.1.36');
-      assert.match(view.lead,/^Steadier long runs/);
+      assert.equal(view.version,'Version 2.1.37');
+      assert.match(view.lead,/^Find in chat, slash commands/);
       assert.equal(view.focus,'whatsNewDone','"Got it" has the focus');
       assert.equal(view.ring,false,'It opens without a focus ring; the keyboard brings one');
       assert.ok(Math.abs(view.left-view.right)<=1 && Math.abs(view.top-view.bottom)<=1,'The dialog is centred: '+JSON.stringify(view));
       assert.ok(!view.sideways && !view.clipped,'Nothing scrolls sideways or is cut: '+JSON.stringify(view));
       assert.ok(view.fits,'All highlights fit an ordinary window without scrolling: '+JSON.stringify(view));
       assert.equal(await js('window.seenCalls'),1,'The version is recorded once it has been shown');
-      // Every glyph sits in the middle of its badge, and the sparkle in its mark.
+      // The Marks image and each glyph sit in the middle of their own badge.
       for (const element of ["document.querySelector('.whats-new-tile')","document.querySelector('.whats-new-seal')",...Array.from({length:view.items},(_, i)=>`document.querySelectorAll('.whats-new-icon')[${i}]`)]) {
         // A rounded square's corners show the card through: square it off while measuring; the glyph stays put.
-        // The seal sits over the tile's corner; it is measured on its own, so hide it for the tile.
         const tile=element.includes('whats-new-tile');
-        if (tile) await js(`document.querySelector('.whats-new-seal').style.visibility='hidden'`);
+        // Marks uses the original colour artwork, whose silhouette is intentionally asymmetric.
+        // Check its image box, while retaining pixel-ink centering checks for the actual glyphs.
+        if (tile) {
+          const mark=await js(`(()=>{const tile=document.querySelector('.whats-new-tile'),img=tile.querySelector('img');const t=tile.getBoundingClientRect(),r=img.getBoundingClientRect();return {loaded:img.complete&&img.naturalWidth>0,x:(r.left+r.right-t.left-t.right)/2,y:(r.top+r.bottom-t.top-t.bottom)/2}})()`);
+          assert.ok(mark.loaded && Math.abs(mark.x)<=1 && Math.abs(mark.y)<=1, 'Marks artwork is loaded and centred: '+JSON.stringify(mark));
+          continue;
+        }
         const round=element.includes('whats-new-seal');
         // The seal's disc and ring are accent over the tile; measure only its glyph, in ink on a card-coloured disc.
         if (round) await js(`(s=>{s.style.background='var(--whats-new-surface)';s.style.boxShadow='none';s.style.color='var(--ink)'})(document.querySelector('.whats-new-seal'))`);
@@ -103,7 +108,6 @@ app.whenReady().then(async () => {
         const ink=await inkInsets(element);
         if (!round) await js(`${element}.style.borderRadius=''`);
         if (round) await js(`(s=>{s.style.background='';s.style.boxShadow='';s.style.color=''})(document.querySelector('.whats-new-seal'))`);
-        if (tile) await js(`document.querySelector('.whats-new-seal').style.visibility=''`);
         assert.ok(Math.abs(ink.left-ink.right)<=1.5 && Math.abs(ink.top-ink.bottom)<=1.5,`${element} is centred in ${theme}: ${JSON.stringify(ink)}`);
       }
       // As it opens: measuring scrolled the list; back to its top for the picture.
@@ -111,14 +115,14 @@ app.whenReady().then(async () => {
       await shot(`whats-new-${theme}.png`);
       // The release notes open externally, for this exact version.
       await js(`document.getElementById('whatsNewNotes').click()`);
-      assert.deepEqual(await js('window.openedLinks'),['https://github.com/totec448-spec/chat-on-steroids/releases/tag/v2.1.36']);
+      assert.deepEqual(await js('window.openedLinks'),['https://github.com/mvclaudianobj/chat-on-steroids/releases/tag/v2.1.37']);
       // "Got it" closes it, with its motion.
       await js(`document.getElementById('whatsNewDone').click()`);
       await until(`!document.getElementById('whatsNewDialog').open`);
     }
 
     // German, the longest of the catalogs here: translated, nothing cut, the actions in view.
-    await open('lang=de&seen=2.1.35&version=2.1.36');
+    await open('lang=de&seen=2.1.36&version=2.1.37');
     await until(`document.getElementById('whatsNewDialog').open`);
     await pause(1100);
     const de=await js(`(()=>{const list=document.getElementById('whatsNewList'),a=document.querySelector('.whats-new-actions').getBoundingClientRect();
@@ -130,7 +134,7 @@ app.whenReady().then(async () => {
     await shot('whats-new-de.png');
 
     // Escape dismisses it the same way.
-    await open('seen=2.1.35&version=2.1.36');
+    await open('seen=2.1.36&version=2.1.37');
     await until(`document.getElementById('whatsNewDialog').open`);
     await pause(1100);
     win.webContents.sendInputEvent({type:'keyDown',keyCode:'Escape'}); win.webContents.sendInputEvent({type:'keyUp',keyCode:'Escape'});
@@ -138,7 +142,7 @@ app.whenReady().then(async () => {
 
     // A short window: the list scrolls inside the dialog and both actions stay in view.
     win.setContentSize(720,460);
-    await open('seen=2.1.35&version=2.1.36');
+    await open('seen=2.1.36&version=2.1.37');
     await until(`document.getElementById('whatsNewDialog').open`);
     await pause(1100);
     const short=await js(`(()=>{const d=document.getElementById('whatsNewDialog').getBoundingClientRect(),a=document.querySelector('.whats-new-actions').getBoundingClientRect(),l=document.getElementById('whatsNewList');

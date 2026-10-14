@@ -715,7 +715,7 @@ export interface UpdateStatus {
 }
 
 /** Where an installation that cannot update itself gets the new version by hand. */
-export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/releases/latest';
+export const RELEASES_PAGE = 'https://github.com/mvclaudianobj/chat-on-steroids/releases/latest';
 
 /**
  * Whether `candidate` is a later release than `current`, compared as three numbers.
