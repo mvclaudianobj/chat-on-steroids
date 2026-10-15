@@ -133,14 +133,14 @@ export function manualDownloadName(
 /** Where "Get update" sends this installation: its exact file for `version`, else the page. */
 export function manualDownloadUrl(version: string | null, name: string | null = manualDownloadName()): string {
   const page = `https://github.com/${REPO}/releases/latest`;
-  return version && /^\d+\.\d+\.\d+$/.test(version) && name ? `https://github.com/${REPO}/releases/download/v${version}/${name}` : page;
+  return version && releaseVersion(version) === version && name ? `https://github.com/${REPO}/releases/download/v${version}/${name}` : page;
 }
 
 /** `v2.0.3` -> `2.0.3`, and anything that is not a release tag -> null. */
 export function releaseVersion(tag: unknown): string | null {
   if (typeof tag !== 'string') return null;
   const version = tag.trim().replace(/^v/, '');
-  return /^\d+\.\d+\.\d+$/.test(version) ? version : null;
+  return /^\d+\.\d+\.\d+(?:\.\d+)?$/.test(version) ? version : null;
 }
 
 const CLEAR: UpdateStatus = { current: APP_VERSION, latest: null, stage: 'idle', error: null, checkedAt: null };

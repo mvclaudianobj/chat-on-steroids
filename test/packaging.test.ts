@@ -799,7 +799,12 @@ Load command 11
     const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
     const manifest = JSON.parse(readFileSync(path.join(root, 'extension', 'manifest.json'), 'utf8'));
     const versionSource = readFileSync(path.join(root, 'src', 'main', 'version.ts'), 'utf8');
-    const tag = `v${pkg.version}`;
+    const releaseVersion = pkg.version.replace('+', '.');
+    const builder = yamlFile('electron-builder.yml');
+    expect(builder.extraMetadata.version).toBe(releaseVersion);
+    expect(builder.buildVersion).toBe(releaseVersion);
+    expect(builder.buildNumber).toBe(releaseVersion.split('.')[3]);
+    const tag = `v${releaseVersion}`;
     const changelog = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
     const notes = readFileSync(path.join(root, 'docs', 'release-notes', `${tag}.md`), 'utf8');
     const publish = readFileSync(path.join(root, '.github', 'workflows', 'publish.yml'), 'utf8');
@@ -807,9 +812,9 @@ Load command 11
 
     expect(lock.version).toBe(pkg.version);
     expect(lock.packages?.['']?.version).toBe(pkg.version);
-    expect(manifest.version).toBe(pkg.version);
-    expect(versionSource.match(/APP_VERSION = '([^']+)'/)?.[1]).toBe(pkg.version);
-    expect(changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m)?.[1]).toBe(pkg.version);
+    expect(manifest.version).toBe(releaseVersion);
+    expect(versionSource.match(/APP_VERSION = '([^']+)'/)?.[1]).toBe(releaseVersion);
+    expect(changelog.match(/^## \[(\d+\.\d+\.\d+(?:\.\d+)?)\]/m)?.[1]).toBe(releaseVersion);
     expect(notes).toMatch(/^## .+$/m);
 
     const artifacts = [

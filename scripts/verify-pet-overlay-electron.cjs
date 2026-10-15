@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const sharp = require('sharp');
 
 const root = path.resolve(__dirname, '..');
+const petId = process.argv.includes('--marks') ? 'marks' : 'capy';
 const { defaultConfig, merge } = require('./fixtures/app-defaults.cjs');
 const reuseAt = process.argv.indexOf('--reuse');
 const reusing = reuseAt >= 0;
@@ -16,7 +17,7 @@ const userData = reusing ? path.resolve(process.argv[reuseAt + 1]) : fs.mkdtempS
 if (!reusing) {
   fs.mkdirSync(path.join(userData, 'state'));
   fs.writeFileSync(path.join(userData, 'state', 'pet-library.json'), JSON.stringify({
-    version: 1, enabled: ['capy'], favorites: []
+    version: 1, enabled: [petId], favorites: []
   }));
   // Start from the app's own defaults so the config is valid and not reset on load.
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify(merge(defaultConfig(), {
@@ -86,6 +87,7 @@ function attachOverlay(win) {
   whenLoaded(() => {
     setTimeout(async () => {
       try {
+        await until(() => win.webContents.executeJavaScript(`Boolean(document.querySelector('.pet-shell .pet-body'))`), 'enabled pet rendered', 10_000);
         const geometry = await win.webContents.executeJavaScript(`(() => {
           const shell = document.querySelector('.pet-shell');
           const body = document.querySelector('.pet-body');
@@ -290,7 +292,7 @@ function attachOverlay(win) {
           await new Promise(resolve => setTimeout(resolve, 100));
           const moved = await win.webContents.executeJavaScript(`(() => {
             const rect = document.querySelector('.pet-shell').getBoundingClientRect();
-            return { x: rect.x, y: rect.y, saved: localStorage.getItem('cos.ui.petDesktop.capy.v1') };
+            return { x: rect.x, y: rect.y, saved: localStorage.getItem('cos.ui.petDesktop.${petId}.v1') };
           })()`);
           assert.ok(Math.abs(moved.x - 333) < 2 && Math.abs(moved.y - 444) < 2,
             `Electron input drag did not move the pet: ${JSON.stringify(moved)}`);
@@ -359,7 +361,7 @@ function attachOverlay(win) {
           window.api.petsOverlayState()
         ])`);
         assert.equal(hidden[0].ok, true);
-        assert.equal(hidden[0].data.pets.find(pet => pet.id === 'capy')?.enabled, true,
+        assert.equal(hidden[0].data.pets.find(pet => pet.id === petId)?.enabled, true,
           'Hide pet must leave the clicked library member Active.');
         assert.equal(hidden[1].ok, true);
         assert.equal(hidden[1].data.visible, false);
@@ -372,6 +374,7 @@ function attachOverlay(win) {
         assert.equal(restored.data.visible, true);
         assert.equal(restored.data.activeCount, 1);
         assert.equal(win.isVisible(), true, 'The View visibility command must restore a dismissed active pet.');
+        await until(() => win.webContents.executeJavaScript(`document.querySelectorAll('.pet-shell').length === 1`), 'dismissed pet restored', 10_000);
         assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".pet-shell").length'), 1);
         const restoredRect = await win.webContents.executeJavaScript('document.querySelector(".pet-shell").getBoundingClientRect().toJSON()');
         assert.ok(Math.abs(restoredRect.x - 333) < 2 && Math.abs(restoredRect.y - 444) < 2,

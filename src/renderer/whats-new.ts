@@ -14,6 +14,12 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.37.1': {
+    lead: () => t('Marks joins your pets.'),
+    highlights: [
+      { icon: 'i-paw', title: () => 'Marks', text: () => t('Enable Marks, the silver robotic wolf, in Pets.') }
+    ]
+  },
   '2.1.37': {
     lead: () => t('Find in chat, slash commands, and messages that go where you want.'),
     highlights: [

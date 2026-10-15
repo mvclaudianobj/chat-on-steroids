@@ -211,6 +211,9 @@ describe('finding a newer release', () => {
   it('reads a release tag, and refuses anything that is not one', () => {
     expect(releaseVersion('v2.1.0')).toBe('2.1.0');
     expect(releaseVersion('2.1.0')).toBe('2.1.0');
+    expect(releaseVersion('v2.1.37.1')).toBe('2.1.37.1');
+    expect(releaseVersion('v2.1.37.1.2')).toBeNull();
+    expect(manualDownloadUrl('2.1.37.1', 'Chat-Marks-Linux-x64.deb')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37.1/Chat-Marks-Linux-x64.deb');
     expect(releaseVersion('v2.1.0-rc.1')).toBeNull();
     expect(releaseVersion(null)).toBeNull();
   });
@@ -221,6 +224,12 @@ describe('finding a newer release', () => {
     expect(isNewer('2.0.9', '2.0.10')).toBe(false);
     expect(isNewer('2.0.2', '2.0.2')).toBe(false);
     expect(isNewer('1.9.9', '2.0.0')).toBe(false);
+    expect(isNewer('2.1.37.1', '2.1.37')).toBe(true);
+    expect(isNewer('2.1.37', '2.1.37.1')).toBe(false);
+    expect(isNewer('2.1.37.2', '2.1.37.1')).toBe(true);
+    expect(isNewer('2.1.38', '2.1.37.1')).toBe(true);
+    expect(isNewer('2.1.37.0', '2.1.37')).toBe(false);
+    expect(isNewer('2.1.37-rc.1', '2.1.36')).toBe(false);
   });
 
   /**
@@ -611,4 +620,3 @@ describe('a check or download that goes wrong on a bad connection', () => {
     expect(updateStatus().error).toContain('no data for 60 seconds');
   });
 });
-
