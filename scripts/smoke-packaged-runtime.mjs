@@ -37,7 +37,8 @@ const packageRoot = explicitRoot ? path.resolve(explicitRoot) : packageRootCandi
 if (!packageRoot) throw new Error(`Could not find unpacked ${targetPlatform}-${targetArch} package under ${releaseDir}`);
 
 const sourcePackage = JSON.parse(readFileSync(path.join(repository, 'package.json'), 'utf8'));
-const expectedVersion = sourcePackage.version;
+// npm uses SemVer build metadata for the optional fourth product revision.
+const expectedVersion = sourcePackage.version.replace(/^(\d+\.\d+\.\d+)\+(\d+)$/, '$1.$2');
 const expectedElectronVersion = sourcePackage.devDependencies?.electron;
 if (!/^\d+\.\d+\.\d+$/.test(expectedElectronVersion ?? '')) {
   throw new Error(`Electron must be pinned to an exact release version, got ${JSON.stringify(expectedElectronVersion)}`);

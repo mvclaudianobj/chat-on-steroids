@@ -12,7 +12,7 @@ import type { PluginPublication, PluginRefreshRequest, PluginRefreshStatus, Plug
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
-const requestedVersion = z.string().regex(/^\d+\.\d+\.\d+$/).optional();
+const requestedVersion = z.string().regex(/^\d+\.\d+\.\d+(?:\.\d+)?$/).optional();
 const rowSchema = z.object({
   surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(),
   completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false),
