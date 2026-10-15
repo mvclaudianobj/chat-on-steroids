@@ -6,7 +6,16 @@ const http = require('node:http');
 const assert = require('node:assert/strict');
 const { fixtureConfigSource } = require('./fixtures/app-defaults.cjs');
 const root = path.resolve(__dirname, '..');
-const version = require('../package.json').version;
+// package.json uses SemVer build metadata (2.1.38+1), while the app, extension
+// and isNewer() use the four-part product version (2.1.38.1). Reproduce the
+// actual runtime value so the newer-extension check is meaningful on CI.
+const npmVersion = require('../package.json').version;
+const productVersion = fs.readFileSync(path.join(root, 'src/main/version.ts'), 'utf8')
+  .match(/export const APP_VERSION = '(\d+\.\d+\.\d+(?:\.\d+)?)'/)?.[1];
+assert.ok(productVersion, 'APP_VERSION must be a valid 3- or 4-part product version');
+assert.equal(productVersion, npmVersion.replace(/\+(\d+)$/, '.$1'),
+  'UI fixture product version must match package.json SemVer metadata');
+const version = productVersion;
 const built = path.join(root, 'out/renderer');
 const output = path.join(root, 'outputs/update-readiness');
 const before = process.argv.includes('--before');

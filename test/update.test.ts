@@ -728,7 +728,11 @@ describe('installing on request', () => {
     expect(installer!.args[1]).toContain('Chat Marks .deb update cancelled');
     expect(installer!.args[1]).toContain('pkexec exit %s');
     expect(installer!.args[1]).toContain('kill -0 "$old_pid"');
-    expect(spawnSync('/bin/sh', ['-n'], { input: installer!.args[1], encoding: 'utf8' }).status).toBe(0);
+    // CI also runs this Linux-handoff fixture on Windows, where /bin/sh is not installed.
+    // Verify the emitted shell syntax only on hosts with a POSIX shell.
+    if (process.platform !== 'win32') {
+      expect(spawnSync('/bin/sh', ['-n'], { input: installer!.args[1], encoding: 'utf8' }).status).toBe(0);
+    }
     expect(installer!.args[3]).toBe(path.join(userData, 'updates', NEXT, DEB_ASSET));
     expect(installer!.args[4]).toBe(sha256('installer bytes'));
     expect(installer!.args[5]).toBe(userData);

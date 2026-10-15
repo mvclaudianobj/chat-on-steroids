@@ -5,9 +5,13 @@ const path = require('node:path');
 const assert = require('node:assert/strict');
 const root = path.resolve(__dirname, '..');
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require('./fixtures/app-defaults.cjs');
-// The first plain argument; switches such as verify-ui's --lang=en-US are not an output folder.
-const outputArg = process.argv.slice(2).find(arg => !arg.startsWith('--'));
+// Electron exposes its entrypoint at argv[1] on Linux but may put it after
+// Chromium switches on macOS. Never treat this .cjs file as an output folder.
+const outputArg = process.argv.slice(1).find(arg =>
+  !arg.startsWith('-') && path.resolve(root, arg) !== __filename);
 const output = outputArg ? path.resolve(root, outputArg) : path.join(root, '.tmp/message-send-20260918/ui');
+// Electron requires userData to exist before setPath on some macOS versions.
+fs.mkdirSync(path.join(output, 'runtime'), { recursive: true });
 app.setPath('userData', path.join(output, 'runtime'));
 
 app.whenReady().then(async () => {
