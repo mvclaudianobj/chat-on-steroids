@@ -1,3 +1,4 @@
+import { modulesStatus, moduleAction } from './modules.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
@@ -1234,6 +1235,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // nothing; the URL is built here from the checked release and this process's platform.
   // Opening Settings: ask GitHub again if the last answer is older than ten minutes. The status
   // reaches the window through the ordinary state push; this returns before the check does.
+  handle('modules:status', async () => modulesStatus());
+  handle('modules:action', async payload => {
+    const request = z.object({ id: z.literal('cli-proxy-api'), action: z.enum(['install', 'start', 'stop', 'restart', 'enable', 'disable', 'open']), managementUrl: z.string().max(256).optional() }).strict().parse(payload);
+    return moduleAction(request.action, request.managementUrl);
+  });
+
   handle('update:refresh', async () => {
     void checkForUpdatesIfStale();
     return true;

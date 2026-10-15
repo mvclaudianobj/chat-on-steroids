@@ -42,7 +42,7 @@ beforeAll(async () => {
 
 it('finds settings on every settings page by name, description and section, never a row its page hides', () => {
   const entries = collectSettings(document);
-  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'usage', 'setup', 'settings', 'appearance']));
+  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'usage', 'setup', 'settings', 'modules', 'appearance']));
   const [finish] = searchSettings(entries, '  SESSION FINISH  ', 'en');
   expect([finish!.title, finish!.page, finish!.section, finish!.tab]).toEqual(['Session finish', 'Agents & automation', 'Keep the turn open', 'settings']);
   expect(finish!.target.contains(document.getElementById('finishTool'))).toBe(true);
@@ -60,10 +60,12 @@ it('finds settings on every settings page by name, description and section, neve
   // Titles are the setting's name alone, never its description or the choices of its menu.
   const language = searchSettings(entries, 'language', 'en')[0]!;
   expect([language.title, language.section]).toEqual(['Language', 'Preferences']);
+  expect(searchSettings(entries, 'cliproxyapi', 'en')[0]!.tab).toBe('modules');
+  expect(searchSettings(entries, 'management console', 'en')[0]!.target.contains(document.getElementById('moduleCliOpen'))).toBe(true);
 });
 
 it('titles every settings page the same way, Activity included', () => {
-  for (const panel of ['home', 'general', 'usage', 'appearance', 'activity']) {
+  for (const panel of ['home', 'general', 'usage', 'modules', 'appearance', 'activity']) {
     const head = document.querySelector(`[data-panel="${panel}"] .settings-page-head`);
     expect(head?.querySelector('h1')?.textContent?.trim(), panel).toBeTruthy();
     expect(head?.querySelector('p')?.textContent?.trim(), panel).toBeTruthy();

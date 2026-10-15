@@ -1,3 +1,4 @@
+import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
 import type { DictationEvent } from '../shared/dictation.js';
 import type { ChatModelCatalog } from '../shared/chat-models.js';
@@ -253,6 +254,8 @@ const api = {
   // Applies the update this app has already downloaded and verified: the app quits, the
   // installer runs, and the app comes back as the new version. It takes no argument because
   // there is nothing here to choose - the main process knows what is staged.
+  modulesStatus: () => call<MarksModuleState[]>('modules:status'),
+  moduleAction: (id: 'cli-proxy-api', action: MarksModuleAction, managementUrl?: string) => call<MarksModuleState[]>('modules:action', { id, action, managementUrl }),
   installUpdate: () => call<boolean>('update:install'),
   downloadUpdate: () => call<boolean>('update:download'),
   /** Settings opened: re-check for an update if the last answer is older than ten minutes. */

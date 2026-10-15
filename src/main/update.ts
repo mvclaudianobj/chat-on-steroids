@@ -22,12 +22,10 @@
  *   belongs to, so the next start recognises the file it already has and reverifies it rather
  *   than spending another hundred megabytes on the same installer.
  *
- * **What updates itself, and what does not.** Windows, and Linux installed as an AppImage. A
- * Linux `.deb` is owned by the system package manager and cannot be replaced without root, and
- * asking for a password during quit is not something this app will do — so a `.deb` install is
- * *told* a new version exists and is given the release page, and nothing is downloaded behind
- * it. That is a real limitation, not parity, and the notice says so rather than implying an
- * update is on its way. macOS is out entirely: those artifacts ship unsigned and unnotarized
+ * **What updates itself, and what does not.** Windows and Linux AppImage stage updates
+ * automatically; Linux `.deb` also stages its verified installer, but invokes the system
+ * package manager via PolicyKit only when the user explicitly presses Install. The password
+ * is entered in the system dialog, never handled by this app. macOS is out entirely: those artifacts ship unsigned and unnotarized
  * (see electron-builder.yml), so an app that silently replaced itself there would be handing
  * Gatekeeper a binary the user never chose to trust.
  *
@@ -80,8 +78,7 @@ export const STALE_CHECK_MS = 10 * 60_000;
 /**
  * The artifact this exact installation can apply to itself, or null for one that cannot.
  *
- * Null is a normal answer, not a failure: macOS is out by policy, a Linux `.deb` belongs to the
- * system package manager and would need root to replace, and an architecture with no published
+ * Null is a normal answer, not a failure: macOS is out by policy, and an architecture with no published
  * artifact has nothing to fetch. Those installations are still told a newer version exists —
  * that is what `latest` with a stage of `idle` means, and the notice turns it into a download
  * link — they are simply not updated for.
@@ -100,12 +97,13 @@ export function stagedArtifact(
   arch: string = process.arch,
   appImage: string | undefined = process.env.APPIMAGE,
   packaged: boolean = app.isPackaged
-): { name: string; kind: 'installer' | 'appimage'; target: string } | null {
+): { name: string; kind: 'installer' | 'appimage' | 'deb'; target: string } | null {
   if (!packaged) return null;
   if (arch !== 'x64' && arch !== 'arm64') return null;
   if (platform === 'win32') return { name: `Chat-Marks-Setup-${arch}.exe`, kind: 'installer', target: '' };
-  if (platform === 'linux' && appImage) {
-    return { name: `Chat-Marks-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
+  if (platform === 'linux') {
+    if (appImage) return { name: `Chat-Marks-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
+    return { name: `Chat-Marks-Linux-${arch}.deb`, kind: 'deb', target: '' };
   }
   return null;
 }
@@ -113,7 +111,7 @@ export function stagedArtifact(
 /**
  * The published file an installation that cannot update itself should download, or null.
  *
- * macOS and a Linux `.deb` are told about a release but never replaced from here (see above).
+ * macOS is told about a release but cannot be replaced from here (see above).
  * Pointing their "Get update" at the exact file for this machine, instead of the release page,
  * saves the search for the right one of thirteen assets. The download still happens in the
  * user's browser, so macOS applies its normal quarantine and Gatekeeper checks to it.
@@ -121,12 +119,11 @@ export function stagedArtifact(
 export function manualDownloadName(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
-  appImage: string | undefined = process.env.APPIMAGE,
+  _appImage: string | undefined = process.env.APPIMAGE,
   packaged: boolean = app.isPackaged
 ): string | null {
   if (!packaged || (arch !== 'x64' && arch !== 'arm64')) return null;
   if (platform === 'darwin') return `Chat-Marks-macOS-${arch}.dmg`;
-  if (platform === 'linux' && !appImage) return `Chat-Marks-Linux-${arch}.deb`;
   return null;
 }
 
@@ -146,7 +143,7 @@ export function releaseVersion(tag: unknown): string | null {
 const CLEAR: UpdateStatus = { current: APP_VERSION, latest: null, stage: 'idle', error: null, checkedAt: null };
 
 let status: UpdateStatus = CLEAR;
-let staged: { version: string; file: string; kind: 'installer' | 'appimage'; target: string; digest: string } | null = null;
+let staged: { version: string; file: string; kind: 'installer' | 'appimage' | 'deb'; target: string; digest: string } | null = null;
 let pass: Promise<void> | null = null;
 /** Set by `markInstallOnQuit`: the user pressed Install, so bring the app back afterwards. */
 let runAfterInstall = false;
@@ -484,6 +481,26 @@ export async function applyStagedUpdate(): Promise<void> {
       // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
       // child process would take the quit down with it.
       installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));
+      installer.unref();
+    } else if (ready.kind === 'deb') {
+      if (!relaunch) return; // Package updates require an explicit click and OS authorization.
+      // Never run apt as root inside the app. The system's PolicyKit agent owns any password
+      // dialogue and only grants /usr/bin/apt-get for this explicit, verified local package.
+      // POSIX shell positional parameters keep every file path literal, including spaces.
+      // A separate process must outlive Electron while dpkg replaces the installed package.
+      const script = [
+        'deb=$1; executable=$2; logfile=$3',
+        'if /usr/bin/pkexec /usr/bin/apt-get install --assume-yes --only-upgrade "$deb" >> "$logfile" 2>&1; then',
+        '  :',
+        'else',
+        '  printf "Chat Marks .deb update was cancelled or failed.\\n" >> "$logfile"',
+        'fi',
+        '"$executable" >/dev/null 2>&1 &'
+      ].join('\n');
+      const installer = spawn('/bin/sh', ['-c', script, 'chat-marks-update', ready.file, app.getPath('exe'), path.join(app.getPath('userData'), 'update-install.log')], {
+        detached: true, stdio: 'ignore'
+      });
+      installer.on('error', (err: Error) => logWarn(`the ${ready.version} package installer did not start: ${err.message}`));
       installer.unref();
     } else {
       const next = `${ready.target}.new`;

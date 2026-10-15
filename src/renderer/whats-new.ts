@@ -14,6 +14,13 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.37.2': {
+    lead: () => t('Manage optional local services from one place. Each module keeps its own settings and console.'),
+    highlights: [
+      { icon: 'i-plug', title: () => t('Modules'), text: () => t('Local API proxy and its existing management console.') },
+      { icon: 'i-retry', title: () => t('Linux .deb upgrade'), text: () => t('A button to request a .deb update with PolicyKit authorization is being prepared; installation is not yet validated.') }
+    ]
+  },
   '2.1.37.1': {
     lead: () => t('Marks joins your pets.'),
     highlights: [

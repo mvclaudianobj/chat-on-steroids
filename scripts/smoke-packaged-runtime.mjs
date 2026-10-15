@@ -4,6 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { RIPGREP, TUNNEL_CLIENT } from './packaging-versions.mjs';
 import { normalizeArch, normalizePlatform, PLATFORM_INFO } from './packaging-targets.mjs';
+import { productVersion } from './release-version.mjs';
 
 const repository = path.resolve(import.meta.dirname, '..');
 const releaseDir = path.join(repository, 'release');
@@ -37,8 +38,7 @@ const packageRoot = explicitRoot ? path.resolve(explicitRoot) : packageRootCandi
 if (!packageRoot) throw new Error(`Could not find unpacked ${targetPlatform}-${targetArch} package under ${releaseDir}`);
 
 const sourcePackage = JSON.parse(readFileSync(path.join(repository, 'package.json'), 'utf8'));
-// npm uses SemVer build metadata for the optional fourth product revision.
-const expectedVersion = sourcePackage.version.replace(/^(\d+\.\d+\.\d+)\+(\d+)$/, '$1.$2');
+const expectedVersion = productVersion(sourcePackage.version);
 const expectedElectronVersion = sourcePackage.devDependencies?.electron;
 if (!/^\d+\.\d+\.\d+$/.test(expectedElectronVersion ?? '')) {
   throw new Error(`Electron must be pinned to an exact release version, got ${JSON.stringify(expectedElectronVersion)}`);

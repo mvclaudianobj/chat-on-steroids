@@ -11,6 +11,23 @@
 .appearance-page-head > div { min-width: 0; }
 .appearance-page-head > .btn { flex: 0 0 auto; min-height: 34px; padding: 7px 9px; font-size: calc(11.5px * var(--text-scale, 1)); }
 .appearance-section + .appearance-section { margin-top: 28px; }
+.modules-panel .modules-service { padding: 0 18px; }
+.modules-service-overview { display: grid; justify-items: start; gap: 8px; padding: 18px 0 12px; }
+.modules-status { display: inline-flex; align-items: center; min-height: 26px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 100px; color: var(--soft); background: var(--sunk); font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
+.modules-status[data-state='running'] { color: var(--green); border-color: var(--green-line); background: var(--green-wash); }
+.modules-status[data-state='stopped'] { color: var(--soft); }
+.modules-status[data-state='missing'], .modules-status[data-state='error'] { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
+.modules-detail { margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; }
+.modules-service-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0 18px; }
+.modules-service-actions .btn, .modules-console > .btn { min-height: 36px; padding: 8px 12px; }
+.modules-service .btn:disabled { opacity: .5; cursor: not-allowed; }
+.modules-console { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; min-height: 80px; padding: 16px 0; border-top: 1px solid var(--line); }
+.modules-console .setting-text { flex: 1 1 220px; min-width: 0; }
+.modules-console-address { display: block; margin-top: 9px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.modules-console input { display: block; width: 100%; min-height: 36px; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--page); color: var(--ink); font: calc(12px * var(--text-scale, 1)) var(--mono); }
+.modules-error { margin: 0; padding: 12px 0 16px; border-top: 1px solid var(--line); color: var(--red); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; }
+.modules-panel :is(button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (max-width: 520px) { .modules-service-actions .btn { flex: 1 1 80px; } .modules-console > .btn { width: 100%; } }
 .appearance-panel .appearance-settings-card { padding: 4px 18px; gap: 0; overflow: visible; }
 .appearance-panel .setting { min-width: 0; min-height: 64px; padding: 14px 0; flex-wrap: wrap; gap: 12px; }
 .appearance-panel .setting-text { flex: 1 1 180px; }

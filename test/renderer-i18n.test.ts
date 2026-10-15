@@ -309,6 +309,34 @@ describe('app interface localization', () => {
       expect(Object.keys(catalog).filter(key => !Object.hasOwn(messages, key)), locale).toEqual([]);
     }
   });
+
+  it('translates Modules extensions, runtime status and all three 2.1.37.2 highlights in every catalog', () => {
+    const required = [
+      'Marks extensions',
+      'Future Marks plugins, skills and modules will appear here for installation and activation.',
+      'Checking status…',
+      'Unsupported system',
+      'Not installed',
+      'Running',
+      'Stopped',
+      'Enabled at startup',
+      'Manual start',
+      'Connect to the local module service to see its status.',
+      'Installation guide opened. Follow the instructions to install CLIProxyAPI.',
+      'Linux .deb upgrade button with PolicyKit (pending validation).',
+      'Linux .deb upgrade',
+      'A button to request a .deb update with PolicyKit authorization is being prepared; installation is not yet validated.'
+    ];
+    for (const [locale, messages] of Object.entries(catalogs)) {
+      for (const key of required) {
+        expect(messages[key]?.trim(), `${locale}: ${key}`).toBeTruthy();
+        expect(messages[key], `${locale}: ${key}`).not.toBe(key);
+      }
+    }
+    expect(catalogs['pt-BR']!['Modules']).toBe('Módulos');
+    expect(catalogs['pt-BR']!['Linux .deb upgrade button with PolicyKit (pending validation).'])
+      .toContain('validação pendente');
+  });
 });
 
 it('matches both Turkish I pairs when searching settings', async () => {

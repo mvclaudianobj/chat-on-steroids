@@ -45,6 +45,7 @@
         <button data-tab="settings" type="button">
           <i class="ico ph ph-robot" aria-hidden="true"></i>Agents &amp; automation
         </button>
+        <button data-tab="modules" type="button"><i class="ico ph ph-squares-four" aria-hidden="true"></i>Modules</button>
         <button data-tab="appearance" type="button"><i class="ico ph ph-sun" aria-hidden="true"></i>Appearance</button>
         <button data-tab="activity" type="button">
           <i class="ico ph ph-activity" aria-hidden="true"></i>Activity
@@ -195,6 +196,48 @@
                 <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send messages, start new chats and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
               </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel appearance-panel modules-panel scroll" data-panel="modules" aria-labelledby="modulesTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head">
+              <h1 id="modulesTitle">Modules</h1>
+              <p>Manage optional local services from one place. Each module keeps its own settings and console.</p>
+            </header>
+            <section class="appearance-section" aria-labelledby="cliProxyTitle">
+              <header class="settings-section-head">
+                <div><h2 id="cliProxyTitle" translate="no">CLIProxyAPI</h2><p>Local API proxy and its existing management console.</p></div>
+                <button class="btn" id="moduleRefresh" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh status</button>
+              </header>
+              <div class="settings-surface modules-service">
+                <div class="modules-service-overview">
+                  <span id="moduleCliStatus" class="modules-status" role="status" aria-live="polite" data-state="unknown">Status unavailable</span>
+                  <p id="moduleCliDetail" class="modules-detail">Checking the local service…</p>
+                </div>
+                <div class="modules-service-actions">
+                  <button class="btn" id="moduleCliInstall" type="button" disabled>Installation guide</button>
+                  <button class="btn" id="moduleCliStart" type="button" disabled>Start</button>
+                  <button class="btn" id="moduleCliStop" type="button" disabled>Stop</button>
+                  <button class="btn" id="moduleCliRestart" type="button" disabled>Restart</button>
+                  <button class="btn" id="moduleCliEnable" type="button" disabled>Enable at startup</button>
+                  <button class="btn" id="moduleCliDisable" type="button" disabled>Disable at startup</button>
+                </div>
+                <div class="modules-console setting">
+                  <span class="setting-text">
+                    <b>Management console</b>
+                    <em>Open the existing CLIProxyAPI console. Change its local address if you use another port.</em>
+                    <label class="modules-console-address" for="moduleCliConsoleUrl">Console URL</label>
+                    <input id="moduleCliConsoleUrl" type="url" autocomplete="off" spellcheck="false" placeholder="http://localhost:PORT/management.html" aria-label="Console URL" />
+                  </span>
+                  <button class="btn" id="moduleCliOpen" type="button" disabled><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open console</button>
+                </div>
+                <p id="moduleCliError" class="modules-error" role="alert" hidden></p>
+              </div>
+            </section>
+            <section class="appearance-section" aria-labelledby="marksExtensionsTitle">
+              <header class="settings-section-head"><div><h2 id="marksExtensionsTitle">Marks extensions</h2><p>Future Marks plugins, skills and modules will appear here for installation and activation.</p></div></header>
             </section>
           </div>
         </section>

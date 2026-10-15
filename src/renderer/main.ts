@@ -22,6 +22,7 @@ import { initWhatsNew } from './whats-new.js';
 import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
+import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
@@ -105,6 +106,114 @@ const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
 });
+let cliProxyModule: MarksModuleState | null = null;
+let moduleChecked = false;
+let moduleLoading = false;
+let moduleBusy = false;
+let moduleError = '';
+let consoleUrlEdited = false;
+
+function paintModules(): void {
+  const current = cliProxyModule;
+  const status = $('moduleCliStatus');
+  const state = moduleLoading ? 'checking' : !moduleChecked ? moduleError ? 'error' : 'unknown'
+    : !current?.supported ? 'unsupported' : !current.installed ? 'missing'
+      : current.running ? 'running' : 'stopped';
+  status.dataset.state = state;
+  status.textContent = t(state === 'checking' ? 'Checking status…'
+    : state === 'error' ? 'Status unavailable'
+      : state === 'unsupported' ? 'Unsupported system'
+        : state === 'missing' ? 'Not installed'
+          : state === 'running' ? 'Running'
+            : state === 'stopped' ? 'Stopped' : 'Status unavailable');
+  $('moduleCliDetail').textContent = current
+    ? `${current.detail}${current.installed ? ` · ${t(current.enabled ? 'Enabled at startup' : 'Manual start')}` : ''}`
+    : t('Connect to the local module service to see its status.');
+  $('moduleCliError').textContent = moduleError;
+  $('moduleCliError').hidden = !moduleError;
+  const blocked = moduleLoading || moduleBusy || !moduleChecked;
+  $<HTMLButtonElement>('moduleRefresh').disabled = moduleLoading || moduleBusy;
+  $<HTMLButtonElement>('moduleCliInstall').disabled = blocked || !!current?.installed;
+  $<HTMLButtonElement>('moduleCliStart').disabled = blocked || !current?.supported || !current.installed || current.running;
+  $<HTMLButtonElement>('moduleCliStop').disabled = blocked || !current?.supported || !current.installed || !current.running;
+  $<HTMLButtonElement>('moduleCliRestart').disabled = blocked || !current?.supported || !current.installed || !current.running;
+  $<HTMLButtonElement>('moduleCliEnable').disabled = blocked || !current?.supported || !current.installed || current.enabled;
+  $<HTMLButtonElement>('moduleCliDisable').disabled = blocked || !current?.supported || !current.installed || !current.enabled;
+  $<HTMLButtonElement>('moduleCliOpen').disabled = blocked || !$<HTMLInputElement>('moduleCliConsoleUrl').value.trim();
+}
+
+function readModuleReply(modules: MarksModuleState[]): MarksModuleState {
+  if (!Array.isArray(modules)) throw new Error('Module status response is unavailable.');
+  const current = modules.find(item => item?.id === 'cli-proxy-api');
+  if (!current || typeof current.installed !== 'boolean' || typeof current.enabled !== 'boolean' ||
+      typeof current.running !== 'boolean' || typeof current.supported !== 'boolean' ||
+      typeof current.detail !== 'string' || typeof current.managementUrl !== 'string') {
+    throw new Error('CLIProxyAPI status is incomplete.');
+  }
+  return current;
+}
+
+function acceptModuleStatus(modules: MarksModuleState[]): void {
+  cliProxyModule = readModuleReply(modules);
+  moduleChecked = true;
+  if (!consoleUrlEdited) $<HTMLInputElement>('moduleCliConsoleUrl').value = cliProxyModule.managementUrl;
+}
+
+async function refreshModules(): Promise<void> {
+  if (moduleLoading || moduleBusy) return;
+  moduleLoading = true;
+  moduleError = '';
+  paintModules();
+  try {
+    const reply = await api.modulesStatus();
+    if (!reply.ok) throw new Error(reply.error);
+    acceptModuleStatus(reply.data);
+  } catch (error) {
+    moduleChecked = false;
+    cliProxyModule = null;
+    moduleError = (error as Error).message || 'Could not check module status.';
+  } finally {
+    moduleLoading = false;
+    paintModules();
+  }
+}
+
+async function actOnModule(action: MarksModuleAction): Promise<void> {
+  if (moduleBusy || moduleLoading || !moduleChecked) return;
+  moduleBusy = true;
+  moduleError = '';
+  paintModules();
+  try {
+    const url = action === 'open' ? $<HTMLInputElement>('moduleCliConsoleUrl').value.trim() : undefined;
+    const reply = await api.moduleAction('cli-proxy-api', action, url);
+    if (!reply.ok) throw new Error(reply.error);
+    acceptModuleStatus(reply.data);
+    if (action === 'install') {
+      // The backend opens the official instructions; installation itself is user-managed.
+      toast(t('Installation guide opened. Follow the instructions to install CLIProxyAPI.'));
+    }
+  } catch (error) {
+    moduleError = (error as Error).message || 'Could not complete the module action.';
+  } finally {
+    moduleBusy = false;
+    paintModules();
+  }
+}
+
+$('moduleRefresh').addEventListener('click', () => void refreshModules());
+for (const [button, action] of [
+  ['moduleCliInstall', 'install'], ['moduleCliStart', 'start'],
+  ['moduleCliStop', 'stop'], ['moduleCliRestart', 'restart'],
+  ['moduleCliEnable', 'enable'], ['moduleCliDisable', 'disable'],
+  ['moduleCliOpen', 'open']
+] as const) {
+  $(button).addEventListener('click', () => void actOnModule(action));
+}
+$('moduleCliConsoleUrl').addEventListener('input', () => {
+  consoleUrlEdited = true;
+  paintModules();
+});
+onLanguageChange(paintModules);
 initSetupGuide();
 const browserSetup = initBrowserSetup({
   choose: chooseChatBrowser,
@@ -234,6 +343,7 @@ function showTab(name: string): void {
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   if (name === 'settings') void paintRecordingStorageUsage();
+  if (name === 'modules') void refreshModules();
   $('tabs').hidden = !settings;
   $('settingsFindBox').hidden = !settings;
   // A page opened any way leaves the search; the page list comes back.

@@ -14,13 +14,15 @@
  */
 
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const spawned: Array<{ file: string; args: string[] }> = [];
-vi.mock('node:child_process', () => ({
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:child_process')>(),
   spawn: (file: string, args: string[]) => {
     spawned.push({ file, args });
     return { on: () => undefined, unref: () => undefined };
@@ -60,6 +62,7 @@ const {
 const NEXT = '99.0.0';
 const WINDOWS_ASSET = `Chat-Marks-Setup-${process.arch}.exe`;
 const APPIMAGE_ASSET = `Chat-Marks-Linux-${process.arch}.AppImage`;
+const DEB_ASSET = `Chat-Marks-Linux-${process.arch}.deb`;
 
 const sha256 = (body: string): string => createHash('sha256').update(body).digest('hex');
 
@@ -81,7 +84,7 @@ function github(options: {
 } = {}) {
   const version = options.version ?? NEXT;
   const body = options.body ?? 'installer bytes';
-  const sums = options.checksums ?? `${sha256(body)}  ${WINDOWS_ASSET}\n${sha256(body)}  ${APPIMAGE_ASSET}\n`;
+  const sums = options.checksums ?? `${sha256(body)}  ${WINDOWS_ASSET}\n${sha256(body)}  ${APPIMAGE_ASSET}\n${sha256(body)}  ${DEB_ASSET}\n`;
   const asked: string[] = [];
   const fetch = vi.fn(async (input: string | URL) => {
     const url = String(input);
@@ -141,7 +144,7 @@ describe('the file Get update opens for an installation that cannot update itsel
   it('names the exact macOS disk image or Linux package for this machine', () => {
     expect(manualDownloadName('darwin', 'arm64', undefined, true)).toBe('Chat-Marks-macOS-arm64.dmg');
     expect(manualDownloadName('darwin', 'x64', undefined, true)).toBe('Chat-Marks-macOS-x64.dmg');
-    expect(manualDownloadName('linux', 'x64', undefined, true)).toBe('Chat-Marks-Linux-x64.deb');
+    expect(manualDownloadName('linux', 'x64', undefined, true)).toBeNull();
     // Installations that update themselves, a dev tree and an unpublished architecture get none.
     expect(manualDownloadName('linux', 'x64', '/opt/cos.AppImage', true)).toBeNull();
     expect(manualDownloadName('win32', 'x64', undefined, true)).toBeNull();
@@ -167,23 +170,13 @@ describe('which installations update themselves', () => {
     });
   });
 
-  /**
-   * A `.deb` is the system package manager's file and replacing it needs root. Asking for a
-   * password during quit is not something this app does, so that installation is told a new
-   * version exists and given the release page - it is not quietly left waiting for a download
-   * that was never going to happen. Same for macOS, where the artifacts ship unsigned.
-   */
-  it('leaves a Linux package install and macOS to be updated by hand', async () => {
-    expect(stagedArtifact('linux', 'x64', undefined)).toBeNull();
+  it('stages a digest-verified Linux package, but requires an explicit install click', async () => {
+    expect(stagedArtifact('linux', 'x64', undefined)).toMatchObject({ kind: 'deb', name: 'Chat-Marks-Linux-x64.deb' });
     expect(stagedArtifact('darwin', 'arm64')).toBeNull();
-    expect(stagedArtifact('win32', 'ia32')).toBeNull();
-
     const { asked } = github();
     await asPlatform('linux', undefined, () => checkForUpdates());
-
-    // Told, and told exactly: a version that is newer, and no pretence of a download.
-    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'idle', error: null });
-    expect(asked).toEqual(['latest']);
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt', DEB_ASSET]);
     await applyStagedUpdate();
     expect(spawned).toEqual([]);
   });
@@ -490,6 +483,24 @@ describe('installing on request', () => {
     ]);
   });
 
+  it('installs a verified Debian package only after clicking Install, via the system PolicyKit agent', async () => {
+    github();
+    await asPlatform('linux', undefined, async () => {
+      await checkForUpdates();
+      expect(updateStatus().stage).toBe('ready');
+      expect(markInstallOnQuit()).toBe(true);
+      await applyStagedUpdate();
+    });
+    expect(spawned).toHaveLength(1);
+    const [installer] = spawned;
+    expect(installer!.file).toBe('/bin/sh');
+    expect(installer!.args[0]).toBe('-c');
+    expect(installer!.args[1]).toContain('/usr/bin/pkexec /usr/bin/apt-get install');
+    expect(installer!.args[1]).toContain('--only-upgrade');
+    expect(spawnSync('/bin/sh', ['-n'], { input: installer!.args[1], encoding: 'utf8' }).status).toBe(0);
+    expect(installer!.args[3]).toBe(path.join(userData, 'updates', NEXT, DEB_ASSET));
+  });
+
   it('relaunches an AppImage install itself, having no installer to ask', async () => {
     const live = path.join(userData, 'Chat-On-Steroids.AppImage');
     writeFileSync(live, 'the old build');
@@ -595,6 +606,9 @@ describe('a check or download that goes wrong on a bad connection', () => {
     expect(online.asked).toEqual([]);
     await vi.advanceTimersByTimeAsync(2_000);
     await vi.waitFor(() => expect(updateStatus().checkedAt).not.toBeNull());
+    // checkedAt records GitHub's answer before staging finishes: drain the prior pass so
+    // its still-running download cannot reach into the next test's fresh platform mock.
+    await checkForUpdates();
     expect(updateStatus().error).toBeNull();
     const calls = online.asked.length;
     await vi.advanceTimersByTimeAsync(60 * 60_000);

@@ -1224,6 +1224,93 @@ it('asks whether an update came out when Settings open, not on every page inside
   expect(refreshUpdate).toHaveBeenCalledTimes(2);
 });
 
+it('manages CLIProxyAPI through the modules API and opens its existing console at the chosen local address', async () => {
+  const installed = {
+    id: 'cli-proxy-api', name: 'CLIProxyAPI', description: 'API proxy and management console',
+    installed: true, enabled: false, running: false, supported: true,
+    managementUrl: 'http://127.0.0.1:8317/management.html', detail: 'Managed by systemd.'
+  };
+  let current = { ...installed };
+  const modulesStatus = vi.fn(async () => ({ ok: true as const, data: [{ ...current }] }));
+  const moduleAction = vi.fn(async (_id: string, action: string, _url?: string) => {
+    if (action === 'start') current = { ...current, running: true };
+    if (action === 'stop') current = { ...current, running: false };
+    if (action === 'enable') current = { ...current, enabled: true };
+    if (action === 'disable') current = { ...current, enabled: false };
+    return { ok: true as const, data: [{ ...current }] };
+  });
+  const { window: w } = await mountChat({}, [], { modulesStatus, moduleAction });
+  const doc = w.document;
+  const button = (id: string) => doc.getElementById(id) as HTMLButtonElement;
+  (doc.getElementById('workspaceSettings') as HTMLButtonElement).click();
+  (doc.querySelector('#tabs [data-tab="modules"]') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(doc.getElementById('moduleCliStatus')!.textContent).toBe('Stopped'));
+  expect(modulesStatus).toHaveBeenCalledTimes(1);
+  expect(doc.querySelector('[data-panel="modules"]')!.classList.contains('is-active')).toBe(true);
+  expect([button('moduleCliStart').disabled, button('moduleCliStop').disabled, button('moduleCliInstall').disabled])
+    .toEqual([false, true, true]);
+  expect(doc.getElementById('moduleCliDetail')!.textContent).toContain('Manual start');
+  const address = doc.getElementById('moduleCliConsoleUrl') as HTMLInputElement;
+  expect(address.value).toBe(installed.managementUrl);
+
+  button('moduleCliStart').click();
+  await vi.waitFor(() => expect(doc.getElementById('moduleCliStatus')!.textContent).toBe('Running'));
+  expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'start', undefined);
+  expect([button('moduleCliStart').disabled, button('moduleCliStop').disabled]).toEqual([true, false]);
+  expect(button('moduleCliRestart').disabled).toBe(false);
+  button('moduleCliRestart').click();
+  await vi.waitFor(() => expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'restart', undefined));
+  button('moduleCliEnable').click();
+  await vi.waitFor(() => expect(doc.getElementById('moduleCliDetail')!.textContent).toContain('Enabled at startup'));
+  expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'enable', undefined);
+  expect([button('moduleCliEnable').disabled, button('moduleCliDisable').disabled]).toEqual([true, false]);
+  button('moduleCliDisable').click();
+  await vi.waitFor(() => expect(doc.getElementById('moduleCliDetail')!.textContent).toContain('Manual start'));
+  expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'disable', undefined);
+
+  address.value = 'http://localhost:8318/management.html';
+  address.dispatchEvent(new w.Event('input', { bubbles: true }));
+  button('moduleCliOpen').click();
+  await vi.waitFor(() => expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'open', address.value));
+  button('moduleRefresh').click();
+  await vi.waitFor(() => expect(modulesStatus).toHaveBeenCalledTimes(2));
+  expect(address.value).toBe('http://localhost:8318/management.html');
+
+  button('moduleCliStop').click();
+  await vi.waitFor(() => expect(doc.getElementById('moduleCliStatus')!.textContent).toBe('Stopped'));
+  expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'stop', undefined);
+});
+
+it('offers guided CLIProxyAPI installation and keeps action failures visible without claiming success', async () => {
+  const missing = {
+    id: 'cli-proxy-api', name: 'CLIProxyAPI', description: 'API proxy',
+    installed: false, enabled: false, running: false, supported: true,
+    managementUrl: 'http://127.0.0.1:8317/management.html', detail: 'Not installed as a systemd service.'
+  };
+  let error = false;
+  const modulesStatus = vi.fn(async () => ({ ok: true as const, data: [{ ...missing }] }));
+  const moduleAction = vi.fn(async () => error
+    ? { ok: false as const, error: 'Could not open installation guide.' }
+    : { ok: true as const, data: [{ ...missing }] });
+  const { window: w } = await mountChat({}, [], { modulesStatus, moduleAction });
+  const doc = w.document;
+  const button = (id: string) => doc.getElementById(id) as HTMLButtonElement;
+  (doc.querySelector('#tabs [data-tab="modules"]') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(doc.getElementById('moduleCliStatus')!.textContent).toBe('Not installed'));
+  expect([button('moduleCliInstall').disabled, button('moduleCliStart').disabled, button('moduleCliStop').disabled,
+    button('moduleCliRestart').disabled, button('moduleCliEnable').disabled, button('moduleCliDisable').disabled])
+    .toEqual([false, true, true, true, true, true]);
+  button('moduleCliInstall').click();
+  await vi.waitFor(() => expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'install', undefined));
+  expect(doc.getElementById('moduleCliStatus')!.textContent).toBe('Not installed');
+  expect(doc.querySelector('.toast')?.textContent).toContain('Installation guide opened');
+  error = true;
+  button('moduleCliInstall').click();
+  await vi.waitFor(() => expect(doc.getElementById('moduleCliError')!.textContent).toContain('Could not open installation guide.'));
+  expect(doc.getElementById('moduleCliError')!.hidden).toBe(false);
+  expect(doc.getElementById('moduleCliStatus')!.textContent).toBe('Not installed');
+});
+
 it('searches every settings page from the sidebar and opens the setting it finds', async () => {
   const { window: w } = await mountChat();
   const doc = w.document;

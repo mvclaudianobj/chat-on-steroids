@@ -9,6 +9,12 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.37.2] — Marks Modules hub and Linux .deb updates
+
+- **Settings → Modules:** a central catalog starts with CLIProxyAPI. Detects the existing Linux systemd service, shows its running/boot status, offers Start/Stop/Restart/Enable/Disable via explicit PolicyKit authorization, and opens the original CLIProxyAPI management panel in a separate sandboxed Chat Marks window. Its configuration, credentials and binary are not modified by the integration. A guided official installation link is offered when the service is absent; one-click native CLIProxyAPI installation is not implemented yet.
+- **Linux .deb updater:** stages the release's verified package alongside Windows/AppImage updates. The **Install now** button initiates an apt upgrade through the desktop's PolicyKit prompt. An ordinary quit does not perform a privileged upgrade. Real end-to-end elevation, installation and relaunch remain to be validated on a test install before publishing.
+- **Marks community updates:** a read-only official stable-release checker and documented manual upstream merge workflow retain the base `X.Y.Z` community version while Marks-only revisions use `.N`. Upstream integration is not performed automatically.
+
 ## [2.1.37.1] — Marks joins the pets
 
 Marks, the silver robotic wolf with cyan eyes and crystal, now ships in the Pets list. Enable him alongside your other companions. This revision also supports four-part release numbers in the updater; earlier installations must install this revision manually.

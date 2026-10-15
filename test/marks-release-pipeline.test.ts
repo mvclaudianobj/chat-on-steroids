@@ -16,7 +16,8 @@ it('checks only the Marks GitHub release and downloads its platform-specific bin
   expect(update).not.toContain("const REPO = 'totec448-spec/chat-on-steroids'");
   expect(stagedArtifact('win32', 'x64', undefined, true)?.name).toBe('Chat-Marks-Setup-x64.exe');
   expect(stagedArtifact('linux', 'x64', '/opt/marks.AppImage', true)?.name).toBe('Chat-Marks-Linux-x64.AppImage');
-  expect(manualDownloadName('linux', 'arm64', undefined, true)).toBe('Chat-Marks-Linux-arm64.deb');
+  expect(stagedArtifact('linux', 'arm64', undefined, true)?.name).toBe('Chat-Marks-Linux-arm64.deb');
+  expect(manualDownloadName('linux', 'arm64', undefined, true)).toBeNull();
   expect(manualDownloadUrl('2.1.37', 'Chat-Marks-Linux-arm64.deb')).toBe(
     'https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37/Chat-Marks-Linux-arm64.deb'
   );
@@ -52,4 +53,12 @@ it('builds and publishes Marks tag releases, with checksums and post-release ver
   expect(assembly).toContain('sha256sum');
   expect(verification.jobs.verify.if).toBe("github.repository == 'mvclaudianobj/chat-on-steroids'");
   expect(read('.github/workflows/release.yml')).toContain('release/Chat-Marks-Extension.zip');
+  const preflight = publish.jobs.preflight.steps.find((step: any) => step.name === 'Verify tag and release metadata agree');
+  expect(preflight.run).toContain('node scripts/verify-release-version.mjs');
+  const native = workflow.jobs.package.steps.find((step: any) => step.name === 'Verify tag matches package version');
+  expect(native.run).toContain('node scripts/verify-release-version.mjs');
+  const linuxScript = workflow.jobs.package.steps.find((step: any) => step.name === 'Install generated DEB on target distro').run;
+  expect(linuxScript).toContain('node scripts/release-version.mjs --deb');
+  const extensionScript = workflow.jobs.assemble.steps.find((step: any) => step.name === 'Package standalone extension').run;
+  expect(extensionScript).toContain('node scripts/verify-release-version.mjs --package-only');
 });

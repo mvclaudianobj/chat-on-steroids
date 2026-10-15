@@ -42,40 +42,8 @@ jobs:
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Verify tag matches package version
-        run: |
-          set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
-          if [ "$TAG" != "v$version" ]; then
-            echo "Tag $TAG does not match package version $version" >&2
-            exit 1
-          fi
-
-      - name: Verify release metadata agrees
-        run: |
-          node <<'NODE'
-          const fs = require('node:fs');
-          const pkg = require('./package.json');
-          const lock = require('./package-lock.json');
-          const manifest = require('./extension/manifest.json');
-          const versionSource = fs.readFileSync('src/main/version.ts', 'utf8');
-          const appVersion = versionSource.match(/APP_VERSION = '([^']+)'/)?.[1];
-          const versions = [pkg.version, lock.version, lock.packages?.['']?.version, manifest.version, appVersion];
-          if (versions.some((version) => version !== pkg.version)) {
-            throw new Error(`Release versions disagree: ${versions.join(', ')}`);
-          }
-
-          const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
-          const changelogVersion = changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m)?.[1];
-          if (changelogVersion !== pkg.version) {
-            throw new Error(`Top changelog entry ${changelogVersion ?? '<missing>'} does not match ${pkg.version}`);
-          }
-
-          const notesPath = `docs/release-notes/v${pkg.version}.md`;
-          if (!fs.existsSync(notesPath)) throw new Error(`Missing ${notesPath}`);
-          const notes = fs.readFileSync(notesPath, 'utf8');
-          if (!/^## .+$/m.test(notes)) throw new Error(`${notesPath} has no release title`);
-          NODE
+      - name: Verify tag and release metadata agree
+        run: node scripts/verify-release-version.mjs
 
       # A release remains reproducible because the tunnel bytes are version/checksum pinned.
       # Refuse a stale pin instead of silently changing the payload named by this tag.
