@@ -16,18 +16,25 @@ let dir = '';
 afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ''; });
 
 /** A complete, correct release folder; `change` edits it before the checksums are written. */
-function release(change: { manifest?: object; stamp?: string | null; omit?: string; afterSums?: () => void } = {}) {
+function release(change: { manifest?: object; stamp?: string | null; omit?: string; afterSums?: () => void; firefoxVersion?: string; updatesVersion?: string; updatesHash?: string; updatesLink?: string; version?: string } = {}) {
   dir = mkdtempSync(path.join(tmpdir(), 'release-'));
   const extensionEntries: Record<string, Uint8Array> = {
-    'manifest.json': strToU8(JSON.stringify(change.manifest ?? { version: '2.1.21' }))
+    'manifest.json': strToU8(JSON.stringify(change.manifest ?? { version: change.version ?? '2.1.21' }))
   };
   if (change.stamp !== null) {
     extensionEntries['build-stamp.txt'] = strToU8(change.stamp ?? '7b3057119b13\n');
   }
   for (const name of EXTENSION_FILES) extensionEntries[name] = strToU8(name);
+  const xpi = zipSync({ 'manifest.json': strToU8(JSON.stringify({ version: change.firefoxVersion ?? change.version ?? '2.1.21',
+    browser_specific_settings: { gecko: { id: 'companion@chatonsteroids.app' } } })), 'META-INF/cose.sig': strToU8('signature') });
+  const updates = Buffer.from(JSON.stringify({ addons: { 'companion@chatonsteroids.app': { updates: [{
+    version: change.updatesVersion ?? change.version ?? '2.1.21',
+    update_link: change.updatesLink ?? `https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v${change.updatesVersion ?? change.version ?? '2.1.21'}/Chat-Marks-Firefox.xpi`,
+    update_hash: `sha256:${change.updatesHash ?? createHash('sha256').update(xpi).digest('hex')}` }] } } }));
   const sums: string[] = [];
   for (const name of RELEASE_FILES) {
-    const bytes = name === 'Chat-Marks-Extension.zip' ? zipSync(extensionEntries) : Buffer.from(`contents of ${name}`);
+    const bytes = name === 'Chat-Marks-Extension.zip' ? zipSync(extensionEntries)
+      : name === 'Chat-Marks-Firefox.xpi' ? xpi : name === 'firefox-updates.json' ? updates : Buffer.from(`contents of ${name}`);
     sums.push(`${createHash('sha256').update(bytes).digest('hex')}  ${name}`);
     if (name !== change.omit) writeFileSync(path.join(dir, name), bytes);
   }
@@ -61,4 +68,24 @@ it('reports missing files and a Chromium extension whose version or build stamp 
 it('reports a release without checksums instead of trusting its files', async () => {
   const folder = release({ afterSums: () => rmSync(path.join(dir, 'SHA256SUMS.txt')) });
   expect(await verifyReleaseAssets({ dir: folder, tag: 'v2.1.21' })).toEqual(['SHA256SUMS.txt is missing from the release.']);
+});
+
+// Firefox installs the signed add-on and follows firefox-updates.json from the latest release.
+it('checks the signed Firefox add-on and the update manifest that points at it', async () => {
+  expect(RELEASE_FILES).toEqual(expect.arrayContaining(['Chat-Marks-Firefox.xpi', 'firefox-updates.json']));
+  expect(await verifyReleaseAssets({ dir: release({ firefoxVersion: '2.1.20' }), tag: 'v2.1.21' }))
+    .toEqual(['The add-on in Chat-Marks-Firefox.xpi is version 2.1.20, not 2.1.21.']);
+  rmSync(dir, { recursive: true, force: true });
+  expect(await verifyReleaseAssets({ dir: release({ updatesVersion: '2.1.20' }), tag: 'v2.1.21' }))
+    .toEqual(['firefox-updates.json does not offer Chat-Marks-Firefox.xpi of v2.1.21 with its checksum.']);
+  rmSync(dir, { recursive: true, force: true });
+  expect(await verifyReleaseAssets({ dir: release({ updatesHash: 'b'.repeat(64) }), tag: 'v2.1.21' }))
+    .toEqual(['firefox-updates.json does not offer Chat-Marks-Firefox.xpi of v2.1.21 with its checksum.']);
+  rmSync(dir, { recursive: true, force: true });
+  expect(await verifyReleaseAssets({ dir: release({ updatesLink: 'https://github.com/totec448-spec/chat-on-steroids/releases/download/v2.1.21/Chat-Marks-Firefox.xpi' }), tag: 'v2.1.21' }))
+    .toEqual(['firefox-updates.json does not offer Chat-Marks-Firefox.xpi of v2.1.21 with its checksum.']);
+});
+
+it('accepts a Marks fourth-revision release and exact Firefox update URL', async () => {
+  expect(await verifyReleaseAssets({ dir: release({ version: '2.1.38.1' }), tag: 'v2.1.38.1' })).toEqual([]);
 });

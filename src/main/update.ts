@@ -35,10 +35,10 @@
  * wrong.
  */
 
-import { spawn } from 'node:child_process';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, rename, rm } from 'node:fs/promises';
-import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream, existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -83,15 +83,36 @@ export const STALE_CHECK_MS = 10 * 60_000;
  * that is what `latest` with a stage of `idle` means, and the notice turns it into a download
  * link — they are simply not updated for.
  *
- * `APPIMAGE` is the environment variable the AppImage runtime sets to the path of the file that
- * is running. Its absence is exactly what distinguishes a portable AppImage from a `.deb`
- * install, so it is both the eligibility test and the target of the swap.
+ * `APPIMAGE` identifies an AppImage runtime. Without it, require dpkg to prove the exact
+ * running executable belongs to the installed chat-on-steroids package: a generic Linux
+ * tarball, Snap or development build must never ask root to install a Debian update.
  *
  * An unpackaged run — `electron-vite dev`, or a maintainer's working tree — is not an
  * installation. Its version is whatever the source says, so it reads as out of date the moment a
  * release ships, and staging for it would let quitting a dev session silently run an installer
  * over the real per-user install. It is told what is published and replaces nothing.
  */
+/** A package database entry alone is insufficient: dpkg must own this exact executable. */
+export function installedDebBinary(executable: string = process.execPath): boolean {
+  if (process.platform !== 'linux') return false;
+  try {
+    const status = execFileSync('/usr/bin/dpkg-query', ['--show', '--showformat=${Status}', 'chat-on-steroids'],
+      { encoding: 'utf8', timeout: 5000 });
+    if (status.trim() !== 'install ok installed') return false;
+    const owner = execFileSync('/usr/bin/dpkg-query', ['--search', '--', realpathSync(executable)],
+      { encoding: 'utf8', timeout: 5000 });
+    return owner.split('\n').some(line => /^chat-on-steroids(?::[a-z0-9-]+)?:\s/.test(line));
+  } catch {
+    return false;
+  }
+}
+
+let debPackageProof = installedDebBinary;
+/** Test seam: simulate dpkg-confirmed and unrelated packaged Linux installations. */
+export function setDebPackageProofForTests(probe: () => boolean): void {
+  debPackageProof = probe;
+}
+
 export function stagedArtifact(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
@@ -103,7 +124,8 @@ export function stagedArtifact(
   if (platform === 'win32') return { name: `Chat-Marks-Setup-${arch}.exe`, kind: 'installer', target: '' };
   if (platform === 'linux') {
     if (appImage) return { name: `Chat-Marks-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
-    return { name: `Chat-Marks-Linux-${arch}.deb`, kind: 'deb', target: '' };
+    if (debPackageProof()) return { name: `Chat-Marks-Linux-${arch}.deb`, kind: 'deb', target: '' };
+    return null;
   }
   return null;
 }
@@ -173,7 +195,28 @@ function set(next: Partial<UpdateStatus>): void {
  * The timer is unreferenced: it is a background courtesy, never a reason for the process to stay
  * alive, and the shutdown sequence does not have to know it exists.
  */
+/** The note the handover leaves: which version was given to the installer. */
+const handoffNote = () => path.join(app.getPath('userData'), 'updates', 'handoff.json');
+
+/**
+ * Says once when the last handover did not install (#1490). An installer that stops silently
+ * (a folder that needs an administrator, a blocked unsigned file) left the next start on the old
+ * version with nothing said. A start that is still older than the noted version reports it; a
+ * start that is that version, or newer, just forgets the note.
+ */
+export async function restoreUpdateHandoff(): Promise<void> {
+  let note: { version?: unknown } | null = null;
+  try { note = JSON.parse(await readFile(handoffNote(), 'utf8')); } catch { return; }
+  await rm(handoffNote(), { force: true }).catch(() => undefined);
+  const version = typeof note?.version === 'string' && /^\d+\.\d+\.\d+(?:\.\d+)?$/.test(note.version) ? note.version : null;
+  if (version && isNewer(version, APP_VERSION)) {
+    set({ notInstalled: version });
+    logWarn(`update: ${version} was handed to its installer, but this is still ${APP_VERSION}; it did not install`);
+  }
+}
+
 export function startUpdateChecks(): void {
+  void restoreUpdateHandoff();
   if (recheck) clearInterval(recheck);
   recheck = setInterval(() => void checkForUpdates(), RECHECK_MS);
   recheck.unref();
@@ -212,7 +255,10 @@ export function checkForUpdates(): Promise<void> {
   if (pass) return pass;
   const run = runPass()
     .catch((err: Error) => {
-      set({ stage: 'failed', error: err.message });
+      // This pass owns GitHub requests; keep its transport failure readable without
+      // relabeling HTTP, filesystem or other diagnostics. The log keeps the original.
+      const reason = err instanceof TypeError && err.message === 'fetch failed' ? 'GitHub could not be reached' : err.message;
+      set({ stage: 'failed', error: reason });
       logWarn(`update check failed: ${err.message}`);
     })
     .finally(() => {
@@ -441,9 +487,10 @@ async function download(version: string, name: string, expected: string): Promis
  *
  * The caller quits. This module still never does.
  */
-export function markInstallOnQuit(): boolean {
-  if (!staged) return false;
+export function markInstallOnQuit(expectedVersion?: string): boolean {
+  if (!staged || (expectedVersion !== undefined && staged.version !== expectedVersion)) return false;
   runAfterInstall = true;
+  if (status.notInstalled) set({ notInstalled: null });
   return true;
 }
 
@@ -454,15 +501,153 @@ export function markInstallOnQuit(): boolean {
  * sequence — after the bridge, the child processes and every durable flush — so the version the
  * user next starts is the new one and nothing was interrupted to achieve that.
  *
- * Windows gets the NSIS installer in silent mode. It is a per-user install (electron-builder.yml
- * sets `perMachine: false`), so `/S` needs no elevation and shows no prompt. Detached, because
- * this process is about to stop existing.
+ * Windows gets the NSIS installer in silent mode. It is a per-user install by default
+ * (electron-builder.yml sets `perMachine: false`), so `/S` needs no elevation and shows no prompt.
+ * But the installer lets people choose the folder, and in one an administrator created (a custom
+ * D:\\ path, C:\\Program Files) the silent installer stops on its access step for lack of rights,
+ * with nothing said (#1490). There it is started through Windows' own permission prompt instead.
+ * Detached, because this process is about to stop existing.
  *
  * An AppImage has no installer: the file that is running is the whole application, so the update
  * is a rename over it. A rename rather than a copy, because the running AppImage is mounted from
  * that path — writing through it would corrupt the process that is still shutting down, while a
  * rename gives the new build a new inode and leaves the old one alive until it exits.
  */
+/**
+ * Whether the installer's own first step will succeed without an administrator.
+ *
+ * Every install and update re-grants the Chromium sandbox read access on the app folder
+ * (scripts/windows-installer-acl.nsh). Changing a folder's permissions needs more than writing
+ * files into it: in a folder an administrator created, a user may write but not re-grant, and the
+ * silent installer then stops on that step with nothing said (#1490). So the app repeats exactly
+ * that idempotent grant first. An icacls exit code means the installer would fail the same way;
+ * an icacls that cannot start at all says nothing, and the update keeps the silent path.
+ */
+const probeInstallFolder = (folder: string): Promise<boolean> => new Promise(resolve => {
+  const icacls = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'icacls.exe');
+  execFile(icacls, [folder, '/grant', '*S-1-15-2-2:(OI)(CI)(RX)', '/Q'], { windowsHide: true, timeout: 15_000 },
+    err => resolve(!err || typeof (err as NodeJS.ErrnoException & { code?: unknown }).code !== 'number'));
+});
+let installFolderAccess = probeInstallFolder;
+
+/** Test seam: answers whether the installer could re-grant the app folder's access by itself. */
+export function setInstallFolderAccessForTests(probe: (folder: string) => Promise<boolean>): void {
+  installFolderAccess = probe;
+}
+
+/**
+ * Starts the installer through Windows' permission prompt and resolves once Windows has an answer:
+ * true when the elevated installer started. Detached, PowerShell gets no console and runs nothing;
+ * attached, it ends with this app, so the handoff waits here. The installer Windows starts is not
+ * this app's child and outlives it (#1492, measured on the Windows VM 2026-10-15). Unanswered after
+ * ten minutes, the prompt is withdrawn so a hidden, quitting app cannot hold the next start.
+ */
+/** How long the quitting app waits for an answer to Windows' permission prompt. */
+export const ELEVATION_ANSWER_MS = 10 * 60_000;
+
+function startElevated(file: string, args: string[]): Promise<boolean> {
+  const quoted = (value: string) => `'${value.replaceAll("'", "''")}'`;
+  return new Promise(resolve => {
+    const prompt = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-Command',
+      `Start-Process -FilePath ${quoted(file)} -ArgumentList ${args.map(quoted).join(',')} -Verb RunAs`],
+      { stdio: 'ignore', windowsHide: true });
+    const timer = setTimeout(() => { prompt.kill(); resolve(false); }, ELEVATION_ANSWER_MS);
+    const settle = (started: boolean) => { clearTimeout(timer); resolve(started); };
+    prompt.on('error', (err: Error) => { logWarn(`update: the permission prompt did not start: ${err.message}`); settle(false); });
+    prompt.on('exit', (code: number | null) => settle(code === 0));
+  });
+}
+
+/** The version this quit installs for a person waiting to get the app back, or null. */
+export function installingVersion(): string | null {
+  return staged && runAfterInstall ? staged.version : null;
+}
+
+/** What the handoff is doing now, for the app's "Installing" window (update-progress.ts). */
+export type UpdateHandoffStep = 'permission' | 'installer';
+let handoffStep: (step: UpdateHandoffStep) => void = () => undefined;
+export function onUpdateHandoffStep(listener: (step: UpdateHandoffStep) => void): void {
+  handoffStep = listener;
+}
+
+/**
+ * A shown installer takes over from the app's Installing window: the app waits for it, so nothing
+ * on screen goes blank in between (measured on Windows: seconds to minutes until it showed).
+ */
+let installerTakeover: () => Promise<void> = async () => undefined;
+export function onInstallerTakeover(wait: () => Promise<void>): void {
+  installerTakeover = wait;
+}
+
+/**
+ * pkexec runs this fixed program as root, never a shell command assembled from downloaded data.
+ * It snapshots the untrusted download into a private root-owned directory, verifies the release
+ * digest over the snapshot, then passes ONLY that private file to apt. The original user-writable
+ * pathname can change at any time without changing the bytes apt reads. TemporaryDirectory
+ * removes the snapshot after apt exits; root never executes or relaunches this app.
+ */
+export const DEBIAN_ROOT_INSTALL_SCRIPT = [
+  'import hashlib, hmac, os, stat, subprocess, sys, tempfile',
+  'source, expected = sys.argv[1:]',
+  'if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):',
+  '    raise ValueError("Invalid expected Debian release digest")',
+  'with tempfile.TemporaryDirectory(prefix="chat-marks-deb-", dir="/var/tmp") as private:',
+  '    target = os.path.join(private, "Chat-Marks-update.deb")',
+  '    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)',
+  '    with os.fdopen(fd, "rb") as untrusted:',
+  '        size = os.fstat(untrusted.fileno())',
+  '        if not stat.S_ISREG(size.st_mode) or size.st_size > 1024 * 1024 * 1024:',
+  '            raise ValueError("Debian source must be a regular file no larger than 1 GiB")',
+  '        digest = hashlib.sha256()',
+  '        copied = 0',
+  '        with open(target, "xb") as sealed:',
+  '            while True:',
+  '                block = untrusted.read(1024 * 1024)',
+  '                if not block:',
+  '                    break',
+  '                copied += len(block)',
+  '                if copied > 1024 * 1024 * 1024:',
+  '                    raise ValueError("Debian source grew beyond 1 GiB")',
+  '                digest.update(block)',
+  '                sealed.write(block)',
+  '            sealed.flush()',
+  '            os.fsync(sealed.fileno())',
+  '    os.chmod(target, 0o600)',
+  '    if not hmac.compare_digest(digest.hexdigest(), expected):',
+  '        raise ValueError("Debian package changed since verification; apt was not invoked")',
+  '    subprocess.run(["/usr/bin/apt-get", "install", "--assume-yes", "--only-upgrade", target], check=True)'
+].join('\n');
+
+/** Runs detached after Electron exits; the only authority for apt is the verified root copy. */
+export const DEBIAN_HANDOFF_SH = [
+  'deb=$1; digest=$2; executable=$3; logfile=$4; old_pid=$5; helper=$6',
+  // Ensure the app really has quit before dpkg can replace its executable or a relaunch races it.
+  'attempts=0',
+  'while kill -0 "$old_pid" 2>/dev/null; do',
+  '  attempts=$((attempts + 1))',
+  '  if [ "$attempts" -ge 120 ]; then',
+  '    printf "Chat Marks .deb update aborted: previous process did not quit.\\n" >> "$logfile"',
+  '    exit 1',
+  '  fi',
+  '  sleep 0.25',
+  'done',
+  'if /usr/bin/pkexec /usr/bin/python3 -c "$helper" "$deb" "$digest" >> "$logfile" 2>&1; then',
+  '  printf "Chat Marks .deb update completed; restarting.\\n" >> "$logfile"',
+  'else',
+  '  result=$?',
+  '  if [ "$result" -eq 126 ]; then',
+  '    printf "Chat Marks .deb update cancelled in the PolicyKit prompt.\\n" >> "$logfile"',
+  '  else',
+  '    printf "Chat Marks .deb update failed (pkexec exit %s); restarting existing app.\\n" "$result" >> "$logfile"',
+  '  fi',
+  'fi',
+  'if [ ! -x "$executable" ]; then',
+  '  printf "Chat Marks could not restart: executable is missing or not executable.\\n" >> "$logfile"',
+  '  exit 1',
+  'fi',
+  '"$executable" >/dev/null 2>&1 &'
+].join('\n');
+
 export async function applyStagedUpdate(): Promise<void> {
   const ready = staged;
   const relaunch = runAfterInstall;
@@ -476,28 +661,40 @@ export async function applyStagedUpdate(): Promise<void> {
       // already owns, so it keeps the location and the shortcuts instead of asking about them.
       // `--force-run` is added only when the user pressed Install and is waiting for the app to
       // come back; an update applied on the way out of an ordinary quit must not reopen it.
-      const args = relaunch ? ['/S', '--updated', '--force-run'] : ['/S', '--updated'];
-      const installer = spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: true });
-      // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
-      // child process would take the quit down with it.
-      installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));
-      installer.unref();
+      // That person also sees the installer's progress window, which closes and starts the app
+      // by itself (scripts/windows-installer-acl.nsh); before 2.1.38 the app just vanished for
+      // about 100 s. An ordinary quit stays silent.
+      const args = relaunch ? ['--updated', '--force-run'] : ['/S', '--updated'];
+      const elevate = process.platform === 'win32' && !(await installFolderAccess(path.dirname(process.execPath)));
+      await writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() })).catch(() => undefined);
+      if (elevate) {
+        logInfo(`update: the install folder needs an administrator; Windows asks for permission to install ${ready.version}`);
+        handoffStep('permission');
+        if (!(await startElevated(ready.file, args))) {
+          logWarn(`update: Windows did not give permission, so ${ready.version} was not installed; the next start says so`);
+          return;
+        }
+        handoffStep('installer');
+        if (relaunch) await installerTakeover();
+      } else {
+        handoffStep('installer');
+        // windowsHide would hide the installer's own window as well (measured on Windows).
+        const installer = spawn(ready.file, args, { detached: true, stdio: 'ignore', windowsHide: !relaunch });
+        // An installer that cannot start reports it asynchronously, and an unhandled 'error' on a
+        // child process would take the quit down with it.
+        installer.on('error', (err: Error) => logWarn(`the ${ready.version} installer did not start: ${err.message}`));
+        installer.unref();
+        if (relaunch) await installerTakeover();
+      }
     } else if (ready.kind === 'deb') {
       if (!relaunch) return; // Package updates require an explicit click and OS authorization.
-      // Never run apt as root inside the app. The system's PolicyKit agent owns any password
-      // dialogue and only grants /usr/bin/apt-get for this explicit, verified local package.
-      // POSIX shell positional parameters keep every file path literal, including spaces.
-      // A separate process must outlive Electron while dpkg replaces the installed package.
-      const script = [
-        'deb=$1; executable=$2; logfile=$3',
-        'if /usr/bin/pkexec /usr/bin/apt-get install --assume-yes --only-upgrade "$deb" >> "$logfile" 2>&1; then',
-        '  :',
-        'else',
-        '  printf "Chat Marks .deb update was cancelled or failed.\\n" >> "$logfile"',
-        'fi',
-        '"$executable" >/dev/null 2>&1 &'
-      ].join('\n');
-      const installer = spawn('/bin/sh', ['-c', script, 'chat-marks-update', ready.file, app.getPath('exe'), path.join(app.getPath('userData'), 'update-install.log')], {
+      // The unprivileged detached shell waits for Electron to exit, records pkexec cancellation
+      // or failure and restarts as the user. Root snapshots and hashes the .deb before apt sees it.
+      // All paths/digests/code are separate argv data, never interpolated shell source.
+      await writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() }));
+      handoffStep('permission');
+      const installer = spawn('/bin/sh', ['-c', DEBIAN_HANDOFF_SH, 'chat-marks-update', ready.file, ready.digest,
+        app.getPath('exe'), path.join(app.getPath('userData'), 'update-install.log'), String(process.pid), DEBIAN_ROOT_INSTALL_SCRIPT], {
         detached: true, stdio: 'ignore'
       });
       installer.on('error', (err: Error) => logWarn(`the ${ready.version} package installer did not start: ${err.message}`));
@@ -507,6 +704,7 @@ export async function applyStagedUpdate(): Promise<void> {
       await copyFile(ready.file, next);
       await chmod(next, 0o755);
       await rename(next, ready.target);
+      handoffStep('installer');
       // No installer to hand the "start it again" to, so this process arranges its own successor.
       // Electron spawns it as this one exits, which is the app.exit() that ends the shutdown.
       if (relaunch) app.relaunch({ execPath: ready.target });
@@ -524,6 +722,7 @@ export async function applyStagedUpdate(): Promise<void> {
 
 /** Test seam: forgets the pass, the staged file and everything reported about them. */
 export function resetUpdateForTests(): void {
+  installFolderAccess = probeInstallFolder;
   status = CLEAR;
   staged = null;
   pass = null;

@@ -53,9 +53,12 @@ for (const name of scripts) {
   // locale; otherwise they fail on any machine whose system language the app also speaks.
   const how = special[name] ?? { command: electron, args: ['--lang=en-US'] };
   const started = Date.now();
-  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, LANG: 'en_US.UTF-8', LANGUAGE: 'en_US:en' }; delete env.ELECTRON_RUN_AS_NODE;
   const run = () => new Promise(resolve => {
-    const child = spawn(how.command, [path.join('scripts', name), ...how.args], { cwd: root, env, windowsHide: true });
+    // Electron/Chromium switches belong before the app entrypoint; after it, --lang is
+    // handed to the verification script instead and the UI inherits the host locale.
+    const argv = special[name] ? [path.join('scripts', name), ...how.args] : [...how.args, path.join('scripts', name)];
+    const child = spawn(how.command, argv, { cwd: root, env, windowsHide: true });
     let output = '';
     // A check that throws inside its async body and then quits in a finally block exits 0: its
     // failure only shows as an unhandled rejection. Two checks passed that way for weeks (#1144).

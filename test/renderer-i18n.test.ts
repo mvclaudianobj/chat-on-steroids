@@ -310,7 +310,25 @@ describe('app interface localization', () => {
     }
   });
 
-  it('translates Modules extensions, runtime status and all three 2.1.37.2 highlights in every catalog', () => {
+  it('keeps every locale key unique, matches keysets and preserves community legal attribution', () => {
+    const legal = 'Catalog illustrations are original Chat On Steroids artwork, Copyright © 2026 Chat On Steroids contributors, licensed under the app’s MIT license. They illustrate independent integrations and are not official product logos or endorsements. Product names belong to their respective owners.';
+    const names = Object.keys(catalogs);
+    const first = Object.keys(catalogs[names[0]!]!).sort();
+    for (const [locale, messages] of Object.entries(catalogs)) {
+      const source = readFileSync(`src/renderer/locales/${locale}.json`, 'utf8');
+      const serializedKeys = [...source.matchAll(/^\s*("(?:\\.|[^"\\])*")\s*:/gm)]
+        .map(match => JSON.parse(match[1]!) as string);
+      expect(serializedKeys.length, locale).toBe(new Set(serializedKeys).size);
+      expect(serializedKeys.length, locale).toBe(Object.keys(messages).length);
+      expect(Object.keys(messages).sort(), locale).toEqual(first);
+      expect(messages[legal], locale).toContain('Chat On Steroids');
+      expect(messages['Updating Chat Marks'], locale).not.toContain('Chat On Steroids');
+      expect(messages['Starting the installer. Chat Marks opens again by itself.'], locale).not.toContain('Chat On Steroids');
+      expect(messages['Add the Chat Marks add-on to Firefox'], locale).not.toContain('Chat On Steroids');
+    }
+  });
+
+  it('translates Modules extensions, runtime status and Marks module and update highlights in every catalog', () => {
     const required = [
       'Marks extensions',
       'Future Marks plugins, skills and modules will appear here for installation and activation.',

@@ -1,11 +1,11 @@
 appId: com.chatonsteroids.app
 productName: Chat Marks
 copyright: MIT licensed
-# Product revision 2.1.37.2; npm uses the equivalent SemVer build metadata +2.
-buildVersion: 2.1.37.2
-buildNumber: '2'
+# Product revision 2.1.38.1; npm uses the equivalent SemVer build metadata +1.
+buildVersion: 2.1.38.1
+buildNumber: '1'
 extraMetadata:
-  version: 2.1.37.2
+  version: 2.1.38.1
 
 directories:
   output: release
@@ -96,6 +96,9 @@ win:
 
 nsis:
   include: scripts/windows-installer-acl.nsh
+  # Drawn by scripts/make-icon.mjs from the app icon: the installer an update shows is CoS's own.
+  installerHeader: build/installerHeader.bmp
+  installerSidebar: build/installerSidebar.bmp
   oneClick: false
   perMachine: false
   buildUniversalInstaller: false

@@ -16,7 +16,8 @@ it('checks only the Marks GitHub release and downloads its platform-specific bin
   expect(update).not.toContain("const REPO = 'totec448-spec/chat-on-steroids'");
   expect(stagedArtifact('win32', 'x64', undefined, true)?.name).toBe('Chat-Marks-Setup-x64.exe');
   expect(stagedArtifact('linux', 'x64', '/opt/marks.AppImage', true)?.name).toBe('Chat-Marks-Linux-x64.AppImage');
-  expect(stagedArtifact('linux', 'arm64', undefined, true)?.name).toBe('Chat-Marks-Linux-arm64.deb');
+  // The generic packaged-Linux case is deliberately not classified as a Debian install.
+  expect(stagedArtifact('linux', 'arm64', undefined, true)?.name).not.toBe('Chat-Marks-Linux-arm64.deb');
   expect(manualDownloadName('linux', 'arm64', undefined, true)).toBeNull();
   expect(manualDownloadUrl('2.1.37', 'Chat-Marks-Linux-arm64.deb')).toBe(
     'https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37/Chat-Marks-Linux-arm64.deb'
@@ -28,8 +29,10 @@ it('checks only the Marks GitHub release and downloads its platform-specific bin
 
 it('makes the published file list exactly match the release planner and the packager', () => {
   const planned = releaseTargets('all').files as string[];
-  expect(planned).toEqual(RELEASE_FILES);
+  // The six-platform reusable build produces 12 core assets; the tag-only Mozilla
+  // signing job adds the signed Firefox add-on and update manifest at publish time.
   expect(planned).toHaveLength(12);
+  expect(RELEASE_FILES).toEqual([...planned, 'Chat-Marks-Firefox.xpi', 'firefox-updates.json']);
   expect(planned.every(name => name.startsWith('Chat-Marks-'))).toBe(true);
   const builder = loadYaml(read('electron-builder.yml')) as any;
   expect(builder.nsis.artifactName).toBe('Chat-Marks-Setup-${arch}.${ext}');

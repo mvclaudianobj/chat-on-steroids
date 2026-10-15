@@ -9,6 +9,8 @@ export interface MarksModuleState {
   enabled: boolean;
   running: boolean;
   supported: boolean;
+  /** Console identity validated and the local service running. */
+  consoleAvailable?: boolean;
   managementUrl: string;
   detail: string;
 }

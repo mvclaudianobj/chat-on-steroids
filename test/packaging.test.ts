@@ -164,6 +164,26 @@ describe('cross-platform packaging targets', () => {
     expect(installer).not.toMatch(/(?:no-sandbox|disable-gpu-sandbox)/i);
   });
 
+  it('shows an update the person asked for as a branded progress window that restarts the app by itself', () => {
+    // 2026-10-15: after Restart and install the app vanished for about 100 s with nothing on
+    // screen. The installer now runs visibly for that case; it skips every question an update
+    // already answered and closes itself at the end instead of waiting for Finish.
+    const config = yamlFile('electron-builder.yml');
+    const installer = readFileSync(path.join(root, 'scripts/windows-installer-acl.nsh'), 'utf8');
+    // An update keeps the installation's own mode; the "install for whom" page never shows.
+    expect(installer).toMatch(/!macro customInstallMode[\s\S]*\$\{if\} \$\{isUpdated\}[\s\S]*\$isForceMachineInstall "1"[\s\S]*\$isForceCurrentInstall "1"[\s\S]*!macroend/);
+    // The finish page of an update starts the app when asked to and ends the installer.
+    expect(installer).toMatch(/!macro customFinishPage[\s\S]*MUI_PAGE_CUSTOMFUNCTION_PRE[\s\S]*!insertmacro MUI_PAGE_FINISH[\s\S]*!macroend/);
+    expect(installer).toMatch(/\$\{if\} \$\{isUpdated\}\s+\$\{if\} \$\{isForceRun\}[\s\S]*ExecShellAsUser[\s\S]*\$\{endif\}\s+Abort/);
+    // A fresh install keeps its Run checkbox.
+    expect(installer).toContain('!define MUI_FINISHPAGE_RUN_FUNCTION');
+    expect(config.nsis.installerHeader).toBe('build/installerHeader.bmp');
+    expect(config.nsis.installerSidebar).toBe('build/installerSidebar.bmp');
+    const icons = readFileSync(path.join(root, 'scripts/make-icon.mjs'), 'utf8');
+    expect(icons).toContain("'installerHeader.bmp'");
+    expect(icons).toContain("'installerSidebar.bmp'");
+  });
+
   it('builds canaries only for the targets most installs use, and releases for all of them', () => {
     expect(releaseTargets('common').include.map((target: { name: string }) => target.name)).toEqual(['Windows x64', 'macOS arm64', 'Linux x64']);
     expect(releaseTargets('common').files).toEqual(['Chat-Marks-Setup-x64.exe', 'Chat-Marks-macOS-arm64.dmg',
@@ -538,7 +558,7 @@ describe('cross-platform packaging targets', () => {
     expect(releaseWorkflow).toContain("grep -Fq '[info] app started' \"$log\"");
     expect(releaseWorkflow).toContain("grep -Fq '[info] window loaded' \"$log\"");
     expect(releaseWorkflow).toContain("test \"$(dpkg-deb --field \"$deb\" Package)\" = chat-on-steroids");
-    expect(releaseWorkflow).toContain("test \"$(dpkg-deb --field \"$deb\" Version)\" = \"$(node -p \"require('./package.json').version\")\"");
+    expect(releaseWorkflow).toContain('test "$(dpkg-deb --field "$deb" Version)" = "$(node scripts/release-version.mjs --deb)"');
     expect(releaseWorkflow).toContain('expected_deb_arch=amd64');
     expect(releaseWorkflow).toContain('test -L /usr/bin/chat-marks');
     expect(releaseWorkflow).toContain('installed_executable="$(readlink -f /usr/bin/chat-marks)"');
@@ -785,13 +805,71 @@ Load command 11
     expect(publish).toBeGreaterThan(candidate);
     expect(workflow.slice(preflight, candidate)).toContain('node scripts/check-release-absent.mjs');
     expect(workflow.slice(preflight, candidate)).toContain('npm run verify:tunnel-current');
-    expect(workflow.slice(preflight, candidate)).toContain('Verify release metadata agrees');
-    expect(workflow.slice(preflight, candidate)).toContain("APP_VERSION = '([^']+)'");
-    expect(workflow.slice(preflight, candidate)).toContain('has no release title');
+    expect(workflow.slice(preflight, candidate)).toContain('Verify tag and release metadata agree');
+    expect(workflow.slice(preflight, candidate)).toContain('node scripts/verify-release-version.mjs');
+    expect(readFileSync(path.join(root, 'scripts/verify-release-version.mjs'), 'utf8')).toContain("APP_VERSION = '([^']+)'");
+    expect(readFileSync(path.join(root, 'scripts/verify-release-version.mjs'), 'utf8')).toContain('Missing reviewed release notes');
     expect(workflow.slice(candidate, publish)).toContain('needs: preflight');
     expect(workflow.slice(publish)).toContain('node scripts/check-release-absent.mjs');
     expect(workflow.slice(publish).match(/npm run verify:tunnel-current/g)).toHaveLength(1);
     expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
+  });
+
+  // The Firefox add-on is signed by Mozilla only when a tag is published: AMO signs each version
+  // once, so canary builds cannot. Signing needs the AMO_JWT_* repository secrets.
+  it('signs the Firefox add-on once per published tag and attaches it with its update manifest', () => {
+    const publish = yamlFile('.github/workflows/publish.yml');
+    const sign = publish.jobs['firefox-addon'];
+    expect(sign?.needs).toBe('preflight');
+    const steps = sign.steps as Array<Record<string, any>>;
+    const script = steps.map(step => String(step.run ?? '')).join('\n');
+    const env = JSON.stringify(steps.map(step => step.env ?? {}));
+    expect(script).toContain('node scripts/write-extension-stamp.mjs');
+    expect(script).toContain('node scripts/stage-firefox-extension.mjs');
+    // Self-hosted: the add-on names its own update_url, which the default (AMO-listed) lint refuses.
+    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ lint --source-dir \S+ --self-hosted/);
+    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ sign --channel=unlisted/);
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs');
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs --verify-signed');
+    expect(env).toContain('${{ secrets.AMO_JWT_ISSUER }}');
+    expect(env).toContain('${{ secrets.AMO_JWT_SECRET }}');
+    // Secrets reach web-ext through the environment, never the command line.
+    expect(script).not.toMatch(/--api-(key|secret)/);
+    expect(publish.jobs.publish.needs).toEqual(['candidate', 'firefox-addon']);
+    const publishSteps = publish.jobs.publish.steps as Array<Record<string, any>>;
+    for (const job of [publish.jobs.preflight, publish.jobs.publish]) {
+      const node = (job.steps as Array<Record<string, any>>).find(step => String(step.uses ?? '').startsWith('actions/setup-node@'));
+      expect(node?.with?.['node-version']).toBe(22);
+    }
+    const names = publishSteps.map(step => step.name);
+    expect(names.indexOf('Add the signed Firefox add-on')).toBeGreaterThan(names.indexOf('Re-verify the checksums'));
+    expect(names.indexOf('Add the signed Firefox add-on')).toBeLessThan(names.indexOf('Publish the release'));
+    expect(String(publishSteps.find(step => step.name === 'Add the signed Firefox add-on')?.run))
+      .toContain('node ../scripts/firefox-update-manifest.mjs --verify-signed');
+    const release = String(publishSteps.find(step => step.name === 'Publish the release')?.run);
+    expect(release).toContain('publish/Chat-Marks-Firefox.xpi');
+    expect(release).toContain('publish/firefox-updates.json');
+  });
+
+  // Proves the AMO credentials and Mozilla's validation before a release depends on them, without
+  // spending a release version: it uses the same X.Y.Z and a separate fourth revision >= 1001.
+  it('can check Firefox signing on demand without using up a release version', () => {
+    const check = yamlFile('.github/workflows/firefox-sign-check.yml');
+    expect(Object.keys(check.on)).toEqual(['workflow_dispatch']);
+    const steps = check.jobs.sign.steps as Array<Record<string, any>>;
+    const script = steps.map(step => String(step.run ?? '')).join('\n');
+    expect(script).toContain('node scripts/stage-firefox-extension.mjs');
+    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ lint --source-dir \S+ --self-hosted/);
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs --test-version "$GITHUB_RUN_NUMBER"');
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs --test-id');
+    expect(script).toContain('m.browser_specific_settings.gecko.id=process.argv[2]');
+    expect(script).toContain('delete m.browser_specific_settings.gecko.update_url');
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs --verify-signed');
+    expect(script).toContain('--test-addon');
+    expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ sign --channel=unlisted/);
+    expect(script).not.toMatch(/--api-(key|secret)/);
+    expect(JSON.stringify(steps.map(step => step.env ?? {}))).toContain('${{ secrets.AMO_JWT_SECRET }}');
+    expect(check.permissions).toEqual({ contents: 'read' });
   });
 
   it('keeps version metadata aligned and validates artifacts independently of editorial release notes', () => {

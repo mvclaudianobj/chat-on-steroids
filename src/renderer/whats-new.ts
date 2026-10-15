@@ -14,11 +14,24 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
-  '2.1.37.2': {
-    lead: () => t('Manage optional local services from one place. Each module keeps its own settings and console.'),
+  '2.1.38.1': {
+    lead: () => t('Firefox, fresh turns for long work, and approvals you answer in the app.'),
     highlights: [
+      { icon: 'i-globe', title: () => t('Firefox'), text: () => t('Choose Firefox as the ChatGPT browser. Its add-on is signed by Mozilla and updates itself.') },
+      { icon: 'i-retry', title: () => t('Fresh turns for long work'), text: () => t('Long work continues in a fresh turn every 30 minutes, so it no longer breaks after about 40 minutes.') },
+      { icon: 'i-check-circle', title: () => t('Approvals in the app'), text: () => t('Answer ChatGPT\'s tool approval cards with Deny or Allow once, right in the app.') },
       { icon: 'i-plug', title: () => t('Modules'), text: () => t('Local API proxy and its existing management console.') },
-      { icon: 'i-retry', title: () => t('Linux .deb upgrade'), text: () => t('A button to request a .deb update with PolicyKit authorization is being prepared; installation is not yet validated.') }
+      { icon: 'i-arrow-down', title: () => t('Linux .deb upgrade'), text: () => t('A button to request a .deb update with PolicyKit authorization is being prepared; installation is not yet validated.') }
+    ]
+  },
+  '2.1.38': {
+    lead: () => t('Firefox, fresh turns for long work, and approvals you answer in the app.'),
+    highlights: [
+      { icon: 'i-globe', title: () => t('Firefox'), text: () => t('Choose Firefox as the ChatGPT browser. Its add-on is signed by Mozilla and updates itself.') },
+      { icon: 'i-retry', title: () => t('Fresh turns for long work'), text: () => t('Long work continues in a fresh turn every 30 minutes, so it no longer breaks after about 40 minutes.') },
+      { icon: 'i-check-circle', title: () => t('Approvals in the app'), text: () => t('Answer ChatGPT\'s tool approval cards with Deny or Allow once, right in the app.') },
+      { icon: 'i-arrow-down', title: () => t('Update all'), text: () => t('Activity shows the app, the extension and each plugin with its status, and one button updates them.') },
+      { icon: 'i-chart', title: () => t('Codex and Claude Code in Usage'), text: () => t('See Codex\'s limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.') }
     ]
   },
   '2.1.37.1': {

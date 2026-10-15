@@ -96,6 +96,7 @@
 .ph.ph-sidebar-simple::before { content: '\ec24'; }
 .ph.ph-sliders-horizontal::before { content: '\e434'; }
 .ph.ph-sparkle::before { content: '\e6a2'; }
+.ph.ph-squares-four::before { content: '\e464'; }
 .ph.ph-star::before { content: '\e46a'; }
 .ph.ph-sign-in::before { content: '\e428'; }
 .ph.ph-sign-out::before { content: '\e42a'; }

@@ -2,9 +2,9 @@ import { onLanguageChange, t } from './i18n.js';
 import type { MainText } from '../shared/main-texts.js';
 
 /**
- * The tray menu, Session finish notice, tunnel-loss notices and CoS browser tray notice in the
- * selected language. The main process has no catalogs, so this document translates the exact
- * source texts and hands them over.
+ * The tray menu, Session finish notice, tunnel-loss notices and Chat Marks browser tray notice in the
+ * selected language, including native update restart confirmation. The main process has no
+ * catalogs, so this document translates the exact source texts and hands them over.
  * Literal `t()` calls keep the catalog audit able to see each key.
  */
 export function mainTexts(): Record<MainText, string> {
@@ -15,6 +15,11 @@ export function mainTexts(): Record<MainText, string> {
     'Connect': t('Connect'),
     'Disconnect': t('Disconnect'),
     'Quit': t('Quit'),
+    'Updating Chat Marks': t('Updating Chat Marks'),
+    'Saving your work…': t('Saving your work…'),
+    'Waiting for your permission in Windows…': t('Waiting for your permission in Windows…'),
+    'Starting the installer. Chat Marks opens again by itself.':
+      t('Starting the installer. Chat Marks opens again by itself.'),
     'Connected': t('Connected'),
     'No internet': t('No internet'),
     'Not connected': t('Not connected'),
