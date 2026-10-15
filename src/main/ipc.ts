@@ -14,6 +14,7 @@ import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
 import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeSkill } from './skills.js';
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
+import { importAgencyAgent, listAgencyAgents, updateAgencyAgent } from './marks-agency-agents.js';
 import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
@@ -904,6 +905,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('skills:list', () => listSkills());
   handle('skills:managed', () => listManagedSkills());
   handle('skills:recommended', () => listRecommendedSkills());
+  handle('skills:agencyCatalog', () => listAgencyAgents());
+  handle('skills:agencyImport', async payload => {
+    const { path, commit } = z.object({
+      path: z.string().min(5).max(190), commit: z.string().regex(/^[a-f0-9]{40}$/)
+    }).strict().parse(payload);
+    return importAgencyAgent(path, commit);
+  });
+  handle('skills:agencyUpdate', async payload => {
+    const { path, commit, sha } = z.object({
+      path: z.string().min(5).max(190), commit: z.string().regex(/^[a-f0-9]{40}$/),
+      sha: z.string().regex(/^[a-f0-9]{40}$/)
+    }).strict().parse(payload);
+    return updateAgencyAgent(path, commit, sha, directory => shell.trashItem(directory));
+  });
   handle('skills:installRecommended', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
     return installRecommendedSkill(id);
@@ -928,14 +943,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:githubLink', async payload => {
     const { id, url } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), url: z.string().trim().min(1).max(2048) }).strict().parse(payload);
+    if (id.startsWith('agency-')) throw new Error('Marks Agency skills use the verified Agency catalog, not the generic GitHub linker.');
     return linkGitHubSkill(id, url);
   });
   handle('skills:githubCheck', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    if (id.startsWith('agency-')) throw new Error('Check Marks Agency skills through their official catalog.');
     return checkGitHubSkillUpdates(id);
   });
   handle('skills:githubUpdate', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    if (id.startsWith('agency-')) throw new Error('Update Marks Agency skills through their verified individual update flow.');
     return updateGitHubSkill(id, directory => shell.trashItem(directory));
   });
   handle('skills:remove', async payload => {

@@ -361,13 +361,23 @@ async function latestVersion(): Promise<string> {
     });
   } catch (err) {
     // GitHub's API refuses unauthenticated calls once an address has spent its hourly quota, and
-    // some networks get 403 outright (#1253). The public release page has no such quota.
-    if (!/ answered (403|429)$/.test((err as Error).message)) throw err;
+    // some networks get 403 outright (#1253). GitHub also returns 404 for repositories with no
+    // API-visible stable release. The public release page is a separate stable-release selector.
+    if (!/ answered (403|404|429)$/.test((err as Error).message)) throw err;
     return latestVersionFromPage();
   }
-  const body = (await response.json()) as { tag_name?: unknown };
-  const version = releaseVersion(body.tag_name);
-  if (!version) throw new Error('the latest release has no usable version tag');
+  const body = (await response.json().catch(() => null)) as
+    { tag_name?: unknown; draft?: unknown; prerelease?: unknown } | null;
+  // A draft, prerelease, missing/non-SemVer tag or malformed API payload must never be selected
+  // as an installable update. Resolve GitHub's public latest *stable* page instead, without
+  // enumerating drafts or guessing from tag names in a release list.
+  const version = body?.draft === false && body.prerelease === false &&
+    typeof body.tag_name === 'string' && body.tag_name.startsWith('v')
+    ? releaseVersion(body.tag_name) : null;
+  if (!version) {
+    logWarn('update: GitHub latest release API returned no usable published stable Marks tag; checking the public latest release page');
+    return latestVersionFromPage();
+  }
   return version;
 }
 
@@ -386,7 +396,9 @@ async function latestVersionFromPage(): Promise<string> {
   if (!response.ok) throw new Error(`the release page answered ${response.status}`);
   let landed: URL | null = null;
   try { landed = new URL(response.url); } catch { landed = null; }
-  const tag = landed?.origin === 'https://github.com' ? /\/releases\/tag\/([^/]+)$/.exec(landed.pathname)?.[1] : undefined;
+  // Redirects to another repository (or a similarly named page) cannot authorize a Marks update.
+  const tag = landed?.origin === 'https://github.com'
+    ? new RegExp(`^/${REPO}/releases/tag/([^/]+)$`).exec(landed.pathname)?.[1] : undefined;
   const version = releaseVersion(tag ? decodeURIComponent(tag) : undefined);
   if (!version) throw new Error('the release page named no usable version tag');
   return version;
@@ -401,13 +413,48 @@ async function latestVersionFromPage(): Promise<string> {
  * something to download, and a file whose digest is not in here is not something to run.
  */
 async function releaseDigests(version: string): Promise<Map<string, string>> {
-  const response = await get(assetUrl(version, 'SHA256SUMS.txt'), CHECK_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await get(assetUrl(version, 'SHA256SUMS.txt'), CHECK_TIMEOUT_MS);
+  } catch (error) {
+    // Some Marks releases were published with binaries but no SHA256SUMS.txt. GitHub computes
+    // SHA-256 on upload and exposes it via the same repository's release-assets API. Accept that
+    // digest only when the manifest is truly absent; never bypass an existing, contradictory or
+    // malformed checksum manifest. Every downloaded artifact is still hashed locally.
+    if ((error as Error).message !== 'SHA256SUMS.txt answered 404') throw error;
+    return releaseDigestsFromGitHub(version);
+  }
   const digests = new Map<string, string>();
   for (const line of (await response.text()).split('\n')) {
     // `sha256sum` writes "<64 hex>  <name>", with a binary/text marker on the second space.
     const match = /^([0-9a-f]{64})\s+[*\s]?(\S+)\s*$/.exec(line.trim());
     if (match) digests.set(match[2]!, match[1]!);
   }
+  return digests;
+}
+
+/** Validated GitHub asset digests are an equivalent SHA-256 authority for releases without sums. */
+async function releaseDigestsFromGitHub(version: string): Promise<Map<string, string>> {
+  const response = await get(`https://api.github.com/repos/${REPO}/releases/tags/v${encodeURIComponent(version)}`,
+    CHECK_TIMEOUT_MS, { accept: 'application/vnd.github+json' });
+  const release = (await response.json()) as {
+    tag_name?: unknown; draft?: unknown; prerelease?: unknown;
+    assets?: Array<{ name?: unknown; digest?: unknown; state?: unknown; size?: unknown; browser_download_url?: unknown }>;
+  };
+  if (release?.tag_name !== `v${version}` || release.draft !== false || release.prerelease !== false ||
+      !Array.isArray(release.assets)) throw new Error(`release ${version} has no verified published asset metadata`);
+  const digests = new Map<string, string>();
+  for (const asset of release.assets) {
+    if (typeof asset.name !== 'string' || typeof asset.digest !== 'string' ||
+        asset.state !== 'uploaded' || typeof asset.size !== 'number' || asset.size <= 0 ||
+        asset.browser_download_url !== assetUrl(version, asset.name)) continue;
+    const digest = /^sha256:([0-9a-f]{64})$/.exec(asset.digest)?.[1];
+    if (!digest) continue;
+    if (digests.has(asset.name)) throw new Error(`release ${version} has duplicate published asset names`);
+    digests.set(asset.name, digest);
+  }
+  if (!digests.size) throw new Error(`release ${version} has no usable GitHub SHA-256 asset digests`);
+  logInfo(`update: release ${version} has no SHA256SUMS.txt; using verified GitHub asset SHA-256 metadata`);
   return digests;
 }
 

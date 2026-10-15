@@ -46,6 +46,9 @@
           <i class="ico ph ph-robot" aria-hidden="true"></i>Agents &amp; automation
         </button>
         <button data-tab="modules" type="button"><i class="ico ph ph-squares-four" aria-hidden="true"></i>Modules</button>
+        <button id="moduleCliNav" class="modules-subnav" data-module-page="module-cli-proxy" type="button" aria-label="CLIProxyAPI" translate="no" hidden>
+          <i class="ico ph ph-plug" aria-hidden="true"></i><span translate="no">CLIProxyAPI</span>
+        </button>
         <button data-tab="appearance" type="button"><i class="ico ph ph-sun" aria-hidden="true"></i>Appearance</button>
         <button data-tab="activity" type="button">
           <i class="ico ph ph-activity" aria-hidden="true"></i>Activity
@@ -214,12 +217,20 @@
                 <button class="btn" id="moduleRefresh" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh status</button>
               </header>
               <div class="settings-surface modules-service">
+                <label class="setting modules-toggle" for="moduleCliActive">
+                  <span class="setting-text">
+                    <b translate="no">CLIProxyAPI</b>
+                    <em>Local API proxy and its existing management console.</em>
+                  </span>
+                  <span class="modules-toggle-control"><span>Enable</span><input id="moduleCliActive" type="checkbox" aria-controls="moduleCliNav" /></span>
+                </label>
                 <div class="modules-service-overview">
                   <span id="moduleCliStatus" class="modules-status" role="status" aria-live="polite" data-state="unknown">Status unavailable</span>
                   <p id="moduleCliDetail" class="modules-detail">Checking the local service…</p>
                 </div>
                 <div class="modules-service-actions">
                   <button class="btn" id="moduleCliInstall" type="button" disabled>Installation guide</button>
+                  <button class="btn" id="moduleCliUpdate" type="button" disabled>Update from GitHub</button>
                   <button class="btn" id="moduleCliStart" type="button" disabled>Start</button>
                   <button class="btn" id="moduleCliStop" type="button" disabled>Stop</button>
                   <button class="btn" id="moduleCliRestart" type="button" disabled>Restart</button>
@@ -231,7 +242,7 @@
                     <b>Management console</b>
                     <em>Open the existing CLIProxyAPI console. Change its local address if you use another port.</em>
                     <label class="modules-console-address" for="moduleCliConsoleUrl">Console URL</label>
-                    <input id="moduleCliConsoleUrl" type="url" autocomplete="off" spellcheck="false" placeholder="http://localhost:PORT/management.html" aria-label="Console URL" />
+                    <input id="moduleCliConsoleUrl" type="url" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:18081/management.html" aria-label="Console URL" translate="no" />
                   </span>
                   <button class="btn" id="moduleCliOpen" type="button" disabled><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open console</button>
                 </div>
@@ -240,6 +251,33 @@
             </section>
             <section class="appearance-section" aria-labelledby="marksExtensionsTitle">
               <header class="settings-section-head"><div><h2 id="marksExtensionsTitle">Marks extensions</h2><p>Future Marks plugins, skills and modules will appear here for installation and activation.</p></div></header>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel appearance-panel modules-panel scroll" data-panel="module-cli-proxy" aria-labelledby="moduleCliPageTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head">
+              <h1 id="moduleCliPageTitle" translate="no">CLIProxyAPI</h1>
+              <p>Open the existing CLIProxyAPI console. Change its local address if you use another port.</p>
+            </header>
+            <section class="appearance-section" aria-labelledby="moduleCliConsoleTitle">
+              <header class="settings-section-head"><div><h2 id="moduleCliConsoleTitle">Management console</h2><p>Local API proxy and its existing management console.</p></div></header>
+              <div class="settings-surface modules-service">
+                <div class="modules-service-overview">
+                  <span id="moduleCliConsoleStatus" class="modules-status" role="status" aria-live="polite" data-state="unknown">Status unavailable</span>
+                  <p id="moduleCliConsoleDetail" class="modules-detail">Checking the local service…</p>
+                </div>
+                <div class="modules-console setting">
+                  <span class="setting-text">
+                    <b>Management console</b>
+                    <em>Open the existing CLIProxyAPI console. Change its local address if you use another port.</em>
+                    <span id="moduleCliVerifiedAddress" class="modules-console-address" translate="no"></span>
+                  </span>
+                  <button class="btn" id="moduleCliReopen" type="button" disabled><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open console</button>
+                </div>
+                <p id="moduleCliConsoleError" class="modules-error" role="alert" hidden></p>
+              </div>
             </section>
           </div>
         </section>

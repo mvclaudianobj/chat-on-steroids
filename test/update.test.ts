@@ -112,6 +112,11 @@ function github(options: {
   fail?: 'release' | 'sums' | 'asset';
   /** The API's status, for a check refused by GitHub's per-address quota (#1253). */
   apiStatus?: number;
+  /** Simulate a partial/draft/non-stable API answer, independently from the public latest page. */
+  releasePayload?: unknown;
+  apiBody?: string;
+  /** GitHub asset metadata (separate from releases/latest) when SHA256SUMS.txt is absent. */
+  releaseAssets?: unknown;
   /** Where the public `/releases/latest` page lands, or a failing status. */
   page?: string | number;
 } = {}) {
@@ -126,7 +131,12 @@ function github(options: {
     if (url.includes('api.github.com')) {
       if (options.apiStatus) return new Response('{"message":"API rate limit exceeded"}', { status: options.apiStatus });
       if (options.fail === 'release') return new Response('nope', { status: 503 });
-      return new Response(JSON.stringify({ tag_name: `v${version}` }), { status: 200 });
+      if (url.includes('/releases/tags/')) return new Response(JSON.stringify({
+        tag_name: `v${version}`, draft: false, prerelease: false, assets: options.releaseAssets ?? []
+      }), { status: 200 });
+      return new Response(options.apiBody ?? JSON.stringify(options.releasePayload === undefined
+        ? { tag_name: `v${version}`, draft: false, prerelease: false }
+        : options.releasePayload), { status: 200 });
     }
     if (url === 'https://github.com/mvclaudianobj/chat-on-steroids/releases/latest') {
       if (typeof options.page === 'number') return new Response(null, { status: options.page });
@@ -144,6 +154,12 @@ function github(options: {
   vi.stubGlobal('fetch', fetch);
   return { asked, fetch, body };
 }
+
+const publishedAsset = (version: string, name: string, digest: string, extra: Record<string, unknown> = {}) => ({
+  name, state: 'uploaded', size: 100, digest: `sha256:${digest}`,
+  browser_download_url: `https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v${version}/${name}`,
+  ...extra
+});
 
 /** Runs the pass as an installation of the given shape, and puts the real one back. */
 async function asPlatform(platform: string, appImage: string | undefined, run: () => Promise<void>): Promise<void> {
@@ -506,6 +522,57 @@ describe('staging the new version', () => {
     expect(spawned).toEqual([]);
   });
 
+  it('refuses to stage or install a Debian release when the published SHA256SUMS.txt is absent', async () => {
+    const { asked } = github({ fail: 'sums' });
+    await asPlatform('linux', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt', `v${NEXT}`]);
+    // The release exists, but without a checksum it cannot become an installable offer.
+    expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed' });
+    expect(updateStatus().error).toContain('no usable GitHub SHA-256 asset digests');
+    expect(markInstallOnQuit()).toBe(false);
+    await applyStagedUpdate();
+    expect(spawned).toEqual([]);
+  });
+
+  it('stages a Debian update using the official GitHub asset digest when SHA256SUMS.txt is absent', async () => {
+    const { asked } = github({ fail: 'sums', releaseAssets: [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'))] });
+    await asPlatform('linux', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt', `v${NEXT}`, DEB_ASSET]);
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+    expect(readFileSync(path.join(userData, 'updates', NEXT, DEB_ASSET), 'utf8')).toBe('installer bytes');
+    // Preparing an update never prompts PolicyKit, installs packages, or modifies the OS.
+    expect(spawned).toEqual([]);
+  });
+
+  it('never overrides a present but contradictory SHA256SUMS.txt with API asset metadata', async () => {
+    const { asked } = github({ checksums: `${sha256('different package')}  ${DEB_ASSET}\n`,
+      releaseAssets: [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'))] });
+    await asPlatform('linux', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt', DEB_ASSET]);
+    expect(updateStatus().stage).toBe('failed');
+    expect(updateStatus().error).toContain('not the published file');
+    expect(spawned).toEqual([]);
+  });
+
+  it('rejects untrusted, mismatched or missing GitHub asset metadata without installing anything', async () => {
+    const badAssets = [
+      [publishedAsset(NEXT, DEB_ASSET, '0'.repeat(64))],
+      [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'), { state: 'starter' })],
+      [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'), {
+        browser_download_url: `https://github.com/totec448-spec/chat-on-steroids/releases/download/v${NEXT}/${DEB_ASSET}`
+      })],
+      [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'), { digest: 'sha256:INVALID' })]
+    ];
+    for (const releaseAssets of badAssets) {
+      resetUpdateForTests();
+      github({ fail: 'sums', releaseAssets });
+      await asPlatform('linux', undefined, () => checkForUpdates());
+      expect(updateStatus().stage).toBe('failed');
+      expect(markInstallOnQuit()).toBe(false);
+      expect(spawned).toEqual([]);
+    }
+  });
+
   /**
    * An AppImage has no installer: the running file is the whole application, so the update is
    * that file being replaced. By rename, never by writing through it - the old build is still
@@ -555,7 +622,7 @@ describe('one pass at a time, and one more next time the app opens', () => {
   });
 
   it('finds the release from the public page when GitHub\'s API refuses the check (#1253)', async () => {
-    for (const status of [403, 429]) {
+    for (const status of [403, 404, 429]) {
       resetUpdateForTests();
       github({ apiStatus: status });
       await asPlatform('win32', undefined, () => checkForUpdates());
@@ -563,14 +630,44 @@ describe('one pass at a time, and one more next time the app opens', () => {
     }
   });
 
+  it.each([
+    { tag_name: null, draft: false, prerelease: false },
+    { tag_name: 'not-semver', draft: false, prerelease: false },
+    { tag_name: 'v99.0.0-rc.1', draft: false, prerelease: true },
+    { tag_name: 'v99.0.0', draft: true, prerelease: false },
+    { tag_name: 'v99.0.0', draft: false, prerelease: true },
+    { tag_name: 'v99.0.0', draft: undefined, prerelease: undefined },
+    { tag_name: '99.0.0', draft: false, prerelease: false }
+  ])('recovers the public stable Marks release when the API latest metadata is unusable: %j', async releasePayload => {
+    const { asked } = github({ releasePayload });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'latest', 'SHA256SUMS.txt', WINDOWS_ASSET]);
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+    expect(warnings).toContain('update: GitHub latest release API returned no usable published stable Marks tag; checking the public latest release page');
+  });
+
+  it('recovers a malformed API JSON body through the stable release page', async () => {
+    const { asked } = github({ apiBody: 'unexpected non-JSON upstream response' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'latest', 'SHA256SUMS.txt', WINDOWS_ASSET]);
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+  });
+
   it('trusts the release page only when it lands on a version tag on github.com', async () => {
     for (const page of ['https://evil.example/mvclaudianobj/chat-on-steroids/releases/tag/v9.9.9',
+      'https://github.com/totec448-spec/chat-on-steroids/releases/tag/v9.9.9',
+      'https://github.com/mvclaudianobj/chat-on-steroids/releases/tag/v9.9.9/more',
       'https://github.com/mvclaudianobj/chat-on-steroids/releases', 404]) {
       resetUpdateForTests();
       github({ apiStatus: 403, page });
       await asPlatform('win32', undefined, () => checkForUpdates());
       expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed' });
     }
+    resetUpdateForTests();
+    github({ releasePayload: { tag_name: 'v99.0.0', draft: true, prerelease: false },
+      page: 'https://github.com/totec448-spec/chat-on-steroids/releases/tag/v99.0.0' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed' });
     // Other API failures are not quota refusals and keep their own error.
     resetUpdateForTests();
     const { fetch } = github({ fail: 'release' });

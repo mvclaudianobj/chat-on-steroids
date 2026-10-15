@@ -4,14 +4,16 @@ import { randomUUID } from 'node:crypto';
 import { access, readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { BrowserWindow, shell } from 'electron';
+import { MARKS_MODULE_SOURCES } from '../shared/module-sources.js';
 import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 
 const exec = promisify(execFile);
 const SERVICE = 'cli-proxy-api.service';
 const BINARY = '/usr/local/bin/cli-proxy-api';
-const DEFAULT_MANAGER = 'http://127.0.0.1:8317/management.html';
+// The Marks CLIProxyAPI unit normally listens on 18081. Status discovery remains
+// authoritative and also supports the upstream 8317 default when configured.
+const DEFAULT_MANAGER = 'http://127.0.0.1:18081/management.html';
 const FALLBACK_PORTS = [8317, 18081] as const;
-const INSTALL_URL = 'https://github.com/router-for-me/CLIProxyAPI';
 const MANAGER_PATH = '/management.html';
 const MANAGEMENT_TITLE = /<title>\s*CLI Proxy API Management Center\s*<\/title>/i;
 
@@ -190,6 +192,7 @@ async function verifiedPort(preferred?: number): Promise<number | null> {
 export async function modulesStatus(): Promise<MarksModuleState[]> {
   const base: MarksModuleState = {
     id: 'cli-proxy-api', name: 'CLIProxyAPI', description: 'API proxy and management console',
+    source: MARKS_MODULE_SOURCES['cli-proxy-api'],
     installed: false, enabled: false, running: false, supported: false, managementUrl: '',
     consoleAvailable: false, detail: 'System service management is currently available on Linux only.'
   };
@@ -207,7 +210,16 @@ export async function modulesStatus(): Promise<MarksModuleState[]> {
 
 export async function moduleAction(action: MarksModuleAction, managementUrl?: string): Promise<MarksModuleState[]> {
   if (action === 'install') {
-    await shell.openExternal(INSTALL_URL);
+    // Installation is opt-in and stays with the official upstream. Never
+    // execute remote install scripts or elevate during a catalog action.
+    await shell.openExternal(MARKS_MODULE_SOURCES['cli-proxy-api'].homepage);
+    return modulesStatus();
+  }
+  if (action === 'update') {
+    // Never silently overwrite a separately installed system service. The
+    // publisher's release page is an explicit update guide until a verified,
+    // pinned installer protocol is implemented for this module.
+    await shell.openExternal(`${MARKS_MODULE_SOURCES['cli-proxy-api'].homepage}/releases`);
     return modulesStatus();
   }
   if (process.platform !== 'linux') throw new Error('Service controls are available on Linux only.');

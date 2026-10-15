@@ -88,7 +88,18 @@ afterEach(() => {
 });
 
 describe('Marks modules security boundary', () => {
+  it('offers official source metadata without bundling or executing an installer', async () => {
+    const [module] = await modulesStatus();
+    expect(module!.source).toEqual({
+      kind: 'github', repository: 'router-for-me/CLIProxyAPI',
+      homepage: 'https://github.com/router-for-me/CLIProxyAPI',
+      install: 'external-guide', update: 'upstream-managed'
+    });
+    expect(fixture.elevated).toEqual([]);
+    expect(fixture.opened).toEqual([]);
+  });
   it('restricts to the exact local management page without URLs carrying credentials', () => {
+    expect(safeManagementUrl()).toBe('http://127.0.0.1:18081/management.html');
     expect(safeManagementUrl('http://localhost:8317/management.html')).toBe('http://127.0.0.1:8317/management.html');
     expect(safeManagementUrl('http://[::1]:18081/management.html')).toBe('http://127.0.0.1:18081/management.html');
     for (const url of [
@@ -171,7 +182,8 @@ describe('Marks modules security boundary', () => {
 
   it('only opens the official installation guide and keeps PolicyKit for explicit service actions', async () => {
     await moduleAction('install');
-    expect(fixture.opened).toEqual(['https://github.com/router-for-me/CLIProxyAPI']);
+    await moduleAction('update');
+    expect(fixture.opened).toEqual(['https://github.com/router-for-me/CLIProxyAPI', 'https://github.com/router-for-me/CLIProxyAPI/releases']);
     await moduleAction('restart');
     expect(fixture.elevated).toEqual([['/usr/bin/systemctl', 'restart', 'cli-proxy-api.service']]);
   });

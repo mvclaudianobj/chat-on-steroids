@@ -11,6 +11,12 @@
 .appearance-page-head > div { min-width: 0; }
 .appearance-page-head > .btn { flex: 0 0 auto; min-height: 34px; padding: 7px 9px; font-size: calc(11.5px * var(--text-scale, 1)); }
 .appearance-section + .appearance-section { margin-top: 28px; }
+.app[data-screen='settings'] #tabs .modules-subnav { margin-left: 22px; padding-left: 12px; border-left: 2px solid var(--line); border-radius: 0 8px 8px 0; min-height: 32px; font-size: calc(12px * var(--text-scale, 1)); }
+.app[data-screen='settings'] #tabs .modules-subnav.is-sel { border-left-color: var(--accent); }
+.modules-toggle { min-height: 74px; border-bottom: 1px solid var(--line); }
+.modules-toggle .setting-text { min-width: 0; }
+.modules-toggle-control { display: inline-flex; gap: 10px; align-items: center; white-space: nowrap; font-size: calc(12px * var(--text-scale, 1)); color: var(--soft); }
+.modules-toggle-control input { width: 18px; height: 18px; accent-color: var(--accent-fill); cursor: pointer; }
 .modules-panel .modules-service { padding: 0 18px; }
 .modules-service-overview { display: grid; justify-items: start; gap: 8px; padding: 18px 0 12px; }
 .modules-status { display: inline-flex; align-items: center; min-height: 26px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 100px; color: var(--soft); background: var(--sunk); font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }

@@ -91,6 +91,19 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
+it('routes Marks Agency skills exclusively through their pinned Agency installer and updater', async () => {
+  const id = 'agency-engineering-backend-architect';
+  for (const [channel, payload] of [
+    ['skills:githubLink', { id, url: 'https://github.com/msitarzewski/agency-agents/tree/main/engineering' }],
+    ['skills:githubCheck', { id }],
+    ['skills:githubUpdate', { id }]
+  ] as const) {
+    const reply = await handlers.get(channel)!(null, payload) as { ok: boolean; error?: string };
+    expect(reply.ok).toBe(false);
+    expect(reply.error).toMatch(/Agency/);
+  }
+});
+
 it('keeps the reported interface language and the extension preferences through a Settings save', async () => {
   // Neither is part of the settings form. The save replaces the whole `ui` object, so both must be
   // carried through, or the extension would lose its language and its kept preferences.

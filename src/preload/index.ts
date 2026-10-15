@@ -16,6 +16,7 @@ import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePre
 import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
+import type { MarksAgencyCatalog } from '../shared/marks-agency-agents.js';
 import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, ToolEditReview } from '../shared/session.js';
 import type { TurnTrace } from '../shared/turn-trace.js';
 import type { RunningExecProcess } from '../shared/background-exec.js';
@@ -174,6 +175,9 @@ const api = {
   listSkills: () => call<SkillSummary[]>('skills:list'),
   listManagedSkills: () => call<ManagedSkill[]>('skills:managed'),
   listRecommendedSkills: () => call<Array<{ id: string; name: string; description: string; installed: boolean }>>('skills:recommended'),
+  listAgencyAgents: () => call<MarksAgencyCatalog>('skills:agencyCatalog'),
+  importAgencyAgent: (path: string, commit: string) => call<ManagedSkill[]>('skills:agencyImport', { path, commit }),
+  updateAgencyAgent: (path: string, commit: string, sha: string) => call<{ status: 'current' | 'updated'; skills: ManagedSkill[]; warning?: string }>('skills:agencyUpdate', { path, commit, sha }),
   installRecommendedSkill: (id: string) => call<ManagedSkill[]>('skills:installRecommended', { id }),
   skillsImport: (kind: 'folder' | 'file') => call<ManagedSkill[] | null>('skills:import', { kind }),
   skillsImportGithub: (url: string) => call<ManagedSkill[]>('skills:githubImport', { url }),

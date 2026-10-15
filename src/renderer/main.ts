@@ -20,11 +20,11 @@ import { initKeychainNotice } from './keychain-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
+import { initMarksModulesUi } from './marks-modules-ui.js';
 import { initWhatsNew } from './whats-new.js';
 import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
-import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
 /**
  * Renderer. No Node, no filesystem, no network — everything goes through window.api.
@@ -108,115 +108,8 @@ const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
 });
-let cliProxyModule: MarksModuleState | null = null;
-let moduleChecked = false;
-let moduleLoading = false;
-let moduleBusy = false;
-let moduleError = '';
-let consoleUrlEdited = false;
-
-function paintModules(): void {
-  const current = cliProxyModule;
-  const status = $('moduleCliStatus');
-  const state = moduleLoading ? 'checking' : !moduleChecked ? moduleError ? 'error' : 'unknown'
-    : !current?.supported ? 'unsupported' : !current.installed ? 'missing'
-      : current.running ? 'running' : 'stopped';
-  status.dataset.state = state;
-  status.textContent = t(state === 'checking' ? 'Checking status…'
-    : state === 'error' ? 'Status unavailable'
-      : state === 'unsupported' ? 'Unsupported system'
-        : state === 'missing' ? 'Not installed'
-          : state === 'running' ? 'Running'
-            : state === 'stopped' ? 'Stopped' : 'Status unavailable');
-  $('moduleCliDetail').textContent = current
-    ? `${current.detail}${current.installed ? ` · ${t(current.enabled ? 'Enabled at startup' : 'Manual start')}` : ''}`
-    : t('Connect to the local module service to see its status.');
-  $('moduleCliError').textContent = moduleError;
-  $('moduleCliError').hidden = !moduleError;
-  const blocked = moduleLoading || moduleBusy || !moduleChecked;
-  $<HTMLButtonElement>('moduleRefresh').disabled = moduleLoading || moduleBusy;
-  $<HTMLButtonElement>('moduleCliInstall').disabled = blocked || !!current?.installed;
-  $<HTMLButtonElement>('moduleCliStart').disabled = blocked || !current?.supported || !current.installed || current.running;
-  $<HTMLButtonElement>('moduleCliStop').disabled = blocked || !current?.supported || !current.installed || !current.running;
-  $<HTMLButtonElement>('moduleCliRestart').disabled = blocked || !current?.supported || !current.installed || !current.running;
-  $<HTMLButtonElement>('moduleCliEnable').disabled = blocked || !current?.supported || !current.installed || current.enabled;
-  $<HTMLButtonElement>('moduleCliDisable').disabled = blocked || !current?.supported || !current.installed || !current.enabled;
-  $<HTMLButtonElement>('moduleCliOpen').disabled = blocked || !current?.supported || !current.installed ||
-    !current.running || current.consoleAvailable === false || !$<HTMLInputElement>('moduleCliConsoleUrl').value.trim();
-}
-
-function readModuleReply(modules: MarksModuleState[]): MarksModuleState {
-  if (!Array.isArray(modules)) throw new Error('Module status response is unavailable.');
-  const current = modules.find(item => item?.id === 'cli-proxy-api');
-  if (!current || typeof current.installed !== 'boolean' || typeof current.enabled !== 'boolean' ||
-      typeof current.running !== 'boolean' || typeof current.supported !== 'boolean' ||
-      typeof current.detail !== 'string' || typeof current.managementUrl !== 'string') {
-    throw new Error('CLIProxyAPI status is incomplete.');
-  }
-  return current;
-}
-
-function acceptModuleStatus(modules: MarksModuleState[]): void {
-  cliProxyModule = readModuleReply(modules);
-  moduleChecked = true;
-  if (!consoleUrlEdited) $<HTMLInputElement>('moduleCliConsoleUrl').value = cliProxyModule.managementUrl;
-}
-
-async function refreshModules(): Promise<void> {
-  if (moduleLoading || moduleBusy) return;
-  moduleLoading = true;
-  moduleError = '';
-  paintModules();
-  try {
-    const reply = await api.modulesStatus();
-    if (!reply.ok) throw new Error(reply.error);
-    acceptModuleStatus(reply.data);
-  } catch (error) {
-    moduleChecked = false;
-    cliProxyModule = null;
-    moduleError = (error as Error).message || 'Could not check module status.';
-  } finally {
-    moduleLoading = false;
-    paintModules();
-  }
-}
-
-async function actOnModule(action: MarksModuleAction): Promise<void> {
-  if (moduleBusy || moduleLoading || !moduleChecked) return;
-  moduleBusy = true;
-  moduleError = '';
-  paintModules();
-  try {
-    const url = action === 'open' ? $<HTMLInputElement>('moduleCliConsoleUrl').value.trim() : undefined;
-    const reply = await api.moduleAction('cli-proxy-api', action, url);
-    if (!reply.ok) throw new Error(reply.error);
-    acceptModuleStatus(reply.data);
-    if (action === 'install') {
-      // The backend opens the official instructions; installation itself is user-managed.
-      toast(t('Installation guide opened. Follow the instructions to install CLIProxyAPI.'));
-    }
-  } catch (error) {
-    moduleError = (error as Error).message || 'Could not complete the module action.';
-  } finally {
-    moduleBusy = false;
-    paintModules();
-  }
-}
-
-$('moduleRefresh').addEventListener('click', () => void refreshModules());
-for (const [button, action] of [
-  ['moduleCliInstall', 'install'], ['moduleCliStart', 'start'],
-  ['moduleCliStop', 'stop'], ['moduleCliRestart', 'restart'],
-  ['moduleCliEnable', 'enable'], ['moduleCliDisable', 'disable'],
-  ['moduleCliOpen', 'open']
-] as const) {
-  $(button).addEventListener('click', () => void actOnModule(action));
-}
-$('moduleCliConsoleUrl').addEventListener('input', () => {
-  consoleUrlEdited = true;
-  paintModules();
-});
-onLanguageChange(paintModules);
+// Marks optional module state/actions live in their own file for upstream-safe merges.
+const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name) });
 initSetupGuide();
 const browserSetup = initBrowserSetup({
   choose: chooseChatBrowser,
@@ -334,6 +227,7 @@ function placePermissions(tab: string): void {
 }
 
 function showTab(name: string): void {
+  name = marksModulesUi.normalizeTab(name);
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
@@ -347,7 +241,7 @@ function showTab(name: string): void {
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   if (name === 'settings') void paintRecordingStorageUsage();
-  if (name === 'modules') void refreshModules();
+  marksModulesUi.onTabOpening(name);
   $('tabs').hidden = !settings;
   $('settingsFindBox').hidden = !settings;
   // A page opened any way leaves the search; the page list comes back.
@@ -359,10 +253,12 @@ function showTab(name: string): void {
   for (const tab of document.querySelectorAll<HTMLElement>('nav button')) {
     tab.classList.toggle('is-sel', tab.dataset.tab === name);
   }
+  marksModulesUi.paintNavigation(name);
   for (const item of document.querySelectorAll<HTMLElement>('[data-sidebar-page]')) item.classList.toggle('is-sel', item.dataset.sidebarPage === name);
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
     panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
   }
+  marksModulesUi.onTabShown(name);
   // After the panel shows: the chat and Agents & automation share its scroll pane, and a hidden
   // pane cannot be scrolled to where each view starts.
   if (name === 'settings') openChatView('settings');
@@ -469,8 +365,12 @@ document.addEventListener('keydown', (event) => {
   event.preventDefault(); void zoom(event.key === '0' ? 1 : zoomFactor + (event.key === '-' ? -.1 : .1));
 });
 $('tabs').addEventListener('click', (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab]');
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab], [data-module-page]');
   if (button?.dataset.tab) showTab(button.dataset.tab);
+  else {
+    const page = marksModulesUi.modulePage(button);
+    if (page) showTab(page);
+  }
 });
 
 // ------------------------------------------------------------ permissions

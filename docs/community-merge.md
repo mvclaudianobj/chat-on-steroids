@@ -36,6 +36,35 @@ For the actual merge, finish or isolate any dirty changes first. Work on a fresh
 
 Stable upstream X.Y.Z always determines the first three numbers, even if upstream `main` contains unreleased newer commits. A Marks-only release retains those first three numbers and increments N. A newer upstream stable release resets N to 1. Never silently merge upstream or push changes based solely on the check's output. Publishing to the `marks` GitHub repository remains a separately reviewed action; it does not change the community remote.
 
+## Marks extension compatibility preflight
+
+Keep Marks-specific implementation in `src/main/marks-*`, `src/shared/marks-*`
+and `src/renderer/marks-*` adapters where practical; minimize integration hooks
+in upstream-managed files. The Agency Skills UI lives in
+`src/renderer/marks-agency-skills.ts`; `skills-library.ts` delegates to it.
+
+Run this non-destructive check before every integration:
+
+```sh
+node scripts/marks-upstream-preflight.mjs
+node scripts/marks-upstream-preflight.mjs --require-clean
+```
+
+These commands inspect already-fetched refs and a virtual Git merge. They never
+fetch, switch, merge, commit, tag or push. They show overlaps and conflicts and
+block a dirty working tree. They **do not** establish that a cached upstream
+ref is the latest stable release: use `check-community-release.mjs` for that.
+After fetching the official published release, inspect that exact ref with
+`node scripts/marks-upstream-preflight.mjs --ref=refs/remotes/upstream/releases/vX.Y.Z`.
+The `--main` option previews unreleased changes only. A conflict-free preview
+does not prove runtime compatibility and cannot include uncommitted Marks edits.
+
+Do not merge until in-progress local changes are safely preserved and
+reviewed. Merge an official stable tag into a new integration branch, retain
+Marks behavior and attribution, run frontend/backend/typecheck/build tests,
+then adjust all version-bearing files together. Publish only to the `marks`
+remote using the terminal after validation. Never rewrite a public tag.
+
 ## Verification and exceptions
 
 Check `git status`, run `npm run typecheck`, the relevant test suites, `npm run verify` and packaging checks where appropriate. `node scripts/verify-release-version.mjs` should validate all version sources and the new product tag before release. Verify the final installed updater behavior separately; a correct source tree does not prove a deployed release.

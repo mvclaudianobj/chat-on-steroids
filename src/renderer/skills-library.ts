@@ -1,5 +1,6 @@
 import type { AppApi } from '../preload/index.js';
 import { parseGitHubSkillUrl, type GitHubSkillUpdateCheck, type ManagedSkill } from '../shared/skills.js';
+import { initMarksAgencySkills } from './marks-agency-skills.js';
 import { $, el, icon, initCardMenuDismissal, run, toast } from './dom.js';
 import { t, ui } from './i18n.js';
 
@@ -19,6 +20,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
   const paintSource = (skill: ManagedSkill): void => {
     const source = document.querySelector<HTMLElement>(`[data-skill-id="${skill.id}"] .skill-library-source`);
     if (!source) return;
+    if (agency.paintSource(skill)) return;
     if (!skill.origin) {
       source.className = 'skill-library-source is-local';
       source.replaceChildren(icon('i-folder'), el('span', '', () => t('Local')));
@@ -51,6 +53,12 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   let recommended: Array<{ id: string; name: string; description: string }> = [];
+  // Agency controls live separately, so upstream changes to the managed library remain easy to merge.
+  const agency = initMarksAgencySkills(api, {
+    getSkills: () => skills,
+    setSkills: next => setSkills(next),
+    updateSkills: request => update(request)
+  });
   const renderRecommended = (): void => {
     const section = document.getElementById('skillsRecommendedSection');
     if (!section) return;
@@ -88,6 +96,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
 
   const render = (): void => {
     renderRecommended();
+    agency.render();
     const host = $('skillsInstalled');
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
     const visible = skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
@@ -118,7 +127,9 @@ export function initSkillsLibrary(api: AppApi): () => void {
       const summary = el('summary'); summary.append(icon('i-more'));
       ui(summary, 'aria-label', () => t('Actions for {0}', [skill.name]));
       const actions = el('div', 'plugin-menu-actions');
-      if (skill.origin) {
+      if (agency.appendCardActions(skill, actions, menu)) {
+        // Marks-specific updates are handled by the Agency catalog.
+      } else if (skill.origin) {
         const refresh = el('button', 'btn', () => t('Update from GitHub')) as HTMLButtonElement;
         refresh.type = 'button'; refresh.addEventListener('click', () => { menu.open = false; confirmUpdate(skill); });
         actions.append(refresh);
@@ -152,7 +163,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
 
   const checkUpdates = (force: boolean): Promise<void> => {
     if (checkPass) return checkPass;
-    const due = skills.filter(skill => skill.origin && (force || !checks.has(skill.id) ||
+    const due = skills.filter(skill => skill.origin && !agency.isAgencySkill(skill) && (force || !checks.has(skill.id) ||
       Date.now() - checks.get(skill.id)!.checkedAt >= (checks.get(skill.id)!.state === 'error' ? 60_000 : checkAgeMs)));
     if (!due.length) return Promise.resolve();
     const groups = new Map<string, ManagedSkill[]>();
@@ -348,5 +359,5 @@ export function initSkillsLibrary(api: AppApi): () => void {
   })());
   void update(api.listManagedSkills());
   if (typeof api.listRecommendedSkills === 'function') void run(api.listRecommendedSkills()).then(list => { if (list) { recommended = list; renderRecommended(); } });
-  return () => refresh(false);
+  return () => { refresh(false); void agency.refresh(false); };
 }
