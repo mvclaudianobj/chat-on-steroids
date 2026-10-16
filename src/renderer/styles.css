@@ -4415,6 +4415,13 @@ select option::checkmark { order: 1; margin-inline-start: auto; color: var(--ink
 .terminal-empty[hidden] { display: none; }
 
 /* One quiet frame for right-side tools; the tool owners keep their own content state. */
+.marks-project-dock-picker { display: flex; flex-direction: column; gap: 12px; padding: 24px 18px; color: var(--ink); }
+.marks-project-dock-picker h2 { margin: 0; font-size: calc(14px * var(--text-scale, 1)); font-weight: 600; }
+.marks-project-dock-picker p { margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.55; }
+.marks-project-dock-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.marks-project-dock-choice { display: flex; gap: 10px; align-items: center; width: 100%; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-md); text-align: left; color: var(--ink); overflow-wrap: anywhere; }
+.marks-project-dock-choice:hover { background: var(--hover); }
+.marks-project-dock-choice .ico { flex: none; color: var(--soft); }
 [data-panel='chat'].has-work-dock { grid-template-columns: minmax(0, 1fr) var(--work-panel-width, minmax(340px, 42%)); }
 .work-dock-right { position: relative; grid-column: 2; min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: clip; border-left: 1px solid var(--line); background: var(--page); }
 /* Logical hiding is immediate; keep the outgoing dock painted only for its short exit. */

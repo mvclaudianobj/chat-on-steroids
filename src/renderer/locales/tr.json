@@ -1776,6 +1776,7 @@
   "{0}K": "{0} B",
   "Open a chat to see its sub-agents": "Alt ajanlarını görmek için bir sohbet açın",
   "Open a project to use Files and Review": "Dosyalar ve İnceleme için bir proje açın",
+  "Choose a local project for this panel. Your conversation stays where it is.": "Bu panel için yerel bir proje seçin. Sohbetiniz olduğu yerde kalır.",
   "1 line": "1 satır",
   "Inactive": "Etkin değil",
   "Remove {0} from favorites": "{0} favorilerden çıkar",

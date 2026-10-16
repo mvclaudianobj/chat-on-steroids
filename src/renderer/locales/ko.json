@@ -1776,6 +1776,7 @@
   "{0}K": "{0}K",
   "Open a chat to see its sub-agents": "하위 에이전트를 보려면 채팅을 여세요",
   "Open a project to use Files and Review": "파일 및 리뷰를 사용하려면 프로젝트를 여세요",
+  "Choose a local project for this panel. Your conversation stays where it is.": "이 패널에서 사용할 로컬 프로젝트를 선택하세요. 대화는 이동하지 않습니다.",
   "1 line": "1줄",
   "Inactive": "비활성",
   "Remove {0} from favorites": "즐겨찾기에서 {0} 제거",

@@ -1776,6 +1776,7 @@
   "{0}K": "{0}千",
   "Open a chat to see its sub-agents": "サブエージェントを見るにはチャットを開いてください",
   "Open a project to use Files and Review": "ファイルとレビューを使うにはプロジェクトを開いてください",
+  "Choose a local project for this panel. Your conversation stays where it is.": "このパネルで使うローカルプロジェクトを選択してください。チャットは移動しません。",
   "1 line": "1 行",
   "Inactive": "非アクティブ",
   "Remove {0} from favorites": "{0} をお気に入りから外す",

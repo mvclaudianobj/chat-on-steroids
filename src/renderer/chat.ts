@@ -4,6 +4,7 @@ import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
+import { showMarksProjectDockPicker } from './marks-project-dock.js';
 import { currentLanguage, ui, t } from './i18n.js';
 import { initSkills } from './skills.js';
 import { imageStorageButton } from './image-storage.js';
@@ -300,6 +301,40 @@ function selectedLocalProject(): LocalProject | null {
   }
   return newChatSelected && selectedProjectId
     ? projects.find(project => project.id === selectedProjectId && !project.ungrouped) ?? null : null;
+}
+// Scope is explicit, private to this window and retired on navigation. Choosing
+// a right-side workspace never moves a chat or widens filesystem permissions.
+let rightDockProject: { owner: string; projectId: string } | null = null;
+let renderedDockScope: string | null = null;
+let rightDockOwner: string | null = null;
+function selectedRightDockProject(): LocalProject | null {
+  const assigned = selectedLocalProject();
+  if (assigned) return assigned;
+  if (rightDockProject?.owner !== draftKey()) return null;
+  return projects.find(project => project.id === rightDockProject?.projectId && !project.ungrouped) ?? null;
+}
+function refreshRightDockScope(): void {
+  const owner = draftKey();
+  if (rightDockOwner !== owner) {
+    // A temporary file-browser scope must never follow the user into a
+    // different chat, or silently return when they revisit the old chat.
+    rightDockProject = null;
+    rightDockOwner = owner;
+  }
+  const scope = selectedRightDockProject();
+  // Also track chat identity: two unassigned chats both have a null project,
+  // but a picker created for the first must not remain actionable in the next.
+  const next = `${owner}\0${scope?.id ?? ''}`;
+  // Keep a project's display name/path current without repeatedly reopening a tab.
+  if (renderedDockScope === next) {
+    filePanel?.update(scope);
+    reviewPanel?.update(scope);
+    return;
+  }
+  renderedDockScope = next;
+  filePanel?.update(scope);
+  reviewPanel?.update(scope);
+  workspaceDocks?.refreshActive();
 }
 const PROJECT_TASK_PAGE_SIZE = 5;
 const PROJECT_TASK_PAGE_INCREMENT = 8;
@@ -1507,8 +1542,7 @@ function paintSessions(): void {
     ?.querySelector<HTMLElement>(focusedControl)?.focus({ preventScroll: true });
   const workers = sessions.filter(entry => entry.origin?.kind === 'worker' && entry.origin.fromSessionId === selectedId && selectedId !== null);
   agentPanel?.update(selectedId, workers);
-  filePanel?.update(selectedLocalProject());
-  reviewPanel?.update(selectedLocalProject());
+  refreshRightDockScope();
   workspaceDocks?.sync();
   workspaceTerminal?.update(selectedLocalProject());
   rightWorkspaceTerminal?.update(selectedLocalProject());
@@ -6725,6 +6759,22 @@ export function initChat(next: Deps): void {
   const chatHost = document.querySelector<HTMLElement>('[data-panel="chat"]')!;
   const docks = createWorkspaceDocks(chatHost);
   workspaceDocks = docks;
+  let projectPicker: HTMLElement | null = null;
+  const closeProjectPicker = (): void => { projectPicker?.remove(); projectPicker = null; };
+  const showProjectPicker = (kind: 'files' | 'review', mount: HTMLElement): void => {
+    closeProjectPicker();
+    const owner = draftKey();
+    projectPicker = showMarksProjectDockPicker(mount, projects, id => {
+      // An older picker cannot attach its workspace to a different chat.
+      if (owner !== draftKey() || !projects.some(row => row.id === id && !row.ungrouped)) return;
+      rightDockProject = { owner, projectId: id };
+      filePanel?.update(selectedRightDockProject());
+      reviewPanel?.update(selectedRightDockProject());
+      renderedDockScope = `${owner}\0${id}`;
+      closeProjectPicker();
+      docks.activate(kind);
+    }, () => { closeProjectPicker(); $('addProject').click(); });
+  };
   const agentToolGroups = new Map<string, HTMLElement>();
   const agentSays = new Map<string, { text: string; row: HTMLElement }>();
   agentPanel = createAgentPanel({
@@ -6935,13 +6985,13 @@ export function initChat(next: Deps): void {
       return attachment => appendImages(owner, [attachment]);
     }
   });
-  filePanel.update(selectedLocalProject());
+  filePanel.update(selectedRightDockProject());
   reviewPanel = createFilePanel({
     host: chatHost, mount: docks.body, reviewOnly: true,
     onShow: () => docks.adopt('review'),
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
-  reviewPanel.update(selectedLocalProject());
+  reviewPanel.update(selectedRightDockProject());
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
     { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false) });
   workspaceTerminal.update(selectedLocalProject());
@@ -6949,8 +6999,10 @@ export function initChat(next: Deps): void {
     { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync() });
   rightWorkspaceTerminal.update(selectedLocalProject());
   docks.register('review', 'Review', 'i-git-diff', mount => {
+    if (!selectedRightDockProject()) { showProjectPicker('review', mount); return; }
+    closeProjectPicker();
     reviewPanel?.mountAt(mount); void reviewPanel?.show();
-  }, () => reviewPanel?.hide(), () => selectedLocalProject() !== null);
+  }, () => { closeProjectPicker(); reviewPanel?.hide(); }, () => true);
   docks.registerTerminal({
     show: (mount, createIfEmpty) => rightWorkspaceTerminal?.show(mount, createIfEmpty),
     hide: () => rightWorkspaceTerminal?.hide(), canCreate: () => true,
@@ -6962,8 +7014,10 @@ export function initChat(next: Deps): void {
     hide: () => workspaceTerminal?.hide()
   });
   docks.register('files', 'Files', 'i-folder', mount => {
+    if (!selectedRightDockProject()) { showProjectPicker('files', mount); return; }
+    closeProjectPicker();
     filePanel?.mountAt(mount); void filePanel?.show();
-  }, () => filePanel?.hide(), () => selectedLocalProject() !== null);
+  }, () => { closeProjectPicker(); filePanel?.hide(); }, () => true);
   docks.register('agents', 'Sub-agents', 'i-agents', () => agentPanel?.show(), () => agentPanel?.hide(), () => selectedId !== null);
   $('attachImages').addEventListener('click', async () => {
     const owner = composerDraftOwner();

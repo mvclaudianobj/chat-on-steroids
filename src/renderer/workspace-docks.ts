@@ -320,5 +320,9 @@ export function createWorkspaceDocks(host: HTMLElement) {
   });
   paint();
   return { body, bottomBody, rightToggle, bottomToggle, register, registerTerminal, activate, adopt,
-    setOpen: setRightOpen, setBottomOpen, toggleBottomTerminal: () => setBottomOpen(!bottomOpen), sync: paint };
+    setOpen: setRightOpen, setBottomOpen, toggleBottomTerminal: () => setBottomOpen(!bottomOpen), sync: paint,
+    /** Reopen only the selected view after its workspace authority changes. */
+    refreshActive: () => {
+      if (rightOpen && (active === 'files' || active === 'review') && available(active)) showView(active);
+    } };
 }

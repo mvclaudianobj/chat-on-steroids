@@ -1775,6 +1775,7 @@
   "{0}K": "{0} тыс.",
   "Open a chat to see its sub-agents": "Откройте чат, чтобы увидеть его субагентов",
   "Open a project to use Files and Review": "Откройте проект, чтобы использовать «Файлы» и «Проверку»",
+  "Choose a local project for this panel. Your conversation stays where it is.": "Выберите локальный проект для этой панели. Ваша беседа останется на месте.",
   "1 line": "1 строка",
   "Inactive": "Неактивно",
   "Remove {0} from favorites": "Убрать {0} из избранного",

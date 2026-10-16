@@ -1776,6 +1776,7 @@
   "{0}K": "{0} k",
   "Open a chat to see its sub-agents": "Ouvrez une discussion pour voir ses sous-agents",
   "Open a project to use Files and Review": "Ouvrez un projet pour utiliser Fichiers et Revue",
+  "Choose a local project for this panel. Your conversation stays where it is.": "Choisissez un projet local pour ce panneau. Votre conversation reste à sa place.",
   "1 line": "1 ligne",
   "Inactive": "Inactive",
   "Remove {0} from favorites": "Retirer {0} des favoris",

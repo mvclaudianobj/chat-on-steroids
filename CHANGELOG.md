@@ -9,6 +9,17 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.39.2] — Accessible Files and Review in Chat Marks
+
+- **Files and Review are now accessible from the right dock for unassigned chats.**
+  Opening either view offers a choice of existing approved local projects.
+  The choice scopes that panel in the current window; it does not move, assign
+  or edit the current conversation, and does not grant filesystem privileges.
+- Switching to another chat retires that temporary workspace choice; selecting
+  Files or Review again offers the appropriate local project choices.
+- All twelve supported interface translations include the new explanation.
+  Existing project-scoped views keep their existing behaviour.
+
 ## [2.1.39.1] — Chat Marks modular sobre Chat On Steroids 2.1.39
 
 Integra a comunidade 2.1.39, com modulos e Skills Marks opcionais.

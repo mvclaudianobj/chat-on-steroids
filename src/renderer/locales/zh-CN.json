@@ -1776,6 +1776,7 @@
   "{0}K": "{0}千",
   "Open a chat to see its sub-agents": "打开一个聊天以查看其子代理",
   "Open a project to use Files and Review": "打开一个项目以使用文件和审查",
+  "Choose a local project for this panel. Your conversation stays where it is.": "为此面板选择一个本地项目。当前聊天不会移动。",
   "1 line": "1 行",
   "Inactive": "未启用",
   "Remove {0} from favorites": "将 {0} 移出收藏",

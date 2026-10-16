@@ -14,6 +14,13 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.39.2': {
+    lead: () => t('Open a project to use Files and Review'),
+    highlights: [
+      { icon: 'i-folder', title: () => t('Files'), text: () => t('Choose a local project for this panel. Your conversation stays where it is.') },
+      { icon: 'i-git-diff', title: () => t('Review'), text: () => t('Choose a local project for this panel. Your conversation stays where it is.') }
+    ]
+  },
   '2.1.39.1': {
     lead: () => t('Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.'),
     highlights: [

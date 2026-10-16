@@ -150,6 +150,25 @@ it('hides the old right view when a recorded edit directly adopts Review', () =>
   expect(document.querySelector('#workDockRight [role=tab][aria-selected=true]')?.textContent).toContain('Review');
 });
 
+it('refreshes just the active scoped tool when the project changes', () => {
+  const { docks } = setup();
+  const files = vi.fn(), review = vi.fn(), agents = vi.fn();
+  docks.register('files', 'Files', 'i-folder', files, vi.fn(), () => true);
+  docks.register('review', 'Review', 'i-git-diff', review, vi.fn(), () => true);
+  docks.register('agents', 'Sub-agents', 'i-agents', agents, vi.fn(), () => true);
+  docks.activate('files');
+  const selected = document.querySelector('#workDockRight [role=tab][aria-selected=true]');
+  docks.refreshActive();
+  expect(files).toHaveBeenCalledTimes(2);
+  expect(document.querySelector('#workDockRight [role=tab][aria-selected=true]')).toBe(selected);
+  docks.activate('agents');
+  docks.refreshActive();
+  expect(agents).toHaveBeenCalledOnce();
+  docks.activate('review');
+  docks.refreshActive();
+  expect(review).toHaveBeenCalledTimes(2);
+});
+
 it('keeps Ctrl+backtick for bottom visibility and Ctrl+Shift+1–4 for scoped actions', () => {
   const { docks } = setup();
   const review = vi.fn(), files = vi.fn(), agents = vi.fn(), rightTerminal = vi.fn(), bottomTerminal = vi.fn();
@@ -217,4 +236,3 @@ it('keeps a greyed-out tab\'s reason in the app\'s language when the language ch
   setLanguage('en');
   expect(quick.title).toBe('Open a project to use Files and Review');
 });
-
