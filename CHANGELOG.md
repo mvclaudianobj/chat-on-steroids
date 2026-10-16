@@ -9,6 +9,40 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.39.1] — Chat Marks modular sobre Chat On Steroids 2.1.39
+
+Integra a comunidade 2.1.39, com modulos e Skills Marks opcionais.
+
+## [2.1.39] — Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report
+
+Long work continues in a fresh turn again, also while ChatGPT is thinking or running a tool. Chats the app opens stay out of incognito windows, and the diagnostics report now answers most questions about a problem by itself.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### 🛠 Fixed
+
+- **Fresh turns for long work.** In 2.1.38 the automatic continue often couldn't be sent. While ChatGPT is thinking or running a tool, it often shows only **Stop** and no **Send**, so the continue appeared in the chat as a failed message, every few minutes, and the long turn broke anyway. The app now stops the answer right after the tool result and sends the continue as the next message, so the work carries on in a fresh turn. A message you type yourself never stops an answer. If a turn can't be continued twice, the app leaves it alone instead of trying again and again.
+- **No chats in incognito windows.** If the extension is allowed in incognito and an incognito window was in front, a chat the app opened (for example a sub-agent's) landed there. ChatGPT is signed out there, so it failed over and over. Those chats now open in your regular window, or in a new regular window if only incognito ones are open.
+- **Settings stay when a value is unknown.** If a setting holds a choice this version doesn't know, for example after going back from a newer version, only that choice returns to its default instead of all your settings.
+
+### ✨ Improved
+
+- **A fuller diagnostics report** (**Activity → Diagnostics report**). Besides versions, connection and the log, it now also shows:
+  - how the app is installed and whether it can update itself;
+  - the computer's memory, processor, free disk space and uptime;
+  - crashes and restarts;
+  - the most frequent warnings since the app started;
+  - which tools were called in the last day and how often they failed;
+  - the state of each active chat, numbered instead of named;
+  - the browser and its ChatGPT tabs;
+  - which of ChatGPT's controls the extension still finds.
+
+  It still contains nothing personal: no names, folders, chat titles or text.
+- **Bug reports on GitHub** now ask for the diagnostics report and a check on the latest release, so we can usually help with the first answer.
+
+
 ## [2.1.38.1] — Chat Marks community 2.1.38 plus Modules and Linux updates
 
 Built on the community's **2.1.38** release with its Firefox support, fresh turns for long work, in-app tool approvals, Update all, and Codex/Claude Code usage improvements. The community's full release notes appear in the 2.1.38 section below.

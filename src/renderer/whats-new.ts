@@ -14,14 +14,12 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
-  '2.1.38.1': {
-    lead: () => t('Firefox, fresh turns for long work, and approvals you answer in the app.'),
+  '2.1.39.1': {
+    lead: () => t('Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.'),
     highlights: [
-      { icon: 'i-globe', title: () => t('Firefox'), text: () => t('Choose Firefox as the ChatGPT browser. Its add-on is signed by Mozilla and updates itself.') },
-      { icon: 'i-retry', title: () => t('Fresh turns for long work'), text: () => t('Long work continues in a fresh turn every 30 minutes, so it no longer breaks after about 40 minutes.') },
-      { icon: 'i-check-circle', title: () => t('Approvals in the app'), text: () => t('Answer ChatGPT\'s tool approval cards with Deny or Allow once, right in the app.') },
-      { icon: 'i-plug', title: () => t('Modules'), text: () => t('Local API proxy and its existing management console.') },
-      { icon: 'i-arrow-down', title: () => t('Linux .deb upgrade'), text: () => t('A button to request a .deb update with PolicyKit authorization is being prepared; installation is not yet validated.') }
+      { icon: 'i-retry', title: () => t('Fresh turns that hold'), text: () => t('Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.') },
+      { icon: 'i-browser', title: () => t('No chats in incognito'), text: () => t('Chats the app opens go to your regular browser window, never an incognito one.') },
+      { icon: 'i-check-circle', title: () => t('A fuller diagnostics report'), text: () => t('It also shows how the app is installed, the browser, crashes, frequent warnings and each chat\'s state, still without anything personal.') }
     ]
   },
   '2.1.38': {

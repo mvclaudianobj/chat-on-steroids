@@ -12865,7 +12865,8 @@
       (!message.recovery || sendAttempted || !stopRequestedAt) &&
       (!sourceQuiet || sendAttempted || (turnProgressRevision === sourceActivity && turnId === sourceTurn &&
         CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === sourceUser)) &&
-      (!message.directTurn || sendAttempted || (CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === sourceUser &&
+      // A first turn's question can be missing from the page (#942); its turn id alone names it.
+      (!message.directTurn || sendAttempted || ((sourceUser === undefined || CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id === sourceUser) &&
         (!turnId || turnId === sourceTurn)));
     // Which onTarget condition failed, in its order, for the release report (#820). A pickup that
     // kept being withdrawn for 17 minutes could not say whether its page moved or its chat changed (#882).
@@ -12873,7 +12874,8 @@
       if (!alive) return 'page-closed';
       if (epoch !== forEpoch || CLF_DOM.conversationId() !== target) return 'left-chat';
       if (message.recovery && !sendAttempted && stopRequestedAt) return 'stop-requested';
-      const newUser = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id !== sourceUser;
+      const newUser = !(message.directTurn && sourceUser === undefined) &&
+        CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id !== sourceUser;
       if ((sourceQuiet || message.directTurn) && !sendAttempted && newUser) return 'new-user-message';
       if ((sourceQuiet || message.directTurn) && !sendAttempted && turnId && turnId !== sourceTurn) return 'turn-changed';
       if (sourceQuiet && !sendAttempted && turnProgressRevision !== sourceActivity) return 'turn-progressed';
@@ -12929,8 +12931,11 @@
         return false;
       }
     }
+    // The running turn is named by the page's own turn id. Its question is usually shown too, but
+    // not in the first turn of a chat the app opened (#942, live 2026-10-15), and refusing there
+    // left every automatic continue of a new chat unsent.
     if (message.directTurn && (!target || ((generating || CLF_DOM.generating()) &&
-        (!sourceUser || sourceTurn !== message.directTurn.id)))) return false;
+        (!sourceTurn || sourceTurn !== message.directTurn.id)))) return false;
     // A new chat of a project with a native ChatGPT Project is typed only on that Project's own
     // page, never at the root; ChatGPT may rewrite that route, so its marker can be in the hash.
     const project = typeof message.project === 'string' && /^g-p-[0-9a-f]{32}$/.test(message.project) ? message.project : null;
@@ -13129,6 +13134,21 @@
       // comparison never matched, and that first turn got no ACK, no turn start and no turn end
       // for Goal or Loop to act on. The bootstrap comparison is exact either way (raw, then one
       // unescape); a person's own sends keep the raw comparison in matchesUserSendReceipt.
+      // While ChatGPT thinks or runs a tool it offers only Stop, no Send (measured 2026-10-15 on
+      // the user's Mac: every automatic continue for a long turn timed out unsent, and the turns
+      // broke at 41 and 52 minutes anyway). The automatic continue then does what #1402 decided by
+      // hand: Stop right after the tool result, then send Continue as the next message. A person's
+      // own message is never allowed to stop a turn; it waits for the turn's end instead.
+      let intoTurn = !!message.directTurn;
+      if (intoTurn && input.purpose === 'rotation' && CLF_DOM.generating() &&
+          !await waitPageView(() => !!CLF_DOM.sendButton(), onTarget, 3000)) {
+        if (!CLF_DOM.stopGeneration(onTarget) ||
+            !await waitPageView(() => !CLF_DOM.generating() && !!CLF_DOM.sendButton() && draft.current(), onTarget, 20000)) return fail(t(
+          'content_delivery_rotation_not_stopped',
+          'ChatGPT offered no Send in the running answer, and stopping it for the automatic continue did not finish.'
+        ));
+        intoTurn = false;
+      }
       const nativeSend = () => sendSubmittedText(sendingTarget, false, async sendCurrent => {
         // Preserve the outbox's revocable claim until the actual native Send is ready.
         if (input.recovery && !await recoveryPageUnfinished(() => sendCurrent() && onTarget() && draft.current(), withdrawWhy)) return false;
@@ -13159,7 +13179,7 @@
       // ChatGPT switches its own image tool off for a message that mentions an app).
       input.purpose === 'decision' || (input.coreMention === false && !input.recovery && !agent) ? null
         : input.recovery || agent || mentionCore ? currentCoreMention() : null,
-      since => sentRequestSince(since, forEpoch), !!message.directTurn);
+      since => sentRequestSince(since, forEpoch), intoTurn);
       // #744: one retry when the editor was replaced before anything asked to send it.
       if (!(await nativeSend()) &&
           !(!authorizing && !sendAttempted && !receipt && !draft.current() && draftCurrent() && await nativeSend())) {
@@ -13728,6 +13748,11 @@
           await pullActivity();
         })().catch(() => {}).then(() => sendResponse({ accepted: resumePendingCompactionFromRepair(message.conversationId) }));
         return true;
+      }
+      // Diagnostics report: which of ChatGPT's controls this page still has. Booleans only.
+      if (message.type === 'clf-page-checks') {
+        sendResponse(CLF_DOM.pageChecks());
+        return false;
       }
       // Popup diagnostics. Ids and counters only — no prose, no transcript, no page text.
       if (message.type === 'clf-page-status') {

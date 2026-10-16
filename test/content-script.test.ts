@@ -696,6 +696,67 @@ describe('desktop input delivery and helper ownership', () => {
     expect(live.sent.filter(message => message.ack)).toHaveLength(change === 'accepted' ? 1 : 0);
     if (change === 'draft') expect(composerText(live.document)).toBe('My own draft');
   });
+  // 2026-10-15, the user's Mac chat: while ChatGPT thinks or runs tools it offers only Stop, no
+  // Send (measured live), so every automatic continue for a long turn timed out unsent and the
+  // turns broke at 41 and 52 minutes anyway. A rotation then does what #1402 decided by hand:
+  // Stop right after the tool result and send Continue. A person's own message never stops a turn.
+  it.each(['rotation', 'user'] as const)('stops a thinking turn for its automatic continue only (%s)', async purpose => {
+    let directTurn: { id: string; startedAt: number };
+    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return { ok: true, data: { input: claimed({ directTurn, purpose }) } };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await live.hook.flush();
+    const start = emitted(live.sent, 'turn_start').at(-1)!;
+    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
+    const send = live.document.querySelector('[data-testid="send-button"]')!;
+    const actions = send.parentElement!;
+    const sends = watchSend(live.document);
+    send.addEventListener('click', () => {
+      userTurn(live!.document, 'rotation-continue', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    send.remove(); // Thinking: only Stop is offered.
+    const stop = live.document.querySelector('[data-testid="stop-button"]')!;
+    Object.defineProperty(stop, 'getClientRects', { value: () => [{ width: 32, height: 32 }] });
+    const stops = vi.fn(() => { actions.append(send); void settleTurn(live!); });
+    stop.addEventListener('click', stops);
+    const result = await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn });
+    expect(stops).toHaveBeenCalledTimes(purpose === 'rotation' ? 1 : 0);
+    expect(sends()).toBe(purpose === 'rotation' ? 1 : 0);
+    expect(result).toEqual({ ok: purpose === 'rotation' });
+    expect(live.sent.filter(message => message.ack)).toHaveLength(purpose === 'rotation' ? 1 : 0);
+  });
+  // 2026-10-15, live on the VM: in the first turn of a chat the app opened, ChatGPT shows no row
+  // for the question (#942), and every automatic continue was refused before its claim because
+  // the page could not name the last user message. The page's own turn id is the proof instead.
+  it('takes an automatic continue into a first turn whose question is not shown', async () => {
+    let directTurn: { id: string; startedAt: number };
+    live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
+      desktop_input: message => {
+        if (message.authorize || message.ack || message.fail) return { ok: true, data: { ok: true } };
+        return { ok: true, data: { input: claimed({ directTurn, purpose: 'rotation' }) } };
+      }
+    });
+    startGenerating(live.document);
+    live.hook.observe(); await live.hook.flush();
+    const start = emitted(live.sent, 'turn_start').at(-1)!;
+    directTurn = { id: start.event.turnId as string, startedAt: start.event.time as number };
+    // ChatGPT redraws the new chat without its question while the turn keeps running.
+    for (const row of live.document.querySelectorAll('[data-message-author-role="user"]')) row.closest('[data-testid^="conversation-turn"]')?.remove() ?? row.remove();
+    live.hook.observe(); await live.hook.flush();
+    const sends = watchSend(live.document);
+    live.document.querySelector('[data-testid="send-button"]')!.addEventListener('click', () => {
+      userTurn(live!.document, 'rotation-continue', text, { sent: false });
+      live!.document.querySelector('#prompt-textarea')!.textContent = '';
+    });
+    expect(await live.runtimeMessage({ type: 'clf-desktop-input', id: inputId, conversationId: chatA, directTurn })).toEqual({ ok: true });
+    expect(sends()).toBe(1);
+    expect(live.sent.filter(message => message.ack)).toHaveLength(1);
+  });
   it('sends a message into the running turn while one of its calls is still running (#1231)', async () => {
     let directTurn: { id: string; startedAt: number };
     live = await nonProHarness(`https://chatgpt.com/c/${chatA}`, {
@@ -3430,6 +3491,18 @@ function resumeSignal(h: Harness, type: 'cos-resume-request' | 'cos-resume-respo
   h.window.dispatchEvent(new h.window.MessageEvent('message', { source: h.window as unknown as Window,
     origin: h.window.location.origin, data: { type, id, conversationId, status, streamOpened } }));
 }
+
+describe('page checks for the diagnostics report', () => {
+  // 2026-10-15: the background asks the most recently used ChatGPT tab which controls it still has.
+  it('answers with booleans and the page language only', async () => {
+    live = await harness();
+    live.document.documentElement.lang = 'es';
+    const answer = await live.runtimeMessage({ type: 'clf-page-checks' }) as Record<string, unknown>;
+    expect(Object.keys(answer).sort()).toEqual(['composer', 'language', 'modelMenu', 'plusMenu', 'sendArea']);
+    expect(answer.language).toBe('es');
+    for (const key of ['composer', 'sendArea', 'modelMenu', 'plusMenu']) expect(typeof answer[key]).toBe('boolean');
+  });
+});
 
 describe('H2 resume transport evidence', () => {
   it('H2 records stream_gone immediately in a non-English page without ending a live generation', async () => {
