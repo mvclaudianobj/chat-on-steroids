@@ -234,7 +234,16 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
       });
       wrapper.append(button, menuBtn);
       wrapper.hidden = !current.get(session.module)?.enabled;
-      sidebar.append(wrapper);
+      if (session.projectId) {
+        const projectGroup = document.querySelector<HTMLElement>(`.project-group[data-project-id="${CSS.escape(session.projectId)}"]`);
+        if (projectGroup) {
+          projectGroup.append(wrapper);
+        } else {
+          sidebar.append(wrapper);
+        }
+      } else {
+        sidebar.append(wrapper);
+      }
       sessionButtons.set(session.id, button);
     }
   }

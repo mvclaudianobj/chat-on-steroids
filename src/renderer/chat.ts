@@ -202,6 +202,10 @@ function projectMenuItems(id: string): RowMenuItem[] {
     }))
   } satisfies RowMenuItem : null;
   return [
+    {
+      action: 'new-chat', icon: 'i-pencil', label: () => 'Novo Chat',
+      run: () => selectNewChat(id)
+    } satisfies RowMenuItem,
     ...(newTerminal ? [newTerminal] : []),
     // Only when its native ChatGPT Project could not be created; otherwise nothing about it shows.
     ...(link?.state === 'failed' || link?.state === 'uncertain' ? [{
