@@ -150,6 +150,7 @@ interface Deps {
   state: () => AppState | null;
   cliModules?: () => ReadonlyArray<{ id: string; name: string; enabled: boolean }>;
   createCliSession?: (moduleId: string, projectId: string) => void | Promise<void>;
+  repaintCliSessions?: () => void;
 }
 
 let deps: Deps;
@@ -1545,6 +1546,7 @@ function paintSessions(): void {
   // Both scopes keep the existing sessionList drag/order owner and durable project binding.
   projectList.replaceChildren(...projectSections);
   chatList.replaceChildren(...rows);
+  deps.repaintCliSessions?.();
   const pointed = pointedId
     ? [...projectList.querySelectorAll<HTMLElement>('.sess'), ...chatList.querySelectorAll<HTMLElement>('.sess')].find(row => row.dataset.id === pointedId)
     : undefined;

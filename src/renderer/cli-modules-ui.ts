@@ -341,6 +341,7 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     paintNavigation: (name: string) => {
       for (const [id, row] of rows) row.navigation.classList.toggle('is-sel', name === `module-${id}`);
     },
-    modulePage: (button: HTMLElement | null | undefined) => button?.dataset.modulePage && IDS.some(id => button.dataset.modulePage === `module-${id}`) ? button.dataset.modulePage : null
+    modulePage: (button: HTMLElement | null | undefined) => button?.dataset.modulePage && IDS.some(id => button.dataset.modulePage === `module-${id}`) ? button.dataset.modulePage : null,
+    repaintSessions: paintSessions
   };
 }
