@@ -571,13 +571,19 @@ it('starts project groups collapsed and deliberately expands the project selecte
   const group = () => mounted.window.document.querySelector<HTMLDetailsElement>(`[data-project-id="${project.id}"]`)!;
   await vi.waitFor(() => expect(group()).not.toBeNull());
   expect(group().open).toBe(false);
-  // A new chat is the row's own button, beside its menu, not an item inside it.
-  expect(rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')).toBeNull();
   const create = group().querySelector<HTMLButtonElement>('.project-heading > .project-new')!;
   expect(create.getAttribute('aria-label')).toBe('New chat in this project');
+  expect(create.dataset.newProject).toBe(project.id);
   expect(create.nextElementSibling?.classList.contains('project-menu')).toBe(true);
-  create.click();
+  const item = rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')!;
+  expect([...mounted.window.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(row => row.dataset.rowAction)).toEqual(['new-chat', 'color', 'remove']);
+  expect(item.textContent).toBe('New chat in this project');
+  expect(item.dataset.newProject).toBe(project.id);
+  expect(mounted.window.document.activeElement).toBe(item);
+  item.click();
+  await settle();
   expect(group().open).toBe(true);
+  expect(mounted.window.document.activeElement).toBe(mounted.window.document.getElementById('chatInput'));
 });
 
 it('commits a project summary click before an immediate state repaint replaces its details node', async () => {
@@ -3596,7 +3602,7 @@ it('shows each startup log line once and in order when lines arrive while the lo
     .toEqual(['app started', 'session catalog ready', 'renderer state ready', 'window loaded']);
 });
 
-it.each(['.project-menu'])('keeps keyboard focus on a project row button (%s) across an activity repaint', async selector => {
+it.each(['.project-new', '.project-menu'])('keeps keyboard focus on a project row button (%s) across an activity repaint', async selector => {
   // Seen live on Windows: after picking a project color, focus went back to the color button and
   // the next sidebar repaint dropped it to the page. Only the project heading kept its focus.
   const { project, session } = projectSidebarFixture();

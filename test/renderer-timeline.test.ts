@@ -1822,7 +1822,7 @@ it('keeps the project visible when its removal fails, and lets the removal be tr
   expect((w as any).api.removeProject).toHaveBeenCalledTimes(2);
 });
 
-it('offers a new chat beside a project\'s menu, and its color as a submenu and removal inside it', async () => {
+it('offers a new chat in a project\'s menu and inline, with color and removal after it', async () => {
   const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
   const { w } = await boot([], false, [], [project]);
   const group = w.document.querySelector<HTMLElement>(`.project-group[data-project-id="${project.id}"]`)!;
@@ -1832,13 +1832,13 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(button.getAttribute('aria-expanded')).toBe('true');
   const menu = w.document.querySelector<HTMLElement>('.row-menu')!;
   expect(menu.getAttribute('role')).toBe('menu');
-  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['color', 'remove']);
+  expect([...menu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'color', 'remove']);
+  expect(menuItem(w, 'new-chat').textContent).toBe('New chat in this project');
+  expect(menuItem(w, 'new-chat').dataset.newProject).toBe(project.id);
   expect(menuItem(w, 'remove').classList.contains('is-danger')).toBe(true);
-  expect(w.document.activeElement).toBe(menuItem(w, 'color'));
+  expect(w.document.activeElement).toBe(menuItem(w, 'new-chat'));
   // Keyboard: Down and Up move, Right opens the color submenu on the current choice, Left comes back.
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-  expect(w.document.activeElement).toBe(menuItem(w, 'remove'));
-  menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }));
   expect(w.document.activeElement).toBe(menuItem(w, 'color'));
   menu.dispatchEvent(new w.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
   expect(w.document.querySelectorAll('.row-menu').length).toBe(2);
@@ -1854,14 +1854,16 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect(button.getAttribute('aria-expanded')).toBe('false');
   // A right click on the row opens the same menu; a click elsewhere closes it.
   group.querySelector('.project-heading')!.dispatchEvent(new w.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 60 }));
+  expect(menuItem(w, 'new-chat').dataset.newProject).toBe(project.id);
   expect(menuItem(w, 'color')).not.toBeNull();
   w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
   expect(w.document.querySelector('.row-menu')).toBeNull();
-  // New chat in this project: the row's own button, no longer a menu item.
-  expect(projectMenu(w, project.id) && menuItem(w, 'new-chat')).toBeNull();
-  w.document.body.dispatchEvent(new w.Event('pointerdown', { bubbles: true }));
-  (w.document.querySelector(`.project-heading > [data-new-project="${project.id}"]`) as HTMLButtonElement).click(); await settle();
-  expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Message in Workspace…');
+  projectMenu(w, project.id);
+  menuItem(w, 'new-chat').click(); await settle();
+  const input = w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  expect(input.placeholder).toBe('Message in Workspace…');
+  expect(w.document.activeElement).toBe(input);
+  expect((w.document.querySelector(`.project-heading > [data-new-project="${project.id}"]`) as HTMLButtonElement).dataset.newProject).toBe(project.id);
 });
 
 it('offers enabled CLI modules in a lazy project terminal submenu with the project id', async () => {
@@ -1878,7 +1880,7 @@ it('offers enabled CLI modules in a lazy project terminal submenu with the proje
   await settle();
 
   projectMenu(w, project.id);
-  expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-terminal', 'color', 'remove']);
+  expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'new-terminal', 'color', 'remove']);
   menuItem(w, 'new-terminal').click();
   const submenu = w.document.querySelectorAll<HTMLElement>('.row-menu')[1]!;
   expect([...submenu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-terminal-markscode', 'new-terminal-claude']);

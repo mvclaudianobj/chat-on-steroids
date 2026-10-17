@@ -70,7 +70,7 @@ describe('Persistent coding CLI terminal', () => {
       expect.objectContaining({ id: secondSession.id, tmuxSession: secondSession.tmuxSession })
     ]));
     const info = await cliOpen(firstSession.id, 90, 30, 'first');
-    expect(info.cwd).toBe('/approved/project');
+    expect(info.cwd).toBe(process.platform === 'win32' ? '/mnt/c/approved/project' : '/approved/project');
     expect(info.session).toBe(firstSession.tmuxSession);
     expect(fixture.commands.some(args => args.includes('has-session') && args.includes(`=${info.session}`))).toBe(true);
     const pty = (await import('node-pty')).spawn;

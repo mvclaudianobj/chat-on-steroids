@@ -884,7 +884,7 @@ Load command 11
     const builder = yamlFile('electron-builder.yml');
     expect(builder.extraMetadata.version).toBe(releaseVersion);
     expect(builder.buildVersion).toBe(releaseVersion);
-    expect(builder.buildNumber).toBe(releaseVersion.split('.')[3]);
+    expect(builder.buildNumber).toBeUndefined();
     const tag = `v${releaseVersion}`;
     const changelog = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
     const notes = readFileSync(path.join(root, 'docs', 'release-notes', `${tag}.md`), 'utf8');

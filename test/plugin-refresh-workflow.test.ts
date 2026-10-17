@@ -26,7 +26,7 @@ function workflow(options: { unchanged?: boolean; deny?: boolean; navigateDuring
   });
   context.ask = ask;
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
-  return { click, ask, run: () => (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools, observeOnly: options.observeOnly }) };
+  return { click, ask, run: () => (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Core', tools, observeOnly: options.observeOnly }) };
 }
 it('claims before exactly one click and completes only a newly observed matching schema', async () => {
   const h = workflow();
@@ -54,7 +54,7 @@ it('notices refreshed tools that arrive without any change on the page', async (
   });
   vm.runInContext(`${section}\nglobalThis.run = refreshManagedPlugin;`, context);
   const started = Date.now();
-  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(true);
+  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Core', tools })).toBe(true);
   expect(Date.now() - started).toBeLessThan(4000);
   expect(click).toHaveBeenCalledTimes(1);
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
@@ -73,7 +73,7 @@ it.each([false, true])('waits for readable tool schemas before claim (navigation
         tools: ready ? (refreshed ? tools : [{ ...tools[0], description: 'Old' }]) : null }) }
   });
   vm.runInContext(`${section}\nglobalThis.run = refreshManagedPlugin;`, context);
-  const pending = (context.run as Function)({ id, appId: null, connectorName: 'Chat On Steroids Core', tools });
+  const pending = (context.run as Function)({ id, appId: null, connectorName: 'Chat Marks Core', tools });
   expect(ask).not.toHaveBeenCalled(); expect(click).not.toHaveBeenCalled();
   ready = true;
   if (navigate) context.epoch = 2;
@@ -94,7 +94,7 @@ it('keeps a loading settings index pending and restores custody after its instal
       pluginRefreshView: () => ({ appId: 'asdk_app_synthetic' }) }
   });
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
-  const run = () => (context.run as Function)({ id, appId: null, connectorName: 'Chat On Steroids Core', tools });
+  const run = () => (context.run as Function)({ id, appId: null, connectorName: 'Chat Marks Core', tools });
   expect(await run()).toBe(false);
   expect(ask).not.toHaveBeenCalled(); // no durable missing-plugin verdict while loading
   buttons = [{ click: () => { location.href = 'https://chatgpt.com/#settings/Plugins/plugin_asdk_app_synthetic'; } }];
@@ -127,7 +127,7 @@ it('stops automatic retry when a changed schema has no Refresh control', async (
   expect(h.ask.mock.calls.map(([message]) => message.action)).toEqual(['manual']);
   expect(h.ask.mock.calls[0]?.[0]).toMatchObject({
     appId: 'asdk_app_synthetic',
-    connectorName: 'Chat On Steroids Core',
+    connectorName: 'Chat Marks Core',
     tools: [{ name: 'read', description: 'Old description.' }]
   });
 });
@@ -198,7 +198,7 @@ it('reports why a page it owns produced no readable view, instead of returning i
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginRefreshView: () => null }
   });
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
-  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(false);
+  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Core', tools })).toBe(false);
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['fail']);
   expect(String(ask.mock.calls[0]?.[0].error)).toMatch(/card|settings/i);
 });
@@ -230,7 +230,7 @@ function registrationGatedWorkflow(action: 'current' | 'manual' | 'claim' | 'fai
   });
   vm.runInContext(`${askSection}\n${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
   return { click, sendToWorker, location, waiting, release,
-    run: () => (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools }) as Promise<boolean> };
+    run: () => (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Core', tools }) as Promise<boolean> };
 }
 it.each(['current', 'manual', 'claim', 'fail', 'complete'] as const)(
   'keeps %s publication owned across the real document-registration await', async action => {
@@ -254,7 +254,7 @@ const nativeFixtures: JSDOM[] = [];
 afterEach(() => { for (const dom of nativeFixtures.splice(0)) dom.window.close(); });
 function nativeInstalledWorkflow(appId: string | null = null) {
   const listed = `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${id}`;
-  const dom = new JSDOM('<main><a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>Chat On Steroids Core</span></a></main>', { runScripts: 'outside-only', url: listed });
+  const dom = new JSDOM('<main><a href="/settings/plugins-settings/plugin_asdk_app_synthetic"><span>Chat Marks Core</span></a></main>', { runScripts: 'outside-only', url: listed });
   nativeFixtures.push(dom);
   Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', { value() { return this.hidden ? [] : [{}]; } });
   dom.window.eval(domSource);
@@ -262,7 +262,7 @@ function nativeInstalledWorkflow(appId: string | null = null) {
   const click = vi.spyOn(link, 'click').mockImplementation(() => {});
   const api = (dom.window as any).CLF_DOM;
   if (appId) {
-    api.setConnectorApps({ core: [{ appId, name: 'Chat On Steroids Core' },
+    api.setConnectorApps({ core: [{ appId, name: 'Chat Marks Core' },
       { appId: 'asdk_app_other', name: 'Other proven Core' }], desktop: [], plugins: [] });
     link.insertAdjacentHTML('afterend', '<a href="/settings/plugins-settings/plugin_asdk_app_other"><span>Other proven Core</span></a>');
   }
@@ -274,7 +274,7 @@ function nativeInstalledWorkflow(appId: string | null = null) {
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginInstalledButtons: installed, pluginRefreshView: view } });
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
   return { dom, link, click, installed, view, assign, ask, replace, location,
-    run: () => (context.run as Function)({ id, appId, surface: 'core', connectorName: 'Chat On Steroids Core', tools, observeOnly: true }) as Promise<boolean> };
+    run: () => (context.run as Function)({ id, appId, surface: 'core', connectorName: 'Chat Marks Core', tools, observeOnly: true }) as Promise<boolean> };
 }
 it('navigates the sole reverified native link with custody attached before inspecting its card', async () => {
   const h = nativeInstalledWorkflow();
@@ -291,8 +291,8 @@ it.each(['original', 'renamed'])('rechecks the exact enrolled installed link bef
   if (name === 'renamed') h.link.querySelector('span')!.textContent = 'User renamed it 日本語';
   expect(await h.run()).toBe(true);
   expect(h.installed).toHaveBeenCalledTimes(2);
-  expect(h.installed).toHaveBeenNthCalledWith(1, 'Chat On Steroids Core', 'asdk_app_synthetic', 'core');
-  expect(h.installed).toHaveBeenNthCalledWith(2, 'Chat On Steroids Core', 'asdk_app_synthetic', 'core');
+  expect(h.installed).toHaveBeenNthCalledWith(1, 'Chat Marks Core', 'asdk_app_synthetic', 'core');
+  expect(h.installed).toHaveBeenNthCalledWith(2, 'Chat Marks Core', 'asdk_app_synthetic', 'core');
   expect(h.assign).toHaveBeenCalledExactlyOnceWith(pathRouted);
   expect(h.click).not.toHaveBeenCalled();
   expect(h.view).not.toHaveBeenCalled();
@@ -302,8 +302,8 @@ it.each(['absent', 'duplicate', 'foreign-name', 'button'])('does not bypass inst
   const h = nativeInstalledWorkflow('asdk_app_synthetic');
   if (mode === 'absent') h.link.remove();
   if (mode === 'duplicate') h.link.after(h.link.cloneNode(true));
-  if (mode === 'foreign-name') { h.link.href = '/settings/plugins-settings/plugin_asdk_app_foreign'; h.link.textContent = 'Chat On Steroids Core'; }
-  if (mode === 'button') h.link.outerHTML = '<button><span>Chat On Steroids Core</span></button>';
+  if (mode === 'foreign-name') { h.link.href = '/settings/plugins-settings/plugin_asdk_app_foreign'; h.link.textContent = 'Chat Marks Core'; }
+  if (mode === 'button') h.link.outerHTML = '<button><span>Chat Marks Core</span></button>';
   expect(await h.run()).toBe(false);
   expect(h.assign).not.toHaveBeenCalled();
   expect(h.click).not.toHaveBeenCalled();
@@ -362,7 +362,7 @@ it.each(['matching', 'unreadable'])('does not claim or fail after a management r
     t: (_key: string, fallback: string) => fallback,
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginRefreshView: () => reading } });
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => { const value = await read(); return current() ? value : null; }; globalThis.run = refreshManagedPlugin;`, context);
-  const pending = (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools });
+  const pending = (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Core', tools });
   location.href = pathRouted.replace('/settings/plugins-settings/', '/plugins/');
   location.pathname = '/plugins/plugin_asdk_app_synthetic';
   release(outcome === 'matching' ? { appId: 'asdk_app_synthetic', tools, refresh: { click } } : null);
@@ -411,7 +411,7 @@ it('owns the path-routed settings page, so an unreadable card is reported rather
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginRefreshView: () => null }
   });
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
-  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(false);
+  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Core', tools })).toBe(false);
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['fail']);
 });
 
@@ -437,9 +437,9 @@ it('continues from the installed list on the path-routed settings page', async (
       pluginRefreshView: () => ({ appId: 'asdk_app_synthetic' }) }
   });
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
-  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools })).toBe(true);
+  expect(await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Core', tools })).toBe(true);
   expect(assign).toHaveBeenCalledExactlyOnceWith(pathRouted);
-  expect(await (context.run as Function)({ id, appId: null, connectorName: 'Chat On Steroids Core', tools })).toBe(true);
+  expect(await (context.run as Function)({ id, appId: null, connectorName: 'Chat Marks Core', tools })).toBe(true);
   expect(replace).toHaveBeenCalledExactlyOnceWith(undefined, '', pathRouted);
   expect(ask).not.toHaveBeenCalled();
 });
@@ -466,7 +466,7 @@ it('refreshes a settled empty Plugins page and passes its tunnel id to the claim
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
       pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', refresh, tunnelId: 'tunnel_synthetic01', settled: true, tools: refreshed ? tools : [] }) } });
   vm.runInContext(`${section}\n${ticking}; globalThis.run = refreshManagedPlugin;`, context);
-  expect(await (context.run as Function)({ id, appId: null, connectorName: 'Chat On Steroids Plugins', tools })).toBe(true);
+  expect(await (context.run as Function)({ id, appId: null, connectorName: 'Chat Marks Plugins', tools })).toBe(true);
   expect(click).toHaveBeenCalledTimes(1);
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['claim', 'complete']);
   expect(ask.mock.calls[0]?.[0]).toMatchObject({ tunnelId: 'tunnel_synthetic01', tools: [] });
@@ -480,7 +480,7 @@ it.each(['claim', 'current'])('forwards the page tunnel id for %s from the exten
   const context = vm.createContext({ call, ownsDocument: () => true, maintain: () => {}, pluginRefreshMarker: () => id,
     chrome: { tabs: { get: async () => ({ url: pathRouted }) } } });
   vm.runInContext(`globalThis.handlers = {\n${handler}\n};`, context);
-  const send = (tunnelId: unknown) => (context.handlers as any).plugin_refresh({ action, id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Desktop', tools, tunnelId }, null, { tab: 7 });
+  const send = (tunnelId: unknown) => (context.handlers as any).plugin_refresh({ action, id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Desktop', tools, tunnelId }, null, { tab: 7 });
   await send('tunnel_synthetic01');
   expect(JSON.parse(call.mock.calls[0]![1].body)).toMatchObject({ action, tunnelId: 'tunnel_synthetic01' });
   await send('tunnel_x"; drop');
@@ -500,7 +500,7 @@ it('waits for the Refresh control that renders just after the tools, and settles
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
       pluginRefreshView: () => ({ appId: 'asdk_app_synthetic', settled: true, refresh: ++reads > 1 ? refresh : null, tools: [{ ...tools[0], description: 'Old' }] }) } });
   vm.runInContext(`${section}\n${ticking}; globalThis.run = refreshManagedPlugin;`, context);
-  await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools });
+  await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Core', tools });
   expect(ask.mock.calls.map(([message]) => message.action)[0]).toBe('claim');
   expect(click).toHaveBeenCalledTimes(1);
   expect(reads).toBeGreaterThanOrEqual(1 + 1500 / 250);
@@ -513,7 +513,7 @@ it('reports a missing Refresh control only after it stayed absent', async () => 
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
       pluginRefreshView: () => (++reads, { appId: 'asdk_app_synthetic', settled: true, refresh: null, tools: [{ ...tools[0], description: 'Old' }] }) } });
   vm.runInContext(`${section}\n${ticking}; globalThis.run = refreshManagedPlugin;`, context);
-  await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat On Steroids Core', tools });
+  await (context.run as Function)({ id, appId: 'asdk_app_synthetic', connectorName: 'Chat Marks Core', tools });
   expect(ask.mock.calls.map(([message]) => message.action)).toEqual(['manual']);
   expect(reads).toBeGreaterThanOrEqual(1 + 4000 / 250);
 });

@@ -189,7 +189,7 @@ function rowMenuButton(owner: string): HTMLElement | null {
 const savingProjectColor = new Set<string>();
 const removingProject = new Set<string>();
 
-/** A project's menu: its color (a submenu) and taking it off the sidebar. A new chat has its own button on the row. */
+/** A project's menu, including New chat; the row keeps the same action as an inline shortcut. */
 function projectMenuItems(id: string): RowMenuItem[] {
   const color = projects.find(row => row.id === id)?.color ?? null;
   const link = projects.find(row => row.id === id)?.chatgpt;
@@ -204,7 +204,7 @@ function projectMenuItems(id: string): RowMenuItem[] {
   } satisfies RowMenuItem : null;
   return [
     {
-      action: 'new-chat', icon: 'i-pencil', label: () => 'Novo Chat',
+      action: 'new-chat', icon: 'i-pencil', label: () => t('New chat in this project'), data: { newProject: id },
       run: () => selectNewChat(id)
     } satisfies RowMenuItem,
     ...(newTerminal ? [newTerminal] : []),
@@ -1494,7 +1494,7 @@ function paintSessions(): void {
       });
       more.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); toggleRowMenu(menu()); });
       heading.addEventListener('contextmenu', event => { event.preventDefault(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
-      // The project's primary action, beside its menu rather than inside it: one click, as in ChatGPT.
+      // Keep the project's primary action available directly beside its menu.
       const create = el('button', 'btn row-menu-button project-new') as HTMLButtonElement;
       create.type = 'button'; create.dataset.newProject = id; create.append(icon('i-pencil'));
       ui(create, 'title', () => t('New chat in this project'));

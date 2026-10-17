@@ -325,6 +325,10 @@ describe('app interface localization', () => {
       expect(messages['Updating Chat Marks'], locale).not.toContain('Chat On Steroids');
       expect(messages['Starting the installer. Chat Marks opens again by itself.'], locale).not.toContain('Chat On Steroids');
       expect(messages['Add the Chat Marks add-on to Firefox'], locale).not.toContain('Chat On Steroids');
+      expect(messages['Chat Marks connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.'], locale).not.toContain('Chat On Steroids');
+      expect(messages['When enabled, use Chat Marks Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.'], locale).not.toContain('Chat On Steroids');
+      expect(messages['Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.'], locale).not.toContain('Chat On Steroids');
+      expect(messages['macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.'], locale).not.toContain('Chat On Steroids');
     }
   });
 

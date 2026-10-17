@@ -192,9 +192,9 @@
    * by exact name, marking duplicate names ambiguous. The content script picks
    * this computer's installed connector only from the app-reported names.
    */
-  const CORE_APP_NAME = 'Chat On Steroids Core';
-  const CORE_NAME = /^Chat On Steroids Core(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u;
-  const PLUGINS_NAME = /^Chat On Steroids Plugins(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u;
+  const CORE_APP_NAME = 'Chat Marks Core';
+  const CORE_NAME = /^Chat Marks Core(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u;
+  const PLUGINS_NAME = /^Chat Marks Plugins(?: \([\p{L}\p{N} ._-]{1,32}\))?$/u;
   let coreMention = null;
   async function inspectSystemHints(response) {
     if (!active) return;
