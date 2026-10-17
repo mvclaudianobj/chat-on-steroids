@@ -22,6 +22,13 @@ const special = {
   'verify-shell-runtime.cjs': { command: process.execPath, args: [] },
   'verify-pet-performance.cjs': { command: process.execPath, args: ['current', '--check'] }
 };
+// Two pets probes can exit 0 when the product closes its only startup/login window
+// before the assertions run. An Electron process exit is not proof that its GUI
+// checks completed: demand the evidence printed *after* their final assertions.
+const requiredSuccessOutput = {
+  'verify-pet-toggle.cjs': 'Pet toggle/drag/click-through and idle decode checks passed.',
+  'verify-pet-overlay-electron.cjs': 'petContextHide='
+};
 
 const scripts = readdirSync(path.join(root, 'scripts'))
   .filter(name => /^verify-.*\.cjs$/.test(name) && name.includes(filter)).sort();
@@ -66,7 +73,13 @@ for (const name of scripts) {
     const keep = chunk => { unhandled ||= /UnhandledPromiseRejection/.test(String(chunk)); output = (output + chunk).slice(-4000); };
     child.stdout.on('data', keep); child.stderr.on('data', keep);
     const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: 'timeout', output }); }, TIMEOUT_MS);
-    child.on('close', (code, signal) => { clearTimeout(timer); resolve({ code: code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`, output }); });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      const expected = requiredSuccessOutput[name];
+      resolve({ code: code === 0 && unhandled ? 'unhandled rejection'
+        : code === 0 && expected && !output.includes(expected) ? 'exited before completing GUI assertions'
+        : code ?? `signal ${signal}`, output });
+    });
   });
   let outcome = await run();
   const first = outcome;

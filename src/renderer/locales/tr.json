@@ -53,6 +53,7 @@
   "Previous source": "Önceki kaynak",
   "Next source": "Sonraki kaynak",
   "Search chats": "Sohbetlerde ara",
+  "New CLI chats": "Yeni CLI sohbetleri",
   "Ctrl": "Ctrl",
   "Showing the first {0} matches. Add a word to narrow them down.": "İlk {0} eşleşme gösteriliyor. Aramayı daraltmak için bir sözcük ekleyin.",
   "Searching message text… {0} of {1} chats": "Mesaj metninde aranıyor… {1} sohbetten {0}",
@@ -115,6 +116,9 @@
   "Loading chats…": "Sohbetler yükleniyor…",
   "No projects yet.": "Henüz proje yok.",
   "No chats outside projects yet.": "Henüz proje dışında sohbet yok.",
+  "Terminals": "Terminaller",
+  "No terminal sessions yet.": "Henüz terminal oturumu yok.",
+  "Terminal project": "Terminal projesi",
   "Refresh chats": "Sohbetleri yenile",
   "Reusable instructions for your chats.": "Sohbetleriniz için tekrar kullanılabilir talimatlar.",
   "Selected skills": "Seçili beceriler",
@@ -2472,5 +2476,10 @@
   "No chats in incognito": "Gizli pencerede sohbet yok",
   "Chats the app opens go to your regular browser window, never an incognito one.": "Uygulamanın açtığı sohbetler gizli pencereye değil, normal tarayıcı pencerenize gider.",
   "A fuller diagnostics report": "Daha ayrıntılı bir tanılama raporu",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Uygulamanın nasıl kurulduğunu, tarayıcıyı, çökmeleri, sık uyarıları ve her sohbetin durumunu da gösterir; yine kişisel bir şey içermez."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Uygulamanın nasıl kurulduğunu, tarayıcıyı, çökmeleri, sık uyarıları ve her sohbetin durumunu da gösterir; yine kişisel bir şey içermez.",
+  "MarksPanel account": "MarksPanel hesabı",
+  "Manage access to this installation of Chat Marks.": "Bu Chat Marks kurulumuna erişimi yönetin.",
+  "Sign out from MarksPanel": "MarksPanel oturumunu kapat",
+  "Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.": "Şifreli yerel oturum bilgilerini siler ve Chat Marks uygulamasını kapatır. Sonraki açılışta yeniden oturum açmanız gerekir.",
+  "Sign out": "Çıkış yap"
 }

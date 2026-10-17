@@ -116,6 +116,31 @@ const api = {
   terminalResize: (id: string, cols: number, rows: number) => call<void>('workspaceTerminal:request', { action: 'resize', id, cols, rows }),
   terminalAck: (id: string, count: number) => call<void>('workspaceTerminal:request', { action: 'ack', id, count }),
   terminalClose: (id: string) => call<void>('workspaceTerminal:request', { action: 'close', id }),
+  cliStatus: () => call<Array<{ id: 'markscode' | 'codex' | 'claude' | 'marksclaw'; name: string; installed: boolean; enabled: boolean; supported: boolean; running: boolean; version: string | null; detail: string }>>('marksCli:request', { action: 'status' }),
+  cliChatOpen: (backend: 'markscode' | 'codex' | 'claude', projectId: string | null) => call<import('../main/cli-chat.js').CliChatThread>('cliChat:request', { action: 'open', backend, projectId }),
+  cliChatSend: (backend: 'markscode' | 'codex' | 'claude', projectId: string | null, prompt: string) => call<import('../main/cli-chat.js').CliChatThread>('cliChat:request', { action: 'send', backend, projectId, prompt }),
+  cliChatCancel: (backend: 'markscode' | 'codex' | 'claude', projectId: string | null) => call<import('../main/cli-chat.js').CliChatThread>('cliChat:request', { action: 'cancel', backend, projectId }),
+  onCliChatEvent: (listener: (event: import('../main/cli-chat.js').CliChatThread) => void): (() => void) => {
+    const wrapped = (_event: unknown, event: import('../main/cli-chat.js').CliChatThread): void => listener(event);
+    ipcRenderer.on('cliChat:event', wrapped);
+    return () => ipcRenderer.removeListener('cliChat:event', wrapped);
+  },
+  marksPanelLogout: () => call<boolean>('markspanel:logout'),
+  cliAction: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', action: 'enable' | 'disable' | 'install' | 'update' | 'stop') => call<unknown>('marksCli:request', { action, module }),
+  cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),
+  cliCreateSession: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', projectId: string | null) => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId }),
+  cliOpen: (sessionId: string, attachmentId: string, cols: number, rows: number) => call<{ id: string; cwd: string; session: string }>('marksCli:request', { action: 'open', sessionId, attachmentId, cols, rows }),
+  cliWrite: (attachmentId: string, data: string) => call<void>('marksCli:request', { action: 'write', attachmentId, data }),
+  cliResize: (attachmentId: string, cols: number, rows: number) => call<void>('marksCli:request', { action: 'resize', attachmentId, cols, rows }),
+  cliAck: (attachmentId: string, count: number) => call<void>('marksCli:request', { action: 'ack', attachmentId, count }),
+  cliDetach: (attachmentId: string) => call<void>('marksCli:request', { action: 'detach', attachmentId }),
+  cliRenameSession: (sessionId: string, title: string) => call<void>('marksCli:request', { action: 'rename', sessionId, title }),
+  cliDeleteSession: (sessionId: string) => call<void>('marksCli:request', { action: 'delete', sessionId }),
+  onCliEvent: (listener: (event: { id: string; data?: string; exitCode?: number }) => void): (() => void) => {
+    const wrapped = (_event: unknown, event: { id: string; data?: string; exitCode?: number }): void => listener(event);
+    ipcRenderer.on('marksCli:event', wrapped);
+    return () => ipcRenderer.removeListener('marksCli:event', wrapped);
+  },
   onTerminalEvent: (listener: (event: WorkspaceTerminalEvent) => void): (() => void) => {
     const wrapped = (_event: unknown, value: WorkspaceTerminalEvent): void => listener(value);
     ipcRenderer.on('workspaceTerminal:event', wrapped);

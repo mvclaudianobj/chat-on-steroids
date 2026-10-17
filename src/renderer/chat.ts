@@ -147,9 +147,12 @@ interface Deps {
   /** The renderer's single save path — reads every control, including ours. */
   save: () => Promise<void>;
   state: () => AppState | null;
+  cliModules?: () => ReadonlyArray<{ id: string; name: string; enabled: boolean }>;
+  createCliSession?: (moduleId: string, projectId: string) => void | Promise<void>;
 }
 
 let deps: Deps;
+let initialized = false;
 let visible = false;
 
 let sessions: SessionSummary[] = [];
@@ -188,7 +191,17 @@ const removingProject = new Set<string>();
 function projectMenuItems(id: string): RowMenuItem[] {
   const color = projects.find(row => row.id === id)?.color ?? null;
   const link = projects.find(row => row.id === id)?.chatgpt;
+  const project = projects.find(row => row.id === id && !row.ungrouped);
+  const enabledCliModules = deps.cliModules?.().filter(module => module.enabled) ?? [];
+  const newTerminal = deps.createCliSession && project && enabledCliModules.length ? {
+    action: 'new-terminal', icon: 'i-terminal', label: () => t('New terminal'),
+    submenu: () => (deps.cliModules?.() ?? []).filter(module => module.enabled).map(module => ({
+      action: `new-terminal-${module.id}`, icon: 'i-terminal', label: () => module.name,
+      run: () => void deps.createCliSession?.(module.id, project.id)
+    }))
+  } satisfies RowMenuItem : null;
   return [
+    ...(newTerminal ? [newTerminal] : []),
     // Only when its native ChatGPT Project could not be created; otherwise nothing about it shows.
     ...(link?.state === 'failed' || link?.state === 'uncertain' ? [{
       action: 'chatgpt-retry', icon: 'i-retry', disabled: retryingChatgptProject.has(id),
@@ -301,6 +314,9 @@ function selectedLocalProject(): LocalProject | null {
   }
   return newChatSelected && selectedProjectId
     ? projects.find(project => project.id === selectedProjectId && !project.ungrouped) ?? null : null;
+}
+export function selectedChatWorkspaceId(): string | null {
+  return selectedLocalProject()?.id ?? null;
 }
 // Scope is explicit, private to this window and retired on navigation. Choosing
 // a right-side workspace never moves a chat or widens filesystem permissions.
@@ -6742,6 +6758,8 @@ function selectNewChat(projectId: string | null = null): void {
 }
 
 export function initChat(next: Deps): void {
+  if (initialized) { deps = next; return; }
+  initialized = true;
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [

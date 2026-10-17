@@ -62,9 +62,14 @@ export function createWindowActivationGate(showWindow: () => void): {
  */
 export function shouldQuitOnWindowAllClosed(
   platform: NodeJS.Platform,
-  minimizeToTray: boolean
+  minimizeToTray: boolean,
+  loginWindowTransition = false
 ): boolean {
-  return platform !== 'darwin' && !minimizeToTray;
+  // The login window intentionally closes after authentication before the main window
+  // exists. Electron emits window-all-closed at that boundary on Windows/Linux too;
+  // it must not turn a successful login into an application quit. Cancellation is
+  // explicitly handled by the bootstrap and still shuts down without granting access.
+  return !loginWindowTransition && platform !== 'darwin' && !minimizeToTray;
 }
 
 /**

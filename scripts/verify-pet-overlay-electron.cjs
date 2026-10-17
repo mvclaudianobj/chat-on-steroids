@@ -1,6 +1,6 @@
 // Exercise Pets with isolated userData against the built renderer or the live Vite dev renderer.
 // Run after `npm run build`; ELECTRON_RENDERER_URL=http://localhost:5173 also checks dev CSS loading.
-const { app, BrowserWindow, screen } = require('electron');
+const { app, BrowserWindow, screen, safeStorage } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -31,6 +31,7 @@ app.setName('CoS Pets Render Probe');
 app.setPath('userData', userData);
 app.setAppPath(root);
 process.env.CLF_BRIDGE_PORTS = '0';
+const assertPetLogin = require('./fixtures/pet-markspanel-login.cjs').installPetMarkspanelLogin({ app, BrowserWindow, safeStorage });
 
 // Windows production proximity is owned by screen.getCursorScreenPoint(). Substitute only that
 // boundary so this fixture exercises the real sampler -> renderer -> IPC path without moving the
@@ -381,6 +382,7 @@ function attachOverlay(win) {
           `Restoring a dismissed pet must retain its position: ${JSON.stringify(restoredRect)}`);
         console.log(`petContextHide=${JSON.stringify({ menu: contextMenu, hidden: hidden[1].data, restored: restored.data })}`);
         owner.minimize();
+        assertPetLogin();
         clearTimeout(timeout);
         if (process.argv.includes('--hold')) {
           console.log('Holding the desktop overlay for 20 seconds for compositor inspection.');

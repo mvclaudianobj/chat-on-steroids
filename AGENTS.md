@@ -1172,6 +1172,56 @@ current page/ink tokens without recreating shells; cursor colors follow the same
 `scripts/verify-workspace-terminal.cjs` tests real Electron/PTY input, cwd/environment persistence,
 hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state.
 
+### Optional coding CLIs and durable tmux terminals
+
+`main/cli-modules.ts` owns four optional command-line adapters: MarksCode, Codex, Claude
+and MarksClaw. It is separate from the upstream CLIProxyAPI systemd adapter (`modules.ts`),
+which retains its own management console security boundary. The four adapters have exact
+fixed IDs, reviewed binary names and acquisition sources. Codex and Claude are installed
+into their own userData/npm prefixes; the two Marks forks build from their specified GitHub
+repositories with local Bun or Rust tooling. The source-build staging tree is private,
+the Git revision and compiled digest are recorded, and a build failure cannot replace
+the previous installed executable. No installer requests administrator privileges.
+
+`state/marks-cli-modules.json` is the main-owned activation ledger. Activation only exposes
+the module; terminal creation still requires the current Command capability, a real binary,
+and a resolved project canonical cwd. Each module/project pair has a deterministic tmux
+session name under an app-specific tmux socket. On Linux/macOS the main process attaches via
+node-pty and on Windows through the user's WSL tmux installation, converting the approved
+Windows project path with `wslpath`. A session persists when the renderer detaches or the app
+closes; explicit Stop or Disable ends matching tmux sessions. This differs deliberately from
+the ordinary human workspace terminal above, whose PTYs end with the app. IPC requests use
+strict schemas, sender/frame checks, project revalidation before input and output flow control.
+`renderer/cli-modules-ui.ts` owns the four independent sidebar destinations and xterm views.
+`main/cli-chat.ts` and `cli-chat-protocol.ts` separately own headless MarksCode, Codex and
+Claude chat adapters; `renderer/cli-chat-ui.ts` adds the Chat header's backend selector,
+workspace-scoped timeline and composer. It never calls ChatGPT's native send or changes
+the selected ChatGPT session identity. Main stores its separate local history in
+`marks-cli-chat`, records each accepted input before process spawn, tracks an exact
+backend/provider session id for verified resumes and persists assistant results on exit.
+On restart, pending CLI turns become failed rather than claiming live generation.
+Only allowlisted assistant text is projected from structured JSONL output; tool calls,
+reasoning, process output and stderr remain private to the CLI, and the renderer gets no
+shell, executable or arbitrary IPC authority. Stop/Disable also cancels headless CLI
+processes. An actual CLI account is required to prove provider-side responses.
+
+### MarksPanel application admission
+
+`main/markspanel-auth.ts` owns the mandatory MarksPanel login boundary. On every startup,
+the encrypted OS credential store is consulted and the bearer is validated against
+`https://marks.ia.br/api/user`; expired access tokens are renewed through the existing
+device-token endpoint. Without valid identity proof, the main workspace, IPC and MCP
+listeners do not start. The dedicated sandboxed login window offers server-mediated
+email/password and device-code authorization, with credentials and tokens withheld from
+the renderer. After admission, one main-owned check refreshes or validates the session
+every 60 seconds. A revoked/invalid account clears the local secret and closes the app;
+an unavailable server closes this runtime while retaining encrypted credentials for a
+later startup. The General page's sign-out action clears that local session and exits.
+There is no verified server-side token-revocation endpoint, so local sign-out must not
+claim to invalidate already issued remote credentials. `test/markspanel-auth.test.ts`
+covers startup/refresh/revocation and negative network responses; a real account remains
+necessary for provider-side acceptance evidence.
+
 ### Images
 
 `view_image` accepts PNG/JPEG/GIF/WebP under an 8 MiB raw bound and explicit decoded-pixel/memory

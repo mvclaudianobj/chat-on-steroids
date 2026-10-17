@@ -455,3 +455,8 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .is-found { animation: setting-found 1600ms ease-out; }
 @keyframes setting-found { from, 35% { background-color: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
 @media (prefers-reduced-motion: reduce) { .is-found { animation: none; background-color: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
+.marks-cli-terminal { min-height: 420px; height: min(60vh, 660px); padding: 12px; background: #101218; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.cli-module-view { display: flex; flex-direction: column; gap: 12px; min-height: 100%; padding: 22px; }
+.cli-module-view h2 { margin: 0; }
+.cli-module-view p { margin: 0; color: var(--soft); overflow-wrap: anywhere; }
+.cli-module-view .marks-cli-terminal { flex: 1; min-height: 0; height: auto; }

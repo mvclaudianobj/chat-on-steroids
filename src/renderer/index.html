@@ -73,6 +73,12 @@
                 <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
                 <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
               </details>
+              <details class="sidebar-session-section" id="cliModuleChats" open>
+                <summary class="sidebar-session-heading" id="cliModuleChatsHeading">
+                  <span class="sidebar-session-label"><svg class="disclosure-chevron sidebar-section-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Terminals</span>
+                </summary>
+                <p class="empty sidebar-section-empty" id="cliModuleChatsEmpty" role="status">No terminal sessions yet.</p>
+              </details>
             </div>
           </div>
         </section>
@@ -191,6 +197,12 @@
               <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT sees of your screen.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Privacy screenshots</b><em>Screenshots show the active window by default instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>MarksPanel account</h2><p>Manage access to this installation of Chat Marks.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <div class="setting"><span class="setting-text"><b>Sign out from MarksPanel</b><em>Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.</em></span><button id="marksPanelLogout" type="button" class="btn">Sign out</button></div>
               </div>
             </section>
             <section class="appearance-section">

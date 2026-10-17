@@ -53,6 +53,7 @@
   "Previous source": "上一个来源",
   "Next source": "下一个来源",
   "Search chats": "搜索聊天",
+  "New CLI chats": "新建 CLI 聊天",
   "Ctrl": "Ctrl",
   "Showing the first {0} matches. Add a word to narrow them down.": "显示前 {0} 个匹配项。添加一个词以缩小范围。",
   "Searching message text… {0} of {1} chats": "正在搜索消息内容…已完成 {0}/{1} 个聊天",
@@ -115,6 +116,9 @@
   "Loading chats…": "正在加载聊天…",
   "No projects yet.": "还没有项目。",
   "No chats outside projects yet.": "还没有项目之外的聊天。",
+  "Terminals": "终端",
+  "No terminal sessions yet.": "还没有终端会话。",
+  "Terminal project": "终端项目",
   "Refresh chats": "刷新聊天",
   "Reusable instructions for your chats.": "可在聊天中重复使用的指令。",
   "Selected skills": "已选技能",
@@ -2472,5 +2476,10 @@
   "No chats in incognito": "不在无痕窗口中打开聊天",
   "Chats the app opens go to your regular browser window, never an incognito one.": "应用打开的聊天会进入你的普通浏览器窗口，绝不会进入无痕窗口。",
   "A fuller diagnostics report": "更完整的诊断报告",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "它还会显示应用的安装方式、浏览器、崩溃、常见警告以及每个聊天的状态，仍不包含任何个人信息。"
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "它还会显示应用的安装方式、浏览器、崩溃、常见警告以及每个聊天的状态，仍不包含任何个人信息。",
+  "MarksPanel account": "MarksPanel 账户",
+  "Manage access to this installation of Chat Marks.": "管理此 Chat Marks 安装的访问权限。",
+  "Sign out from MarksPanel": "退出 MarksPanel",
+  "Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.": "清除本地加密登录信息并关闭 Chat Marks。下次启动时需要重新验证身份。",
+  "Sign out": "退出登录"
 }

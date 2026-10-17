@@ -123,6 +123,7 @@ import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath } from './window-icon.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 import { showConnectionLossNotice } from './connection-loss-notice.js';
+import { requireMarkspanelLogin, startMarkspanelSessionMonitor } from './markspanel-auth.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -138,6 +139,8 @@ let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
 const usageWarmup = new AbortController();
+let stopMarkspanelMonitor: (() => void) | null = null;
+let completingMarkspanelLogin = false;
 
 // One instance only: two copies would fight over the tunnel and the config file.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -451,6 +454,41 @@ void app.whenReady().then(async () => {
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
+  // The login page opens before the ordinary renderer CSP/permissions setup.
+  // It never requires OS permissions; deny them before creating that window.
+  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  // Access to the local workspace and its MCP endpoints begins only after the
+  // Markspanel account has been validated by the service. A cancelled login
+  // leaves this startup closed rather than continuing in an anonymous session.
+  let loginApproved = false;
+  completingMarkspanelLogin = true;
+  try {
+    loginApproved = await requireMarkspanelLogin({
+      loginPage: path.join(__dirname, '../renderer/markspanel-login.html'),
+      ...(process.env.ELECTRON_RENDERER_URL ? {
+        loginUrl: new URL('/markspanel-login.html', process.env.ELECTRON_RENDERER_URL).toString()
+      } : {}),
+      preload: path.join(__dirname, '../preload/markspanel-login.js'),
+      isQuitting: () => quitting || windowActivation.isDisabled()
+    });
+  } finally {
+    completingMarkspanelLogin = false;
+  }
+  if (!loginApproved) {
+    if (!quitting) app.quit();
+    return;
+  }
+  if (windowActivation.isDisabled()) return;
+  // Refresh and revalidate the Markspanel session throughout the app lifetime.
+  // A revoked token or unavailable identity service closes this runtime through
+  // the existing bounded shutdown, rather than continuing to publish local tools.
+  stopMarkspanelMonitor = startMarkspanelSessionMonitor({
+    isQuitting: () => quitting || windowActivation.isDisabled(),
+    onAccessLost: reason => {
+      logWarn(`Markspanel session ${reason}; stopping local access`);
+      app.quit();
+    }
+  });
   setRecordingStorageLimit(getConfig().sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
   await loadConnectorProof();
   await loadWorkerArchive();
@@ -701,6 +739,8 @@ void app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  stopMarkspanelMonitor?.();
+  stopMarkspanelMonitor = null;
   if (!ownsAppRuntime(hasSingleInstanceLock)) return;
   quitting = true;
   // From this point `will-quit` owns a bounded teardown. A Dock click/relaunch arriving while
@@ -715,7 +755,7 @@ app.on('window-all-closed', () => {
   // macOS convention: closing the last window is not quitting the application. The Dock/menu
   // bar stay alive and `activate` recreates it. Windows/Linux retain the explicit close-to-tray
   // preference; Cmd+Q / app.quit bypasses this event and still enters the shutdown sequence.
-  if (shouldQuitOnWindowAllClosed(process.platform, getConfig().ui.minimizeToTray)) app.quit();
+  if (shouldQuitOnWindowAllClosed(process.platform, getConfig().ui.minimizeToTray, completingMarkspanelLogin)) app.quit();
 });
 
 /**

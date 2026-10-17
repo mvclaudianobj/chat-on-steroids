@@ -53,6 +53,7 @@
   "Previous source": "Nguồn trước",
   "Next source": "Nguồn tiếp theo",
   "Search chats": "Tìm cuộc trò chuyện",
+  "New CLI chats": "Cuộc trò chuyện CLI mới",
   "Ctrl": "Ctrl",
   "Showing the first {0} matches. Add a word to narrow them down.": "Đang hiển thị {0} kết quả đầu tiên. Thêm một từ để thu hẹp tìm kiếm.",
   "Searching message text… {0} of {1} chats": "Đang tìm trong nội dung tin nhắn… {0}/{1} cuộc trò chuyện",
@@ -102,6 +103,9 @@
   "Loading chats…": "Đang tải cuộc trò chuyện…",
   "No projects yet.": "Chưa có dự án.",
   "No chats outside projects yet.": "Chưa có cuộc trò chuyện nào ngoài dự án.",
+  "Terminals": "Thiết bị đầu cuối",
+  "No terminal sessions yet.": "Chưa có phiên terminal nào.",
+  "Terminal project": "Dự án terminal",
   "Refresh chats": "Làm mới cuộc trò chuyện",
   "Reusable instructions for your chats.": "Hướng dẫn dùng lại cho các cuộc trò chuyện.",
   "Selected skills": "Kỹ năng đã chọn",
@@ -2472,5 +2476,10 @@
   "No chats in incognito": "Không mở chat trong cửa sổ ẩn danh",
   "Chats the app opens go to your regular browser window, never an incognito one.": "Các chat do ứng dụng mở sẽ vào cửa sổ trình duyệt thường, không bao giờ vào cửa sổ ẩn danh.",
   "A fuller diagnostics report": "Báo cáo chẩn đoán đầy đủ hơn",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Báo cáo còn cho biết cách cài ứng dụng, trình duyệt, sự cố, cảnh báo thường gặp và trạng thái của từng chat, vẫn không có thông tin cá nhân."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Báo cáo còn cho biết cách cài ứng dụng, trình duyệt, sự cố, cảnh báo thường gặp và trạng thái của từng chat, vẫn không có thông tin cá nhân.",
+  "MarksPanel account": "Tài khoản MarksPanel",
+  "Manage access to this installation of Chat Marks.": "Quản lý quyền truy cập vào bản cài đặt Chat Marks này.",
+  "Sign out from MarksPanel": "Đăng xuất MarksPanel",
+  "Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.": "Xóa thông tin đăng nhập cục bộ đã mã hóa và đóng Chat Marks. Bạn sẽ xác thực lại khi mở lần sau.",
+  "Sign out": "Đăng xuất"
 }

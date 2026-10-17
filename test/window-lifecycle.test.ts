@@ -170,6 +170,10 @@ describe('native window activation', () => {
   it.each(['win32', 'linux'] as const)('keeps close-to-tray semantics on %s', (platform) => {
     expect(shouldQuitOnWindowAllClosed(platform, true)).toBe(false);
     expect(shouldQuitOnWindowAllClosed(platform, false)).toBe(true);
+    // Login is the only window at startup: a successful login closes it before
+    // the main window exists. That transition is not a user-requested quit.
+    expect(shouldQuitOnWindowAllClosed(platform, false, true)).toBe(false);
+    expect(shouldQuitOnWindowAllClosed(platform, false, false)).toBe(true);
   });
 
   it('persists normal bounds plus maximized presentation and ignores other transient native states', () => {

@@ -53,6 +53,7 @@
   "Previous source": "上一個來源",
   "Next source": "下一個來源",
   "Search chats": "搜尋聊天",
+  "New CLI chats": "新增 CLI 聊天",
   "Ctrl": "Ctrl",
   "Showing the first {0} matches. Add a word to narrow them down.": "顯示前 {0} 個相符項目。加入一個詞以縮小範圍。",
   "Searching message text… {0} of {1} chats": "正在搜尋訊息內容…已完成 {0}/{1} 個聊天",
@@ -115,6 +116,9 @@
   "Loading chats…": "正在載入聊天…",
   "No projects yet.": "尚無專案。",
   "No chats outside projects yet.": "尚無專案以外的聊天。",
+  "Terminals": "終端機",
+  "No terminal sessions yet.": "尚無終端機工作階段。",
+  "Terminal project": "終端機專案",
   "Refresh chats": "重新整理聊天",
   "Reusable instructions for your chats.": "可在聊天中重複使用的指令。",
   "Selected skills": "已選技能",
@@ -2472,5 +2476,10 @@
   "No chats in incognito": "不在無痕視窗中開啟聊天",
   "Chats the app opens go to your regular browser window, never an incognito one.": "應用程式開啟的聊天會進入你的一般瀏覽器視窗，絕不會進入無痕視窗。",
   "A fuller diagnostics report": "更完整的診斷報告",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "它也會顯示應用程式的安裝方式、瀏覽器、當機、常見警告以及每個聊天的狀態，仍不包含任何個人資訊。"
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "它也會顯示應用程式的安裝方式、瀏覽器、當機、常見警告以及每個聊天的狀態，仍不包含任何個人資訊。",
+  "MarksPanel account": "MarksPanel 帳戶",
+  "Manage access to this installation of Chat Marks.": "管理此 Chat Marks 安裝的存取權限。",
+  "Sign out from MarksPanel": "登出 MarksPanel",
+  "Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.": "清除本機加密的登入資訊並關閉 Chat Marks。下次啟動時需要重新驗證身分。",
+  "Sign out": "登出"
 }

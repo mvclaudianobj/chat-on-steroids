@@ -53,6 +53,7 @@
   "Previous source": "Fonte anterior",
   "Next source": "Próxima fonte",
   "Search chats": "Pesquisar chats",
+  "New CLI chats": "Novos chats CLI",
   "Ctrl": "Ctrl",
   "Showing the first {0} matches. Add a word to narrow them down.": "Mostrando os primeiros {0} resultados. Adicione uma palavra para refinar a busca.",
   "Searching message text… {0} of {1} chats": "Pesquisando o texto das mensagens… {0} de {1} chats",
@@ -102,6 +103,9 @@
   "Loading chats…": "Carregando chats…",
   "No projects yet.": "Ainda não há projetos.",
   "No chats outside projects yet.": "Ainda não há chats fora de projetos.",
+  "Terminals": "Terminais",
+  "No terminal sessions yet.": "Ainda não há sessões de terminal.",
+  "Terminal project": "Projeto do terminal",
   "Refresh chats": "Atualizar chats",
   "Reusable instructions for your chats.": "Instruções reutilizáveis para seus chats.",
   "Selected skills": "Skills selecionadas",
@@ -2472,5 +2476,10 @@
   "No chats in incognito": "Nada de chats no modo anônimo",
   "Chats the app opens go to your regular browser window, never an incognito one.": "Os chats que o app abre vão para a janela normal do navegador, nunca para uma anônima.",
   "A fuller diagnostics report": "Um relatório de diagnóstico mais completo",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Ele também mostra como o app está instalado, o navegador, falhas, avisos frequentes e o estado de cada chat, ainda sem nada pessoal."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Ele também mostra como o app está instalado, o navegador, falhas, avisos frequentes e o estado de cada chat, ainda sem nada pessoal.",
+  "MarksPanel account": "Conta MarksPanel",
+  "Manage access to this installation of Chat Marks.": "Gerencie o acesso a esta instalação do Chat Marks.",
+  "Sign out from MarksPanel": "Sair do MarksPanel",
+  "Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.": "Apaga o login local criptografado e fecha o Chat Marks. Será necessário autenticar-se novamente na próxima inicialização.",
+  "Sign out": "Sair"
 }

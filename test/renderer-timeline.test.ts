@@ -1844,6 +1844,32 @@ it('offers a new chat beside a project\'s menu, and its color as a submenu and r
   expect((w.document.getElementById('chatInput') as HTMLTextAreaElement).placeholder).toBe('Message in Workspace…');
 });
 
+it('offers enabled CLI modules in a lazy project terminal submenu with the project id', async () => {
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  const modules = [
+    { id: 'markscode', name: 'MarksCode', enabled: true },
+    { id: 'codex', name: 'Codex', enabled: false },
+    { id: 'claude', name: 'Claude', enabled: true }
+  ];
+  const createCliSession = vi.fn();
+  const { w } = await boot([], false, [], [project]);
+  const { initChat } = await import('../src/renderer/chat.js');
+  initChat({ save: async () => undefined, state: () => null, cliModules: () => modules, createCliSession });
+  await settle();
+
+  projectMenu(w, project.id);
+  expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-terminal', 'color', 'remove']);
+  menuItem(w, 'new-terminal').click();
+  const submenu = w.document.querySelectorAll<HTMLElement>('.row-menu')[1]!;
+  expect([...submenu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-terminal-markscode', 'new-terminal-claude']);
+  menuItem(w, 'new-terminal-markscode').click();
+  expect(createCliSession).toHaveBeenCalledExactlyOnceWith('markscode', project.id);
+
+  modules.forEach(module => { module.enabled = false; });
+  projectMenu(w, project.id);
+  expect(w.document.querySelector('.row-menu [data-row-action="new-terminal"]')).toBeNull();
+});
+
 it('picks and clears project color without changing project membership', async () => {
   const project = {
     id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1

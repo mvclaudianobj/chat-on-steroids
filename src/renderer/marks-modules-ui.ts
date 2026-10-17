@@ -3,13 +3,18 @@ import type { AppApi } from '../preload/index.js';
 import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 import { $, toast } from './dom.js';
 import { t, onLanguageChange } from './i18n.js';
+import { createCliModulesUi, type CliModuleSummary } from './cli-modules-ui.js';
 
 export interface MarksModulesUiHooks {
   showTab(name: string): void;
+  openChatView(name: string): void;
+  workspace(): string | null;
 }
 
 /** Only the sidebar hooks are visible to upstream-owned main.ts. */
 export interface MarksModulesUiController {
+  createSession(moduleId: string, projectId: string | null): Promise<void>;
+  cliModules(): ReadonlyArray<CliModuleSummary>;
   normalizeTab(name: string): string;
   onTabOpening(name: string): void;
   onTabShown(name: string): void;
@@ -18,6 +23,7 @@ export interface MarksModulesUiController {
 }
 
 export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): MarksModulesUiController {
+  const cli = createCliModulesUi(api, hooks);
   let cliProxyModule: MarksModuleState | null = null;
   let moduleChecked = false;
   let moduleLoading = false;
@@ -208,10 +214,13 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
   });
   onLanguageChange(paintModules);
   return {
-    normalizeTab: name => name === 'module-cli-proxy' && !moduleUiActive ? 'modules' : name,
-    onTabOpening: name => { if (name === 'modules') void refreshModules(); },
-    onTabShown: name => { if (name === 'module-cli-proxy') void openSelectedModuleConsole(); },
+    createSession: cli.createSession,
+    cliModules: cli.cliModules,
+    normalizeTab: name => cli.normalizeTab(name === 'module-cli-proxy' && !moduleUiActive ? 'modules' : name),
+    onTabOpening: name => { if (name === 'modules') void refreshModules(); cli.onTabOpening(name); },
+    onTabShown: name => { if (name === 'module-cli-proxy') void openSelectedModuleConsole(); cli.onTabShown(name); },
     paintNavigation: name => {
+      cli.paintNavigation(name);
       // Keep the parent Modules page visibly selected while its subitem is open.
       if (name === 'module-cli-proxy') {
         document.querySelector<HTMLElement>('nav [data-tab="modules"]')?.classList.add('is-sel');
@@ -223,6 +232,6 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
         else item.removeAttribute('aria-current');
       }
     },
-    modulePage: button => button?.dataset.modulePage && moduleUiActive ? button.dataset.modulePage : null
+    modulePage: button => cli.modulePage(button) ?? (button?.dataset.modulePage === 'module-cli-proxy' && moduleUiActive ? button.dataset.modulePage : null)
   };
 }

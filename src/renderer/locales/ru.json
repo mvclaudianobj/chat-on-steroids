@@ -53,6 +53,7 @@
   "Previous source": "Предыдущий источник",
   "Next source": "Следующий источник",
   "Search chats": "Поиск по чатам",
+  "New CLI chats": "Новые чаты CLI",
   "Ctrl": "Ctrl",
   "Showing the first {0} matches. Add a word to narrow them down.": "Показаны первые {0} совпадений. Добавьте слово, чтобы сузить поиск.",
   "Searching message text… {0} of {1} chats": "Поиск по тексту сообщений… {0} из {1} чатов",
@@ -115,6 +116,9 @@
   "Loading chats…": "Загрузка чатов…",
   "No projects yet.": "Проектов пока нет.",
   "No chats outside projects yet.": "Чатов вне проектов пока нет.",
+  "Terminals": "Терминалы",
+  "No terminal sessions yet.": "Сеансов терминала пока нет.",
+  "Terminal project": "Проект терминала",
   "Refresh chats": "Обновить чаты",
   "Reusable instructions for your chats.": "Инструкции, которые можно использовать в разных чатах.",
   "Selected skills": "Выбранные Skills",
@@ -2472,5 +2476,10 @@
   "No chats in incognito": "Никаких чатов в режиме инкогнито",
   "Chats the app opens go to your regular browser window, never an incognito one.": "Чаты, которые открывает приложение, попадают в обычное окно браузера, а не в окно инкогнито.",
   "A fuller diagnostics report": "Более подробный диагностический отчёт",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Он также показывает, как установлено приложение, браузер, сбои, частые предупреждения и состояние каждого чата — по-прежнему без личных данных."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "Он также показывает, как установлено приложение, браузер, сбои, частые предупреждения и состояние каждого чата — по-прежнему без личных данных.",
+  "MarksPanel account": "Учётная запись MarksPanel",
+  "Manage access to this installation of Chat Marks.": "Управление доступом к установленному Chat Marks.",
+  "Sign out from MarksPanel": "Выйти из MarksPanel",
+  "Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.": "Удаляет зашифрованные локальные данные входа и закрывает Chat Marks. При следующем запуске потребуется войти снова.",
+  "Sign out": "Выйти"
 }

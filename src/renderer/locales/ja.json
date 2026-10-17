@@ -53,6 +53,7 @@
   "Previous source": "前のソース",
   "Next source": "次のソース",
   "Search chats": "チャットを検索",
+  "New CLI chats": "新しいCLIチャット",
   "Ctrl": "Ctrl",
   "Showing the first {0} matches. Add a word to narrow them down.": "最初の{0}件を表示しています。語句を追加して絞り込んでください。",
   "Searching message text… {0} of {1} chats": "メッセージ本文を検索中… {1} 件中 {0} 件のチャット",
@@ -115,6 +116,9 @@
   "Loading chats…": "チャットを読み込み中…",
   "No projects yet.": "まだプロジェクトがありません。",
   "No chats outside projects yet.": "プロジェクト外のチャットはまだありません。",
+  "Terminals": "ターミナル",
+  "No terminal sessions yet.": "ターミナルセッションはまだありません。",
+  "Terminal project": "ターミナルプロジェクト",
   "Refresh chats": "チャットを更新",
   "Reusable instructions for your chats.": "チャットで繰り返し使える指示。",
   "Selected skills": "選択中のスキル",
@@ -2472,5 +2476,10 @@
   "No chats in incognito": "シークレットウィンドウにチャットを開かない",
   "Chats the app opens go to your regular browser window, never an incognito one.": "アプリが開くチャットは通常のブラウザウィンドウに入り、シークレットウィンドウには入りません。",
   "A fuller diagnostics report": "より充実した診断レポート",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "アプリのインストール方法、ブラウザ、クラッシュ、よくある警告、各チャットの状態も表示します。個人的な情報は引き続き含みません。"
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "アプリのインストール方法、ブラウザ、クラッシュ、よくある警告、各チャットの状態も表示します。個人的な情報は引き続き含みません。",
+  "MarksPanel account": "MarksPanel アカウント",
+  "Manage access to this installation of Chat Marks.": "この Chat Marks のインストールへのアクセスを管理します。",
+  "Sign out from MarksPanel": "MarksPanel からログアウト",
+  "Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.": "暗号化されたローカルのログイン情報を削除し、Chat Marks を終了します。次回起動時に再認証が必要です。",
+  "Sign out": "ログアウト"
 }

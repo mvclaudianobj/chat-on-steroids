@@ -53,6 +53,7 @@
   "Previous source": "Fuente anterior",
   "Next source": "Fuente siguiente",
   "Search chats": "Buscar chats",
+  "New CLI chats": "Nuevos chats de CLI",
   "Ctrl": "Ctrl",
   "Showing the first {0} matches. Add a word to narrow them down.": "Se muestran las primeras {0} coincidencias. Añade una palabra para acotar la búsqueda.",
   "Searching message text… {0} of {1} chats": "Buscando en el texto de los mensajes… {0} de {1} chats",
@@ -115,6 +116,9 @@
   "Loading chats…": "Cargando chats…",
   "No projects yet.": "Aún no hay proyectos.",
   "No chats outside projects yet.": "Aún no hay chats fuera de los proyectos.",
+  "Terminals": "Terminales",
+  "No terminal sessions yet.": "Aún no hay sesiones de terminal.",
+  "Terminal project": "Proyecto del terminal",
   "Refresh chats": "Actualizar chats",
   "Reusable instructions for your chats.": "Instrucciones reutilizables para tus chats.",
   "Selected skills": "Skills seleccionadas",
@@ -2472,5 +2476,10 @@
   "No chats in incognito": "Sin chats en incógnito",
   "Chats the app opens go to your regular browser window, never an incognito one.": "Los chats que abre la app van a tu ventana normal del navegador, nunca a una de incógnito.",
   "A fuller diagnostics report": "Un informe de diagnóstico más completo",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "También muestra cómo está instalada la app, el navegador, los fallos, las advertencias frecuentes y el estado de cada chat, sin nada personal."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "También muestra cómo está instalada la app, el navegador, los fallos, las advertencias frecuentes y el estado de cada chat, sin nada personal.",
+  "MarksPanel account": "Cuenta de MarksPanel",
+  "Manage access to this installation of Chat Marks.": "Administra el acceso a esta instalación de Chat Marks.",
+  "Sign out from MarksPanel": "Cerrar sesión en MarksPanel",
+  "Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.": "Borra el inicio de sesión local cifrado y cierra Chat Marks. Tendrás que iniciar sesión la próxima vez.",
+  "Sign out": "Cerrar sesión"
 }

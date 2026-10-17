@@ -53,6 +53,7 @@
   "Previous source": "이전 출처",
   "Next source": "다음 출처",
   "Search chats": "채팅 검색",
+  "New CLI chats": "새 CLI 채팅",
   "Ctrl": "Ctrl",
   "Showing the first {0} matches. Add a word to narrow them down.": "처음 {0}개 결과를 표시합니다. 단어를 추가해 범위를 좁히세요.",
   "Searching message text… {0} of {1} chats": "메시지 내용 검색 중… 채팅 {1}개 중 {0}개",
@@ -102,6 +103,9 @@
   "Loading chats…": "채팅 불러오는 중…",
   "No projects yet.": "아직 프로젝트가 없습니다.",
   "No chats outside projects yet.": "아직 프로젝트 밖의 채팅이 없습니다.",
+  "Terminals": "터미널",
+  "No terminal sessions yet.": "아직 터미널 세션이 없습니다.",
+  "Terminal project": "터미널 프로젝트",
   "Refresh chats": "채팅 새로고침",
   "Reusable instructions for your chats.": "채팅에서 재사용할 수 있는 지침입니다.",
   "Selected skills": "선택한 스킬",
@@ -2472,5 +2476,10 @@
   "No chats in incognito": "시크릿 창에는 채팅 없음",
   "Chats the app opens go to your regular browser window, never an incognito one.": "앱이 여는 채팅은 시크릿 창이 아닌 일반 브라우저 창으로 갑니다.",
   "A fuller diagnostics report": "더 자세한 진단 보고서",
-  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "앱 설치 방식, 브라우저, 충돌, 자주 나오는 경고, 각 채팅의 상태도 보여 줍니다. 개인 정보는 여전히 포함하지 않습니다."
+  "It also shows how the app is installed, the browser, crashes, frequent warnings and each chat's state, still without anything personal.": "앱 설치 방식, 브라우저, 충돌, 자주 나오는 경고, 각 채팅의 상태도 보여 줍니다. 개인 정보는 여전히 포함하지 않습니다.",
+  "MarksPanel account": "MarksPanel 계정",
+  "Manage access to this installation of Chat Marks.": "이 Chat Marks 설치의 접근 권한을 관리합니다.",
+  "Sign out from MarksPanel": "MarksPanel에서 로그아웃",
+  "Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.": "암호화된 로컬 로그인 정보를 지우고 Chat Marks를 종료합니다. 다음 실행 시 다시 인증해야 합니다.",
+  "Sign out": "로그아웃"
 }

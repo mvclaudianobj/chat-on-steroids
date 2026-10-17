@@ -1,5 +1,8 @@
 import { modulesStatus, moduleAction } from './modules.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
+import { registerCliModuleIpc } from './cli-modules.js';
+import { registerCliChatIpc } from './cli-chat.js';
+import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
@@ -594,6 +597,7 @@ async function buildState(): Promise<AppState> {
 function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void {
   ipcMain.handle(channel, async (_event, payload: unknown) => {
     try {
+      if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out; local actions are blocked');
       return { ok: true as const, data: await fn(payload) };
     } catch (err) {
       const message =
@@ -629,6 +633,21 @@ export async function openSessionChat(id: string): Promise<void> {
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
+  registerCliModuleIpc(getWindow);
+  registerCliChatIpc(getWindow);
+  // Sign out is an application admission transition. End this process after
+  // clearing its secure session so the next startup must authenticate again.
+  ipcMain.handle('markspanel:logout', async event => {
+    const target = getWindow();
+    if (!target || target.isDestroyed() || event.sender !== target.webContents || event.senderFrame !== target.webContents.mainFrame) {
+      return { ok: false, error: 'Window not authorized' };
+    }
+    try {
+      await logoutMarkspanel();
+      setImmediate(() => app.quit());
+      return { ok: true, data: true };
+    } catch { return { ok: false, error: 'Unable to sign out securely' }; }
+  });
   registerDictationIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.

@@ -14,6 +14,13 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.39.3': {
+    lead: () => `${t('Modules')} · MarksPanel`,
+    highlights: [
+      { icon: 'i-terminal', title: () => t('Modules'), text: () => `${t('Modules')}: MarksCode, Codex, Claude, MarksClaw.` },
+      { icon: 'i-check-circle', title: () => t('Authentication'), text: () => `${t('Sign in')} · MarksPanel.` }
+    ]
+  },
   '2.1.39.2': {
     lead: () => t('Open a project to use Files and Review'),
     highlights: [

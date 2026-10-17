@@ -9,6 +9,21 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.39.3] — Módulos CLI e autenticação MarksPanel (pré-lançamento)
+
+> **Preparação:** versão superior à 2.1.39.2; os testes de aceitação e a publicação ainda precisam de confirmação.
+
+- Adicionados módulos opcionais MarksCode, Codex, Claude e MarksClaw com ativação,
+  instalação/atualização sob demanda e terminais persistentes por workspace via tmux.
+- Criados adaptadores de conversa CLI para MarksCode, Codex e Claude, com histórico
+  durável independente da conversa ChatGPT e respostas estruturadas filtradas.
+- Implementado login MarksPanel por senha ou navegador, persistência de sessão
+  criptografada pelo sistema operacional, renovação, revogação e logout protegido.
+- Reforçadas segurança de IPC, isolamento dos workspaces, finalização dos processos,
+  verificações de integridade dos instaladores e testes de regressão.
+- Validação ainda necessária: login real autorizado, chamadas reais dos provedores,
+  macOS/Windows/WSL nativos e política de atualização para versões superiores.
+
 ## [2.1.39.2] — Accessible Files and Review in Chat Marks
 
 - **Files and Review are now accessible from the right dock for unassigned chats.**

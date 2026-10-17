@@ -1,6 +1,7 @@
 import { app, ipcMain, type BrowserWindow, type WebContents } from 'electron';
 import { z } from 'zod';
 import { WorkspaceTerminals } from './workspace-terminal.js';
+import { markspanelAccessBlocked } from './markspanel-auth.js';
 
 export function registerWorkspaceTerminalIpc(getWindow: () => BrowserWindow | null): void {
   let owner: WebContents | null = null;
@@ -16,6 +17,7 @@ export function registerWorkspaceTerminalIpc(getWindow: () => BrowserWindow | nu
   ]);
   ipcMain.handle('workspaceTerminal:request', async (event, payload: unknown) => {
     try {
+      if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
       const target = getWindow();
       if (!target || target.isDestroyed() || event.sender !== target.webContents || event.senderFrame !== target.webContents.mainFrame) throw new Error('Terminal window is unavailable');
       const args = request.parse(payload);

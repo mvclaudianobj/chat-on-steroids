@@ -2,6 +2,7 @@ import { offerToolInput, acknowledgeToolInput, TOOL_INPUT_HEADER } from '../sess
 import { noteConnectorUse } from '../connector-proof.js';
 import { beginPluginToolCall } from '../plugin-refresh.js';
 import { pluginManager } from '../plugins/manager.js';
+import { markspanelAccessBlocked } from '../markspanel-auth.js';
 import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-computer.js';
 /**
  * The machinery every model-facing tool sits on, independent of which surface it lives on.
@@ -638,6 +639,10 @@ export async function dispatch(
   parent?: CallContext,
   setupProfileId: string | null = null
 ): Promise<ToolResult> {
+  if (markspanelAccessBlocked()) return {
+    isError: true,
+    content: [{ type: 'text', text: 'MARKSPANEL_SIGNING_OUT: Local tools are unavailable while the app closes.' }]
+  };
   // The context is built here, one layer out from where the work happens, because the
   // compaction barrier asks about the whole request and not just the handler. A call is
   // still unsettled while it waits for its request-id evidence, while its outcome is being
@@ -990,6 +995,9 @@ async function dispatchTracked(
   let handlerRan = false;
   markTiming('identity');
   const invokeHandler = (): Promise<ToolResult> => {
+    // Identity admission and strict allowlist checks may have awaited storage.
+    // A concurrent MarksPanel logout must not let the earlier request run now.
+    if (markspanelAccessBlocked()) return Promise.resolve(fail('MARKSPANEL_SIGNING_OUT: Local tools are unavailable while the app closes.'));
     handlerRan = true;
     return run();
   };

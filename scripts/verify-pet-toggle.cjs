@@ -1,7 +1,7 @@
 // Real Electron overlay regression, with isolated data and no provider/tunnel access.
 // Run after npm run build: electron scripts/verify-pet-toggle.cjs
 // Windows --native-pointer moves the OS cursor; do not touch the mouse during this test.
-const { app, BrowserWindow, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, nativeImage, screen, safeStorage } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -28,6 +28,7 @@ app.setName('CoS Pet Toggle Probe');
 app.setPath('userData', userData);
 app.setAppPath(root);
 process.env.CLF_BRIDGE_PORTS = '0';
+const assertPetLogin = require('./fixtures/pet-markspanel-login.cjs').installPetMarkspanelLogin({ app, BrowserWindow, safeStorage });
 let owner, overlay, ignored = true, decodes = 0;
 let pointer = { x: 0, y: 0 };
 // Drive the existing native proximity sampler without moving the user's actual mouse.
@@ -185,6 +186,7 @@ async function drag(id) {
   await until(() => ignored, 'click-through after leaving pet');
 }
 app.on('browser-window-created', (_event, win) => {
+  if (win.getTitle().includes('Entrar')) return;
   // The overlay's title only arrives with its page. It is the one window created after the owner:
   // the library starts with no pet enabled, so nothing else opens a window here.
   if (win.getTitle() === 'Pets' || (owner && win !== owner && !overlay)) {
@@ -235,6 +237,7 @@ app.on('browser-window-created', (_event, win) => {
           await enable('capy', false);
         }
         clearTimeout(deadline);
+        assertPetLogin();
         console.log('Pet toggle/drag/click-through and idle decode checks passed.');
         app.quit();
       })().catch(error => { console.error(error); app.exit(1); });

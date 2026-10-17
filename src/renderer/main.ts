@@ -56,7 +56,7 @@ import {
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
 import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
-import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView } from './chat.js';
+import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, selectedChatWorkspaceId } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
@@ -68,6 +68,12 @@ declare global {
 }
 
 const api = window.api;
+document.getElementById('marksPanelLogout')?.addEventListener('click', async () => {
+  const button = document.getElementById('marksPanelLogout') as HTMLButtonElement;
+  button.disabled = true;
+  const reply = await api.marksPanelLogout();
+  if (!reply.ok) { toast(reply.error); button.disabled = false; }
+});
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
@@ -109,7 +115,7 @@ const settingsSearch = initSettingsSearch({
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
 });
 // Marks optional module state/actions live in their own file for upstream-safe merges.
-const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name) });
+const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId });
 initSetupGuide();
 const browserSetup = initBrowserSetup({
   choose: chooseChatBrowser,
@@ -2794,7 +2800,12 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-initChat({ save: () => save(), state: () => state });
+initChat({
+  save: () => save(),
+  state: () => state,
+  cliModules: marksModulesUi.cliModules,
+  createCliSession: marksModulesUi.createSession
+});
 
 void (async () => {
   await refresh();

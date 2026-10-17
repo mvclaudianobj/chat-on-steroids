@@ -198,7 +198,11 @@ app.whenReady().then(async () => {
       const attemptEnd = Date.now() + 1_500;
       while (Date.now() < attemptEnd && !(await interrupted())) await new Promise(resolve => setTimeout(resolve, 40));
     }
-    win.setSize(830, 700); await new Promise(resolve => setTimeout(resolve, 300));
+    win.setSize(830, 700);
+    // Resizing while the bottom drawer is still animating can sample the intermediate
+    // zero-height grid track. Assert the settled viewport, not an animation frame.
+    await js('Promise.race([Promise.all(document.getAnimations().filter(animation => animation.effect?.getComputedTiming().endTime !== Infinity).map(animation => animation.finished.catch(() => undefined))), new Promise(resolve => setTimeout(resolve, 1500))])');
+    await until(`(()=>{const p=document.getElementById('workspaceTerminal').getBoundingClientRect();return p.right<=innerWidth+1&&p.bottom<=innerHeight+1})()`);
     const geometry = await js(`(()=>{const p=document.getElementById('workspaceTerminal').getBoundingClientRect();return {width:p.width,height:p.height,fits:p.right<=innerWidth+1&&p.bottom<=innerHeight+1}})()`);
     assert.ok(geometry.fits, JSON.stringify(geometry));
     fs.writeFileSync(path.join(output, 'terminal.png'), (await win.webContents.capturePage(undefined, { stayHidden: true, stayAwake: true })).toPNG());
