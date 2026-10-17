@@ -58,7 +58,8 @@ import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuse
  * key but can never read it back.
  */
 
-import { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import { repairMacOSPermissions, resetMacOSPermissions } from './computer/macos-grants.js';
 import { z } from 'zod';
 import {
   CAPABILITIES,
@@ -92,8 +93,8 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, expireArmedProjectCreates, getSessionProject, listProjects, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
-import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile } from './project-files.js';
+import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
+import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
 import { hasSecret, isEncryptionAvailable, secureStorageStatus, setAsideUnreadableSecrets, setSecret, storedSecretsUnreadable } from './secrets.js';
@@ -227,6 +228,7 @@ const settingsPatch = z.object({
     playfulContinue: z.boolean().optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
+    mentionPlugins: z.boolean().optional(),
     language: z.enum(UI_LANGUAGES).optional(),
     browserPreferences: z.object({ overwrite: z.boolean(), durations: z.boolean() }).strict().optional(),
     cosBrowserTrayHint: z.boolean().optional(),
@@ -407,6 +409,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
+      mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
       // Not part of the settings form: reported by the window and the extension, carried through.
       language: current.ui.language,
       browserPreferences: current.ui.browserPreferences,
@@ -985,7 +988,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const folder = () => scope.sessionId ? getSessionProject(scope.sessionId)
       : scope.projectId ? projectWorkspace(scope.projectId) : Promise.resolve(null);
     const before = await folder();
-    const library = await listSkillLibrary({ projectPath: before?.real ?? null, refreshCodexPlugins: true });
+    const library = await listSkillLibrary({ projectPath: localProjectPath(before), refreshCodexPlugins: true });
     if ((await folder())?.real !== before?.real) throw new Error('The project changed while Skills were loading');
     return library;
   });
@@ -1010,6 +1013,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const project = await addProject(folder);
     push('session:changed');
     // Its native ChatGPT Project is created by the browser; tell it there is work.
+    if (project.chatgpt?.state === 'requested') wakeBrowserWork();
+    return project;
+  });
+  // A folder on a server (#1469): the address and folder as typed; the server is asked once.
+  handle('projects:addRemote', async payload => {
+    const { address, folder } = (payload ?? {}) as { address?: unknown; folder?: unknown };
+    if (typeof address !== 'string' || typeof folder !== 'string' || address.length > 300 || folder.length > 4096) throw new Error('Enter an SSH address and a folder');
+    const project = await addRemoteProject(address, folder);
+    push('session:changed');
     if (project.chatgpt?.state === 'requested') wakeBrowserWork();
     return project;
   });
@@ -1148,6 +1160,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('projectFiles:attach', async payload => {
     const { projectId, path } = z.object({ projectId: projectFileId, path: projectRelativePath.min(1) }).strict().parse(payload);
+    // A file in a project on a server (#1469) is copied over SFTP first.
+    const snapshot = await serverFileSnapshot(projectId, path);
+    if (snapshot) {
+      const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
+      try { return await stageInputAttachment(snapshot.file, retained); } finally { await snapshot.cleanup(); }
+    }
     const target = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
     const retained = new Set((await listInputs()).filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).flatMap(row => row.attachments?.map(file => file.id) ?? []));
     const checked = await projectFileTarget(projectId, path, { allowRoot: false, fileOnly: true });
@@ -1262,6 +1280,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('desktop:requestAccessibility', async () => {
     await refreshMacOSDesktopAccess({ promptAccessibility: true });
+    return buildState();
+  });
+  // A grant from an earlier build no longer applies, yet System Settings shows it on: reset this
+  // app's own entries and ask again, so macOS files the grant under the build running now.
+  handle('desktop:repairPermissions', async () => {
+    const access = getMacOSDesktopAccess();
+    if (process.platform !== 'darwin' || !access) return buildState();
+    const reset = await repairMacOSPermissions(access, {
+      reset: resetMacOSPermissions,
+      requestScreen: async () => { await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 1, height: 1 } }); },
+      refresh: async options => { await refreshMacOSDesktopAccess(options); }
+    });
+    logInfo(`desktop macos permissions reset for a new prompt: ${reset.join(', ') || 'none'}`);
     return buildState();
   });
 

@@ -9,35 +9,39 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [2.1.39.3] — Módulos CLI e autenticação MarksPanel (pré-lançamento)
+## [2.1.40] — Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions
 
-> **Preparação:** versão superior à 2.1.39.2; os testes de aceitação e a publicação ainda precisam de confirmação.
+Projects can now live on a server you reach over SSH. In the composer, `/` offers your Skills and `@` your project's files anywhere in a message. On a Mac, Desktop access that an update left broken is repaired with one click.
 
-- Adicionados módulos opcionais MarksCode, Codex, Claude e MarksClaw com ativação,
-  instalação/atualização sob demanda e terminais persistentes por workspace via tmux.
-- Criados adaptadores de conversa CLI para MarksCode, Codex e Claude, com histórico
-  durável independente da conversa ChatGPT e respostas estruturadas filtradas.
-- Implementado login MarksPanel por senha ou navegador, persistência de sessão
-  criptografada pelo sistema operacional, renovação, revogação e logout protegido.
-- Reforçadas segurança de IPC, isolamento dos workspaces, finalização dos processos,
-  verificações de integridade dos instaladores e testes de regressão.
-- Validação ainda necessária: login real autorizado, chamadas reais dos provedores,
-  macOS/Windows/WSL nativos e política de atualização para versões superiores.
+### 👉 After updating
 
-## [2.1.39.2] — Accessible Files and Review in Chat Marks
+- Nothing to do. The browser extension updates itself once no chat is busy.
 
-- **Files and Review are now accessible from the right dock for unassigned chats.**
-  Opening either view offers a choice of existing approved local projects.
-  The choice scopes that panel in the current window; it does not move, assign
-  or edit the current conversation, and does not grant filesystem privileges.
-- Switching to another chat retires that temporary workspace choice; selecting
-  Files or Review again offers the appropriate local project choices.
-- All twelve supported interface translations include the new explanation.
-  Existing project-scoped views keep their existing behaviour.
+### ✨ New
 
-## [2.1.39.1] — Chat Marks modular sobre Chat On Steroids 2.1.39
+- **Projects on a server (SSH).** Click **+** next to Projects, choose **Folder on a server (SSH)…**, and enter the server (for example `me@server` or a Host from your `~/.ssh/config`) and the folder. The app connects with your own SSH setup (config, agent, keys and known hosts; key login only) and installs nothing on the server. ChatGPT reads, searches, edits and runs commands in that folder, the folder's `AGENTS.md` comes along, and the terminal opens there. It works whatever login shell the server account uses, fish and tcsh included. Not in this first version: changing a server project's files from the Files panel (browsing, previews and Attach work), the Git panel, and separate checkouts for sub-agents.
+- **Skills and files anywhere in the composer.** `/` offers your installed Skills and `@` the files and folders of the chat's project at any point in a message, not only at the start. App commands such as `/goal` still work at the start.
+- **Prefer Plugins on app-sent messages** (**Settings → General**, off by default). Ordinary messages the app sends mention your Chat On Steroids Plugins app instead of Core. Goal, Loop, sub-agents and recovery keep Core.
+- **Local control API:** a message can choose its model and thinking level (`GET /v1/models` lists them).
 
-Integra a comunidade 2.1.39, com modulos e Skills Marks opcionais.
+### 🛠 Fixed
+
+- **Adding a connector in ChatGPT.** On accounts where ChatGPT uses its newest connector protocol, adding a Chat On Steroids connector failed with "424 / Method not found". It works now; existing connectors were not affected.
+- **Windows line endings.** When ChatGPT edits a file with Windows line endings, the file keeps them instead of ending up with mixed line endings.
+- **Typing after a long paste.** Typing no longer stalls after pasting long text with many escaped spaces.
+- **Editing a queued message.** If the message was sent while you were editing it, your edit lands in the composer instead of being lost.
+- **Exit codes on Windows.** ChatGPT now sees a command's real exit code instead of 1 for every failure.
+- **Mac permissions after an update.** If Screen Recording or Accessibility stopped working after an update while System Settings still shows them as allowed, the app now says so in the chat and repairs it with one click (**Repair permissions**). The button also appears whenever a permission is missing.
+- **The "refresh the plugin" reminder.** Automatic plugin refresh works again for connectors set up with an older version, so the reminder no longer stays while automatic refresh is on. It also opens ChatGPT's current settings page instead of sometimes landing on Home.
+- **GPT-6 answers** show `|` and `&` as the model wrote them, instead of `&#124;` and `&amp;`.
+- **Usage page.** Codex's 5-hour and weekly limits are labeled as Codex, instead of looking like limits on your ChatGPT chats.
+- **Two browsers.** If one of them still has an older extension, new chats open in the up-to-date browser right away instead of waiting.
+- **"OpenAI outage" instead of "No internet"** when OpenAI's tunnel service fails, because your internet is fine then.
+- **Fresh turns.** After a long turn the app continued in a fresh turn, your next message goes out right away, and no leftover "Continue" blocks it. A continue that couldn't be sent stays at the time it was made, instead of sitting at the end of the chat.
+- **Mac: windows on another Space.** Observing a window on an inactive Space works again.
+- **Windows.** A command's exit status shows as the signed number Codex shows (for example −1 instead of 4294967295), and the key hints in Settings show only Ctrl shortcuts.
+- **Firefox.** New chats the app opens no longer occasionally lose their turn, which left Goal, Loop or queued messages waiting. When the add-on is behind the app, the notice says how Firefox updates it.
+- **Smaller fixes.** The diagnostics report's save dialog is titled in your language, the update details in **Activity** are spaced properly again, and a normal update no longer fills the log with warnings.
 
 ## [2.1.39] — Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report
 
@@ -67,18 +71,6 @@ Long work continues in a fresh turn again, also while ChatGPT is thinking or run
 
   It still contains nothing personal: no names, folders, chat titles or text.
 - **Bug reports on GitHub** now ask for the diagnostics report and a check on the latest release, so we can usually help with the first answer.
-
-
-## [2.1.38.1] — Chat Marks community 2.1.38 plus Modules and Linux updates
-
-Built on the community's **2.1.38** release with its Firefox support, fresh turns for long work, in-app tool approvals, Update all, and Codex/Claude Code usage improvements. The community's full release notes appear in the 2.1.38 section below.
-
-### Marks additions
-
-- **Settings → Modules:** manage the existing CLIProxyAPI Linux systemd service from Chat Marks, including detected running and startup status. Start, Stop, Restart, Enable and Disable require explicit user action and Linux PolicyKit authorization. Open the **existing** management console at its detected local address or choose a custom local port. The integration does not change CLIProxyAPI's binary, settings or credentials. The install action opens the project's official guide; it does not automatically install CLIProxyAPI.
-- **Linux .deb updates:** prepare and verify the Marks release package and offer **Install now**, which requests system authorization through PolicyKit rather than running a privileged update when the app quits. **Real PolicyKit elevation, package replacement and relaunch have not yet been validated end to end; release publication must wait for confirmation.**
-- **Community update workflow:** preserve the community version `X.Y.Z` and use `X.Y.Z.N` for Marks revisions (npm SemVer `X.Y.Z+N`). Official release checks are read-only; incorporating community code remains a reviewed Git merge, never a silent automatic merge.
-- **Marks mascot:** retains the silver robotic wolf introduced in 2.1.37.1.
 
 ## [2.1.38] — Firefox, fresh turns for long work, and answering approvals from the app
 
@@ -125,10 +117,6 @@ Firefox joins Chrome, Edge and Brave as a ChatGPT browser. Long work now continu
 - **Updates you can follow.** The question before restarting is now the app's own dialog, with **Keep working** first. While an update installs, a Chat On Steroids window shows each step, and on Windows the installer's progress follows. From this version on, the app opens again by itself without a click.
 - **Codex limits explained.** When Codex stops at a limit, Usage says why in your language, for example when the workspace's Codex credits are used up.
 - **The automatic Continue** no longer ends with a random fun fact. Switch it back on under **Settings → General → Playful asides in automatic Continue**.
-
-## [2.1.37.1] — Marks joins the pets
-
-Marks, the silver robotic wolf with cyan eyes and crystal, now ships in the Pets list. Enable him alongside your other companions. This revision also supports four-part release numbers in the updater; earlier installations must install this revision manually.
 
 ## [2.1.37] — Find in chat, slash commands and Send now
 

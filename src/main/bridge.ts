@@ -1260,13 +1260,19 @@ const EXTENSION_UPDATE_HOLDS: Record<string, string> = {
   'folder-not-ready': 'its folder does not hold the new build yet',
   'browser-updates-itself': 'Firefox updates the signed add-on itself (about:addons → Check for Updates)'
 };
-let extensionUpdateHoldLogged: string | null = null;
+/**
+ * The hold last logged per browser. With two browsers reporting in turn, one shared value made the
+ * browser without a hold reset the other's, and the same reason was logged every round (2.1.39).
+ */
+const extensionUpdateHoldLogged = new Map<string, string | null>();
 
-/** Logs once per change why an offered extension update is waiting; silence resets it. */
-export function noteExtensionUpdateHold(hold: unknown): void {
+/** Logs once per change and browser why an offered extension update is waiting; silence resets it. */
+export function noteExtensionUpdateHold(hold: unknown, browser: string | null = null): void {
   const reason = typeof hold === 'string' && Object.hasOwn(EXTENSION_UPDATE_HOLDS, hold) ? hold : null;
-  if (reason === extensionUpdateHoldLogged) return;
-  extensionUpdateHoldLogged = reason;
+  const key = browser ?? '';
+  if (reason === (extensionUpdateHoldLogged.get(key) ?? null)) return;
+  extensionUpdateHoldLogged.set(key, reason);
+  if (extensionUpdateHoldLogged.size > 16) extensionUpdateHoldLogged.delete(extensionUpdateHoldLogged.keys().next().value!);
   if (reason) logInfo(`bridge: the browser extension waits to update: ${EXTENSION_UPDATE_HOLDS[reason]}`);
 }
 
@@ -2563,7 +2569,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         return json(res, 400, { error: 'invalid_stalled_conversations' }, origin);
       }
       stalledConversations = (body.stalledConversations ?? []) as string[];
-      noteExtensionUpdateHold(body.updateHold);
+      noteExtensionUpdateHold(body.updateHold, browserOf(req));
       revealRequested = body.canReveal === true;
       imageExportRequested = body.canExportImages === true;
       if (req.headers['x-extension-host'] === 'browser' && externalExtension?.browserId !== undefined &&
@@ -2611,6 +2617,10 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
     const follow = canReveal ? takeFollow(browser) : null;
     if (req.method === 'POST' && imageExportRequested) imageExportBrowsers.set(browser ?? '', Date.now());
     const otherBrowser = notChosenBrowser(req), chosenBuiltIn = chosenBuiltInBrowser(req);
+    // A companion the claim route would refuse as out of date is not offered inputs either: being
+    // offered one first made it the owner of a new chat it could never claim, and the current
+    // browser was never offered it (2.1.39 release round, Windows VM).
+    const refusedAsStale = staleCompanion(req);
     const pendingInputs = otherBrowser ? [] : await pendingBrowserInputs();
     const pendingIds = new Set((await pendingBrowserInputs()).map(input => input.id));
     for (const id of openingCustody.keys()) if (!pendingIds.has(id)) openingCustody.delete(id);
@@ -2633,7 +2643,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         inputOpeningIds: inputRows.filter(row => !['sent', 'failed', 'cancelled'].includes(row.state)).map(row => row.id),
         // A message for the running turn goes in while a call runs: ChatGPT keeps that call's result (#1231).
         // An existing chat waits out a new tunnel-client's takeover, or its next call waits ~2 min (#1220).
-        inputs: [...pendingInputs.filter(input => (!input.conversationId || input.directTurn || runningToolCalls(input.conversationId) === 0) &&
+        inputs: [...pendingInputs.filter(input => !refusedAsStale && (!input.conversationId || input.directTurn || runningToolCalls(input.conversationId) === 0) &&
             (!input.conversationId || !tunnelRouteSettling()) &&
             !inputHeldElsewhere(input, browser, chosenBuiltIn)),
           ...inputRows.filter(row => row.lifetime === 'temporary-planner' && ['sent', 'cancelled', 'failed'].includes(row.state))
@@ -3521,6 +3531,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // "Follow new output" applies to the ChatGPT page too; the page owns the scrolling.
         followOutput: getConfig().ui.followOutput !== false,
         mentionCore: getConfig().ui.mentionCore !== false,
+        mentionPlugins: getConfig().ui.mentionPlugins === true,
         // This chat was opened by the app, so its first user message is not the user's —
         // it is the handoff brief or the worker bootstrap this app typed. The page uses
         // it to fold that message away. Read off the session record rather than remembered
@@ -4278,6 +4289,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         context: contextView(),
         followOutput: getConfig().ui.followOutput !== false,
         mentionCore: getConfig().ui.mentionCore !== false,
+        mentionPlugins: getConfig().ui.mentionPlugins === true,
         goal: {
           enabled: getConfig().goal.enabled,
           // The app-wide setting is nobody's own answer, by definition: it is what a chat that
@@ -8233,8 +8245,16 @@ async function noteRecoveryObservations(
   // The ten-/two-minute budget is silence recovery only. Final response evidence
   // consumes it even if a local call is still draining; runningToolCalls separately
   // guards actual send/compaction. Replayed finals cannot consume newer work.
+  // A rotation is reported as one batch with the rotated turn's end and the fresh turn's start,
+  // which never moves the grant; the fresh turn's later work then renews it under the rotated
+  // turn's id. That turn has ended, so this later completed final spends its grant too. Without
+  // this the chat read as busy, and a message typed after the answer waited for the silence sweep
+  // (163 s in the 2.1.40 release round).
+  const grantTurnEnded = !!completedFinal && !!terminalGrant?.turnId && !!finalTurn && terminalGrant.turnId !== finalTurn &&
+    terminalGrant.sessionId === sessionId && activeUntil.get(conversationId) === terminalGrant &&
+    (await readRecentEvents(sessionId!, 20, { kinds: ['turn_end'] })).some(event => event.turnId === terminalGrant.turnId);
   if (completedFinal && terminalGrant && activeUntil.get(conversationId) === terminalGrant &&
-      terminalGrant.sessionId === sessionId && (terminalGrant.turnId ?? null) === (finalTurn ?? null)) endActivity(conversationId);
+      terminalGrant.sessionId === sessionId && ((terminalGrant.turnId ?? null) === (finalTurn ?? null) || grantTurnEnded)) endActivity(conversationId);
   else if (mcpTerminal && terminalGrant && activeUntil.get(conversationId) === terminalGrant) {
     terminalGrant.mcpBacked = true;
     // A completed tool-only response can still acquire its missing final text.

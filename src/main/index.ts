@@ -1,3 +1,4 @@
+import { closeRemoteSessions } from './remote/ssh.js';
 import { stopInputStartup } from './session/start-input.js';
 import { browserExtensionRequired } from '../shared/types.js';
 import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
@@ -371,7 +372,7 @@ function refreshTray(): void {
   const offline = state === 'offline';
   // Offline keeps the running icon: the bridge is up, the internet is not.
   const running = connected || offline;
-  const label = mainText(connected ? 'Connected' : offline ? 'No internet' : 'Not connected');
+  const label = mainText(connected ? 'Connected' : offline ? (getStatus().offlineCause === 'service' ? 'OpenAI outage' : 'No internet') : 'Not connected');
   tray.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
   tray.setToolTip(`Chat Marks — ${label}`);
@@ -804,6 +805,8 @@ app.on('will-quit', (event) => {
         name: 'process cleanup',
         budgetMs: 15_000,
         run: () => [unifiedExecManager.terminateAllProcesses(), workspaceTerminalsExited(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close(),
+          // SFTP sessions of projects on a server (#1469): their ssh would outlive the app on Windows.
+          Promise.resolve().then(() => closeRemoteSessions()),
           Promise.resolve().then(() => loadedCosBrowser()?.stop())]
       },
       // Phase 3: recorder work can enqueue both session projections and named durable state.

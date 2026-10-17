@@ -1,5 +1,7 @@
 import { initBrowserSetup } from './setup-browser.js';
 import { currentLanguage, ui, uiText, t, initLanguage, onLanguageChange } from './i18n.js';
+import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
+import { desktopAccessProblem, paintDesktopAccessNotice } from './desktop-access-notice.js';
 import { chatgptNameLine } from './connector-name.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { displayLocalServer } from './local-url.js';
@@ -20,7 +22,6 @@ import { initKeychainNotice } from './keychain-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
-import { initMarksModulesUi } from './marks-modules-ui.js';
 import { initWhatsNew } from './whats-new.js';
 import { initSettingsSearch } from './settings-search.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
@@ -60,6 +61,7 @@ import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, op
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
+import { initMarksModulesUi } from './marks-modules-ui.js';
 
 declare global {
   interface Window {
@@ -68,6 +70,7 @@ declare global {
 }
 
 const api = window.api;
+
 document.getElementById('marksPanelLogout')?.addEventListener('click', async () => {
   const button = document.getElementById('marksPanelLogout') as HTMLButtonElement;
   button.disabled = true;
@@ -77,6 +80,10 @@ document.getElementById('marksPanelLogout')?.addEventListener('click', async () 
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initLanguage();
+// Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
+ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
+ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));
+ui($('enterSendsModifier'), 'textContent', () => primaryShortcut(t('Enter')));
 let pluginRefreshResetBusy = false;
 let pluginRefreshResetFailed = false;
 function paintPluginRefreshRecovery(next: AppState): void {
@@ -114,8 +121,6 @@ const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
 });
-// Marks optional module state/actions live in their own file for upstream-safe merges.
-const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId });
 initSetupGuide();
 const browserSetup = initBrowserSetup({
   choose: chooseChatBrowser,
@@ -233,7 +238,6 @@ function placePermissions(tab: string): void {
 }
 
 function showTab(name: string): void {
-  name = marksModulesUi.normalizeTab(name);
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
@@ -247,7 +251,6 @@ function showTab(name: string): void {
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   if (name === 'settings') void paintRecordingStorageUsage();
-  marksModulesUi.onTabOpening(name);
   $('tabs').hidden = !settings;
   $('settingsFindBox').hidden = !settings;
   // A page opened any way leaves the search; the page list comes back.
@@ -259,12 +262,10 @@ function showTab(name: string): void {
   for (const tab of document.querySelectorAll<HTMLElement>('nav button')) {
     tab.classList.toggle('is-sel', tab.dataset.tab === name);
   }
-  marksModulesUi.paintNavigation(name);
   for (const item of document.querySelectorAll<HTMLElement>('[data-sidebar-page]')) item.classList.toggle('is-sel', item.dataset.sidebarPage === name);
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
     panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
   }
-  marksModulesUi.onTabShown(name);
   // After the panel shows: the chat and Agents & automation share its scroll pane, and a hidden
   // pane cannot be scrolled to where each view starts.
   if (name === 'settings') openChatView('settings');
@@ -353,7 +354,6 @@ $('sidebarPets').addEventListener('click', () => showTab('pets'));
 $('sidebarSkills').addEventListener('click', () => showTab('skills'));
 api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
-$('composerFolder').addEventListener('click', () => $('addProject').click());
 let zoomFactor = 1;
 let zoomEdited = false;
 void api.getZoom().then(result => {
@@ -371,12 +371,8 @@ document.addEventListener('keydown', (event) => {
   event.preventDefault(); void zoom(event.key === '0' ? 1 : zoomFactor + (event.key === '-' ? -.1 : .1));
 });
 $('tabs').addEventListener('click', (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab], [data-module-page]');
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab]');
   if (button?.dataset.tab) showTab(button.dataset.tab);
-  else {
-    const page = marksModulesUi.modulePage(button);
-    if (page) showTab(page);
-  }
 });
 
 // ------------------------------------------------------------ permissions
@@ -661,15 +657,26 @@ function paintDesktopAccess(next: AppState): void {
   box.hidden = missing.length === 0;
   if (box.hidden) return;
 
+  const problem = desktopAccessProblem(next);
+  const stale = problem?.stale === true;
+  // Repair resets only this app's own entry and asks again, so it is safe whether or not an
+  // earlier grant is remembered; the first version that remembers grants knows of none.
+  const repairable = problem?.missing === true;
   ui($('desktopAccessTitle'), 'textContent', () => t("Desktop access needs attention"));
-  ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat Marks. ", [missing.join(' · ')]) +
-    t("Grant the missing macOS permission, then fully quit and reopen the app."));
+  ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat On Steroids. ", [missing.join(' · ')]) +
+    (stale
+      ? t("macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.")
+      : repairable
+        ? t("Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.")
+        : t("Grant the missing macOS permission, then fully quit and reopen the app.")));
+  $<HTMLButtonElement>('repairDesktopAccess').hidden = !repairable;
   $<HTMLButtonElement>('openDesktopScreen').hidden =
     !needsScreen || access.screen === 'granted';
   $<HTMLButtonElement>('openDesktopAccessibility').hidden =
     !needsAccessibility || access.accessibility === 'granted';
+  // Repair asks for Accessibility again itself; a second request button would only compete with it.
   $<HTMLButtonElement>('requestDesktopAccessibility').hidden =
-    !needsAccessibility || access.accessibility === 'granted';
+    !needsAccessibility || access.accessibility === 'granted' || repairable;
 }
 
 /**
@@ -760,6 +767,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
+      mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
@@ -847,6 +855,11 @@ const STATUS_TEXT: Record<AppState['status']['state'], string> = {
   'auth-failed': "Sign-in failed",
   'tunnel-unavailable': "Tunnel unavailable"
 };
+
+/** The connection's one-line name; an outage of OpenAI's tunnel service is not "No internet". */
+function statusText(status: AppState['status']): string {
+  return status.state === 'offline' && status.offlineCause === 'service' ? "OpenAI outage" : STATUS_TEXT[status.state];
+}
 
 const METHOD_HINT: Record<string, string> = {
   openai:
@@ -1214,7 +1227,7 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
   let tone: UpdateTone = 'work';
   // #1490: an installer that stopped silently left this start on the old version.
   if (update.notInstalled) {
-    lines.push(t("Chat Marks {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.", [update.notInstalled, update.current]));
+    lines.push(t("Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.", [update.notInstalled, update.current]));
     tone = 'bad';
   }
   if (update.latest && !(update.notInstalled === update.latest && update.stage === 'ready')) {
@@ -1225,12 +1238,12 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
       update.stage === 'checking'
         ? t("Checking for the latest update…")
         : update.stage === 'ready'
-        ? t("Chat Marks {0} is downloaded and ready. Install it now, or it installs the next time you quit.", [update.latest])
+        ? t("Chat On Steroids {0} is downloaded and ready. Install it now, or it installs the next time you quit.", [update.latest])
         : update.stage === 'downloading'
-          ? t("Chat Marks {0} is downloading. Keep working; you can install it when it lands.", [update.latest])
+          ? t("Chat On Steroids {0} is downloading. Keep working; you can install it when it lands.", [update.latest])
           : update.stage === 'failed'
-            ? t("Chat Marks {0} could not be downloaded: {1}.", [update.latest, update.error ? updateErrorText(update.error) : t("the download stopped")])
-            : t("Chat Marks {0} is out. This installation has to be updated by hand.", [update.latest])
+            ? t("Chat On Steroids {0} could not be downloaded: {1}.", [update.latest, update.error ? updateErrorText(update.error) : t("the download stopped")])
+            : t("Chat On Steroids {0} is out. This installation has to be updated by hand.", [update.latest])
     );
     if (update.stage === 'failed' || update.notInstalled) tone = 'bad';
   } else if (update.stage === 'failed') {
@@ -1240,13 +1253,17 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
     lines.push(t("Checking for a newer version…"));
   } else if (!stale && !missing && !update.notInstalled) {
     const extension = bridge.present && bridge.extensionVersion ? t(" · extension {0}", [bridge.extensionVersion]) : '';
-    lines.push(t("Up to date! Chat Marks {0}{1}", [update.current, extension]));
+    lines.push(t("Up to date! Chat On Steroids {0}{1}", [update.current, extension]));
     tone = 'ok';
   }
   if (stale) {
+    // Firefox runs the add-on Mozilla signed and updates it itself; the app's folder is not what it loads.
+    const firefox = bridge.externalExtension?.engine === 'gecko' && bridge.externalExtension.version === stale;
     lines.push(
       t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
-        t("Reload the extension from this app’s folder, then refresh ChatGPT.")
+        (firefox
+          ? t("Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.")
+          : t("Reload the extension from this app’s folder, then refresh ChatGPT."))
     );
     tone = 'bad';
   }
@@ -1462,7 +1479,7 @@ function apply(next: AppState): void {
   const label = $('sidebarConnectionLabel');
   const capsuleWords = (): string => disconnecting ? t('Disconnecting…') : busy ? t('Connecting…')
     // A failure says so in one short word; its reason is in the title and the details.
-    : offline ? t(STATUS_TEXT[status.state]) : failed ? t('Failed') : t('Connect');
+    : offline ? t(statusText(status)) : failed ? t('Failed') : t('Connect');
   // Connecting sends several updates with the same words: those change nothing, and a morph under way
   // keeps going. New words morph from what is on screen now, the width mid-way included.
   // Opening from the dot (Disconnecting…) morphs the same way, with no old words to fade.
@@ -1528,12 +1545,12 @@ function apply(next: AppState): void {
     ], { duration: 900, easing: 'ease-out' });
   }
   if (previousConnectionState !== null && previousConnectionState !== status.state) {
-    ui($('connectionAnnounce'), 'textContent', () => t(STATUS_TEXT[status.state]));
+    ui($('connectionAnnounce'), 'textContent', () => t(statusText(status)));
   }
   previousConnectionState = status.state;
   const connectionPopover = $('connectionPopover');
   connectionPopover.className = `connection-popover scroll${capsuleTone ? ` ${capsuleTone}` : ''}`;
-  ui($('connectionPopoverTitle'), 'textContent', () => t(STATUS_TEXT[status.state]));
+  ui($('connectionPopoverTitle'), 'textContent', () => t(statusText(status)));
 
   const id = config.tunnel.tunnelId;
   ui($('headerSub'), 'textContent', () => config.tunnel.kind === 'openai'
@@ -1617,6 +1634,7 @@ function apply(next: AppState): void {
   readCommandAllowlist();
   paintGroups();
   paintDesktopAccess(next);
+  paintDesktopAccessNotice(next, { repair: () => void repairDesktopAccess(), open: () => showTab('home') });
 
   // ---- folders
   paintRoots(config.roots);
@@ -1649,7 +1667,17 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
-  applyValue($<HTMLSelectElement>('rotateTurnMinutes'), String(config.ui.rotateTurnMinutes ?? 30), previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
+  // A value the list does not offer (set in the config) gets its own option; without one the select
+  // reads empty and the next save of any setting turned fresh turns Off (2.1.39 release round).
+  const rotate = $<HTMLSelectElement>('rotateTurnMinutes');
+  const rotateMinutes = String(config.ui.rotateTurnMinutes ?? 30);
+  if (![...rotate.options].some(option => option.value === rotateMinutes)) {
+    rotate.querySelector('option[data-configured]')?.remove();
+    const option = document.createElement('option');
+    option.value = rotateMinutes; option.textContent = t("{0} min", [rotateMinutes]); option.dataset.configured = '';
+    rotate.add(option);
+  }
+  applyValue(rotate, rotateMinutes, previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
   applyValue($<HTMLSelectElement>('followUp'), config.ui.followUp ?? 'steer', previousState?.config.ui.followUp ?? 'steer');
@@ -1679,6 +1707,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
+  applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
   applyChecked($<HTMLInputElement>('mcpPersistentUrls'), config.mcp?.persistentUrls === true, previousState?.config.mcp?.persistentUrls);
   // Stable URLs live only in the OS-backed secret store; without it they keep rotating.
@@ -1760,7 +1789,7 @@ function apply(next: AppState): void {
   wizConnect.dataset.tone = tone;
   const pill = $('wizStatusPill');
   pill.dataset.tone = tone;
-  ui(pill, 'textContent', () => t(STATUS_TEXT[status.state]));
+  ui(pill, 'textContent', () => t(statusText(status)));
   const detail = $('wizStatus');
   detail.hidden = !failed || !status.detail;
   ui(detail, 'textContent', () => failed ? status.detail : '');
@@ -1796,7 +1825,7 @@ function apply(next: AppState): void {
         ? t("The plugin is in your ChatGPT. It runs the first time a chat asks for it.")
         : ''
       : ranAt === null
-        ? t("ChatGPT connected {0} but has never run a tool. Check that the Chat Marks app is enabled in ChatGPT → Plugins.", [ago(reachedAt)])
+        ? t("ChatGPT connected {0} but has never run a tool. Check that the CoS app is enabled in ChatGPT → Plugins.", [ago(reachedAt)])
         : unverified.length > 0
           ? // One connector working is not the whole setup. Naming the missing one is the
             // difference between "something is off" and knowing what to go and create.
@@ -2105,7 +2134,7 @@ function paintClock(): void {
       ? t("Reached")
       : connected
         ? t("waiting")
-        : t(STATUS_TEXT[status.state]));
+        : t(statusText(status)));
   ui($('connectionPopoverBrowser'), 'textContent', () => bridge.present
     ? t("Connected")
     : bridge.paired ? t("Paired · not active") : t("Not connected"));
@@ -2119,8 +2148,8 @@ function paintClock(): void {
   ui($('connectionPopoverTitle'), 'title', () => disconnecting ? t('Closing connection…') : status.handshakeAt !== null ? t("verified {0}", [ago(status.handshakeAt)]) : t("no handshake yet"));
 
   const triggerText = status.handshakeAt !== null && running
-    ? `${t(STATUS_TEXT[status.state])} · ${t("verified {0}", [ago(status.handshakeAt)])}`
-    : t(STATUS_TEXT[status.state]);
+    ? `${t(statusText(status))} · ${t("verified {0}", [ago(status.handshakeAt)])}`
+    : t(statusText(status));
   ui($('sidebarConnection'), 'aria-label', () => triggerText);
   ui($('sidebarConnection'), 'title', () => triggerText);
 }
@@ -2492,6 +2521,16 @@ async function runChecks(): Promise<void> {
 }
 
 $('runChecks').addEventListener('click', () => void runChecks());
+async function repairDesktopAccess(): Promise<void> {
+  for (const id of ['repairDesktopAccess', 'desktopAccessNoticeRepair']) $<HTMLButtonElement>(id).disabled = true;
+  try {
+    const next = await run(api.repairDesktopAccess());
+    if (next) apply(next);
+  } finally {
+    for (const id of ['repairDesktopAccess', 'desktopAccessNoticeRepair']) $<HTMLButtonElement>(id).disabled = false;
+  }
+}
+$('repairDesktopAccess').addEventListener('click', () => void repairDesktopAccess());
 $('requestDesktopAccessibility').addEventListener('click', async () => {
   const button = $<HTMLButtonElement>('requestDesktopAccessibility');
   button.disabled = true;
@@ -2565,7 +2604,7 @@ function confirmUpdateRestart(version: string): Promise<boolean> {
     const title = document.createElement('h2'); title.id = 'updateRestartTitle';
     ui(title, 'textContent', () => t('Restart to install the update?'));
     const lead = document.createElement('p'); lead.className = 'whats-new-lead'; lead.id = 'updateRestartLead';
-    ui(lead, 'textContent', () => t('Chat Marks will close and restart. Running chats, agents and commands may be interrupted.'));
+    ui(lead, 'textContent', () => t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'));
     dialog.setAttribute('aria-labelledby', title.id); dialog.setAttribute('aria-describedby', lead.id);
     head.append(hero, named, title, lead);
     const actions = document.createElement('footer'); actions.className = 'whats-new-actions';
@@ -2601,7 +2640,7 @@ updateAllButton.addEventListener('click', async () => {
     if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
     const result = reply.data;
     if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
-    else if (result === 'restarting') toast(t('Installing the update. Chat Marks closes and starts again as the new version.'));
+    else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
     else if (result === 'checking-connectors') toast(document.getElementById('updateReadinessCard') ? t('Plugin checks requested. Any remaining steps are shown in Update status.') : t('Checking…'));
     else if (result === 'confirm') toast(t('Update postponed. You can keep working.'));
   } catch (error) {
@@ -2622,7 +2661,7 @@ updateAllButton.addEventListener('click', async () => {
  * click looking like a crash. Both buttons are the same action; either can be the one pressed.
  */
 function installUpdate(): void {
-  toast(t("Installing the update. Chat Marks closes and starts again as the new version."));
+  toast(t("Installing the update. Chat On Steroids closes and starts again as the new version."));
   void run(api.installUpdate());
 }
 
@@ -2741,6 +2780,7 @@ for (const id of [
   'enterSends',
   'turnNotifications',
   'mentionCore',
+  'mentionPlugins',
   'controlApiEnabled',
   'controlApiAllowActions',
   'mcpPersistentUrls',
@@ -2800,9 +2840,8 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-initChat({
-  save: () => save(),
-  state: () => state,
+const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId });
+initChat({ save: () => save(), state: () => state ,
   cliModules: marksModulesUi.cliModules,
   createCliSession: marksModulesUi.createSession
 });

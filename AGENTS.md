@@ -466,16 +466,23 @@ then acts as a package-bounded alias for that target; resource paths are revalid
 cannot traverse above the linked package. The managed root itself and linked `SKILL.md` files
 remain non-linkable. Desktop and external plugins receive no managed root.
 
-Skills open through leading `/` completion in the composer; the attachment popup's Skills button
-inserts that leading slash and focuses the input while preserving existing draft text. Commands and Skills are
-separate compact sections; there is no sidebar entry, modal library or native import/remove UI.
+Skills open through `/` completion in the composer. In prose, completion offers only installed
+Skills; selecting an exact Skill id projects it into the existing leading authored directive block, while
+slash text in paths, links and code stays literal. App commands remain available only in the
+leading command block. The attachment popup's Skills button inserts that leading slash and focuses
+the input while preserving existing draft text. `@` completion browses entries under the current
+Local Project via the existing project-files listing authority and inserts a project-relative text
+reference; it does not upload a file or broaden filesystem access. Commands, Skills and project
+files are separate compact sections; there is no sidebar entry, modal library or native import/remove UI.
 Commands: `/plan`, `/goal`, `/loop`, `/compact`, plus Codex's `/model` and `/reasoning` (open the model picker), `/new`, `/rename`, `/pin`, `/status` (the context meter's panel), `/review` and `/init` (put a review or AGENTS.md request in front of the draft, unsent), `/usage`, `/plugins`, `/pet` and `/feedback` (Settings → Activity, the diagnostics report). `/rename`, `/pin`, `/status` and `/compact` are offered only while a chat is open (`commandAvailable`); popups open after the choosing click has passed the outside-click handlers.
 A small plus icon to the right of that Skills button inserts `Please add the following skills to my COS skills:`
 into the authored draft without sending it. ChatGPT can create Markdown instructions through
 the existing permission-checked `/skills` filesystem root. Leading `/id` or `/prompt id` completion projects selected
 commands as removable chips. The existing authored draft retains those command bytes; chips and
 the visible task textarea are projections, never a separate selection ledger. Multiple commands
-preserve order and deduplicate; prose/code later in a message is literal. Empty/loading/no-match
+preserve order and deduplicate; prose/code later in a message is literal. Inline exact Skill
+selection is projected into the same leading directive block, so `skillDirectives` remains the
+authority for submitted Skill ids. Empty/loading/no-match
 states do not intercept Enter. Draft replacement, navigation, render generations and IME composition retire stale choices.
 
 `skill-library.ts` discovers repository `.agents/skills`, project `.codex/skills`, standard user,
@@ -977,6 +984,38 @@ chats receive no project file. Missing AGENTS is fine; an unsafe/unreadable/bina
 preparation visibly. Full prompt budgeting and
 hidden framing are described in §6.
 
+### Projects on a server (SSH, #1469)
+
+A `Root` and a `LocalProject` may carry `remote: RemoteFolder` (`src/shared/types.ts`): `host` as
+the person typed it (an ssh-config alias or `user@host`, never starting with `-`), optional `port`,
+and the absolute folder on the server. Their `path` is then the identity `host[:port]:/path`
+(`remoteIdentity`), never a local path. `addRemoteProject(address, folder)` (IPC
+`projects:addRemote`, preload `addRemoteProject`) parses with `parseRemote`, asks the server once
+over SFTP (`realpath`, then `stat`: a folder), and adds the root and the project; the same server
+folder again is the same project. Connections only through the system `ssh`
+(`src/main/remote/ssh.ts`) with `BatchMode=yes`: key or agent login only. Files go over one SFTP
+session per address (`sftpFor`), commands over `ssh host remoteCommand(folder, command)`.
+
+`resolvePath` refuses a server folder unless the caller passes `remote: true`: every caller that has
+not opted in acts on this computer's disk, where the server path would name an unrelated local
+file. Opted in are the read tools (`read`, glob expansion, `view_image`), `find`, `apply_patch`,
+`exec_command` (via `resolveCwd`) and Files' listing/preview (`serverTarget` in
+`project-files.ts`). They reach the server through `ProjectFs` (`src/main/remote/project-fs.ts`:
+`localFs`, `sftpFs`, `fsForRoot`), which keeps the local errors (`ENOENT`, `EEXIST`, `EINVAL` …), the
+read limits and the walk order, never follows a link when listing or removing, writes whole files
+(temporary file + rename, mode kept, through a link to its target) and reopens a dropped SFTP session
+once. Server-side containment is `resolveRemote` in `sandbox.ts`: no `..`, a link that leaves the
+folder and a dangling link are refused (OpenSSH's realpath tolerates a missing last component, so
+existence is checked with `stat` first). One patch stays inside one server folder. `find` without a
+path names an unreachable server folder under `not_searched` and searches the rest; a regex is
+matched in the app there (ripgrep is local only). A command runs as one ssh connection of its own
+(`-T`, or `-tt` for a terminal) from the app's temp folder; the workspace terminal is `ssh -tt`
+into the folder's login shell (`remoteLoginShell`), and typing checks the project's address in the
+local config, not the server. Not in v1, each refused in one sentence: editing a server project's
+files from the app (Files' create/rename/save), its Git panel, the file watcher, and worktrees for
+workers (they share the server folder). The server needs a POSIX shell and SFTP; nothing is
+installed there.
+
 ### Native ChatGPT Project for a new CoS project (#1176)
 
 One-way, CoS-owned and only for projects created after this existed: `addProject` gives a new row
@@ -1300,9 +1339,22 @@ Browser Send puts a Chat On Steroids Core app mention in front of the text, beca
 (Plus in Chat mode, #861) attach the app to a message only when the message mentions it.
 `ui.mentionCore` (Settings › General, default on, delivered to the page with the activity reply) can
 leave the mention off the user's own prompts, which on other accounts start plain questions with a
-probe tool call (#952). Workers, Continue recovery, Goal and Loop always keep it, because they need
-the app to answer. A Goal helper decision (`purpose: 'decision'`) never gets it.
-A fresh-turn continue (`purpose: 'rotation'`, #1402, see the settings table) keeps it.
+probe tool call (#952). Workers, Continue recovery, Goal and Loop always keep Core,
+because they need the app to answer. A Goal helper decision (`purpose: 'decision'`)
+never gets an app mention. A fresh-turn continue (`purpose: 'rotation'`, #1402)
+also keeps Core.
+An independent default-off `ui.mentionPlugins` preference selects **Plugins instead of Core**
+for ordinary user-authored prompts COS sends; Goal/Loop and fresh-turn continues follow the
+Core mention as before, workers and recovery always select Core, and decision helpers still
+select neither. The exact Plugins app id comes
+only from this page's provider system hints and must match this installation's connector
+name, including its optional computer suffix. Missing, duplicate or foreign IDs
+produce no Plugins token, never a guessed or other-computer attachment; the prompt then
+keeps the Core mention (when that is on), so an account that attaches apps only on mention
+(#861) never loses its tools to a missing Plugins app. App-managed
+picture requests still suppress mentions; directly typed ChatGPT messages are untouched.
+The provider can withhold or cache tool declarations even with an authentic mention;
+this is not a repair of stale tool catalogs or ChatGPT-side exposure decisions.
 ChatGPT switches its own image tool off for a message that mentions an app (measured
 2026-10-05: per message, also as a follow-up in a chat whose first message had the mention). So a
 person's own message (`authoredSource` text, not `decision`/recovery/`finishOwner`, not a worker or
@@ -1780,6 +1832,9 @@ replace stable identities by temp→rename, never regress final to streaming, an
 chronological anchors across revisions. Metadata coalesces ordinary updates but writes immediately
 at ownership boundaries; it can rebuild history-derived fields without inventing an empty session
 when recovery lacks proof. Legacy files overlay lazily rather than triggering a whole-history rewrite.
+Rebuilding for newly introduced derived fields or estimate versions is an informational migration.
+Missing checkpoints and known history-watermark mismatches remain warnings; successful reconstruction
+is logged only after the replacement checkpoint is written.
 
 Native image-only user messages keep their exact message identity, empty authored text and
 bounded attachment metadata. They participate in the same turn/receipt chronology as text and
@@ -2023,7 +2078,11 @@ safe nesting identities. Usage cache version 9 retains the distinction on record
 `extension/usage.js` observes bounded allowed account-usage responses in MAIN world, including
 already available state; it does not retain raw account payloads. App `session/usage.ts` accepts
 one fresh validated snapshot, replaces rather than merges accounts/tabs, and distinguishes
-model, shared and feature pools. Missing/expired values mean unreported, never zero/full.
+model, feature and `codex` pools. Missing/expired values mean unreported, never zero/full.
+`codex` rows come from `/backend-api/wham/usage`, which is **Codex's** usage (the 5-hour and weekly
+windows Codex's /status and ChatGPT's sidebar panel show), never a limit on ChatGPT chat messages;
+the Usage tab and the `usage` tool label them as Codex. An extension before 2.1.40 sends them as
+`shared`, which the app reads as `codex`.
 
 Daily work/cost charts use a **local estimate**: cap final frontend context, then / 2 per unique
 recorded tool call, with editable divisor, multiplier and per-model comparison rates. If the
@@ -4530,6 +4589,10 @@ Plugins catalog limit use proven ids first.
 and same-origin links to exact `plugin_asdk_app_*` management routes inside the page's `main`.
 A unique surface with account-proven App IDs accepts only its proven IDs, permitting
 renames before learned names catch up; a same-named foreign ID never falls back.
+An explicit observation retains its scoped enrolled App ID and first rediscovers that
+exact native installed link, rather than treating other proven aliases as competing targets.
+Its existing requested surface validates the ID through cross-surface name collisions;
+another surface, absent ID, name-only row or duplicate native link cannot substitute it.
 First enrollment and legacy buttons use the unique configured/learned name leaf.
 Unknown, catalog, external, transcript, hidden or ambiguous rows grant no authority.
 After awaits, the same unique connected visible link must retain its exact href;
@@ -4620,8 +4683,9 @@ Local and public URLs, tunnel ids and plugin sources/config never appear; free t
 one per read, cleared when the request is answered.
 
 The read routes (`control-reads.ts`) are `GET /v1/sessions`, `/v1/sessions/{id}`,
-`/v1/sessions/{id}/events`, `/v1/inputs`, `/v1/agents` and `/v1/log`. Each asks the owner that
-already feeds the renderer (`session/read-model.ts`, `listInputs`, `swarmState`, `getLog`) and
+`/v1/sessions/{id}/events`, `/v1/inputs`, `/v1/agents`, `/v1/log` and `/v1/models` (the saved
+model catalog; reading it never starts discovery). Each asks the owner that
+already feeds the renderer (`session/read-model.ts`, `listInputs`, `swarmState`, `getLog`, `getChatModels`) and
 projects the answer through an allowlist, so a field an owner grows later stays private until
 it is named there. `/v1/agents` mirrors the broker's `retainedHistory` boolean so a watcher can
 distinguish parked worker history from no retained history; it does not expose dormant family
@@ -4686,7 +4750,10 @@ reason, and answers with `Connection: close`.
 
 The action routes (`control-actions.ts`) are `POST /v1/inputs` (send a message to an existing chat,
 or without `sessionId` start a new chat with it, optionally in a `projectId`; the new session's id
-is the message id, as for the composer's New chat), `POST /v1/inputs/{id}/cancel`, and
+is the message id, as for the composer's New chat; an optional `model` and `reasoningEffort`, always
+together, must resolve in the saved catalog to an entry offering that effort and are filed under its
+id, else 409 `models_unknown`, `model_unknown` or `effort_unavailable`; without them the row keeps
+null and ChatGPT its own selection), `POST /v1/inputs/{id}/cancel`, and
 `POST /v1/sessions/{id}/stop` with `{ "turnId" }` from `live.activeTurnId`, which calls
 `stopSessionTurn` exactly as the Stop button does (Goal/Loop off, a 202 with the chat's `live`,
 409 `turn_not_running` when that answer is no longer running; the recorded `turn_end` is the proof
@@ -4823,6 +4890,9 @@ the page language from the most recently used awake ChatGPT tab, read at most on
 development discovery uses Electron's app root for `resources/tunnel`, independent of source
 nesting, bundle layout and the launching shell's working directory. Restore missing binaries
 with `npm run tunnel`, which verifies the pinned archive checksum before staging it.
+An `offline` report carries `offlineCause: 'service'` (into `ConnectionStatus.offlineCause`) when
+OpenAI's control plane answered a poll with 5xx in the last 3 minutes: the internet works and the UI
+says "OpenAI outage" instead of "No internet".
 `diagnostics.ts` tests the chain hop by hop. Transient health evidence must not produce repeated
 replacement tunnels or claim a broken provider was repaired. Update checks (§20), browser wake
 and MCP connection have separate lifecycles.
@@ -4840,6 +4910,15 @@ UIA helper; macOS uses Swift ScreenCaptureKit/AX/CGEvent through an architecture
 addon on an Electron worker. The packaged Electron app is the macOS permission subject; a
 standalone CLI probe does not prove Screen Recording/Accessibility permission for the app.
 
+macOS keeps those grants per code signature, and releases are ad-hoc signed, so after an update
+System Settings still shows a grant that no longer applies. `computer/macos-grants.ts` records
+which permissions the app was ever seen holding (durable `macos-permission-grants`) and exposes
+it as `MacOSDesktopAccessStatus.grantedBefore`. A missing permission that was granted before is
+shown in Settings and as the chat notice `#desktopAccessNotice` with Repair permissions
+(preload `repairDesktopAccess` → IPC `desktop:repairPermissions`): `tccutil reset` of this app's
+own missing entries (`MACOS_BUNDLE_ID`, electron-builder's `appId`), a screen-source request for
+Screen Recording and Electron's Accessibility prompt, so macOS asks again for the running build.
+
 `computer/index.ts` owns native actions, capture frames/accessibility refs, batching and
 postconditions. Registrars own live capability checks. Windows `windows-api.ts` implements the
 13 Window2 methods: `list_windows`, `get_window`, `list_apps`, `launch_app`, `get_window_state`,
@@ -4851,6 +4930,10 @@ unresolved requests cannot borrow observations. Headerless calls retain a separa
 anonymous context; opting out refuses indexed/coordinate input without exact identity.
 Explicit activation consumes observation state too; ordinary input already activates its target.
 Late observations and replaced principals cannot lend another call their state.
+Single-window capture includes the cursor only when ScreenCaptureKit reports the window on
+screen: requesting the current desktop cursor for an off-Space window fails with -3811.
+Observation never activates that window or substitutes current-desktop pixels.
+`test/fixtures/verify-macos-window-capture.mjs` exercises this decision with the production Swift.
 Observe → act uses exact frame/ref, target geometry and
 helper generation. Recheck those after asynchronous image work and before every local action
 in a batch. A replaced helper/window/display invalidates old coordinates and refs. Bound
