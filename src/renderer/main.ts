@@ -117,6 +117,7 @@ const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.
 publishUiLanguage();
 onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
+const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId });
 const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
@@ -232,7 +233,6 @@ const externalSetupLinks = [...document.querySelectorAll<HTMLButtonElement>('#wi
 const permissionSurface = document.querySelector<HTMLElement>('.workspace-permissions > .settings-surface')!;
 const permissionHome = permissionSurface.parentElement!;
 
-let marksModulesUi!: ReturnType<typeof initMarksModulesUi>;
 
 function placePermissions(tab: string): void {
   const target = tab === 'setup' ? $('accessFineSlot') : permissionHome;
@@ -2850,7 +2850,7 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId });
+
 initChat({ save: () => save(), state: () => state ,
   cliModules: marksModulesUi.cliModules,
   createCliSession: marksModulesUi.createSession
