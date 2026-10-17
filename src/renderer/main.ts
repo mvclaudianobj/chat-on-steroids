@@ -232,6 +232,8 @@ const externalSetupLinks = [...document.querySelectorAll<HTMLButtonElement>('#wi
 const permissionSurface = document.querySelector<HTMLElement>('.workspace-permissions > .settings-surface')!;
 const permissionHome = permissionSurface.parentElement!;
 
+let marksModulesUi!: ReturnType<typeof initMarksModulesUi>;
+
 function placePermissions(tab: string): void {
   const target = tab === 'setup' ? $('accessFineSlot') : permissionHome;
   if (permissionSurface.parentElement !== target) target.append(permissionSurface);
@@ -2848,7 +2850,7 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId });
+marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId });
 initChat({ save: () => save(), state: () => state ,
   cliModules: marksModulesUi.cliModules,
   createCliSession: marksModulesUi.createSession
