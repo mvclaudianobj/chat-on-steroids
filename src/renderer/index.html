@@ -2,28 +2,13 @@
 <html lang="en" data-theme="dark">
   <head>
     <meta charset="utf-8" />
-    <title>Chat On Steroids</title>
+    <title>Chat Marks</title>
     <link rel="stylesheet" href="./icons.css" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./settings.css" />
     <link rel="stylesheet" href="./dictation.css" />
   </head>
   <body>
-    <!-- Interface icons are Phosphor glyphs (icons.css, dom.ts icon()). Only the bespoke
-         product mark stays here, stroke-based on a 24 grid; every <use> carries a
-         viewBox or the browser shows the top-left corner of that grid. -->
-    <svg class="sprite" aria-hidden="true">
-      <defs>
-        <!-- The product mark: the same folder-behind-a-message shape as the app and
-             extension icons (scripts/make-icon.mjs), drawn in stroke for this grid. -->
-        <g id="i-mark">
-          <path d="M3.5 8.5V5.5a1 1 0 0 1 1-1h3.1L9 6.4h6.5" />
-          <path
-            d="M5.5 8.5h13a1 1 0 0 1 1 1v6a1 1 0 0 1-1 1h-8L7 20v-3.5H5.5a1 1 0 0 1-1-1v-6a1 1 0 0 1 1-1Z"
-          />
-        </g>
-      </defs>
-    </svg>
 
     <div class="app" data-screen="chat">
       <div class="app-topbar">
@@ -33,7 +18,7 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden><i class="ico ph ph-arrow-left" aria-hidden="true"></i><span>Back to chat</span></button>
-        <div class="sidebar-brand"><span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span><strong>Chat On Steroids</strong><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
+        <div class="sidebar-brand"><span class="mark"><img class="marks-app-icon" src="./browser-icons/cos.png" alt="" /></span><strong>Chat Marks</strong><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
         <div class="sidebar-primary" id="sidebarPrimary">
           <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
@@ -59,6 +44,10 @@
         </button>
         <button data-tab="settings" type="button">
           <i class="ico ph ph-robot" aria-hidden="true"></i>Agents &amp; automation
+        </button>
+        <button data-tab="modules" type="button"><i class="ico ph ph-squares-four" aria-hidden="true"></i>Modules</button>
+        <button id="moduleCliNav" class="modules-subnav" data-module-page="module-cli-proxy" type="button" aria-label="CLIProxyAPI" translate="no" hidden>
+          <i class="ico ph ph-plug" aria-hidden="true"></i><span translate="no">CLIProxyAPI</span>
         </button>
         <button data-tab="appearance" type="button"><i class="ico ph ph-sun" aria-hidden="true"></i>Appearance</button>
         <button data-tab="activity" type="button">
@@ -157,14 +146,14 @@
         <div class="offer-icon"><i class="ico ph ph-arrows-clockwise" aria-hidden="true"></i></div>
         <div class="offer-text">
           <b id="pluginRefreshOfferTitle">Keep plugins up to date in ChatGPT</b>
-          <em>When an update changes a plugin's tools, Chat On Steroids refreshes it in ChatGPT for you. You can change this later in Settings.</em>
+          <em>When an update changes a plugin's tools, Chat Marks refreshes it in ChatGPT for you. You can change this later in Settings.</em>
         </div>
         <button class="offer-later" id="pluginRefreshOfferLater" type="button">Not now</button>
         <button class="offer-accept" id="pluginRefreshOfferAccept" type="button">Turn on</button>
       </div>
       <div class="notice" id="pluginRefreshReminder" role="status" hidden>
         <i class="ico ph ph-activity" aria-hidden="true"></i>
-        <span>The tools of a Chat On Steroids plugin changed. Refresh that plugin in ChatGPT; this is separate from the browser extension.</span>
+        <span>The tools of a Chat Marks plugin changed. Refresh that plugin in ChatGPT; this is separate from the browser extension.</span>
         <button class="btn btn-icon" id="dismissPluginRefreshReminder" type="button" title="Dismiss reminder" aria-label="Dismiss reminder"><i class="ico ph ph-x" aria-hidden="true"></i></button>
       </div>
       <div class="notice" id="desktopAccessNotice" role="status" hidden>
@@ -207,8 +196,8 @@
                 <label class="setting"><span class="setting-text"><b>Keep awake while a chat works</b><em>Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose The computer and screen.</em></span><select id="keepAwake"><option value="off">Off</option><option value="computer">The computer</option><option value="screen">The computer and screen</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Playful status words</b><em>Show rotating gym jokes instead of “Working”.</em></span><input id="playfulStatus" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Playful asides in automatic Continue</b><em>Add a random fun fact or meme joke to each automatic Continue, marked for the model to ignore.</em></span><input id="playfulContinue" type="checkbox" /></label>
-                <label class="setting"><span class="setting-text"><b>Mention Chat On Steroids Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
-                <label class="setting"><span class="setting-text"><b>Prefer Plugins on app-sent messages</b><em>When enabled, use Chat On Steroids Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.</em></span><input id="mentionPlugins" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Mention Chat Marks Core</b><em>Makes sure ChatGPT can use this app in every chat. Turn it off if ChatGPT starts plain questions with an unneeded tool call. Workers, Goal, Loop and Continue always keep the mention.</em></span><input id="mentionCore" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Prefer Plugins on app-sent messages</b><em>When enabled, use Chat Marks Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.</em></span><input id="mentionPlugins" type="checkbox" /></label>
               </div>
             </section>
             <section class="appearance-section" id="privacyScreenshotsSetting">
@@ -217,7 +206,7 @@
                 <label class="setting"><span class="setting-text"><b>Privacy screenshots</b><em>Screenshots show the active window by default instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
               </div>
             </section>
-                        <section class="appearance-section">
+            <section class="appearance-section">
               <header class="settings-section-head"><div><h2>MarksPanel account</h2><p>Manage access to this installation of Chat Marks.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <div class="setting"><span class="setting-text"><b>Sign out from MarksPanel</b><em>Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.</em></span><button id="marksPanelLogout" type="button" class="btn">Sign out</button></div>
@@ -227,9 +216,86 @@
               <header class="settings-section-head"><div><h2>For developers</h2><p>Troubleshooting details and access for tools on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Developer mode</b><em>Show turn boundaries and recovery events in the chat.</em></span><input id="developerMode" type="checkbox" /></label>
-                <label class="setting"><span class="setting-text"><b>Keep plugin URLs across restarts</b><em>For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.</em></span><input id="mcpPersistentUrls" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Keep plugin URLs across restarts</b><em>For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat Marks plugins until you turn this off. Needs secure storage.</em></span><input id="mcpPersistentUrls" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send messages, start new chats and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel appearance-panel modules-panel scroll" data-panel="modules" aria-labelledby="modulesTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head">
+              <h1 id="modulesTitle">Modules</h1>
+              <p>Manage optional local services from one place. Each module keeps its own settings and console.</p>
+            </header>
+            <section class="appearance-section" aria-labelledby="cliProxyTitle">
+              <header class="settings-section-head">
+                <div><h2 id="cliProxyTitle" translate="no">CLIProxyAPI</h2><p>Local API proxy and its existing management console.</p></div>
+                <button class="btn" id="moduleRefresh" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh status</button>
+              </header>
+              <div class="settings-surface modules-service">
+                <label class="setting modules-toggle" for="moduleCliActive">
+                  <span class="setting-text">
+                    <b translate="no">CLIProxyAPI</b>
+                    <em>Local API proxy and its existing management console.</em>
+                  </span>
+                  <span class="modules-toggle-control"><span>Enable</span><input id="moduleCliActive" type="checkbox" aria-controls="moduleCliNav" /></span>
+                </label>
+                <div class="modules-service-overview">
+                  <span id="moduleCliStatus" class="modules-status" role="status" aria-live="polite" data-state="unknown">Status unavailable</span>
+                  <p id="moduleCliDetail" class="modules-detail">Checking the local service…</p>
+                </div>
+                <div class="modules-service-actions">
+                  <button class="btn" id="moduleCliInstall" type="button" disabled>Installation guide</button>
+                  <button class="btn" id="moduleCliUpdate" type="button" disabled>Update from GitHub</button>
+                  <button class="btn" id="moduleCliStart" type="button" disabled>Start</button>
+                  <button class="btn" id="moduleCliStop" type="button" disabled>Stop</button>
+                  <button class="btn" id="moduleCliRestart" type="button" disabled>Restart</button>
+                  <button class="btn" id="moduleCliEnable" type="button" disabled>Enable at startup</button>
+                  <button class="btn" id="moduleCliDisable" type="button" disabled>Disable at startup</button>
+                </div>
+                <div class="modules-console setting">
+                  <span class="setting-text">
+                    <b>Management console</b>
+                    <em>Open the existing CLIProxyAPI console. Change its local address if you use another port.</em>
+                    <label class="modules-console-address" for="moduleCliConsoleUrl">Console URL</label>
+                    <input id="moduleCliConsoleUrl" type="url" autocomplete="off" spellcheck="false" placeholder="http://127.0.0.1:18081/management.html" aria-label="Console URL" translate="no" />
+                  </span>
+                  <button class="btn" id="moduleCliOpen" type="button" disabled><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open console</button>
+                </div>
+                <p id="moduleCliError" class="modules-error" role="alert" hidden></p>
+              </div>
+            </section>
+            <section class="appearance-section" aria-labelledby="marksExtensionsTitle">
+              <header class="settings-section-head"><div><h2 id="marksExtensionsTitle">Marks extensions</h2><p>Future Marks plugins, skills and modules will appear here for installation and activation.</p></div></header>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel appearance-panel modules-panel scroll" data-panel="module-cli-proxy" aria-labelledby="moduleCliPageTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head">
+              <h1 id="moduleCliPageTitle" translate="no">CLIProxyAPI</h1>
+              <p>Open the existing CLIProxyAPI console. Change its local address if you use another port.</p>
+            </header>
+            <section class="appearance-section" aria-labelledby="moduleCliConsoleTitle">
+              <header class="settings-section-head"><div><h2 id="moduleCliConsoleTitle">Management console</h2><p>Local API proxy and its existing management console.</p></div></header>
+              <div class="settings-surface modules-service">
+                <div class="modules-service-overview">
+                  <span id="moduleCliConsoleStatus" class="modules-status" role="status" aria-live="polite" data-state="unknown">Status unavailable</span>
+                  <p id="moduleCliConsoleDetail" class="modules-detail">Checking the local service…</p>
+                </div>
+                <div class="modules-console setting">
+                  <span class="setting-text">
+                    <b>Management console</b>
+                    <em>Open the existing CLIProxyAPI console. Change its local address if you use another port.</em>
+                    <span id="moduleCliVerifiedAddress" class="modules-console-address" translate="no"></span>
+                  </span>
+                  <button class="btn" id="moduleCliReopen" type="button" disabled><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Open console</button>
+                </div>
+                <p id="moduleCliConsoleError" class="modules-error" role="alert" hidden></p>
               </div>
             </section>
           </div>
@@ -244,7 +310,7 @@
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>Preview</h2><p>See changes as you adjust the workspace.</p></div></header>
               <div class="appearance-preview" aria-label="Appearance preview">
-                <div class="appearance-preview-sidebar"><svg class="ico brand-icon" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-mark" /></svg><span></span><span class="is-selected"></span><span></span></div>
+                <div class="appearance-preview-sidebar"><img class="marks-app-icon brand-icon" src="./browser-icons/cos.png" alt="" /><span></span><span class="is-selected"></span><span></span></div>
                 <div class="appearance-preview-chat">
                   <div class="appearance-preview-message"><span class="appearance-preview-avatar">You</span><p>Check the build and show what changed.</p></div>
                   <div class="appearance-preview-message"><span class="appearance-preview-avatar is-agent">ChatGPT</span><div><p>Build passed. Here is the updated command:</p><pre><code>npm run build</code></pre><span class="appearance-preview-badge">✓ Complete</span></div></div>
@@ -291,10 +357,10 @@
           <div class="plugins-content">
           <header class="plugin-page-head"><div><h1>Plugins</h1><p>Bring your favorite tools into the conversation.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="pluginsSearch" type="search" placeholder="Search plugins" aria-label="Search plugins" /></label><button class="btn plugin-add" id="pluginsAdd" type="button" aria-label="Add a plugin" title="Add a plugin"><i class="ico ph ph-plus" aria-hidden="true"></i></button></div></header>
           <section class="plugin-connection" aria-labelledby="pluginsSetupTitle">
-            <div><h2 id="pluginsSetupTitle">Set up plugins before your first use</h2><p id="pluginsSetupHint">Add Chat On Steroids Plugins to ChatGPT once, so ChatGPT can use your installed plugins.</p><span id="pluginsConnectionStatus" role="status">Setup required · connect your plugins</span></div>
+            <div><h2 id="pluginsSetupTitle">Set up plugins before your first use</h2><p id="pluginsSetupHint">Add Chat Marks Plugins to ChatGPT once, so ChatGPT can use your installed plugins.</p><span id="pluginsConnectionStatus" role="status">Setup required · connect your plugins</span></div>
             <button class="btn btn-solid" id="pluginsSetupLink" type="button">Set up plugins</button>
           </section>
-          <div class="plugin-refresh-guide"><p>After installing, updating or changing enabled plugins, refresh <strong id="pluginsRefreshName" translate="no">Chat On Steroids Plugins</strong> in ChatGPT to make its tools available.</p><button class="btn" id="pluginsOpenChatGPT" type="button">Open ChatGPT plugins</button></div>
+          <div class="plugin-refresh-guide"><p>After installing, updating or changing enabled plugins, refresh <strong id="pluginsRefreshName" translate="no">Chat Marks Plugins</strong> in ChatGPT to make its tools available.</p><button class="btn" id="pluginsOpenChatGPT" type="button">Open ChatGPT plugins</button></div>
           <div class="plugin-section-head"><h2>Installed <span id="pluginsCount" class="plugin-count">Loading…</span></h2><button class="btn" id="pluginsRefresh" type="button">Check local status</button></div>
           <div id="pluginsInstalled" aria-live="polite"></div>
           <div class="plugin-section-head"><h2>Explore plugins</h2><span class="muted">Made for your workflow</span></div>
@@ -304,12 +370,12 @@
         </section>
         <section class="panel plugins-panel skills-panel" data-panel="skills">
           <div class="plugins-content">
-            <header class="plugin-page-head"><div><h1>Skills</h1><p>Reusable instructions for the work you do in Chat On Steroids.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="skillsSearch" type="search" placeholder="Search skills" aria-label="Search skills" /></label><details class="plugin-menu skill-import-menu"><summary class="btn plugin-add" aria-label="Import a skill" title="Import a skill"><i class="ico ph ph-plus" aria-hidden="true"></i></summary><div class="plugin-menu-actions"><button class="btn" id="skillsImportFolder" type="button">Import folder</button><button class="btn" id="skillsImportFile" type="button">Import SKILL.md</button><button class="btn" id="skillsImportGithub" type="button">Import from GitHub</button></div></details></div></header>
+            <header class="plugin-page-head"><div><h1>Skills</h1><p>Reusable instructions for the work you do in Chat Marks.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="skillsSearch" type="search" placeholder="Search skills" aria-label="Search skills" /></label><details class="plugin-menu skill-import-menu"><summary class="btn plugin-add" aria-label="Import a skill" title="Import a skill"><i class="ico ph ph-plus" aria-hidden="true"></i></summary><div class="plugin-menu-actions"><button class="btn" id="skillsImportFolder" type="button">Import folder</button><button class="btn" id="skillsImportFile" type="button">Import SKILL.md</button><button class="btn" id="skillsImportGithub" type="button">Import from GitHub</button></div></details></div></header>
             <div class="plugin-refresh-guide pet-import-guide"><p>Import a folder, a standalone SKILL.md, or a public GitHub skill. Local skills can be linked to their GitHub source to check for updates; installing an update stays your choice.</p></div>
             <dialog class="plugin-dialog pet-delete-dialog" id="skillGithubDialog" aria-labelledby="skillGithubTitle">
               <div class="plugin-dialog-head"><h2 id="skillGithubTitle">Import from GitHub</h2><button class="btn" id="skillGithubClose" type="button">Close</button></div>
               <form id="skillGithubForm" class="plugin-dialog-body">
-                <p id="skillGithubDescription">Paste a public GitHub folder link or a link to its SKILL.md. The complete skill folder will be copied to your CoS library.</p>
+                <p id="skillGithubDescription">Paste a public GitHub folder link or a link to its SKILL.md. The complete skill folder will be copied to your Chat Marks library.</p>
                 <label class="plugin-field" for="skillGithubUrl"><span>GitHub URL</span><input id="skillGithubUrl" type="url" required autocomplete="url" spellcheck="false" placeholder="https://github.com/owner/repo/tree/main/skill" /></label>
                 <p id="skillGithubError" class="plugin-error" role="alert" hidden></p>
                 <div class="pet-delete-actions"><button class="btn" id="skillGithubCancel" type="button">Cancel</button><button class="btn btn-solid" id="skillGithubSubmit" type="submit">Import skill</button></div>
@@ -325,7 +391,7 @@
         </section>
         <section class="panel plugins-panel pets-panel" data-panel="pets">
           <div class="plugins-content">
-            <header class="plugin-page-head"><div><h1>Pets</h1><p>Your little desktop companions.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="petsSearch" type="search" placeholder="Search pets" aria-label="Search pets" /></label><button class="btn plugin-add" id="petsImport" type="button" aria-label="Import CoS Pet folder" title="Import CoS Pet folder"><i class="ico ph ph-plus" aria-hidden="true"></i></button></div></header>
+            <header class="plugin-page-head"><div><h1>Pets</h1><p>Your little desktop companions.</p></div><div class="plugin-search-actions"><label class="plugin-search"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i><input id="petsSearch" type="search" placeholder="Search pets" aria-label="Search pets" /></label><button class="btn plugin-add" id="petsImport" type="button" aria-label="Import Chat Marks Pet folder" title="Import Chat Marks Pet folder"><i class="ico ph ph-plus" aria-hidden="true"></i></button></div></header>
             <div class="plugin-refresh-guide pet-import-guide">
               <p>A compatible pet is a folder with three files.</p>
               <button class="btn" id="petsFormatGuide" type="button">What can I import?</button>
@@ -334,7 +400,7 @@
               <div class="plugin-dialog-head"><h2 id="petFormatTitle">What can I import?</h2><button class="btn" id="petsFormatClose" type="button">Close</button></div>
               <div class="plugin-dialog-body pet-format-content">
                 <div class="pet-format-guide-head"><p>A compatible pet is a folder with three files.</p><button class="btn" id="petsCopyInstructions" type="button">Copy instructions</button></div>
-                <p class="pet-format-folder">Import the folder itself with <code>pet.json</code>, <code>atlas.png</code>, and <code>animations.json</code>. Chat On Steroids validates all three before copying the pet into your local library.</p>
+                <p class="pet-format-folder">Import the folder itself with <code>pet.json</code>, <code>atlas.png</code>, and <code>animations.json</code>. Chat Marks validates all three before copying the pet into your local library.</p>
                 <div class="pet-format-ai-help">
                   <strong>AI-assisted creation</strong>
                   <p>Copy the production brief below and replace <code>&lt;describe your character here&gt;</code> with the character, personality, colors, style, accessories, and references you want. In Codex, invoke <code>$hatch-pet</code> for visual generation and QA; its official URL is included for discovery, while this app’s 96-frame CoS format remains authoritative.</p>
@@ -360,7 +426,7 @@
             <div class="usage-sections">
               <section class="settings-section usage-section usage-messages" aria-labelledby="usageMessagesTitle">
                 <header class="settings-section-head">
-                  <div><h2 id="usageMessagesTitle">Messages and limits</h2><p>Verified native sends alongside model and feature limits reported by ChatGPT, and Codex limits.</p></div>
+                  <div><h2 id="usageMessagesTitle">Messages and limits</h2><p>Verified native sends alongside model, shared and feature limits reported by ChatGPT.</p></div>
                   <button class="btn" id="refreshUsage" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button>
                 </header>
                 <div class="settings-surface usage-message-surface">
@@ -423,7 +489,6 @@
                     <div class="desktop-access" id="desktopAccess" hidden>
                       <strong id="desktopAccessTitle">Desktop access needs attention</strong>
                       <p id="desktopAccessDetail"></p>
-                      <button class="btn btn-solid" id="repairDesktopAccess" type="button" hidden>Repair permissions</button>
                       <button class="btn btn-solid" id="requestDesktopAccessibility" type="button">Request Accessibility</button>
                       <button
                         class="btn"
@@ -612,7 +677,7 @@
                   <section id="browserExtensionStage" class="browser-stage" aria-labelledby="browserExtensionTitle">
                     <div class="browser-stage-copy">
                       <ol class="browser-install-steps">
-                        <li data-install-engine="gecko" hidden><div><b id="extensionStepAddon">Add the Chat On Steroids add-on to Firefox</b><button type="button" class="btn btn-solid" id="openFirefoxAddon"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i><span>Get the add-on</span></button>
+                        <li data-install-engine="gecko" hidden><div><b id="extensionStepAddon">Add the Chat Marks add-on to Firefox</b><button type="button" class="btn btn-solid" id="openFirefoxAddon"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i><span>Get the add-on</span></button>
                           <p>Firefox asks before it adds the add-on. Choose Add.</p></div></li>
                         <li data-install-engine="chromium"><div><b id="extensionStepOpen">Open the extensions page</b><button type="button" class="btn btn-quiet" id="openExtensionSettings"><span id="setupExtensionAddress" translate="no">chrome://extensions</span><i class="ico ph ph-copy" aria-hidden="true"></i></button>
                           <p id="extensionStepOpenHint">Click the address to copy it, then paste it into the address bar and press Enter.</p></div></li>
@@ -635,7 +700,7 @@
                       <h3 id="browserLocationTitle" tabindex="-1">Where should ChatGPT run?</h3>
                       <p class="step-lead">You can change this later in Settings.</p>
                       <div class="browser-choice" role="radiogroup" aria-label="ChatGPT browser">
-                        <button class="browser-option" id="useCosBrowser" type="button" role="radio" data-browser-choice="cos"><img src="./browser-icons/cos.png" alt="" /><b>In Chat On Steroids</b><em>Use the app’s built-in browser.</em></button>
+                        <button class="browser-option" id="useCosBrowser" type="button" role="radio" data-browser-choice="cos"><img src="./browser-icons/cos.png" alt="" /><b>In Chat Marks</b><em>Use the app’s built-in browser.</em></button>
                         <button class="browser-option" id="useExtensionBrowser" type="button" role="radio" data-browser-choice="extension"><img id="setupExternalIcon" src="./browser-icons/chrome.svg" alt="" /><b>In your browser</b><em id="setupExternalLabel"></em></button>
                       </div>
                       <div data-browser-variant="cos" class="browser-action"><button class="btn btn-solid" id="showCosBrowser" type="button"><i class="ico ph ph-sign-in" aria-hidden="true"></i><span>Sign in to ChatGPT</span></button><span class="status-pill" id="cosBrowserState" data-tone="off" role="status"></span></div>
@@ -844,7 +909,7 @@
                         aria-describedby="connectorSuffixHint"
                       />
                       <p class="hint is-warn" id="connectorSuffixError" role="alert" hidden>Use up to 32 letters, digits, spaces, dots, dashes or underscores.</p>
-                      <p class="hint" id="connectorSuffixHint">Each computer needs its own plugins in ChatGPT, and they can't share a name. “Windows” names this computer's plugins “Chat On Steroids Core (Windows)” and so on. After changing it, rename this computer's plugins to match: in ChatGPT, open Settings → Plugins, select each one and edit its app name.</p>
+                      <p class="hint" id="connectorSuffixHint">Each computer needs its own plugins in ChatGPT, and they can't share a name. “Windows” names this computer's plugins “Chat Marks Core (Windows)” and so on. After changing it, rename this computer's plugins to match: in ChatGPT, open Settings → Plugins, select each one and edit its app name.</p>
                     </div>
                   </details>
                   <!-- #1495: a workspace member without admin rights can neither add a custom app nor
@@ -914,7 +979,7 @@
               </div>
 
               <div class="field">
-                <label class="inline" id="startAtLoginRow" hidden><input type="checkbox" id="startAtLogin" /> Start Chat On Steroids when I sign in</label>
+                <label class="inline" id="startAtLoginRow" hidden><input type="checkbox" id="startAtLogin" /> Start Chat Marks when I sign in</label>
                 <label class="inline"><input type="checkbox" id="autoConnect" /> Connect automatically at startup</label>
                 <label class="inline"><input type="checkbox" id="minimizeToTray" /> <span id="minimizeToTrayCopy">Keep running when closed</span></label>
               </div>
@@ -936,9 +1001,9 @@
                 <span aria-hidden="true">/</span>
                 <span id="chatProjectName"></span>
               </span>
-              <span class="mark"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
+              <span class="mark"><img class="marks-app-icon" src="./browser-icons/cos.png" alt="" /></span>
               <span class="title">
-                Chat On Steroids
+                Chat Marks
                 <span id="headerSub">Not set up yet</span>
               </span>
               <span class="state">
@@ -977,7 +1042,7 @@
                 <div id="timeline"></div>
                 <div id="inputQueue" class="input-queue" aria-live="polite"></div>
                 <p class="empty" id="timelineEmpty">
-                  <svg class="ico welcome-mark" viewBox="0 0 24 24"><use href="#i-mark" /></svg><span>What would you like to build?</span>
+                  <img class="marks-app-icon welcome-mark" src="./browser-icons/cos.png" alt="" /><span>What would you like to build?</span>
                 </p>
               </div>
 
@@ -1137,7 +1202,7 @@
                   </div>
                 <header class="settings-section-head automation-section-head"><div><h2 class="settings-section-title">Browser & history</h2><p>Manage background tabs, browser preferences, and history compaction.</p></div></header>
                 <div class="settings-surface pane">
-                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the browser extension and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat On Steroids browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="firefox">Mozilla Firefox</option><option value="cos">Chat On Steroids browser (built-in)</option></select></label>
+                  <label class="setting"><span class="setting-text"><b>ChatGPT browser</b><em>Used when the app launches a browser. Install the browser extension and sign in to ChatGPT in this browser's active profile. Already connected tabs stay in their browser. The built-in Chat Marks browser needs no install and runs hidden in the tray.</em></span><select id="chatBrowser"><option value="chrome">Google Chrome / Chromium</option><option value="edge">Microsoft Edge</option><option value="brave">Brave Browser</option><option value="firefox">Mozilla Firefox</option><option value="cos">Chat Marks browser (built-in)</option></select></label>
                   <label class="setting" id="cosBrowserMinimizeRow" hidden><span class="setting-text"><b>Minimize the built-in browser to</b><em>Where its window goes when you minimize it. Its chats go on either way.</em></span><select id="cosBrowserMinimize"><option value="taskbar" id="cosBrowserMinimizeTaskbar">Taskbar</option><option value="tray" id="cosBrowserMinimizeTray">Tray</option></select></label>
                   <div class="setting"><span class="setting-text"><b>Browser extension</b><em>Disconnect the browser extension from this app.</em></span><button class="btn" id="bridgeUnpair" type="button">Disconnect browser</button></div>
                   <label class="setting"><span class="setting-text"><b>Browser bridge port</b><em id="browserBridgePortHint">Auto uses the first available port. A fixed port must be available.</em></span><select id="browserBridgePort"><option value="auto">Auto</option><option value="8765">8765</option><option value="8766">8766</option><option value="8767">8767</option><option value="8768">8768</option><option value="8769">8769</option></select></label>
@@ -1504,16 +1569,6 @@
     </div>
 
     <!-- Chat search (⌘K / Ctrl+K, or the magnifier beside the app name): recent chats, then matches. -->
-    <dialog class="plugin-dialog ssh-project-dialog" id="sshProjectDialog" aria-labelledby="sshProjectTitle">
-      <div class="plugin-dialog-head"><h2 id="sshProjectTitle">Add a folder on a server</h2><button class="btn" id="sshProjectClose" type="button">Close</button></div>
-      <form id="sshProjectForm" class="plugin-dialog-body">
-        <p>Chat On Steroids connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.</p>
-        <label class="plugin-field" for="sshProjectAddress"><span>SSH address</span><input id="sshProjectAddress" required autocomplete="off" spellcheck="false" placeholder="me@server, me@server:2222 or a Host from ~/.ssh/config" /></label>
-        <label class="plugin-field" for="sshProjectFolder"><span>Folder on the server</span><input id="sshProjectFolder" required autocomplete="off" spellcheck="false" placeholder="/srv/app or ~/app" /></label>
-        <p id="sshProjectError" class="plugin-error" role="alert" hidden></p>
-        <div class="pet-delete-actions"><button class="btn" id="sshProjectCancel" type="button">Cancel</button><button class="btn btn-solid" id="sshProjectSubmit" type="submit">Test and add</button></div>
-      </form>
-    </dialog>
     <dialog class="search-dialog" id="searchDialog" aria-label="Search chats">
       <div class="search-dialog-field">
         <i class="ico ph ph-magnifying-glass" aria-hidden="true"></i>
@@ -1527,7 +1582,7 @@
       <header class="whats-new-head">
         <!-- The app's own tile, sealed with a sparkle: the same language as the browser sign-in card. -->
         <div class="whats-new-hero" aria-hidden="true">
-          <span class="whats-new-tile"><svg class="ico" viewBox="0 0 24 24"><use href="#i-mark" /></svg></span>
+          <span class="whats-new-tile"><img class="marks-app-icon" src="./browser-icons/cos.png" alt="" /></span>
           <span class="whats-new-seal"><i class="ico ph ph-sparkle"></i></span>
         </div>
         <span class="whats-new-version" id="whatsNewVersion"></span>

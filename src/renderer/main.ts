@@ -238,6 +238,7 @@ function placePermissions(tab: string): void {
 }
 
 function showTab(name: string): void {
+  name = marksModulesUi.normalizeTab(name);
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   const library = name === 'plugins' || name === 'skills' || name === 'pets';
@@ -251,6 +252,7 @@ function showTab(name: string): void {
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
   if (name === 'settings') void paintRecordingStorageUsage();
+  marksModulesUi.onTabOpening(name);
   $('tabs').hidden = !settings;
   $('settingsFindBox').hidden = !settings;
   // A page opened any way leaves the search; the page list comes back.
@@ -262,10 +264,12 @@ function showTab(name: string): void {
   for (const tab of document.querySelectorAll<HTMLElement>('nav button')) {
     tab.classList.toggle('is-sel', tab.dataset.tab === name);
   }
+  marksModulesUi.paintNavigation(name);
   for (const item of document.querySelectorAll<HTMLElement>('[data-sidebar-page]')) item.classList.toggle('is-sel', item.dataset.sidebarPage === name);
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
     panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
   }
+  marksModulesUi.onTabShown(name);
   // After the panel shows: the chat and Agents & automation share its scroll pane, and a hidden
   // pane cannot be scrolled to where each view starts.
   if (name === 'settings') openChatView('settings');
@@ -354,6 +358,7 @@ $('sidebarPets').addEventListener('click', () => showTab('pets'));
 $('sidebarSkills').addEventListener('click', () => showTab('skills'));
 api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
+$('composerFolder').addEventListener('click', () => $('addProject').click());
 let zoomFactor = 1;
 let zoomEdited = false;
 void api.getZoom().then(result => {
@@ -371,8 +376,12 @@ document.addEventListener('keydown', (event) => {
   event.preventDefault(); void zoom(event.key === '0' ? 1 : zoomFactor + (event.key === '-' ? -.1 : .1));
 });
 $('tabs').addEventListener('click', (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab]');
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab], [data-module-page]');
   if (button?.dataset.tab) showTab(button.dataset.tab);
+  else {
+    const page = marksModulesUi.modulePage(button);
+    if (page) showTab(page);
+  }
 });
 
 // ------------------------------------------------------------ permissions
@@ -1227,7 +1236,7 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
   let tone: UpdateTone = 'work';
   // #1490: an installer that stopped silently left this start on the old version.
   if (update.notInstalled) {
-    lines.push(t("Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.", [update.notInstalled, update.current]));
+    lines.push(t("Chat Marks {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.", [update.notInstalled, update.current]));
     tone = 'bad';
   }
   if (update.latest && !(update.notInstalled === update.latest && update.stage === 'ready')) {
@@ -1238,12 +1247,12 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
       update.stage === 'checking'
         ? t("Checking for the latest update…")
         : update.stage === 'ready'
-        ? t("Chat On Steroids {0} is downloaded and ready. Install it now, or it installs the next time you quit.", [update.latest])
+        ? t("Chat Marks {0} is downloaded and ready. Install it now, or it installs the next time you quit.", [update.latest])
         : update.stage === 'downloading'
-          ? t("Chat On Steroids {0} is downloading. Keep working; you can install it when it lands.", [update.latest])
+          ? t("Chat Marks {0} is downloading. Keep working; you can install it when it lands.", [update.latest])
           : update.stage === 'failed'
-            ? t("Chat On Steroids {0} could not be downloaded: {1}.", [update.latest, update.error ? updateErrorText(update.error) : t("the download stopped")])
-            : t("Chat On Steroids {0} is out. This installation has to be updated by hand.", [update.latest])
+            ? t("Chat Marks {0} could not be downloaded: {1}.", [update.latest, update.error ? updateErrorText(update.error) : t("the download stopped")])
+            : t("Chat Marks {0} is out. This installation has to be updated by hand.", [update.latest])
     );
     if (update.stage === 'failed' || update.notInstalled) tone = 'bad';
   } else if (update.stage === 'failed') {
@@ -1253,7 +1262,7 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
     lines.push(t("Checking for a newer version…"));
   } else if (!stale && !missing && !update.notInstalled) {
     const extension = bridge.present && bridge.extensionVersion ? t(" · extension {0}", [bridge.extensionVersion]) : '';
-    lines.push(t("Up to date! Chat On Steroids {0}{1}", [update.current, extension]));
+    lines.push(t("Up to date! Chat Marks {0}{1}", [update.current, extension]));
     tone = 'ok';
   }
   if (stale) {
@@ -2604,7 +2613,7 @@ function confirmUpdateRestart(version: string): Promise<boolean> {
     const title = document.createElement('h2'); title.id = 'updateRestartTitle';
     ui(title, 'textContent', () => t('Restart to install the update?'));
     const lead = document.createElement('p'); lead.className = 'whats-new-lead'; lead.id = 'updateRestartLead';
-    ui(lead, 'textContent', () => t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'));
+    ui(lead, 'textContent', () => t('Chat Marks will close and restart. Running chats, agents and commands may be interrupted.'));
     dialog.setAttribute('aria-labelledby', title.id); dialog.setAttribute('aria-describedby', lead.id);
     head.append(hero, named, title, lead);
     const actions = document.createElement('footer'); actions.className = 'whats-new-actions';
@@ -2640,7 +2649,7 @@ updateAllButton.addEventListener('click', async () => {
     if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
     const result = reply.data;
     if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
-    else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
+    else if (result === 'restarting') toast(t('Installing the update. Chat Marks closes and starts again as the new version.'));
     else if (result === 'checking-connectors') toast(document.getElementById('updateReadinessCard') ? t('Plugin checks requested. Any remaining steps are shown in Update status.') : t('Checking…'));
     else if (result === 'confirm') toast(t('Update postponed. You can keep working.'));
   } catch (error) {
@@ -2661,7 +2670,7 @@ updateAllButton.addEventListener('click', async () => {
  * click looking like a crash. Both buttons are the same action; either can be the one pressed.
  */
 function installUpdate(): void {
-  toast(t("Installing the update. Chat On Steroids closes and starts again as the new version."));
+  toast(t("Installing the update. Chat Marks closes and starts again as the new version."));
   void run(api.installUpdate());
 }
 
