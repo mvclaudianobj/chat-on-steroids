@@ -14,6 +14,9 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
   const parent = document.querySelector('[data-panel="modules"] .appearance-content')!;
   const panels = document.querySelector('[data-panel="modules"]')!.parentElement!;
   const sidebar = document.getElementById('cliModuleChats')!;
+  const sidebarPrimary = document.getElementById('sidebarPrimary')!;
+  const newChatBtn = document.getElementById('newChat')!;
+  let lastSidebarBtn: Element = newChatBtn;
   const chatBody = document.getElementById('chatBody')!;
   const composer = document.getElementById('composer');
   const composerDock = document.getElementById('composerDock');
@@ -52,7 +55,7 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     sidebarButton.append(document.createTextNode(`Novo ${name}`));
     sidebarButton.hidden = true;
     sidebarButton.addEventListener('click', () => void createSession(id, hooks.workspace()));
-    sidebar.append(sidebarButton);
+    sidebarPrimary.insertBefore(sidebarButton, lastSidebarBtn.nextSibling); lastSidebarBtn = sidebarButton;
     sidebarButtons.set(id, sidebarButton);
     const row = document.createElement('section'); row.className = 'appearance-section';
     row.append(text('h2', name));
