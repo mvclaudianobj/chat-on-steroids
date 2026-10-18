@@ -28,13 +28,14 @@ const VERSION = /^(?:0|[1-9]\d{0,8})(?:\.(?:0|[1-9]\d{0,8})){2,3}$/;
 export function firefoxSigningTestVersion(npmVersion, runNumber) {
   const current = productVersion(npmVersion);
   const parts = current.split('.');
-  if (parts.length !== 4 || !VERSION.test(current) || !/^[1-9]\d*$/.test(String(runNumber))) {
-    throw new Error('Firefox signing check requires a Marks X.Y.Z.N package and a positive workflow run number');
+  if ((parts.length !== 3 && parts.length !== 4) || !VERSION.test(current) || !/^[1-9]\d*$/.test(String(runNumber))) {
+    throw new Error('Firefox signing check requires a Marks X.Y.Z or X.Y.Z.N package and a positive workflow run number');
   }
   const probeRevision = BigInt(runNumber) + 1000n;
   const candidate = `${parts.slice(0, 3).join('.')}.${probeRevision}`;
-  if (probeRevision <= BigInt(parts[3]) || !VERSION.test(candidate)) {
-    throw new Error(`Firefox signing check revision ${probeRevision} must exceed ${parts[3]} and fit AMO's numeric version range`);
+  const publicRevision = parts[3] ?? '0';
+  if (probeRevision <= BigInt(publicRevision) || !VERSION.test(candidate)) {
+    throw new Error(`Firefox signing check revision ${probeRevision} must exceed ${publicRevision} and fit AMO's numeric version range`);
   }
   return candidate;
 }
