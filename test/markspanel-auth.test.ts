@@ -9,9 +9,11 @@ vi.mock('electron', () => ({
   dialog: { showErrorBox: vi.fn() }
 }));
 vi.mock('../src/main/secrets.js', () => ({ getSecret: vi.fn(), setSecret: vi.fn() }));
+vi.mock('../src/main/logger.js', () => ({ logError: vi.fn(), logInfo: vi.fn() }));
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { getSecret, setSecret } from '../src/main/secrets.js';
+import { logInfo } from '../src/main/logger.js';
 import { logoutMarkspanel, requireMarkspanelLogin, startMarkspanelSessionMonitor } from '../src/main/markspanel-auth.js';
 
 const options = { loginPage: '/app/login.html', preload: '/app/login.js' };
@@ -67,6 +69,19 @@ describe('MarksPanel login gate', () => {
       'Login do MarksPanel',
       expect.stringContaining('A tela de login não pôde ser carregada.')
     );
+  });
+
+  it('reports readiness only when the login window is ready to show', async () => {
+    vi.mocked(getSecret).mockResolvedValue(null);
+    const login = loginWindow();
+    const gate = requireMarkspanelLogin(options);
+    await vi.waitFor(() => expect(login.win.loadFile).toHaveBeenCalledWith('/app/login.html'));
+    expect(logInfo).not.toHaveBeenCalledWith('markspanel login ready');
+    login.win.emit('ready-to-show');
+    expect(login.win.show).toHaveBeenCalledOnce();
+    expect(logInfo).toHaveBeenCalledWith('markspanel login ready');
+    login.win.close();
+    expect(await gate).toBe(false);
   });
 
   it('renews an expired session and revalidates the new bearer before granting access', async () => {

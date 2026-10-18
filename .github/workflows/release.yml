@@ -237,9 +237,11 @@ jobs:
             echo "Installed DEB GUI exited before the intentional timeout (status $status)" >&2
             exit 1
           fi
-          grep -Fq '[info] app started' deb-gui.log
-          grep -Fq '[info] window loaded' deb-gui.log
-          grep -Fq '[info] renderer state ready' deb-gui.log
+          if ! grep -Fq '[info] markspanel login ready' deb-gui.log; then
+            grep -Fq '[info] app started' deb-gui.log
+            grep -Fq '[info] window loaded' deb-gui.log
+            grep -Fq '[info] renderer state ready' deb-gui.log
+          fi
           if grep -Fq '[error] window failed to load' deb-gui.log || grep -Fq '[error] renderer:' deb-gui.log; then
             echo "Installed DEB GUI reported a renderer startup failure" >&2
             exit 1
@@ -253,7 +255,7 @@ jobs:
           appimage="$PWD/release/Chat-Marks-Linux-${{ matrix.arch }}.AppImage"
           test -x "$appimage"
           # Exercise the actual static-runtime artifact through Chromium/Electron startup and
-          # require renderer-state proof rather than accepting a process that merely hangs.
+          # require login-or-workspace readiness proof rather than accepting a process that merely hangs.
           # Do not use Electron's Node mode through AppRun here: when user namespaces are blocked,
           # the 1.0.3 launcher can prepend --no-sandbox, which Node mode rejects as a bad option.
           # The unpacked native-runtime probe above already validates every native dependency.
@@ -295,9 +297,11 @@ jobs:
               echo "AppImage $label GUI exited before the intentional timeout (status $status)" >&2
               exit 1
             fi
-            grep -Fq '[info] app started' "$log"
-            grep -Fq '[info] window loaded' "$log"
-            grep -Fq '[info] renderer state ready' "$log"
+            if ! grep -Fq '[info] markspanel login ready' "$log"; then
+              grep -Fq '[info] app started' "$log"
+              grep -Fq '[info] window loaded' "$log"
+              grep -Fq '[info] renderer state ready' "$log"
+            fi
             if grep -Fq '[error] window failed to load' "$log" || grep -Fq '[error] renderer:' "$log"; then
               echo "AppImage $label GUI reported a renderer startup failure" >&2
               exit 1

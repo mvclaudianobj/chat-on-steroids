@@ -1,7 +1,7 @@
 /** The Markspanel login is an application admission boundary, owned by main. */
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { getSecret, setSecret } from './secrets.js';
-import { logError } from './logger.js';
+import { logError, logInfo } from './logger.js';
 
 const SERVER = 'https://marks.ia.br';
 const CLIENT = 'opencode-cli'; // Same registered public device client used by MarksCode.
@@ -384,7 +384,10 @@ export async function requireMarkspanelLogin(options: { loginPage: string; login
       win.once('ready-to-show', () => {
         if (appearanceDeadline) clearTimeout(appearanceDeadline);
         appearanceDeadline = null;
-        if (!options.isQuitting?.()) win.show(); else win.close();
+        if (!options.isQuitting?.()) {
+          win.show();
+          logInfo('markspanel login ready');
+        } else win.close();
       });
       win.webContents.on('render-process-gone', () => {
         showFailure('A tela de login não pôde ser renderizada.');

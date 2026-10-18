@@ -61,23 +61,31 @@ beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'
 
 describe('Persistent coding CLI terminal', () => {
   it('creates independent durable sessions and reopens each stable tmux identity', async () => {
-    const firstSession = await cliCreateSession('codex', 'a-workspace');
-    const secondSession = await cliCreateSession('codex', 'a-workspace');
-    expect(firstSession.id).not.toBe(secondSession.id);
-    expect(firstSession.tmuxSession).not.toBe(secondSession.tmuxSession);
-    expect(await cliSessions()).toEqual(expect.arrayContaining([
-      expect.objectContaining({ id: firstSession.id, tmuxSession: firstSession.tmuxSession }),
-      expect.objectContaining({ id: secondSession.id, tmuxSession: secondSession.tmuxSession })
-    ]));
-    const info = await cliOpen(firstSession.id, 90, 30, 'first');
-    expect(info.cwd).toBe(process.platform === 'win32' ? '/mnt/c/approved/project' : '/approved/project');
-    expect(info.session).toBe(firstSession.tmuxSession);
-    expect(fixture.commands.some(args => args.includes('has-session') && args.includes(`=${info.session}`))).toBe(true);
-    const pty = (await import('node-pty')).spawn;
-    expect(pty).toHaveBeenCalledWith('tmux', expect.arrayContaining(['attach-session', '-t', `=${info.session}`]), expect.objectContaining({ cwd: '/approved/project', cols: 90, rows: 30 }));
-    expect(await cliOpen(secondSession.id, 80, 20, 'second')).toMatchObject({ session: secondSession.tmuxSession });
-    expect(await cliOpen(firstSession.id, 80, 20, 'third')).toMatchObject({ session: info.session });
-    expect(fixture.commands.some(args => args.includes('kill-session'))).toBe(false);
+    try {
+      const firstSession = await cliCreateSession('codex', 'a-workspace');
+      const secondSession = await cliCreateSession('codex', 'a-workspace');
+      expect(firstSession.id).not.toBe(secondSession.id);
+      expect(firstSession.tmuxSession).not.toBe(secondSession.tmuxSession);
+      expect(await cliSessions()).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: firstSession.id, tmuxSession: firstSession.tmuxSession }),
+        expect.objectContaining({ id: secondSession.id, tmuxSession: secondSession.tmuxSession })
+      ]));
+      const info = await cliOpen(firstSession.id, 90, 30, 'first');
+      expect(info.cwd).toBe(process.platform === 'win32' ? '/mnt/c/approved/project' : '/approved/project');
+      expect(info.session).toBe(firstSession.tmuxSession);
+      expect(fixture.commands.some(args => args.includes('has-session') && args.includes(`=${info.session}`))).toBe(true);
+      const pty = (await import('node-pty')).spawn;
+      if (process.platform === 'win32') {
+        expect(pty).toHaveBeenCalledWith('wsl.exe', expect.arrayContaining(['--exec', 'tmux', 'attach-session']), expect.objectContaining({ cwd: '/approved/project', cols: 90, rows: 30 }));
+      } else {
+        expect(pty).toHaveBeenCalledWith('tmux', expect.arrayContaining(['attach-session', '-t', `=${info.session}`]), expect.objectContaining({ cwd: '/approved/project', cols: 90, rows: 30 }));
+      }
+      expect(await cliOpen(secondSession.id, 80, 20, 'second')).toMatchObject({ session: secondSession.tmuxSession });
+      expect(await cliOpen(firstSession.id, 80, 20, 'third')).toMatchObject({ session: info.session });
+      expect(fixture.commands.some(args => args.includes('kill-session'))).toBe(false);
+    } finally {
+      await cliAction('codex', 'stop');
+    }
   });
 
   it('rejects disabled command authority and wrong renderer callers', async () => {
