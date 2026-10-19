@@ -26,8 +26,9 @@ function fixture() {
   git(repo, 'config', 'user.email', 'test@example.invalid');
   git(repo, 'remote', 'add', 'marks', 'https://github.com/mvclaudianobj/chat-on-steroids.git');
   git(repo, 'remote', 'add', 'upstream', 'https://github.com/totec448-spec/chat-on-steroids');
+  writeFileSync(path.join(repo, '.gitignore'), 'node_modules\n');
   writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ version: '2.1.41+1' }));
-  git(repo, 'add', 'package.json'); git(repo, 'commit', '-m', 'marks baseline');
+  git(repo, 'add', 'package.json', '.gitignore'); git(repo, 'commit', '-m', 'marks baseline');
   const marks = git(repo, 'rev-parse', 'HEAD');
   git(repo, 'update-ref', 'refs/remotes/marks/main', marks);
   writeFileSync(path.join(repo, 'community.md'), 'new community feature');
@@ -97,6 +98,7 @@ it('verifies exact commit and checksums while refusing mismatches, traversal, du
 
 it('generates build/packaging gates without execution and refuses stale or dirty source', () => {
   const { worktree, marks } = fixture();
+  mkdirSync(path.join(worktree, 'node_modules'));
   const opts = { repo: worktree, expectedHead: marks, tests: ['test/packaging.test.ts'] };
   expect(releaseCommands(opts).commands).toEqual([
     [process.execPath, 'scripts/verify-release-version.mjs'],
@@ -115,4 +117,14 @@ it('generates build/packaging gates without execution and refuses stale or dirty
   expect(() => releaseCommands({ ...opts, expectedHead: 'a'.repeat(40) })).toThrow(/pinned/);
   writeFileSync(path.join(worktree, 'dirty.txt'), 'do not release');
   expect(() => releaseCommands(opts)).toThrow(/clean committed/);
+});
+
+it('refuses linked worktree dependencies before constructing an incomplete native package', () => {
+  const { parent, worktree, marks } = fixture();
+  const opts = { repo: worktree, expectedHead: marks, level: 'package', platform: process.platform, arch: 'x64' };
+  expect(() => releaseCommands(opts)).toThrow(/Missing node_modules/);
+  const otherDependencies = path.join(parent, 'shared-deps');
+  mkdirSync(otherDependencies);
+  symlinkSync(otherDependencies, path.join(worktree, 'node_modules'), 'dir');
+  expect(() => releaseCommands(opts)).toThrow(/Linked node_modules is unsafe/);
 });

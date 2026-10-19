@@ -64,6 +64,10 @@ node .agents/skills/marks-community-merge/scripts/local-release.mjs \
   --head <SHA_DO_COMMIT_INTEGRADO> --level build --test test/packaging.test.ts --execute yes
 
 # Pacote nativo desta plataforma, com publicação desabilitada no owner existente:
+ # Nesta worktree isolada, instalar dependências próprias antes do pacote:
+ # node_modules NÃO pode ser symlink para outra worktree; electron-builder omite
+ # dependências transitivas e smoke rejeita os instaladores incompletos.
+npm ci --prefer-offline
 node .agents/skills/marks-community-merge/scripts/local-release.mjs \
   --head <SHA_DO_COMMIT_INTEGRADO> --level package --platform linux --arch x64 --execute yes
 ```
