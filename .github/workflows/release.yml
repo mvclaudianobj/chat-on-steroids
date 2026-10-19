@@ -57,6 +57,40 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  contracts:
+    # Run the complete OS-specific suite alongside native packaging. Keeping it inside the
+    # package job made even a warm macOS build wait for the entire Vitest suite first.
+    # All three suites remain mandatory: assemble cannot run unless they all succeed.
+    name: Verify ${{ matrix.name }} contracts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-2025
+            platform: win32
+          - name: macOS arm64
+            runner: macos-15
+            platform: darwin
+          - name: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+      - name: Verify OS contracts
+        env:
+          # Keep the existing Windows retry policy and flake reporting.
+          COS_TEST_RETRY: ${{ matrix.platform == 'win32' && '2' || '0' }}
+        run: npm run verify:ci
+
   package:
     name: Package ${{ matrix.name }}
     needs: plan
@@ -67,6 +101,11 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.include) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
+    env:
+      # Electron and electron-builder fetch sizeable platform/arch-specific inputs. Cache
+      # downloads only (never node_modules, installed binaries or finished installers).
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -77,30 +116,35 @@ jobs:
           architecture: ${{ matrix.arch }}
           cache: npm
 
+      - name: Reuse Electron packaging downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: marks-release-electron-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Verify tag matches package version
         if: github.ref_type == 'tag'
         run: node scripts/verify-release-version.mjs
 
-      # Every target still packages and smokes natively. Run the architecture-neutral
-      # 9k+ unit suite once per OS, not twice (slow Intel macOS/ARM Windows runners).
-      - name: Verify OS contracts (primary architecture)
-        if: (matrix.platform == 'win32' && matrix.arch == 'x64') || (matrix.platform == 'darwin' && matrix.arch == 'arm64') || (matrix.platform == 'linux' && matrix.arch == 'x64')
-        run: npm run verify:ci
-        env:
-          # The slow Intel macOS and Windows runners retry a failed test; the flaky reporter still names
-          # every retried test as a warning. Windows had no retry, so a known timing flake failed 3 of 8
-          # canaries on 2026-10-04 (plugins-manager, bridge, code-mode-mcp), each green in its PR's CI.
-          COS_TEST_RETRY: ${{ matrix.platform == 'win32' && '2' || '0' }}
+      # The complete suite (typecheck, notices, privacy and native tests) runs for
+      # each OS in parallel in `contracts`. All six architectures independently
+      # prove their actual packaging target and run their packaged native smokes.
+      - name: Verify package metadata
+        run: node scripts/verify-release-version.mjs --package-only
 
+      # Preserve the source/licensing checks on the three non-primary architectures.
+      # The full suites run in parallel in `contracts`, while these lightweight
+      # checks still validate each secondary runner's installed native dependencies.
       - name: Verify source contracts (secondary architecture)
         if: (matrix.platform == 'win32' && matrix.arch == 'arm64') || (matrix.platform == 'darwin' && matrix.arch == 'x64') || (matrix.platform == 'linux' && matrix.arch == 'arm64')
         run: |
           npm run typecheck
           npm run verify:notices
-          node scripts/verify-release-version.mjs --package-only
 
       - name: Prove native runner target
         run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"
@@ -330,7 +374,7 @@ jobs:
 
   assemble:
     name: Assemble release candidate
-    needs: [plan, package, sources]
+    needs: [plan, package, sources, contracts]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 

@@ -54,6 +54,21 @@ it('keeps commands stable when another package with the same name appears or dis
   expect((await listSkillLibrary()).skills).toEqual([]);
 });
 
+it('discovers and reads the internal Chat Marks community merge Skill through the project catalog', async () => {
+  const bundled = path.resolve('.agents/skills/marks-community-merge');
+  const destination = path.join(project, '.agents/skills/marks-community-merge');
+  await fs.cp(bundled, destination, { recursive: true });
+  const library = await listSkillLibrary({ projectPath: project });
+  const skill = library.skills.find(entry => entry.name === 'marks-community-merge');
+  expect(skill).toMatchObject({ source: 'repo-agents', scope: 'repo', managed: false });
+  expect(library.errors).toEqual([]);
+  expect(skillLibraryInstructions(library)).toContain('marks-community-merge');
+  const document = await readLibrarySkill(skill!.id, { projectPath: project }, library);
+  expect(document.text).toContain('merge-guard.mjs');
+  expect(document.text).toContain('local-release.mjs');
+  expect(document.text).toContain('MarksPanel');
+});
+
 it('deduplicates a managed package link against the same discovered SKILL.md', async () => {
   const source = path.join(project, '.agents/skills/review');
   await write(path.join(source, 'SKILL.md'), contents('Review'));

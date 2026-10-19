@@ -8539,6 +8539,13 @@ places `Chat-On-Steroids-Native-Sources.tar.gz` beside the matching installers a
 https://github.com/totec448-spec/chat-on-steroids/releases
 Use the source archive and checksums from the same release as your installer.
 
+For reliability, `preverified/fontconfig-40707235.tar.xz` is a byte-exact
+copy of fontconfig 2.18.1's source archive, retrieved from the official
+freedesktop GitLab package registry on 2026-10-19. The registry intermittently
+returned 502/504 during native-source packaging. This on-disk copy is checked
+against the original `sources.json` length and SHA-256 before use; it is still
+listed in the corresponding release source archive, with the same provenance.
+
 It contains original component archives, locked Rust dependency sources, build repositories,
 patches, source license/copyright notices, a URL/SHA-256 inventory, and build/replacement
 instructions. Source remains under its original individual licenses, including LGPLv3 and
