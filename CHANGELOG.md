@@ -9,6 +9,13 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.40.1] — Marks modules and verified native packaging
+
+- Restored Marks module hooks and branding in the desktop renderer.
+- Repaired module initialization, navigation, project terminals and menus.
+- Aligned native smoke tests with MarksPanel login readiness and checked the Firefox signing probe independently from the release identity.
+- Rebuilt the Windows, Linux and macOS release candidate on all supported architectures with successful CI checks. Installation and runtime validation remain platform-specific.
+
 ## [2.1.40] — Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions
 
 Projects can now live on a server you reach over SSH. In the composer, `/` offers your Skills and `@` your project's files anywhere in a message. On a Mac, Desktop access that an update left broken is repaired with one click.
