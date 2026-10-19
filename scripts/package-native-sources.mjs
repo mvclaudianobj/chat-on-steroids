@@ -7,6 +7,10 @@ import { fetchFirst } from './fetch-retry.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const noticeDirectory = path.join(root, 'docs', 'licenses', 'native');
+// The fontconfig GitLab package registry returned 504/502 repeatedly on 2026-10-19.
+// Keep its exact reviewed source archive in Git, and verify its hash before using it.
+// No other binary/source can bypass the locked inventory or checksums below.
+const preverifiedDirectory = path.join(noticeDirectory, 'preverified');
 const inventory = JSON.parse(await fs.readFile(path.join(noticeDirectory, 'sources.json'), 'utf8'));
 const lock = JSON.parse(await fs.readFile(path.join(root, 'package-lock.json'), 'utf8'));
 const componentNotices = await fs.readFile(path.join(noticeDirectory, 'COMPONENT-NOTICES.txt'));
@@ -33,6 +37,15 @@ for (const source of inventory.sources) {
     throw new Error(`Incomplete native source identity: ${source.file}`);
   }
 }
+for (const source of inventory.sources) {
+  const embedded = path.join(preverifiedDirectory, source.file);
+  let bytes;
+  try { bytes = await fs.readFile(embedded); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; }
+  if (bytes && (bytes.length !== source.bytes || createHash('sha256').update(bytes).digest('hex') !== source.sha256)) {
+    throw new Error(`Preverified native source checksum mismatch: ${source.file}`);
+  }
+}
 if (process.argv.includes('--check')) {
   console.log(`Validated ${inventory.sources.length} pinned native source archives and patches.`);
   process.exit(0);
@@ -50,6 +63,10 @@ await Promise.all(Array.from({ length: 8 }, async () => {
     let bytes;
     try { bytes = await fs.readFile(destination); }
     catch (error) { if (error.code !== 'ENOENT') throw error; }
+    if (!bytes) {
+      try { bytes = await fs.readFile(path.join(preverifiedDirectory, source.file)); }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+    }
     if (!bytes) {
       // Byte-identical copies only: the checksum below decides, whichever address answered.
       const response = await fetchFirst([source.url, ...(source.mirrors ?? [])], { timeoutMs: 180_000 });

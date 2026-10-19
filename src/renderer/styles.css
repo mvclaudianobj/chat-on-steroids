@@ -576,11 +576,11 @@ code {
 .whats-new-hero { position: relative; margin-bottom: 22px; }
 .whats-new-tile { display: grid; place-items: center; width: 56px; height: 56px; border-radius: 16px; background: var(--ink); color: var(--page);
   box-shadow: 0 0 0 1px var(--line), 0 6px 16px -8px #000a; animation: whats-new-pop .5s cubic-bezier(.34, 1.4, .64, 1) .16s both; }
-.whats-new-tile .ico { --ico: 30px; stroke-width: 1.6; }
-/* The mark's drawing carries its ink a pixel left of its box (the folder tab) and half a pixel low (the speech tail); centred in the tile. */
-.whats-new-tile .ico { translate: 1px -0.5px; }
 .whats-new-tile:has(> .marks-app-icon) { background: transparent; box-shadow: none; }
-.whats-new-tile .marks-app-icon { width: 56px; height: 56px; }
+/* The transparent wolf artwork has 3px more breathing room beneath its ink than above;
+   centre the visible mark, not just its 56px image box (verified at actual renderer pixels). */
+.whats-new-tile .marks-app-icon { width: 56px; height: 56px; translate: 0 2px; }
+:root[data-theme='light'] .whats-new-tile .marks-app-icon { translate: 0 0.5px; }
 .whats-new-seal { position: absolute; right: -7px; bottom: -7px; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%;
   background: var(--accent); color: var(--whats-new-surface); box-shadow: 0 0 0 3px var(--whats-new-surface);
   animation: whats-new-pop .45s cubic-bezier(.34, 1.4, .64, 1) .42s both; }
