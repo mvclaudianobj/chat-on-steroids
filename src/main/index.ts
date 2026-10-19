@@ -194,6 +194,10 @@ function createWindow(): void {
     }
   });
 
+  // Some Linux window managers ignore Electron's constructor icon during the first
+  // native mapping; Windows taskbar grouping can also fall back to a generic icon.
+  // Publish the same Marks artwork explicitly once the native window exists.
+  if (icon) window.setIcon?.(icon);
   if (process.platform === 'win32') window.removeMenu();
   const owner = window;
 

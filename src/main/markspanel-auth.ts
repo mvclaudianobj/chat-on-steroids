@@ -8,6 +8,7 @@ const CLIENT = 'opencode-cli'; // Same registered public device client used by M
 const STORE = 'markspanel:session';
 const RECHECK_MS = 60_000;
 const CHECK_DEADLINE_MS = 20_000;
+const SESSION_LIFETIME_MS = 7 * 24 * 60 * 60 * 1000;
 // Runtime access must have fresh server proof. Even a transient outage ends this app
 // runtime, but it does not erase credentials that may work again on the next launch.
 export type MarkspanelAccessLoss = 'revoked' | 'unavailable';
@@ -32,7 +33,7 @@ function requireShutdown(onAccessLost: ((reason: MarkspanelAccessLoss) => void) 
   }
 }
 type Tokens = { access_token: string; refresh_token: string; expires_in: number };
-type Saved = { access: string; refresh: string; expiry: number; email: string; id?: string };
+type Saved = { access: string; refresh: string; expiry: number; email: string; id?: string; authenticatedAt: number };
 type Profile = { id: string; email: string };
 type Device = { device_code: string; user_code: string; verification_uri_complete: string; expires_in: number; interval: number };
 const MAX_RESPONSE_BYTES = 131_072;
@@ -108,13 +109,22 @@ async function validate(access: string, signal?: AbortSignal): Promise<Profile> 
   return { id: response.data.id, email: response.data.email };
 }
 
+/** A refresh renews the short-lived bearer, never the user's seven-day login. */
+function loginStillCurrent(data: Saved, now = Date.now()): boolean {
+  return Number.isSafeInteger(data.authenticatedAt) && data.authenticatedAt > 0 &&
+    data.authenticatedAt <= now && now - data.authenticatedAt < SESSION_LIFETIME_MS;
+}
+
 async function prepareSession(result: Tokens, previous?: Saved, signal?: AbortSignal, epoch = sessionEpoch): Promise<Saved> {
+  if (previous && !loginStillCurrent(previous)) throw new AuthRejected();
   const profile = await validate(result.access_token, signal);
   if (previous && (profile.email.toLowerCase() !== previous.email.toLowerCase() ||
     (previous.id && profile.id !== previous.id))) throw new AuthRejected();
   if (epoch !== sessionEpoch || signal?.aborted) throw new AuthRejected();
+  if (previous && !loginStillCurrent(previous)) throw new AuthRejected();
   return { access: result.access_token, refresh: result.refresh_token,
-    expiry: Date.now() + result.expires_in * 1000, email: profile.email, id: profile.id };
+    expiry: Date.now() + result.expires_in * 1000, email: profile.email, id: profile.id,
+    authenticatedAt: previous?.authenticatedAt ?? Date.now() };
 }
 
 async function persist(result: Tokens, previous?: Saved, signal?: AbortSignal, epoch = sessionEpoch): Promise<void> {
@@ -133,11 +143,14 @@ async function verifyStoredSession(signal?: AbortSignal): Promise<'valid' | Mark
     if (typeof data.access !== 'string' || !data.access || typeof data.refresh !== 'string' || !data.refresh ||
       typeof data.email !== 'string' || !data.email.includes('@') || typeof data.expiry !== 'number' ||
       !Number.isFinite(data.expiry)) return 'revoked';
+    // Older saved sessions without an issuance timestamp require a fresh login:
+    // their age cannot be established, and refreshing tokens must not restart the clock.
+    if (!loginStillCurrent(data)) return 'revoked';
     if (epoch !== sessionEpoch || signal?.aborted) return 'revoked';
     if (data.expiry - Date.now() > 300_000) {
       const profile = await validate(data.access, signal);
       if (profile.email.toLowerCase() !== data.email.toLowerCase() || (data.id && profile.id !== data.id)) return 'revoked';
-      return epoch === sessionEpoch && !signal?.aborted ? 'valid' : 'revoked';
+      return epoch === sessionEpoch && !signal?.aborted && loginStillCurrent(data) ? 'valid' : 'revoked';
     }
     const refreshed = await json('/auth/device/token', { grant_type: 'refresh_token', refresh_token: data.refresh, client_id: CLIENT }, undefined, signal);
     if (refreshed.status === 400 && refreshed.data.error === 'invalid_grant') throw new AuthRejected();
