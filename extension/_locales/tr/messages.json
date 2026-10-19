@@ -725,12 +725,6 @@
   "content_workers_still_running": {
     "message": "$1 yardımcı ajan hâlâ çalışıyor"
   },
-  "content_workers_summary": {
-    "message": "$1 tamamlandı · $2 çalışıyor"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 tamamlandı · $2 çalışıyor · $3 başarısız"
-  },
   "content_working": {
     "message": "çalışıyor…"
   },
@@ -818,9 +812,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · bağlantı noktası $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 bekletiliyor · toplam $2"
-  },
   "popup_detail_chat_id": {
     "message": "sohbet kimliği"
   },
@@ -845,17 +836,11 @@
   "popup_detail_observed": {
     "message": "gözlemlendi"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 olay · $2 çağrı"
-  },
   "popup_detail_ownership": {
     "message": "sahiplik"
   },
   "popup_detail_page_sends": {
     "message": "sayfa gönderimleri"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 başarısız"
   },
   "popup_detail_recorder": {
     "message": "kaydedici"
@@ -1171,5 +1156,89 @@
   },
   "popup_app_not_running_help": {
     "message": "Chat Marks'in bu bilgisayarda açık olduğundan emin olun. Eklenti kendiliğinden bağlanır."
+  },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT başlangıç için kullanılabilir bir ileti alanı göstermedi"
+  },
+  "content_delivery_signed_out": {
+    "message": "Bu tarayıcıda ChatGPT oturumu açık değil. Orada ChatGPT’ye giriş yapın, sonra yeniden gönderin."
+  },
+  "content_goal_retrying__one": {
+    "message": "Hedef $1 saniye içinde yeniden denenecek"
+  },
+  "content_tokens_from__one": {
+    "message": "$1 tokendan itibaren"
+  },
+  "content_tool_calls_count__one": {
+    "message": "$1 araç çağrısı"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "$1 değiştirilmiş dosya daha"
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "Önizleme $1 karakterden kısaltıldı."
+  },
+  "content_waiting_local_tools__one": {
+    "message": "$1 yerel aracın tamamlanması bekleniyor"
+  },
+  "content_workers_still_running__one": {
+    "message": "$1 yardımcı ajan hâlâ çalışıyor"
+  },
+  "popup_count_held__one": {
+    "message": "$1 bekletiliyor"
+  },
+  "popup_count_held_in_page__one": {
+    "message": "$1 sayfada bekletiliyor"
+  },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi — bunun yerine $2 kullandı."
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "$1 istek kimliği kaydedilmiş araç etkinliğiyle eşleştirildi."
+  },
+  "content_workers_finished": {
+    "message": "$1 tamamlandı"
+  },
+  "content_workers_finished__one": {
+    "message": "$1 tamamlandı"
+  },
+  "content_workers_running": {
+    "message": "$1 çalışıyor"
+  },
+  "content_workers_running__one": {
+    "message": "$1 çalışıyor"
+  },
+  "content_workers_failed": {
+    "message": "$1 başarısız"
+  },
+  "content_workers_failed__one": {
+    "message": "$1 başarısız"
+  },
+  "popup_detail_events": {
+    "message": "$1 olay"
+  },
+  "popup_detail_events__one": {
+    "message": "$1 olay"
+  },
+  "popup_detail_calls": {
+    "message": "$1 çağrı"
+  },
+  "popup_detail_calls__one": {
+    "message": "$1 çağrı"
+  },
+  "popup_detail_failed": {
+    "message": "$1 başarısız"
+  },
+  "popup_detail_failed__one": {
+    "message": "$1 başarısız"
+  },
+  "popup_detail_total": {
+    "message": "toplam $1"
+  },
+  "content_edit_message_missing": {
+    "message": "Bu mesaj artık ChatGPT sayfasında değil, bu yüzden düzenlenemez."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT bu mesaj için Düzenle seçeneği sunmadı. Sohbeti ChatGPT'de açıp yeniden deneyin."
   }
 }

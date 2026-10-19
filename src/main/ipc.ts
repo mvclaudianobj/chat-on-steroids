@@ -9,7 +9,9 @@ import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
-import { setMainTextTranslations } from './main-texts.js';
+import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
+import { MAIN_TEXTS } from '../shared/main-texts.js';
+import { MAX_TASK_REQUEST_CHARS } from '../shared/task-progress.js';
 import { applyLoginStartup, supportsLoginStartup } from './window-lifecycle.js';
 import { startControlApi, stopControlApi } from './control-api.js';
 import { appearanceSchema } from './appearance-schema.js';
@@ -137,7 +139,7 @@ import {
   withSessionMutationFence
 } from './session/store.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
-import { findInSession, locateSearchMatch, searchSessions } from './session/search.js';
+import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
@@ -398,6 +400,9 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       binaryPath: pick(current.tunnel.binaryPath, base.tunnel.binaryPath, wanted.tunnel.binaryPath)
     },
     ui: {
+      // Fields the settings form does not own (the What's New version) stay as they are; every
+      // save rebuilt \`ui\` without them, so What's New came back after any changed setting.
+      ...current.ui,
       appearance: mergeAppearance(current.ui.appearance, base.ui.appearance, wanted.ui.appearance),
       autoContinue: pick(current.ui.autoContinue, base.ui.autoContinue, wanted.ui.autoContinue),
       defaultChatModel: pick(current.ui.defaultChatModel, base.ui.defaultChatModel, wanted.ui.defaultChatModel),
@@ -857,7 +862,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const window = getWindow();
     if (!window) throw new Error('No window');
     const result = await dialog.showOpenDialog(window, {
-      title: 'Approve a folder for ChatGPT',
+      ...dialogLabel('Approve a folder for ChatGPT'),
       properties: ['openDirectory']
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
@@ -887,8 +892,10 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     setStopNoticeTranslations(z.record(z.string().max(200), z.string().max(400)).refine(value => Object.keys(value).length <= 16).parse(payload));
   });
   handle('ui:mainTexts', async payload => {
-    // The tray menu and Session finish notice in the interface language; bounded and allowlisted.
-    setMainTextTranslations(z.record(z.string().max(200), z.string().max(200)).refine(value => Object.keys(value).length <= 32).parse(payload));
+    // The tray menu, notices and native dialogs in the interface language; bounded and allowlisted.
+    // The bound follows the list: a fixed 32 refused the whole set once it grew past that.
+    setMainTextTranslations(z.record(z.string().max(200), z.string().max(200))
+      .refine(value => Object.keys(value).length <= MAIN_TEXTS.length).parse(payload));
   });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());
@@ -897,7 +904,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return setPetOverlayVisible(visible);
   });
   handle('pets:import', async () => {
-    const options: Electron.OpenDialogOptions = { title: 'Import CoS Pet folder', properties: ['openDirectory'] };
+    const options: Electron.OpenDialogOptions = { ...dialogLabel('Import CoS Pet folder'), properties: ['openDirectory'] };
     const owner = getWindow();
     const selected = owner && !owner.isDestroyed()
       ? await dialog.showOpenDialog(owner, options)
@@ -948,8 +955,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('skills:import', async payload => {
     const { kind } = z.object({ kind: z.enum(['folder', 'file']) }).strict().parse(payload);
     const options: Electron.OpenDialogOptions = kind === 'folder'
-      ? { title: 'Import Skill folder', properties: ['openDirectory'] }
-      : { title: 'Import SKILL.md', properties: ['openFile'], filters: [{ name: 'Markdown skills', extensions: ['md'] }] };
+      ? { ...dialogLabel('Import Skill folder'), properties: ['openDirectory'] }
+      : { ...dialogLabel('Import SKILL.md'), properties: ['openFile'], filters: [{ name: mainText('Markdown skills'), extensions: ['md'] }] };
     const owner = getWindow();
     const selected = owner && !owner.isDestroyed()
       ? await dialog.showOpenDialog(owner, options)
@@ -1001,7 +1008,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('projects:add', async () => {
     const window = getWindow();
     if (!window) throw new Error('No window');
-    const result = await dialog.showOpenDialog(window, { title: 'Choose a project folder for ChatGPT', properties: ['openDirectory'] });
+    const result = await dialog.showOpenDialog(window, { ...dialogLabel('Choose a project folder for ChatGPT'), properties: ['openDirectory'] });
     if (result.canceled || !result.filePaths[0]) return null;
     const folder = result.filePaths[0];
     try { await resolvePath(getConfig().roots, folder); }
@@ -1222,9 +1229,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const window = getWindow();
     if (!window) throw new Error('No window');
     const result = await dialog.showOpenDialog(window, {
-      title: 'Select the tunnel executable',
+      ...dialogLabel('Select the tunnel executable'),
       properties: ['openFile'],
-      ...(process.platform === 'win32' ? { filters: [{ name: 'Programs', extensions: ['exe'] }] } : {})
+      ...(process.platform === 'win32' ? { filters: [{ name: mainText('Programs'), extensions: ['exe'] }] } : {})
     });
     if (result.canceled || !result.filePaths[0]) return buildState();
     await updateConfig((config) => ({
@@ -1312,6 +1319,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'session']),
       turnId: z.string().min(1).max(200).optional(),
+      messageId: z.string().min(1).max(200).optional(),
       target: z.enum(['clipboard', 'file'])
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
@@ -1451,7 +1459,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return stageInputAttachments(sources, retained);
   };
   handle('sessions:files', async () => {
-    const chosen = await dialog.showOpenDialog({ title: 'Attach files', properties: ['openFile', 'multiSelections'] });
+    const chosen = await dialog.showOpenDialog({ ...dialogLabel('Attach files'), properties: ['openFile', 'multiSelections'] });
     if (chosen.canceled) return [];
     if (chosen.filePaths.length > 20) throw new Error('Attach up to 20 files per message');
     return stageFiles(chosen.filePaths);
@@ -1492,7 +1500,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return setSessionAutomation(id, automation, afterTurn);
   });
   handle('sessions:objective', async (payload) => {
-    const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(16000), mode: z.enum(['goal', 'loop']) }).parse(payload);
+    const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(MAX_TASK_REQUEST_CHARS), mode: z.enum(['goal', 'loop']) }).parse(payload);
     return setSessionObjective(id, text, mode);
   });
   handle('sessions:compact', async (payload) => compactSession(sessionIdArg.parse(payload).id));
@@ -1502,7 +1510,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('sessions:cancelCompaction', async (payload) => cancelSessionCompaction(sessionIdArg.parse(payload).id));
   handle('sessions:plan', async (payload) => {
-    const { text, backend, requestId } = z.object({ text: z.string().trim().min(1).max(16000), backend: z.enum(['api', 'chatgpt']), requestId: z.string().uuid().optional() }).parse(payload);
+    const { text, backend, requestId } = z.object({ text: z.string().trim().min(1).max(MAX_TASK_REQUEST_CHARS), backend: z.enum(['api', 'chatgpt']), requestId: z.string().uuid().optional() }).parse(payload);
     const publish = (progress: import('../shared/task-progress.js').TaskProgressUpdate) => {
       const target = getWindow();
       if (requestId && target && !target.isDestroyed()) target.webContents.send('task:progress', { requestId, ...progress });
@@ -1713,6 +1721,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id, query } = sessionIdArg.extend({ query: z.string().max(200) }).parse(payload);
     return locateSearchMatch(id, query);
   });
+  // Branch in new chat (#482): where the reply a branch was made from is, to open the source there.
+  handle('sessions:locate-message', async (payload) => {
+    const { id, messageId } = sessionIdArg.extend({ messageId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) }).parse(payload);
+    return locateMessage(id, messageId);
+  });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);
     if (!await getSession(id)) throw new Error('Session not found');
@@ -1896,26 +1909,31 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // or a model-facing tool. List bounded relative paths instead of native paths.
     const changedFiles = candidate.changes.slice(0, 25).map(name =>
       `  - ${name.replace(/[\x00-\x1f\x7f]/g, '?').slice(0, 180)}`);
+    // Function replacements: a checkout path may contain `$&` or `$'`.
+    const workspace = candidate.workspace;
+    const discarded = String(candidate.changes.length);
     const details = [
-      `Checkout: ${candidate.workspace}`,
+      mainText('Checkout: {0}').replace('{0}', () => workspace),
       candidate.changes.length
-        ? `${candidate.changes.length} uncommitted/ignored paths would be discarded:`
-        : 'No uncommitted or ignored paths were detected.',
+        ? mainText('Uncommitted or ignored paths that would be discarded ({0}):').replace('{0}', () => discarded)
+        : mainText('No uncommitted or ignored paths were detected.'),
       ...changedFiles,
       candidate.changes.length > changedFiles.length || candidate.changesTruncated
-        ? 'Additional paths are not shown; review the checkout before confirming.' : '',
-      candidate.ignoredFiles ? 'Ignored files are included in the removal.' : '',
-      candidate.uniqueCommits ? 'Commits made only on this branch will remain in Git.' : '',
-      'This action removes the entire checkout directory, including tracked working files, ignored files and uncommitted changes. The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.'
+        ? mainText('Additional paths are not shown; review the checkout before confirming.') : '',
+      candidate.ignoredFiles ? mainText('Ignored files are included in the removal.') : '',
+      candidate.uniqueCommits ? mainText('Commits made only on this branch will remain in Git.') : '',
+      // Two sentences, each within the 200 characters a published translation may have.
+      mainText('This removes the entire checkout folder, including tracked working files, ignored files and uncommitted changes.'),
+      mainText('The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.')
     ].filter(Boolean).join('\n');
     // Approval is acquired in the trusted main process, not supplied as a boolean by renderer
     // or model. Default is cancellation, even for an apparently clean checkout.
     const { response } = await dialog.showMessageBox({
       type: 'warning',
-      title: 'Remove worker Git checkout?',
-      message: 'Review the worker checkout before removing it',
+      title: mainText('Remove worker Git checkout?'),
+      message: mainText('Review the worker checkout before removing it'),
       detail: details,
-      buttons: ['Keep checkout', 'Remove checkout; preserve Git branch'],
+      buttons: [mainText('Keep checkout'), mainText('Remove checkout; preserve Git branch')],
       defaultId: 0,
       cancelId: 0,
       noLink: true
@@ -2030,7 +2048,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ? entry.text + GOAL_MARKER_INSTRUCTION : entry.text;
       // Only the opening user input owns executor setup. Existing chats, queued
       // checkpoints and automatic continuations already have their instructions.
-      return (entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish'
+      // An edit of a chat's first question (#365) replaces the message that carried its setup.
+      return ((entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish') || entry.editFramed
         ? prepareSessionPrompt(text, entry, limits, authored)
         : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits, entry) : text;
     },
@@ -2076,7 +2095,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   onGoalChange(() => push('session:changed'));
   handle('tasks:cancel', async payload => cancelTaskRequest(z.object({ requestId: z.string().uuid() }).parse(payload).requestId));
   handle('sessions:goalOpening', async payload => {
-    const { text, mode, requestId } = z.object({ text: z.string().trim().min(1).max(16000),
+    const { text, mode, requestId } = z.object({ text: z.string().trim().min(1).max(MAX_TASK_REQUEST_CHARS),
       mode: z.enum(['goal', 'loop']), requestId: z.string().uuid() }).parse(payload);
     const backend = goalBackendFor(mode);
     const publish = (progress: import('../shared/task-progress.js').TaskProgressUpdate) => push('task:progress', { requestId, ...progress });

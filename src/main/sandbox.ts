@@ -19,6 +19,12 @@ import { sftpFor } from './remote/ssh.js';
 import { SftpError } from './remote/sftp.js';
 
 const IS_WINDOWS = process.platform === 'win32';
+/** Windows file-name rules for paths on this computer; a server's paths never take them. */
+let windowsNameRules = IS_WINDOWS;
+/** Test seam: apply (true) or drop (false) the Windows name rules on any platform; null restores. */
+export function setWindowsPathRulesForTests(on: boolean | null): void {
+  windowsNameRules = on ?? IS_WINDOWS;
+}
 
 /** WSL's local redirector aliases; the Linux part of their paths is case-sensitive. */
 const WSL_PATH = /^\\\\(?:wsl\.localhost|wsl\$)\\([^\\]+)(.*)$/i;
@@ -76,21 +82,37 @@ export interface Resolved {
  */
 export function suggestApprovedSpelling(roots: readonly Root[], segments: readonly string[]): string | null {
   for (const [index, segment] of segments.entries()) {
-    const slug = normaliseRootName(segment);
-    const root = roots.find((candidate) => candidate.name === slug);
+    const slugs = new Set([normaliseRootName(segment), legacyRootName(segment)]);
+    const root = roots.find((candidate) => slugs.has(candidate.name));
     if (root) return `/${root.name}${segments.slice(index + 1).map((part) => `/${part}`).join('')}`;
   }
   return null;
 }
 
-/** Normalises a user-supplied root name into the slug used in virtual paths. */
-export function normaliseRootName(input: string): string {
-  const slug = input
-    .toLowerCase()
+/** Letters spelled with two ASCII letters by custom, or that Unicode does not decompose. */
+const ASCII_SPELLINGS: Readonly<Record<string, string>> = { ä: 'ae', ö: 'oe', ü: 'ue', ß: 'ss', æ: 'ae', œ: 'oe', ø: 'o', ł: 'l', đ: 'd', ð: 'd', þ: 'th' };
+
+function slugOf(lowered: string): string {
+  const slug = lowered
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[-.]+|[-.]+$/g, '')
     .slice(0, 32);
   return slug || 'folder';
+}
+
+/**
+ * Normalises a user-supplied root name into the slug used in virtual paths. Letters keep an
+ * ASCII spelling instead of being dropped: "Größe" is `groesse`, "Café" is `cafe` (older
+ * versions made "Kundenprojekt Größe & Ä" `/kundenprojekt-gr-e`).
+ */
+export function normaliseRootName(input: string): string {
+  return slugOf(input.toLowerCase().replace(/[äöüßæœøłđðþ]/g, letter => ASCII_SPELLINGS[letter]!)
+    .normalize('NFKD').replace(/\p{M}+/gu, ''));
+}
+
+/** The slug older versions gave a root, which existing roots keep as their name. */
+function legacyRootName(input: string): string {
+  return slugOf(input.toLowerCase());
 }
 
 /** Picks a root name derived from a folder that does not collide with existing ones. */
@@ -109,7 +131,7 @@ export function uniqueRootName(folderPath: string, existing: readonly Root[]): s
  * Validates one path segment. Traversal/control constraints apply everywhere; Windows also
  * rejects drive/ADS syntax, reserved device names and names Win32 silently aliases.
  */
-function checkSegment(segment: string): void {
+function checkSegment(segment: string, windows = windowsNameRules): void {
   if (segment === '' || segment === '.') {
     throw new SandboxError('Path contains an empty segment');
   }
@@ -123,7 +145,7 @@ function checkSegment(segment: string): void {
   if (/[\x00-\x1f]/.test(segment)) {
     throw new SandboxError('Path contains a control character');
   }
-  if (IS_WINDOWS) {
+  if (windows) {
     // ":" would open an alternate data stream or a drive-relative path.
     if (segment.includes(':')) {
       throw new SandboxError('Path contains ":", which is not allowed');
@@ -144,8 +166,12 @@ function checkSegment(segment: string): void {
   }
 }
 
-/** Splits a virtual path into validated segments. Windows accepts both native separators. */
-export function splitVirtualPath(input: string): string[] {
+/**
+ * Splits a virtual path into validated segments. Windows accepts both native separators. A path
+ * in a folder on a server (`posix`) splits on "/" only and keeps the server's own name rules: a
+ * Linux file may be called `it's "quoted".txt` or `a\b`, and Windows has no say over it.
+ */
+export function splitVirtualPath(input: string, { posix = false }: { posix?: boolean } = {}): string[] {
   if (typeof input !== 'string') {
     throw new SandboxError('Path must be a string');
   }
@@ -155,11 +181,12 @@ export function splitVirtualPath(input: string): string[] {
   if (input.length > 4096) {
     throw new SandboxError('Path is too long');
   }
-  const segments = (IS_WINDOWS ? input.split(/[/\\]+/) : input.split(/\/+/)).filter((s) => s.length > 0);
+  const windows = windowsNameRules && !posix;
+  const segments = (windows ? input.split(/[/\\]+/) : input.split(/\/+/)).filter((s) => s.length > 0);
   if (segments.length === 0) {
     throw new SandboxError('Path is empty. Use an approved virtual root such as /<root>/file.txt.');
   }
-  for (const segment of segments) checkSegment(segment);
+  for (const segment of segments) checkSegment(segment, windows);
   return segments;
 }
 
@@ -401,7 +428,10 @@ export async function resolvePath(
       `"${requested.slice(0, 120)}" is relative and this chat has no active folder yet. Use a full path: ${names}`
     );
   }
-  const segments = splitVirtualPath(requested);
+  // The root decides which name rules apply, so find it before checking the rest of the path.
+  const firstName = (windowsNameRules ? String(requested).split(/[/\\]+/) : String(requested).split(/\/+/)).find(Boolean)?.toLowerCase();
+  const onServer = roots.some((r) => !!r.remote && r.name.toLowerCase() === firstName);
+  const segments = splitVirtualPath(requested, { posix: onServer });
   const rootName = segments[0]!.toLowerCase();
   const root = roots.find((r) => r.name.toLowerCase() === rootName);
   if (!root) {

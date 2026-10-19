@@ -9,14 +9,18 @@ vi.mock('electron', () => ({
   dialog: { showErrorBox: vi.fn() }
 }));
 vi.mock('../src/main/secrets.js', () => ({ getSecret: vi.fn(), setSecret: vi.fn() }));
+vi.mock('../src/main/logger.js', () => ({ logError: vi.fn(), logInfo: vi.fn() }));
 
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import { getSecret, setSecret } from '../src/main/secrets.js';
+import { logInfo } from '../src/main/logger.js';
 import { logoutMarkspanel, requireMarkspanelLogin, startMarkspanelSessionMonitor } from '../src/main/markspanel-auth.js';
 
 const options = { loginPage: '/app/login.html', preload: '/app/login.js' };
 const fakeResponse = (body: unknown, status = 200): Response => ({ status, text: async () => JSON.stringify(body) }) as Response;
-const saved = (expiry = Date.now() + 3600_000): string => JSON.stringify({ access: 'valid-access', refresh: 'refresh', expiry, email: 'owner@example.com' });
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const saved = (expiry = Date.now() + 3600_000, authenticatedAt = Date.now()): string =>
+  JSON.stringify({ access: 'valid-access', refresh: 'refresh', expiry, email: 'owner@example.com', authenticatedAt });
 let stop: (() => void) | undefined;
 
 function loginWindow() {
@@ -49,7 +53,7 @@ describe('MarksPanel login gate', () => {
   });
 
   it('validates a stored session with the server and does not show a login window', async () => {
-    vi.mocked(getSecret).mockResolvedValue(JSON.stringify({ access: 'valid-access', refresh: 'refresh', expiry: Date.now() + 3600_000, email: 'owner@example.com' }));
+    vi.mocked(getSecret).mockResolvedValue(saved());
     const fetcher = vi.fn().mockResolvedValue(fakeResponse({ id: 'user-id', email: 'owner@example.com' }));
     vi.stubGlobal('fetch', fetcher);
     expect(await requireMarkspanelLogin(options)).toBe(true);
@@ -69,8 +73,21 @@ describe('MarksPanel login gate', () => {
     );
   });
 
+  it('reports readiness only when the login window is ready to show', async () => {
+    vi.mocked(getSecret).mockResolvedValue(null);
+    const login = loginWindow();
+    const gate = requireMarkspanelLogin(options);
+    await vi.waitFor(() => expect(login.win.loadFile).toHaveBeenCalledWith('/app/login.html'));
+    expect(logInfo).not.toHaveBeenCalledWith('markspanel login ready');
+    login.win.emit('ready-to-show');
+    expect(login.win.show).toHaveBeenCalledOnce();
+    expect(logInfo).toHaveBeenCalledWith('markspanel login ready');
+    login.win.close();
+    expect(await gate).toBe(false);
+  });
+
   it('renews an expired session and revalidates the new bearer before granting access', async () => {
-    vi.mocked(getSecret).mockResolvedValue(JSON.stringify({ access: 'expired', refresh: 'refresh-old', expiry: Date.now() - 1000, email: 'owner@example.com' }));
+    vi.mocked(getSecret).mockResolvedValue(JSON.stringify({ ...JSON.parse(saved(Date.now() - 1000)), access: 'expired', refresh: 'refresh-old' }));
     const fetcher = vi.fn()
       .mockResolvedValueOnce(fakeResponse({ access_token: 'access-new', refresh_token: 'refresh-new', expires_in: 3600 }))
       .mockResolvedValueOnce(fakeResponse({ id: 'user-id', email: 'owner@example.com' }));
@@ -128,6 +145,52 @@ describe('MarksPanel login gate', () => {
     await vi.waitFor(() => expect(setSecret).toHaveBeenCalledWith('markspanel:session', expect.stringContaining('new-refresh')));
     expect(onAccessLost).not.toHaveBeenCalled();
     expect(fetcher).toHaveBeenNthCalledWith(2, 'https://marks.ia.br/api/user', expect.objectContaining({ headers: expect.objectContaining({ authorization: 'Bearer new-access' }) }));
+  });
+
+  it('retains the original login time across a bearer refresh', async () => {
+    const authenticatedAt = Date.now() - SEVEN_DAYS_MS + 120_000;
+    vi.mocked(getSecret).mockResolvedValue(saved(Date.now() - 1000, authenticatedAt));
+    vi.stubGlobal('fetch', vi.fn()
+      .mockResolvedValueOnce(fakeResponse({ access_token: 'renewed', refresh_token: 'new-refresh', expires_in: 3600 }))
+      .mockResolvedValueOnce(fakeResponse({ id: 'user-id', email: 'owner@example.com' })));
+    expect(await requireMarkspanelLogin(options)).toBe(true);
+    const persisted = vi.mocked(setSecret).mock.calls.find(([key, value]) => key === 'markspanel:session' && value !== '');
+    expect(JSON.parse(persisted![1]).authenticatedAt).toBe(authenticatedAt);
+  });
+
+  it('asks for a new login after seven days even if the bearer still works', async () => {
+    vi.mocked(getSecret).mockResolvedValue(saved(Date.now() + 3600_000, Date.now() - SEVEN_DAYS_MS));
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const window = loginWindow();
+    const gate = requireMarkspanelLogin(options);
+    await vi.waitFor(() => expect(window.win.loadFile).toHaveBeenCalled());
+    expect(fetcher).not.toHaveBeenCalled();
+    window.win.close();
+    expect(await gate).toBe(false);
+  });
+
+  it('requires a fresh login for sessions saved before the seven-day timestamp existed', async () => {
+    vi.mocked(getSecret).mockResolvedValue(JSON.stringify({ access: 'access', refresh: 'refresh', expiry: Date.now() + 3600_000, email: 'owner@example.com' }));
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const window = loginWindow();
+    const gate = requireMarkspanelLogin(options);
+    await vi.waitFor(() => expect(window.win.loadFile).toHaveBeenCalled());
+    expect(fetcher).not.toHaveBeenCalled();
+    window.win.close();
+    expect(await gate).toBe(false);
+  });
+
+  it('closes an active session at the seven-day boundary without refreshing it', async () => {
+    vi.mocked(getSecret).mockResolvedValue(saved(Date.now() + 3600_000, Date.now() - SEVEN_DAYS_MS));
+    const fetcher = vi.fn();
+    vi.stubGlobal('fetch', fetcher);
+    const onAccessLost = vi.fn();
+    stop = startMarkspanelSessionMonitor({ onAccessLost });
+    await vi.waitFor(() => expect(onAccessLost).toHaveBeenCalledWith('revoked'));
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(setSecret).toHaveBeenCalledWith('markspanel:session', '');
   });
 
   it('rejects refresh-token revocation with no revalidation against the old access token', async () => {
@@ -268,6 +331,7 @@ describe('MarksPanel login gate', () => {
     const committed = vi.mocked(setSecret).mock.calls.find(([name, value]) => name === 'markspanel:session' && value !== '');
     expect(committed).toBeDefined();
     expect(JSON.parse(committed![1])).toMatchObject({ access: 'access', email: 'owner@example.com', id: 'stable-user' });
+    expect(JSON.parse(committed![1]).authenticatedAt).toBeGreaterThan(0);
     expect(ipcMain.removeHandler).toHaveBeenCalledTimes(3);
   });
 

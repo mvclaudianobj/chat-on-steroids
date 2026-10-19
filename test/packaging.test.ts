@@ -401,6 +401,8 @@ describe('cross-platform packaging targets', () => {
     expect(macGuiScript).toContain("output.includes('[info] app started')");
     expect(macGuiScript).toContain("output.includes('[info] window loaded')");
     expect(macGuiScript).toContain("output.includes('[info] renderer state ready')");
+    expect(macGuiScript).toContain("output.includes('[info] markspanel login ready')");
+    expect(macGuiScript).toContain('loginReady || workspaceReady');
     expect(macGuiScript).toContain("output.includes('[error] window failed to load')");
     expect(macGuiScript).toContain("output.includes('[error] renderer:')");
     expect(macGuiScript).toContain('minimumSurvivalMs = 10_000');
@@ -432,6 +434,7 @@ describe('cross-platform packaging targets', () => {
     expect(debGui).toContain("grep -Fq '[info] app started' deb-gui.log");
     expect(debGui).toContain("grep -Fq '[info] window loaded' deb-gui.log");
     expect(debGui).toContain("grep -Fq '[info] renderer state ready' deb-gui.log");
+    expect(debGui).toContain("if ! grep -Fq '[info] markspanel login ready' deb-gui.log; then");
     expect(debGui).toContain("grep -Fq '[error] window failed to load' deb-gui.log");
     expect(debGui).toContain("grep -Fq '[error] renderer:' deb-gui.log");
     expect(debGui).not.toContain('ELECTRON_RUN_AS_NODE');
@@ -455,6 +458,7 @@ describe('cross-platform packaging targets', () => {
     expect(appImageGui).toContain("grep -Fq '[info] app started' \"$log\"");
     expect(appImageGui).toContain("grep -Fq '[info] window loaded' \"$log\"");
     expect(appImageGui).toContain("grep -Fq '[info] renderer state ready' \"$log\"");
+    expect(appImageGui).toContain("if ! grep -Fq '[info] markspanel login ready' \"$log\"; then");
     expect(appImageGui).toContain("grep -Fq '[error] window failed to load' \"$log\"");
     expect(appImageGui).toContain("grep -Fq '[error] renderer:' \"$log\"");
     expect(appImageGui).toContain('run_appimage_smoke normal "$normal_smoke_root" "$PATH" appimage-normal-gui.log');
@@ -884,7 +888,8 @@ Load command 11
     const builder = yamlFile('electron-builder.yml');
     expect(builder.extraMetadata.version).toBe(releaseVersion);
     expect(builder.buildVersion).toBe(releaseVersion);
-    expect(builder.buildNumber).toBe(releaseVersion.split('.')[3]);
+    const revision = pkg.version.split('+')[1];
+    expect(builder.buildNumber).toBe(revision);
     const tag = `v${releaseVersion}`;
     const changelog = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
     const notes = readFileSync(path.join(root, 'docs', 'release-notes', `${tag}.md`), 'utf8');

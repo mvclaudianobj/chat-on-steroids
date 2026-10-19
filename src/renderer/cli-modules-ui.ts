@@ -14,6 +14,9 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
   const parent = document.querySelector('[data-panel="modules"] .appearance-content')!;
   const panels = document.querySelector('[data-panel="modules"]')!.parentElement!;
   const sidebar = document.getElementById('cliModuleChats')!;
+  const sidebarPrimary = document.getElementById('sidebarPrimary')!;
+  const newChatBtn = document.getElementById('newChat')!;
+  let lastSidebarBtn: Element = newChatBtn;
   const chatBody = document.getElementById('chatBody')!;
   const composer = document.getElementById('composer');
   const composerDock = document.getElementById('composerDock');
@@ -52,7 +55,7 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     sidebarButton.append(document.createTextNode(`Novo ${name}`));
     sidebarButton.hidden = true;
     sidebarButton.addEventListener('click', () => void createSession(id, hooks.workspace()));
-    sidebar.append(sidebarButton);
+    sidebarPrimary.insertBefore(sidebarButton, lastSidebarBtn.nextSibling); lastSidebarBtn = sidebarButton;
     sidebarButtons.set(id, sidebarButton);
     const row = document.createElement('section'); row.className = 'appearance-section';
     row.append(text('h2', name));
@@ -231,7 +234,16 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
       });
       wrapper.append(button, menuBtn);
       wrapper.hidden = !current.get(session.module)?.enabled;
-      sidebar.append(wrapper);
+      if (session.projectId) {
+        const projectGroup = document.querySelector<HTMLElement>(`.project-group[data-project-id="${CSS.escape(session.projectId)}"]`);
+        if (projectGroup) {
+          projectGroup.append(wrapper);
+        } else {
+          sidebar.append(wrapper);
+        }
+      } else {
+        sidebar.append(wrapper);
+      }
       sessionButtons.set(session.id, button);
     }
   }
@@ -329,6 +341,7 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     paintNavigation: (name: string) => {
       for (const [id, row] of rows) row.navigation.classList.toggle('is-sel', name === `module-${id}`);
     },
-    modulePage: (button: HTMLElement | null | undefined) => button?.dataset.modulePage && IDS.some(id => button.dataset.modulePage === `module-${id}`) ? button.dataset.modulePage : null
+    modulePage: (button: HTMLElement | null | undefined) => button?.dataset.modulePage && IDS.some(id => button.dataset.modulePage === `module-${id}`) ? button.dataset.modulePage : null,
+    repaintSessions: paintSessions
   };
 }

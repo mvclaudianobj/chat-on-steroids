@@ -725,12 +725,6 @@
   "content_workers_still_running": {
     "message": "$1 Worker laufen noch"
   },
-  "content_workers_summary": {
-    "message": "$1 fertig · $2 laufen"
-  },
-  "content_workers_summary_failed": {
-    "message": "$1 fertig · $2 laufen · $3 fehlgeschlagen"
-  },
   "content_working": {
     "message": "arbeitet …"
   },
@@ -818,9 +812,6 @@
   "popup_detail_app_value": {
     "message": "v$1 · Port $2"
   },
-  "popup_detail_browser_queue_value": {
-    "message": "$1 zurückgehalten · $2 gesamt"
-  },
   "popup_detail_chat_id": {
     "message": "Chat-ID"
   },
@@ -845,17 +836,11 @@
   "popup_detail_observed": {
     "message": "beobachtet"
   },
-  "popup_detail_observed_value": {
-    "message": "$1 Ereignisse · $2 Aufrufe"
-  },
   "popup_detail_ownership": {
     "message": "Zuständigkeit"
   },
   "popup_detail_page_sends": {
     "message": "Sendungen der Seite"
-  },
-  "popup_detail_page_sends_value": {
-    "message": "$1 · $2 fehlgeschlagen"
   },
   "popup_detail_recorder": {
     "message": "Rekorder"
@@ -1171,5 +1156,89 @@
   },
   "popup_app_not_running_help": {
     "message": "Stelle sicher, dass Chat Marks auf diesem Computer geöffnet ist. Die Browser-Erweiterung verbindet sich dann von selbst."
+  },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT hat für den Start kein nutzbares Eingabefeld angezeigt"
+  },
+  "content_delivery_signed_out": {
+    "message": "ChatGPT ist in diesem Browser nicht angemeldet. Melde dich dort bei ChatGPT an und sende dann erneut."
+  },
+  "content_goal_retrying__one": {
+    "message": "Goal wird in $1 Sekunde erneut versucht"
+  },
+  "content_tokens_from__one": {
+    "message": "von $1 Token"
+  },
+  "content_tool_calls_count__one": {
+    "message": "$1 Tool-Aufruf"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "$1 weitere geänderte Datei"
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "Vorschau gekürzt, ursprünglich $1 Zeichen."
+  },
+  "content_waiting_local_tools__one": {
+    "message": "Warte, bis $1 lokales Tool fertig ist"
+  },
+  "content_workers_still_running__one": {
+    "message": "$1 Worker läuft noch"
+  },
+  "popup_count_held__one": {
+    "message": "$1 zurückgehalten"
+  },
+  "popup_count_held_in_page__one": {
+    "message": "$1 in der Seite zurückgehalten"
+  },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "Die App konnte $1 Aufruf nicht per Request-ID zuordnen – sie hat auf $2 zurückgegriffen."
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "$1 Request-ID der aufgezeichneten Tool-Aktivität zugeordnet."
+  },
+  "content_workers_finished": {
+    "message": "$1 fertig"
+  },
+  "content_workers_finished__one": {
+    "message": "$1 fertig"
+  },
+  "content_workers_running": {
+    "message": "$1 laufen"
+  },
+  "content_workers_running__one": {
+    "message": "$1 läuft"
+  },
+  "content_workers_failed": {
+    "message": "$1 fehlgeschlagen"
+  },
+  "content_workers_failed__one": {
+    "message": "$1 fehlgeschlagen"
+  },
+  "popup_detail_events": {
+    "message": "$1 Ereignisse"
+  },
+  "popup_detail_events__one": {
+    "message": "$1 Ereignis"
+  },
+  "popup_detail_calls": {
+    "message": "$1 Aufrufe"
+  },
+  "popup_detail_calls__one": {
+    "message": "$1 Aufruf"
+  },
+  "popup_detail_failed": {
+    "message": "$1 fehlgeschlagen"
+  },
+  "popup_detail_failed__one": {
+    "message": "$1 fehlgeschlagen"
+  },
+  "popup_detail_total": {
+    "message": "$1 gesamt"
+  },
+  "content_edit_message_missing": {
+    "message": "Diese Nachricht ist nicht mehr auf der ChatGPT-Seite und kann nicht bearbeitet werden."
+  },
+  "content_edit_unavailable": {
+    "message": "ChatGPT hat für diese Nachricht kein Bearbeiten angeboten. Öffne den Chat in ChatGPT und versuche es dann erneut."
   }
 }

@@ -20,6 +20,7 @@ export interface MarksModulesUiController {
   onTabShown(name: string): void;
   paintNavigation(name: string): void;
   modulePage(button: HTMLElement | null | undefined): string | null;
+  repaintSessions(): void;
 }
 
 export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): MarksModulesUiController {
@@ -232,6 +233,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
         else item.removeAttribute('aria-current');
       }
     },
-    modulePage: button => cli.modulePage(button) ?? (button?.dataset.modulePage === 'module-cli-proxy' && moduleUiActive ? button.dataset.modulePage : null)
+    modulePage: button => cli.modulePage(button) ?? (button?.dataset.modulePage === 'module-cli-proxy' && moduleUiActive ? button.dataset.modulePage : null),
+    repaintSessions: () => cli.repaintSessions()
   };
 }

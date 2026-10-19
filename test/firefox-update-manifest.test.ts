@@ -52,12 +52,15 @@ describe('Firefox update manifest', () => {
   });
 
   it('derives a unique four-part AMO test version from npm build metadata, not a fifth component', () => {
+    expect(firefoxSigningTestVersion('2.1.40', 1)).toBe('2.1.40.1001');
+    expect(firefoxSigningTestVersion('2.1.40', 44)).toBe('2.1.40.1044');
     expect(firefoxSigningTestVersion('2.1.38+1', 1)).toBe('2.1.38.1001');
     expect(firefoxSigningTestVersion('2.1.38+1', 44)).toBe('2.1.38.1044');
-    expect(() => firefoxSigningTestVersion('2.1.38+1', 0)).toThrow();
+    expect(() => firefoxSigningTestVersion('2.1.40', 0)).toThrow(/X\.Y\.Z or X\.Y\.Z\.N/);
     expect(() => firefoxSigningTestVersion('2.1.38+1', 'abc')).toThrow();
     expect(() => firefoxSigningTestVersion('2.1.38+1001', 1)).toThrow();
     expect(() => firefoxSigningTestVersion('2.1.38+1', 999999000)).toThrow();
+    expect(() => firefoxSigningTestVersion('2.1', 1)).toThrow();
   });
 
   it('refuses unsigned, wrong-ID or wrong-version artifacts before generating updates', () => {

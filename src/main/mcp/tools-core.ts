@@ -54,6 +54,7 @@ import {
   type Hunk,
   type PatchPathResolver
 } from '../codex/apply-patch/index.js';
+import { approvalCardWaiting } from '../approval-wait.js';
 import { maybeParseApplyPatchForExec } from '../codex/apply-patch/invocation.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../codex/command-batch.js';
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
@@ -1256,9 +1257,9 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
     toolDeclaration('agents', () => ({
       title: 'Multi-agent run',
       description:
-        'Run ChatGPT workers. Omit model and reasoning_effort unless the user explicitly requests an override; saved app defaults apply. Do not ask the user to choose them. Reuse a suitable sleeping worker with message before spawn. ' +
-        'message: prime↔worker. Reports ride tool results, never restart primes. Use status once to collect pending reports before finalizing; otherwise state that review is pending. Never poll repeatedly. ' +
-        'status: your active, sleeping/revivable and terminal workers, including parked families. finish: record the report, then normally sleep.',
+        'Runs ChatGPT workers. Without model/reasoning_effort, saved app defaults apply; they are set only for a user’s explicit request. A suitable sleeping worker is reused with message, not respawned. ' +
+        'message: prime↔worker. Reports arrive with tool results, not by restarting an idle prime. ' +
+        'status: your active, sleeping/revivable and terminal workers, incl. parked families, and pending reports; one call before a final answer collects them. Repeated polling adds nothing. finish: records the report, then normally sleeps.',
       inputSchema: z.object({
         action: z.enum(['spawn', 'message', 'status', 'finish']).describe('What to do.'),
         run_id: z.string().uuid().optional().describe('Select your returned worker family when status lists several; never grants another caller’s workers.'),
@@ -1285,13 +1286,13 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 .max(80)
                 .optional()
                 .describe(
-                  'Omit unless explicitly requested by the user; app settings supply defaults. Use an exact account-observed model id or provider alias. Invalid overrides return observed ids before opening; the browser confirms availability before Send.'
+                  'Only for a model the user asked for; app settings supply the default. An exact account-observed model id or provider alias. Invalid overrides return observed ids before opening; the browser checks availability before Send.'
                 ),
               reasoning_effort: z
                 .enum(REASONING_EFFORTS)
                 .optional()
                 .describe(
-                  'Omit unless explicitly requested by the user; app settings supply defaults. Do not ask just to spawn a worker. This selects reasoning only, never a model.'
+                  'Only for an effort the user asked for; app settings supply the default. Selects reasoning only, never a model.'
                 )
             }).strict()
           )
@@ -1299,7 +1300,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(8)
           .optional()
           .describe(
-            'spawn: fresh workers to create only after checking status for a suitable sleeping worker; revive one explicitly with message.'
+            'spawn: fresh workers; status lists sleeping workers that message can revive instead.'
           ),
         messages: z
           .array(
@@ -1313,7 +1314,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
           .max(16)
           .optional()
           .describe(
-            'message: atomic batch; prefer this to one call per recipient.'
+            'message: atomic batch for several recipients in one call.'
           ),
         to: z
           .string()
@@ -1575,6 +1576,12 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               : info.state;
         const asleep = state.agents.filter((info) => info.state === 'sleeping' && info.revivable);
         const slots = status.freeWorkerSlots;
+        // ChatGPT's own "allow this app?" card stops a worker until the person answers it. Read
+        // as just "active", the prime decided the runtime was stuck instead of telling the person
+        // a click was needed (VM, 2026-10-17).
+        const needsApproval = (info: { role: string; conversationId: string | null }): boolean =>
+          info.role !== 'prime' && !!info.conversationId && approvalCardWaiting(info.conversationId);
+        const awaitingUser = state.agents.filter(needsApproval);
         return {
           content: [
             {
@@ -1584,7 +1591,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 state.agents
                   .map(
                     (info) =>
-                      `${info.id}  ${info.role}  ${shown(info)}  waiting ${info.pending}  ${info.label}` +
+                      `${info.id}  ${info.role}  ${shown(info)}${needsApproval(info) ? ', needs the user to answer a tool approval in its chat' : ''}  waiting ${info.pending}  ${info.label}` +
                       (info.model ? `  model ${info.model}` : '') +
                       (info.reasoningEffort ? `  reasoning ${info.reasoningEffort}` : '') +
                       (info.result
@@ -1607,6 +1614,10 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                   ? `\n\n${failed.map((info) => info.id).join(', ')} will not report. Do that work yourself or wake ` +
                     'another worker; do not wait for them.'
                   : '') +
+                (awaitingUser.length > 0
+                  ? `\n\n${awaitingUser.map((info) => info.id).join(', ')} ${awaitingUser.length === 1 ? 'waits' : 'wait'} for the user to allow or deny a tool call in ${awaitingUser.length === 1 ? 'its own chat' : 'their own chats'} ` +
+                    'and continue only after the user answers, in the app or in the browser. If you are waiting for them, tell the user.'
+                  : '') +
                 // A status check is a glance, not a stopping point. Without this the table reads
                 // like an answer to hand back to the user, and a prime that has just looked at its
                 // workers stops mid-run to report what it saw.
@@ -1628,6 +1639,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               state: info.state,
               revivable: info.revivable,
               waiting: info.pending,
+              needs_user_approval: needsApproval(info),
               result: info.result ?? null
             }))
           }
