@@ -2,7 +2,7 @@
 /** Local, non-publishing merge gates. No branch, tag, or working-tree reset is performed. */
 import { execFileSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { createReadStream, existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { createReadStream, existsSync, lstatSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isOfficialUpstream, nextMarksVersion, parseCommunityTag } from '../../../../scripts/check-community-release.mjs';
@@ -45,13 +45,24 @@ function commonGit(repo) {
 /** Git for Windows and Node can spell the same canonical path using different
  * separator and drive-letter casing. Compare only canonicalized paths. */
 export function sameResolvedPath(left, right, platform = process.platform) {
-  if (platform === 'win32') return path.win32.normalize(left).toLowerCase() === path.win32.normalize(right).toLowerCase();
+  if (platform === 'win32') {
+    const canonical = (value) => path.win32.normalize(value.replace(/^\\\\\?\\/, '')).toLowerCase();
+    if (canonical(left) === canonical(right)) return true;
+    // On Windows, Git and Node can resolve one worktree using different mount
+    // aliases. Only recognize it when the OS confirms the SAME physical directory.
+    try {
+      const a = statSync(left, { bigint: true });
+      const b = statSync(right, { bigint: true });
+      return a.ino !== 0n && a.dev === b.dev && a.ino === b.ino && a.isDirectory() && b.isDirectory();
+    } catch { return false; }
+  }
   return left === right;
 }
 
 function inspectWorkspace(repo) {
   const root = realpathSync(git(repo, 'rev-parse', '--show-toplevel'));
-  if (!sameResolvedPath(root, realpathSync(repo))) throw new Error('Use the exact Git worktree root as --repo');
+  if (!sameResolvedPath(root, realpathSync(repo)))
+    throw new Error(`Use the exact Git worktree root as --repo (git=${JSON.stringify(root)}; resolved=${JSON.stringify(realpathSync(repo))})`);
   const metadata = path.join(root, '.git');
   if (!lstatSync(metadata).isFile()) throw new Error('A separate linked Git worktree is required');
   const branch = git(root, 'symbolic-ref', '--quiet', '--short', 'HEAD');
