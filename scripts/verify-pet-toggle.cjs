@@ -28,7 +28,8 @@ app.setName('CoS Pet Toggle Probe');
 app.setPath('userData', userData);
 app.setAppPath(root);
 process.env.CLF_BRIDGE_PORTS = '0';
-const assertPetLogin = require('./fixtures/pet-markspanel-login.cjs').installPetMarkspanelLogin({ app, BrowserWindow, safeStorage });
+const { installPetMarkspanelLogin, isPetMarkspanelLoginWindow } = require('./fixtures/pet-markspanel-login.cjs');
+const assertPetLogin = installPetMarkspanelLogin({ app, BrowserWindow, safeStorage });
 let owner, overlay, ignored = true, decodes = 0;
 let pointer = { x: 0, y: 0 };
 // Drive the existing native proximity sampler without moving the user's actual mouse.
@@ -39,7 +40,7 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const errors = [];
 app.on('web-contents-created', (_event, contents) => {
   contents.session.webRequest.onBeforeRequest({ urls: ['https://*/*', 'http://*/*'] }, (_details, callback) => callback({ cancel: true }));
-  contents.on('console-message', (_event, details) => { if (details.level === 'error') errors.push(details.message); });
+  contents.on('console-message', details => { if (details.level === 'error') errors.push(details.message); });
 });
 const deadline = setTimeout(() => { console.error('Pet toggle timed out', { userData, errors }); app.exit(1); }, 45000);
 async function until(predicate, label) {
@@ -186,7 +187,8 @@ async function drag(id) {
   await until(() => ignored, 'click-through after leaving pet');
 }
 app.on('browser-window-created', (_event, win) => {
-  if (win.getTitle().includes('Entrar')) return;
+  console.log('Pet GUI window candidate:', { title: win.getTitle(), preload: path.basename(win.webContents.getLastWebPreferences?.()?.preload ?? '') });
+  if (isPetMarkspanelLoginWindow(win)) return;
   // The overlay's title only arrives with its page. It is the one window created after the owner:
   // the library starts with no pet enabled, so nothing else opens a window here.
   if (win.getTitle() === 'Pets' || (owner && win !== owner && !overlay)) {
@@ -195,10 +197,15 @@ app.on('browser-window-created', (_event, win) => {
     win.setIgnoreMouseEvents = (value, options) => { ignored = value; return ignore(value, options); };
   } else if (!owner) {
     owner = win;
-    win.webContents.once('did-finish-load', () => {
+    win.webContents.on('did-finish-load', () => {
+      console.log('Pet owner load:', { document: win.webContents.getURL().split('/').pop() });
+      if (!win.webContents.getURL().endsWith('/index.html')) return;
       void (async () => {
+        let stage = 'first pet enabled';
+        try {
         await sleep(1200);
         await enable('capy', true);
+        stage = 'first pet drag';
         await drag('capy');
         await enable('capy', false);
         await until(() => !overlay.isVisible(), 'hide last pet');
@@ -236,11 +243,17 @@ app.on('browser-window-created', (_event, win) => {
           await drag('capy');
           await enable('capy', false);
         }
+        stage = 'final login and overlay assertions';
         clearTimeout(deadline);
         assertPetLogin();
         console.log('Pet toggle/drag/click-through and idle decode checks passed.');
         app.quit();
-      })().catch(error => { console.error(error); app.exit(1); });
+        } catch (error) {
+          console.error(`Pet GUI failure at ${stage}:`, error);
+          if (errors.length) console.error('Pet renderer console errors:', errors.slice(-5));
+          app.exit(1);
+        }
+      })();
     });
   }
 });
