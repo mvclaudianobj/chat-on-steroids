@@ -1,21 +1,18 @@
 // Test process only: exercise the real login gate with a synthetic server identity.
 // Never import this fixture from production main, preload, or renderer code.
 const assert = require('node:assert/strict');
-const path = require('node:path');
 
-// The native BrowserWindow title is not reliable at creation on every desktop OS.
-// The login preload is the stable identity specified by the production login gate.
-function isPetMarkspanelLoginWindow(window) {
-  const preload = window.webContents.getLastWebPreferences?.()?.preload;
-  return typeof preload === 'string' && preload.length > 0 ? path.basename(preload) === 'markspanel-login.js'
-    : window.getTitle().includes('Entrar');
-}
-
-function isPetMarkspanelLoginDocument(url) {
+// Native titles and getLastWebPreferences() can both be empty at window creation
+// on macOS. Only the loaded document proves which test window owns the page.
+function petFixtureDocumentKind(url) {
   try {
     const page = new URL(url);
-    return ['file:', 'http:', 'https:'].includes(page.protocol) && page.pathname.endsWith('/markspanel-login.html');
-  } catch { return false; }
+    if (page.protocol !== 'file:' && !(page.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(page.hostname))) return null;
+    if (page.pathname.endsWith('/markspanel-login.html')) return 'login';
+    if (page.pathname.endsWith('/pet-overlay.html')) return 'overlay';
+    if (page.pathname.endsWith('/index.html')) return 'owner';
+  } catch { /* Missing or transient navigation URL. */ }
+  return null;
 }
 
 function installPetMarkspanelLogin({ app, BrowserWindow, safeStorage }) {
@@ -62,15 +59,12 @@ function installPetMarkspanelLogin({ app, BrowserWindow, safeStorage }) {
     safeStorage.decryptStringAsync = originalDecrypt;
   });
   app.on('browser-window-created', (_event, window) => {
-    console.log('Pet login window candidate:', { title: window.getTitle(), preload: path.basename(window.webContents.getLastWebPreferences?.()?.preload ?? '') });
-    if (!isPetMarkspanelLoginWindow(window)) return;
-    window.once('closed', () => { loginClosed = true; });
     window.webContents.on('did-finish-load', () => {
-      console.log('Pet login load:', { document: window.webContents.getURL().split('/').pop() });
-      // On fast native hosts the first did-finish-load can be for about:blank.
-      // Wait for the actual, verified login document before interacting with it.
-      if (loaded || !isPetMarkspanelLoginDocument(window.webContents.getURL())) return;
+      // Avoid assigning the login to the ordinary owner while native metadata is
+      // still unset. about:blank and other documents must not start login.
+      if (loaded || petFixtureDocumentKind(window.webContents.getURL()) !== 'login') return;
       loaded = true;
+      window.once('closed', () => { loginClosed = true; });
       void window.webContents.executeJavaScript(`(() => {
         const email = document.getElementById('email');
         const password = document.getElementById('password');
@@ -99,7 +93,7 @@ function installPetMarkspanelLogin({ app, BrowserWindow, safeStorage }) {
       });
     });
   });
-  return () => {
+  const assertCompleted = () => {
     assert.equal(loaded, true, 'The real MarksPanel login document must load');
     assert.equal(filled, true, 'The real login form and protected preload must be usable');
     assert.equal(loginRequested, true, 'The form must invoke the real password handler');
@@ -107,6 +101,8 @@ function installPetMarkspanelLogin({ app, BrowserWindow, safeStorage }) {
     assert.equal(loginClosed, true, 'The approved login must close its window');
     verified = true;
   };
+  assertCompleted.status = () => ({ loaded, filled, loginRequested, profileValidated, loginClosed });
+  return assertCompleted;
 }
 
-module.exports = { installPetMarkspanelLogin, isPetMarkspanelLoginWindow, isPetMarkspanelLoginDocument };
+module.exports = { installPetMarkspanelLogin, petFixtureDocumentKind };
