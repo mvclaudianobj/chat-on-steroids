@@ -5,12 +5,18 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, expect, it } from 'vitest';
 // @ts-expect-error Skill scripts are deliberately standalone Node .mjs CLIs without application typings.
-import { compareSha, preflight, recovery } from '../.agents/skills/marks-community-merge/scripts/merge-guard.mjs';
+import { compareSha, preflight, recovery, sameResolvedPath } from '../.agents/skills/marks-community-merge/scripts/merge-guard.mjs';
 // @ts-expect-error Skill scripts are deliberately standalone Node .mjs CLIs without application typings.
 import { executeReleaseCommands, releaseCommands } from '../.agents/skills/marks-community-merge/scripts/local-release.mjs';
 
 const temporary: string[] = [];
 afterEach(() => { for (const dir of temporary.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+
+it('compares canonical Windows paths without changing the identity of different worktrees', () => {
+  expect(sameResolvedPath('D:/a/_temp/project/integration', 'd:\\A\\_TEMP\\Project\\integration', 'win32')).toBe(true);
+  expect(sameResolvedPath('D:/a/_temp/project/integration', 'd:\\a\\_temp\\project\\integration-other', 'win32')).toBe(false);
+  expect(sameResolvedPath('/tmp/project/integration', '/tmp/Project/integration', 'linux')).toBe(false);
+});
 
 function git(repo: string, ...args: string[]) {
   return execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();

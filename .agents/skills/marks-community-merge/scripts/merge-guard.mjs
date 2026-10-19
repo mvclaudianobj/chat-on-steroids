@@ -42,9 +42,16 @@ function commonGit(repo) {
   return realpathSync(path.resolve(repo, output));
 }
 
+/** Git for Windows and Node can spell the same canonical path using different
+ * separator and drive-letter casing. Compare only canonicalized paths. */
+export function sameResolvedPath(left, right, platform = process.platform) {
+  if (platform === 'win32') return path.win32.normalize(left).toLowerCase() === path.win32.normalize(right).toLowerCase();
+  return left === right;
+}
+
 function inspectWorkspace(repo) {
   const root = realpathSync(git(repo, 'rev-parse', '--show-toplevel'));
-  if (root !== realpathSync(repo)) throw new Error('Use the exact Git worktree root as --repo');
+  if (!sameResolvedPath(root, realpathSync(repo))) throw new Error('Use the exact Git worktree root as --repo');
   const metadata = path.join(root, '.git');
   if (!lstatSync(metadata).isFile()) throw new Error('A separate linked Git worktree is required');
   const branch = git(root, 'symbolic-ref', '--quiet', '--short', 'HEAD');
@@ -87,7 +94,8 @@ export function recovery({ repo = REPO, record, destination, branch, execute = f
   if (!record || !destination || !branch) throw new Error('Recovery requires --record, --destination and --branch');
   const snapshot = JSON.parse(readFileSync(path.resolve(record), 'utf8'));
   const workspace = inspectWorkspace(path.resolve(repo));
-  if (snapshot.schema !== 1 || snapshot.root !== workspace.root || snapshot.commonDir !== workspace.commonDir ||
+  if (snapshot.schema !== 1 || !sameResolvedPath(snapshot.root, workspace.root) ||
+      !sameResolvedPath(snapshot.commonDir, workspace.commonDir) ||
       snapshot.branch !== workspace.branch || !SHA.test(snapshot.marks ?? '') || !SHA.test(snapshot.upstream ?? '') ||
       !TAG_REF.test(snapshot.ref ?? ''))
     throw new Error('Recovery snapshot does not identify this exact worktree');
