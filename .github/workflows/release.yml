@@ -84,13 +84,23 @@ jobs:
         if: github.ref_type == 'tag'
         run: node scripts/verify-release-version.mjs
 
-      - name: Verify
+      # Every target still packages and smokes natively. Run the architecture-neutral
+      # 9k+ unit suite once per OS, not twice (slow Intel macOS/ARM Windows runners).
+      - name: Verify OS contracts (primary architecture)
+        if: (matrix.platform == 'win32' && matrix.arch == 'x64') || (matrix.platform == 'darwin' && matrix.arch == 'arm64') || (matrix.platform == 'linux' && matrix.arch == 'x64')
         run: npm run verify:ci
         env:
           # The slow Intel macOS and Windows runners retry a failed test; the flaky reporter still names
           # every retried test as a warning. Windows had no retry, so a known timing flake failed 3 of 8
           # canaries on 2026-10-04 (plugins-manager, bridge, code-mode-mcp), each green in its PR's CI.
-          COS_TEST_RETRY: ${{ ((matrix.platform == 'darwin' && matrix.arch == 'x64') || matrix.platform == 'win32') && '2' || '0' }}
+          COS_TEST_RETRY: ${{ matrix.platform == 'win32' && '2' || '0' }}
+
+      - name: Verify source contracts (secondary architecture)
+        if: (matrix.platform == 'win32' && matrix.arch == 'arm64') || (matrix.platform == 'darwin' && matrix.arch == 'x64') || (matrix.platform == 'linux' && matrix.arch == 'arm64')
+        run: |
+          npm run typecheck
+          npm run verify:notices
+          node scripts/verify-release-version.mjs --package-only
 
       - name: Prove native runner target
         run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"

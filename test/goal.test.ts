@@ -28,6 +28,7 @@ vi.mock('electron', () => ({
 const { defaultConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, setSecret } = await import('../src/main/secrets.js');
 const { initDurableStore } = await import('../src/main/durable.js');
+const { takeAutomaticReply } = await import('../src/main/session/automatic-replies.js');
 const { appendEvent, createSession, observeSessionModel, initSessionStore, resetSessionStoreForTests, readRecentEvents } = await import(
   '../src/main/session/store.js'
 );
@@ -426,6 +427,8 @@ describe('what leaves this machine', () => {
     expect(view.stage).toBe('ready');
     // The streamed text, typed: see `humanReply` and the block at the bottom of this file.
     expect(view.reply).toBe(goal.humanReply('what about the tests'));
+    // Its page will type it: the message it comes back as is the app's, not the person's (#1655).
+    expect(takeAutomaticReply('c-goal-2', view.reply)).toBe(true);
     expect(sent.url).toBe('https://openrouter.ai/api/v1/chat/completions');
     expect((sent.headers as Record<string, string>).authorization).toBe('Bearer sk-or-test');
     expect(sent.body.model).toBe('deepseek/deepseek-v4-flash');
@@ -1709,6 +1712,18 @@ describe('the message a person would have typed', () => {
     expect(typed).toContain('`npm run verify`');
     expect(typed).toContain('src/renderer/chat.ts');
     expect(typed).toContain('https://example.com/build/latest');
+  });
+
+  // VM, 2026-10-19: a Goal follow-up said "run powershel -NoProfile -Command ...". A command
+  // written without backticks is still a command, and a word the reply must contain is literal.
+  it.each([
+    // In each draft the protected word is the only one a mistake could go into.
+    ['a command line without backticks', 'ok, run powershell -NoProfile now', 'powershell -NoProfile'],
+    ['a command after run', 'pls run npm install now', 'npm install'],
+    ['quoted text', 'say "checked" now', '"checked"'],
+    ['the word a reply must be', 'say the word ready now', 'the word ready']
+  ])('keeps %s exact', (_, written, kept) => {
+    expect(goal.humanReply(written)).toContain(kept);
   });
 
   it('leaves a message with nothing to spoil exactly as it was', () => {

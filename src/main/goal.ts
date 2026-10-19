@@ -79,6 +79,7 @@ export function loopAfterTurnFor(conversationId: string): boolean {
   return control.enabled && (control.afterTurn || getConfig().ui.finishTool !== true);
 }
 import { resumeBootstrapMatches, resumeBootstrapText } from './session/handoff.js';
+import { noteAutomaticReply } from './session/automatic-replies.js';
 import {
   GOAL_LOOP_STOP_REFUSED,
   GOAL_LOOP_TRAILER,
@@ -2007,6 +2008,8 @@ async function run(draft: GoalDraft): Promise<void> {
     // mistakes a person leaves behind go in. After the NO_REPLY test above, never before it.
     draft.reply = draft.backend === 'templates' ? humanReply(decision.reply.slice(0, -GOAL_MARKER_INSTRUCTION.length)) + GOAL_MARKER_INSTRUCTION : humanReply(decision.reply);
     logInfo(`goal: drafted ${decision.reply.length} characters for ${draft.conversationId} with ${draft.model}`);
+    // Its page types it: the message it comes back as is marked the app's (#1655).
+    noteAutomaticReply(draft.conversationId, draft.reply);
     settle(draft, 'ready');
   } catch (err) {
     const detail = (err as Error).message;
@@ -2833,8 +2836,17 @@ function undash(text: string): string {
  *
  * A typo is only harmless in prose. Inside a path, a command, a URL or a file name it is a
  * different instruction, and the whole point of this message is that ChatGPT acts on it.
+ * A command is not always in backticks (2026-10-19: "run powershel -NoProfile …"), so the rest
+ * of a clause after run/execute/invoke counts as one, and so does a word followed by a flag.
+ * Quoted text and the word after "word" are what a reply has to say, letter for letter.
  */
-const PROTECTED = /```[\s\S]*?```|`[^`\n]*`|https?:\/\/\S+|\S+[\\/@]\S+|[\w-]+\.[\w-]+/g;
+const PROTECTED = new RegExp([
+  '```[\\s\\S]*?```', '`[^`\\n]*`', 'https?:\\/\\/\\S+', '\\S+[\\\\/@]\\S+', '[\\w-]+\\.[\\w-]+',
+  '"[^"\\n]*"', '“[^”\\n]*”',
+  '\\b(?:run|runs|running|execute|executes|executing|invoke|invokes)\\s[^.,;:!?\\n]*',
+  '\\S+(?=\\s+--?[a-z0-9])',
+  '\\bwords?\\s+\\S+'
+].join('|'), 'gi');
 
 /** One plain lowercase word: no capitals, so an acronym or a model id is never a candidate. */
 const CANDIDATE = /(?<![\w'’-])[a-z][a-z'’]{2,}[a-z](?![\w'’-])/g;

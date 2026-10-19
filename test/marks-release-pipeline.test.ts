@@ -58,6 +58,18 @@ it('builds and publishes Marks tag releases, with checksums and post-release ver
   expect(read('.github/workflows/release.yml')).toContain('release/Chat-Marks-Extension.zip');
   const preflight = publish.jobs.preflight.steps.find((step: any) => step.name === 'Verify tag and release metadata agree');
   expect(preflight.run).toContain('node scripts/verify-release-version.mjs');
+  const fullVerify = workflow.jobs.package.steps.find((step: any) => step.name === 'Verify OS contracts (primary architecture)');
+  const secondary = workflow.jobs.package.steps.find((step: any) => step.name === 'Verify source contracts (secondary architecture)');
+  expect(fullVerify.run).toBe('npm run verify:ci');
+  expect(fullVerify.if).toContain("matrix.platform == 'win32' && matrix.arch == 'x64'");
+  expect(fullVerify.if).toContain("matrix.platform == 'darwin' && matrix.arch == 'arm64'");
+  expect(fullVerify.if).toContain("matrix.platform == 'linux' && matrix.arch == 'x64'");
+  expect(secondary.run).toContain('npm run typecheck');
+  expect(secondary.run).toContain('npm run verify:notices');
+  expect(secondary.run).toContain('node scripts/verify-release-version.mjs --package-only');
+  expect(secondary.if).toContain("matrix.platform == 'win32' && matrix.arch == 'arm64'");
+  expect(secondary.if).toContain("matrix.platform == 'darwin' && matrix.arch == 'x64'");
+  expect(secondary.if).toContain("matrix.platform == 'linux' && matrix.arch == 'arm64'");
   const native = workflow.jobs.package.steps.find((step: any) => step.name === 'Verify tag matches package version');
   expect(native.run).toContain('node scripts/verify-release-version.mjs');
   const linuxScript = workflow.jobs.package.steps.find((step: any) => step.name === 'Install generated DEB on target distro').run;
