@@ -8,6 +8,7 @@ function installPetMarkspanelLogin({ app, BrowserWindow, safeStorage }) {
   const originalEncrypt = safeStorage.encryptStringAsync;
   const originalDecrypt = safeStorage.decryptStringAsync;
   let completed = false;
+  let profileValidated = false;
   let verified = false;
   process.on('exit', code => {
     if (code === 0 && !verified) {
@@ -26,6 +27,7 @@ function installPetMarkspanelLogin({ app, BrowserWindow, safeStorage }) {
     }
     if (endpoint === 'https://marks.ia.br/api/user') {
       assert.equal(options.headers.authorization, 'Bearer pet-probe-access');
+      profileValidated = true;
       return new Response(JSON.stringify({ id: 'pet-probe-user', email: 'pet-probe@example.invalid' }), { status: 200 });
     }
     if (endpoint.startsWith('https://marks.ia.br/')) throw new Error(`Unexpected MarksPanel request: ${endpoint}`);
@@ -44,7 +46,17 @@ function installPetMarkspanelLogin({ app, BrowserWindow, safeStorage }) {
         document.getElementById('email').value = 'pet-probe@example.invalid';
         document.getElementById('password').value = 'pet-probe-password';
         document.getElementById('passwordForm').requestSubmit();
-      })()`).then(() => { completed = true; }).catch(error => { console.error(error); app.exit(1); });
+      })()`).then(() => { completed = true; }).catch(error => {
+        // A successful synthetic login closes this very renderer. On fast hosts the
+        // destruction can beat Electron's executeJavaScript reply even though the
+        // real admission path completed. Only accept that exact race after the
+        // mocked login's authenticated /api/user call and the window's destruction;
+        // all other script errors still fail the probe, and the caller must finish
+        // its entire post-login GUI assertions before it calls the completion gate.
+        if (profileValidated && window.isDestroyed()) { completed = true; return; }
+        console.error(error);
+        app.exit(1);
+      });
     });
   });
   return () => {

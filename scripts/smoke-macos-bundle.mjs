@@ -6,6 +6,7 @@ import {
   assertNoTrustBearingMacCodeSignature,
   withOtoolSafePath
 } from './macos-audit-utils.mjs';
+import { productVersion } from './release-version.mjs';
 
 if (process.platform !== 'darwin') {
   throw new Error(`smoke-macos-bundle.mjs must run on macOS, got ${process.platform}`);
@@ -23,7 +24,7 @@ const app = process.argv[3]
 const contents = path.join(app, 'Contents');
 const resources = path.join(contents, 'Resources');
 const plist = path.join(contents, 'Info.plist');
-const packageVersion = JSON.parse(readFileSync(path.resolve('package.json'), 'utf8')).version;
+const packageVersion = productVersion(JSON.parse(readFileSync(path.resolve('package.json'), 'utf8')).version);
 
 if (!existsSync(app)) throw new Error(`Missing packaged app: ${app}`);
 
