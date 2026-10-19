@@ -39,3 +39,12 @@ it('preserves app identity, executable artwork and Marks-only update origin', ()
   expect(source('src/main/update.ts')).toContain("const REPO = 'mvclaudianobj/chat-on-steroids'");
   expect(source('src/main/version.ts')).toContain('mvclaudianobj/chat-on-steroids');
 });
+
+it('keeps the real-Electron Whats New fixture on the exact Marks release revision', () => {
+  const appVersion = /APP_VERSION = '([^']+)'/.exec(source('src/main/version.ts'))?.[1];
+  expect(appVersion).toBeTruthy();
+  const fixture = source('scripts/verify-whats-new.cjs');
+  expect(fixture).toContain(`version=${appVersion}`);
+  expect(fixture).toContain(`Version ${appVersion}`);
+  expect(fixture).toContain(`/releases/tag/v${appVersion}`);
+});
