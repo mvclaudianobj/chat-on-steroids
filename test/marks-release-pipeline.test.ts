@@ -58,18 +58,31 @@ it('builds and publishes Marks tag releases, with checksums and post-release ver
   expect(read('.github/workflows/release.yml')).toContain('release/Chat-Marks-Extension.zip');
   const preflight = publish.jobs.preflight.steps.find((step: any) => step.name === 'Verify tag and release metadata agree');
   expect(preflight.run).toContain('node scripts/verify-release-version.mjs');
-  const fullVerify = workflow.jobs.package.steps.find((step: any) => step.name === 'Verify OS contracts (primary architecture)');
-  const secondary = workflow.jobs.package.steps.find((step: any) => step.name === 'Verify source contracts (secondary architecture)');
-  expect(fullVerify.run).toBe('npm run verify:ci');
-  expect(fullVerify.if).toContain("matrix.platform == 'win32' && matrix.arch == 'x64'");
-  expect(fullVerify.if).toContain("matrix.platform == 'darwin' && matrix.arch == 'arm64'");
-  expect(fullVerify.if).toContain("matrix.platform == 'linux' && matrix.arch == 'x64'");
-  expect(secondary.run).toContain('npm run typecheck');
-  expect(secondary.run).toContain('npm run verify:notices');
-  expect(secondary.run).toContain('node scripts/verify-release-version.mjs --package-only');
-  expect(secondary.if).toContain("matrix.platform == 'win32' && matrix.arch == 'arm64'");
-  expect(secondary.if).toContain("matrix.platform == 'darwin' && matrix.arch == 'x64'");
-  expect(secondary.if).toContain("matrix.platform == 'linux' && matrix.arch == 'arm64'");
+  // Complete platform suites run alongside packaging but still gate assembly. No architecture
+  // gets to publish when any OS suite fails, and the slow Intel Mac can package immediately.
+  expect(workflow.jobs.assemble.needs).toContain('contracts');
+  const contractJobs = workflow.jobs.contracts.strategy.matrix.include;
+  expect(contractJobs.map(({ platform, runner }: any) => [platform, runner])).toEqual([
+    ['win32', 'windows-2025'], ['darwin', 'macos-15'], ['linux', 'ubuntu-24.04']
+  ]);
+  expect(workflow.jobs.contracts.steps.find((step: any) => step.name === 'Verify OS contracts').run).toBe('npm run verify:ci');
+  expect(workflow.jobs.contracts.steps.find((step: any) => step.name === 'Verify OS contracts').env.COS_TEST_RETRY).toContain("matrix.platform == 'win32'");
+  expect(workflow.jobs.package.needs).toBe('plan');
+  expect(workflow.jobs.package.steps.some((step: any) => step.run === 'npm run verify:ci')).toBe(false);
+  const cache = workflow.jobs.package.steps.find((step: any) => step.name === 'Reuse Electron packaging downloads');
+  expect(cache.uses).toMatch(/^actions\/cache@[a-f0-9]{40}$/);
+  expect(cache.with.key).toContain('matrix.arch');
+  expect(cache.with.key).toContain("hashFiles('package-lock.json')");
+  expect(cache.with.path).toContain('ELECTRON_CACHE');
+  expect(cache.with.path).toContain('ELECTRON_BUILDER_CACHE');
+  expect(workflow.jobs.package.steps.find((step: any) => step.name === 'Verify package metadata').run)
+    .toContain('node scripts/verify-release-version.mjs --package-only');
+  for (const name of ['Prove native runner target', 'Package', 'Smoke packaged runtime natively',
+    'Audit packaged macOS bundle metadata and Mach-O payloads', 'Verify generated macOS archives',
+    'Launch packaged macOS app normally', 'Install generated DEB on target distro',
+    'Launch installed DEB normally under Xvfb', 'Execute generated static-runtime AppImage']) {
+    expect(workflow.jobs.package.steps.some((step: any) => step.name === name), name).toBe(true);
+  }
   const native = workflow.jobs.package.steps.find((step: any) => step.name === 'Verify tag matches package version');
   expect(native.run).toContain('node scripts/verify-release-version.mjs');
   const linuxScript = workflow.jobs.package.steps.find((step: any) => step.name === 'Install generated DEB on target distro').run;
