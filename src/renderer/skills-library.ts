@@ -1,5 +1,7 @@
 import type { AppApi } from '../preload/index.js';
+import { AIHERO_SITE, isAiheroSkillOrigin } from '../shared/aihero-skills.js';
 import { parseGitHubSkillUrl, type GitHubSkillUpdateCheck, type ManagedSkill } from '../shared/skills.js';
+import { initAiheroSkills } from './aihero-skills.js';
 import { initMarksAgencySkills } from './marks-agency-skills.js';
 import { $, el, icon, initCardMenuDismissal, run, toast } from './dom.js';
 import { t, tn, ui } from './i18n.js';
@@ -34,22 +36,21 @@ export function initSkillsLibrary(api: AppApi): () => void {
       : state === 'available' ? 'Update available'
         : state === 'current' ? 'Up to date'
           : state === 'error' ? 'Check failed' : 'GitHub';
+    const aihero = isAiheroSkillOrigin(skill.origin);
     const marker = state === 'available' ? 'i-retry' : state === 'current' ? 'i-check'
       : state === 'error' ? 'i-warning' : 'i-globe';
     if (state === 'available') {
       const action = el('button', 'skill-library-update') as HTMLButtonElement;
       action.type = 'button';
-      action.append(icon(marker), el('span', '', () => t(label)));
+      action.append(icon(marker), el('span', '', () => aihero ? `aihero.dev · ${t(label)}` : t(label)));
       ui(action, 'aria-label', () => `${t('Update from GitHub')}: ${skill.name}`);
       action.addEventListener('click', () => confirmUpdate(skill));
       source.replaceChildren(action);
     } else {
-      source.replaceChildren(icon(marker), el('span', '', () => t(label)));
+      source.replaceChildren(icon(marker), el('span', '', () => aihero ? `aihero.dev · ${t(label)}` : t(label)));
     }
     const revision = installedRevision(skill);
-    source.title = check?.error
-      ? `${skill.origin.url}\n${revision}\n${check.error}`
-      : `${skill.origin.url}\n${revision}`;
+    source.title = [aihero ? AIHERO_SITE : null, skill.origin.url, revision, check?.error].filter(Boolean).join('\n');
   };
 
   let recommended: Array<{ id: string; name: string; description: string }> = [];
@@ -58,6 +59,21 @@ export function initSkillsLibrary(api: AppApi): () => void {
     getSkills: () => skills,
     setSkills: next => setSkills(next),
     updateSkills: request => update(request)
+  });
+  const aihero = initAiheroSkills({
+    getSkills: () => skills,
+    importSkill: async url => {
+      const own = ++epoch;
+      try {
+        const result = await api.skillsImportGithub(url);
+        if (!result.ok) return { ok: false, error: result.error };
+        if (own === epoch) setSkills(result.data);
+        else await update(api.listManagedSkills());
+        return { ok: true };
+      } catch {
+        return { ok: false, error: t('Could not reach GitHub. Try again.') };
+      }
+    }
   });
   const renderRecommended = (): void => {
     const section = document.getElementById('skillsRecommendedSection');
@@ -97,6 +113,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
   const render = (): void => {
     renderRecommended();
     agency.render();
+    aihero.render();
     const host = $('skillsInstalled');
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
     const visible = skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
