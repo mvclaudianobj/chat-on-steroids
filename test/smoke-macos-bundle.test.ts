@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 const script = fileURLToPath(new URL('../scripts/smoke-macos-bundle.mjs', import.meta.url));
@@ -46,7 +46,9 @@ childProcess.spawnSync = (command, args) => {
 };
 syncBuiltinESMExports();
 `);
-    return spawnSync(process.execPath, ['--import', preload, script, 'arm64', app], {
+    // Node's ESM --import is a URL specifier, not a native path: C:\\... is
+    // otherwise parsed as protocol "c:" and fails before any plist check.
+    return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, script, 'arm64', app], {
       cwd,
       encoding: 'utf8'
     });
