@@ -77,6 +77,17 @@ it('builds and publishes Marks tag releases, with checksums and post-release ver
   expect(cache.with.path).toContain('ELECTRON_BUILDER_CACHE');
   expect(workflow.jobs.package.steps.find((step: any) => step.name === 'Verify package metadata').run)
     .toContain('node scripts/verify-release-version.mjs --package-only');
+  // Separating the full suite into parallel jobs must not drop the source/license
+  // checks that ran on the three secondary native architectures before acceleration.
+  const secondary = workflow.jobs.package.steps.find((step: any) => step.name === 'Verify source contracts (secondary architecture)');
+  expect(secondary.if).toContain("matrix.platform == 'win32' && matrix.arch == 'arm64'");
+  expect(secondary.if).toContain("matrix.platform == 'darwin' && matrix.arch == 'x64'");
+  expect(secondary.if).toContain("matrix.platform == 'linux' && matrix.arch == 'arm64'");
+  expect(secondary.run).toContain('npm run typecheck');
+  expect(secondary.run).toContain('npm run verify:notices');
+  expect(workflow.jobs.package.steps.indexOf(secondary)).toBeLessThan(
+    workflow.jobs.package.steps.findIndex((step: any) => step.name === 'Package')
+  );
   for (const name of ['Prove native runner target', 'Package', 'Smoke packaged runtime natively',
     'Audit packaged macOS bundle metadata and Mach-O payloads', 'Verify generated macOS archives',
     'Launch packaged macOS app normally', 'Install generated DEB on target distro',

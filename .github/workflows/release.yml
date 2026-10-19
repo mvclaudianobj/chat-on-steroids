@@ -137,6 +137,15 @@ jobs:
       - name: Verify package metadata
         run: node scripts/verify-release-version.mjs --package-only
 
+      # Preserve the source/licensing checks on the three non-primary architectures.
+      # The full suites run in parallel in `contracts`, while these lightweight
+      # checks still validate each secondary runner's installed native dependencies.
+      - name: Verify source contracts (secondary architecture)
+        if: (matrix.platform == 'win32' && matrix.arch == 'arm64') || (matrix.platform == 'darwin' && matrix.arch == 'x64') || (matrix.platform == 'linux' && matrix.arch == 'arm64')
+        run: |
+          npm run typecheck
+          npm run verify:notices
+
       - name: Prove native runner target
         run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"
 
