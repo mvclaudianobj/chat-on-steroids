@@ -16,3 +16,10 @@ export function browserWindowIconPath(
   if (platform !== 'linux' && platform !== 'win32') return undefined;
   return packaged ? path.join(resourcesPath, 'runtime-icon.png') : path.join(process.cwd(), 'icon_marks.png');
 }
+
+/**
+ * The Windows taskbar matches a running window to its Start/desktop shortcut through this id,
+ * which the NSIS installer writes into the shortcuts from `appId` in electron-builder.yml.
+ * Without it the window joins a separate group with a generic icon.
+ */
+export const WINDOWS_APP_USER_MODEL_ID = 'com.chatonsteroids.app';

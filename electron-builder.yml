@@ -159,7 +159,9 @@ linux:
   target:
     - AppImage
     - deb
-  icon: build/icon.png
+  # A size set, not one 1024px file: hicolor themes have no 1024 folder, so menus, launchers
+  # and the taskbar (which finds the icon through the desktop entry) showed a blank icon.
+  icon: build/icons
   category: Development
   executableName: chat-marks
   maintainer: Chat Marks <mvclaudianobj@users.noreply.github.com>

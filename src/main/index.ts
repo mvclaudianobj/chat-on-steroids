@@ -121,7 +121,7 @@ import {
   shouldQuitOnWindowAllClosed
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
-import { browserWindowIconPath } from './window-icon.js';
+import { browserWindowIconPath, WINDOWS_APP_USER_MODEL_ID } from './window-icon.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 import { showConnectionLossNotice } from './connection-loss-notice.js';
 import { requireMarkspanelLogin, startMarkspanelSessionMonitor } from './markspanel-auth.js';
@@ -142,6 +142,8 @@ let shutdownComplete = false;
 const usageWarmup = new AbortController();
 let stopMarkspanelMonitor: (() => void) | null = null;
 let completingMarkspanelLogin = false;
+
+if (process.platform === 'win32') app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
 
 // One instance only: two copies would fight over the tunnel and the config file.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
