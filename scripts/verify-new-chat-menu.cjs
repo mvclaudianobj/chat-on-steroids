@@ -13,8 +13,12 @@ let server, win;
 const fixture = `(() => {
  const old=window.api,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
  const module=(id,name)=>({id,name,installed:true,enabled:true,running:true,supported:true,version:'1.0.0',detail:'ready'});
+ // shared/appearance.ts defaultAppearance(): a complete appearance, so only the layout changes.
+ const defaultLook={light:{background:'#f4f4f5',sidebar:'#e9edf2',accent:'#486f9d',contrast:45},dark:{background:'#181818',sidebar:'#1a2129',accent:'#b0cbed',contrast:60},font:'system',fontSize:14,translucentSidebar:true};
+ let layout='projects';
+ window.setLayout=async next=>{layout=next;const r=await methods.getState();composerFixture.emit('onStateChanged',r.data);};
  const methods={
-  getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'pt-BR',theme:'dark'};return r;},
+  getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'pt-BR',theme:'dark',appearance:{...(r.data.config.ui.appearance||defaultLook),sidebarLayout:layout}};return r;},
   cliStatus:()=>ok([module('markscode','MarksCode'),module('codex','Codex'),module('claude','Claude')]),
   cliSessions:()=>ok([])
  };
@@ -45,7 +49,16 @@ app.whenReady().then(async () => {
   assert.deepEqual(await js(`[...document.querySelectorAll('.row-menu [data-row-action^="new-chat-"]')].map(b=>b.dataset.rowAction+'='+b.textContent.trim())`),
     ['new-chat-chatgpt=ChatGPT','new-chat-markscode=MarksCode','new-chat-codex=Codex','new-chat-claude=Claude']);
   await capture('menu.png');
+  // The Inbox layout's compose button opens the same menu.
+  await js(`document.querySelector('.row-menu')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+  await js(`window.setLayout('inbox')`);
+  await until(`!!document.querySelector('[data-inbox-control="compose"]')`);
+  await js(`document.querySelector('[data-inbox-control="compose"]').click()`);
+  await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-chatgpt"]')`);
+  assert.deepEqual(await js(`[...document.querySelectorAll('.row-menu [data-row-action^="new-chat-"]')].map(b=>b.dataset.rowAction)`),
+    ['new-chat-chatgpt','new-chat-markscode','new-chat-codex','new-chat-claude']);
+  await capture('inbox-menu.png');
   assert.deepEqual(errors,[]);
-  console.log('PASS: New chat opens one menu with ChatGPT first, then MarksCode, Codex and Claude');
+  console.log('PASS: New chat opens one menu with ChatGPT first, then MarksCode, Codex and Claude, in the Projects and Inbox layouts');
   win.destroy();await server.close();app.exit(0);
 }).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await server?.close();app.exit(1);});
