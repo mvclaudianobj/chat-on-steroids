@@ -9,10 +9,11 @@ import { surfaceDefinition } from './mcp/surfaces.js';
 import { APP_VERSION } from './version.js';
 import { PLUGIN_MAX_TOOLS } from './plugins/exposure.js';
 import type { PluginPublication, PluginRefreshRequest, PluginRefreshStatus, PluginSurface, PluginToolSchema } from '../shared/plugin-refresh.js';
+import { isReleaseVersion } from '../shared/types.js';
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
-const requestedVersion = z.string().regex(/^\d+\.\d+\.\d+(?:\.\d+)?$/).optional();
+const requestedVersion = z.string().refine(isReleaseVersion).optional();
 const rowSchema = z.object({
   surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(),
   completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false),

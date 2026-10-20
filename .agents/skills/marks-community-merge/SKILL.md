@@ -18,7 +18,15 @@ description: Integra versões/tag do repositório comunitário totec448-spec/cha
 3. Na worktree limpa e validada, `git merge --no-commit --no-ff refs/remotes/upstream/releases/vX.Y.Z`.
 4. Resolver somente os conflitos listados por `git diff --name-only --diff-filter=U`: preservar ambos os lados sem reintroduzir bugs; mesclar catálogos de tradução por **chave**; nunca descartar ou duplicar integrações Marks silenciosamente.
 5. Usar a revisão calculada no preflight: `package.json` e lockfile recebem `X.Y.Z+N`; `APP_VERSION`, manifest da extensão e `electron-builder.yml` recebem `X.Y.Z.N` e `buildNumber: 'N'`. Um novo upstream geralmente inicia em `N=1`; para mesma base, incrementar a revisão existente.
+   O quarto número é a revisão Marks e o upstream só conhece três: **toda checagem de versão vinda da comunidade deve usar `isReleaseVersion` / `RELEASE_VERSION_PATTERN` de `src/shared/types.ts`**, nunca uma regex própria. `test/release-version-format.test.ts` falha se uma cópia `\d+\.\d+\.\d+` aparecer em `src/` ou `extension/` (2.1.42.1: o Setup recusava a própria extensão).
+   Após qualquer mudança em `extension/`, rodar `node scripts/write-extension-stamp.mjs`: o `build-stamp.txt` é ignorado pelo Git e um stamp velho faz o app tratar a própria extensão como desatualizada (`stale_extension_build`).
 6. Reunir novidades do upstream com What's New, CHANGELOG, traduções e `docs/release-notes/vX.Y.Z.N.md`. Links de release do Marks devem ir para `mvclaudianobj/chat-on-steroids`.
+
+## Fluxo contínuo e regras anti-regressão
+- **Versão cheia acompanha a comunidade publicada:** Chat Marks `X.Y.Z.N` = release oficial `X.Y.Z` da comunidade + revisão Marks `N`. Uma tag da comunidade sem release publicada (ex.: `v2.1.43` enquanto a `latest` é `v2.1.42`) não entra; mudanças só Marks incrementam `N`. Confirmar com `node scripts/check-community-release.mjs`.
+- `.github/workflows/sync-upstream.yml` é **só aviso antecipado**: mescla `upstream/main` diariamente em `sync/upstream`, roda `verify:ci` e abre issue em conflito ou falha. Esse branch **nunca** é mesclado em `main` (traria código e versão não lançados); corrigir o que ele apontar diretamente em `main`.
+- Teste da comunidade que contradiz um comportamento Marks: **ajustar o teste, nunca o comportamento Marks**.
+- Toda regressão Marks encontrada depois de um merge só fecha quando vira teste. Proteções atuais: `test/release-version-format.test.ts` (versão `X.Y.Z.N`) e `test/marks-upstream-guards.test.ts` (stamp da extensão regenerado por `dev`/`build`/empacotamento; nenhum texto novo de UI com "Chat On Steroids" — a lista `test/fixtures/marks-legacy-brand-strings.json` só pode diminuir).
 
 ## Checklist obrigatório de preservação
 - Login MarksPanel obrigatório, sete dias **desde a autenticação**, refresh sem prolongar o prazo; caminhos de IPC/MCP/CLI protegidos.

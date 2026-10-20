@@ -2996,6 +2996,12 @@ it('recognizes a finished first step after a restart from live or lasting eviden
   expect(result).toMatchObject({ done: false, choosing: false, status: 'Update your extension' });
   result = await scenario('chrome', { present: false, version: null, lastSeenAt: null, proof: { version: old, signedIn: true } });
   expect(result).toMatchObject({ done: false, choosing: false, status: 'Update your extension' });
+  // A Marks revision carries a fourth number: a known version, compared in full.
+  const revision = `${app.split('.').slice(0, 3).join('.')}.${Number(app.split('.')[3] ?? 0) + 1}`;
+  result = await scenario('chrome', { present: true, version: revision, lastSeenAt: now, signedIn: null, proof: { version: revision, signedIn: true } });
+  expect(result).toMatchObject({ done: true, status: 'Extension connected and up to date' });
+  result = await scenario('chrome', { present: true, version: `${old}.1`, lastSeenAt: now, signedIn: true, proof: { version: app, signedIn: true } });
+  expect(result).toMatchObject({ done: false, choosing: false, status: 'Update your extension' });
   // No extension ever: the install part, waiting.
   result = await scenario('chrome', null);
   expect(result).toMatchObject({ done: false, choosing: false, status: 'Waiting for the browser extension' });
