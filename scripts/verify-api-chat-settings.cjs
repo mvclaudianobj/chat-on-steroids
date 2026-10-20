@@ -11,12 +11,14 @@ app.setPath('userData', path.join(output, 'profile')); app.disableHardwareAccele
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let server, win;
 const fixture = `(() => {
+ // The same language on every runner, whatever the system language is.
+ try{localStorage.setItem('cos.ui.language','en');}catch{}
  const old=window.api,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
  const status={endpoint:'http://127.0.0.1:18081/v1',model:'claude-sonnet-5-5',effort:null,favorites:['claude-opus-5-5'],recents:['claude-sonnet-5-5'],hasKey:false,detected:true,keyRequired:true};
  const row=(id,ownedBy,extra={})=>({id,ownedBy,modality:'chat',favorite:status.favorites.includes(id),recent:status.recents.includes(id),availability:null,...extra});
  window.sentKeys=[];
  const methods={
-  getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'pt-BR',theme:'dark'};return r;},
+  getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'en',theme:'dark'};return r;},
   apiChatStatus:()=>ok(status),
   apiChatSetKey:key=>{window.sentKeys.push(key.length);status.hasKey=key.length>0;status.keyRequired=!status.hasKey;return ok(status);},
   apiChatToggleFavorite:id=>{status.favorites=status.favorites.includes(id)?status.favorites.filter(x=>x!==id):[id,...status.favorites];return ok(status);},
@@ -46,16 +48,16 @@ app.whenReady().then(async () => {
   win.show(); win.focus(); win.webContents.focus(); await pause(100);
   await js(`document.querySelector('[data-tab="modules"]').click()`);
   await until(`document.querySelectorAll('#apiChatModel option').length===3`);
-  assert.equal(await js(`document.getElementById('apiChatKeyState').textContent`),'Nenhuma chave salva');
+  assert.equal(await js(`document.getElementById('apiChatKeyState').textContent`),'No key saved');
   assert.equal(await js(`document.getElementById('apiChatKeyNeeded').hidden`),false,'Asks for the key the proxy required');
-  assert.match(await js(`document.getElementById('apiChatDetection').textContent`),/^Encontrado em http:\/\/127\.0\.0\.1:18081\/v1 · 3 modelos de chat$/);
-  assert.deepEqual(await js(`[...document.querySelectorAll('#apiChatModel optgroup')].map(g=>g.label)`),['Favoritos','Recentes','openai']);
+  assert.match(await js(`document.getElementById('apiChatDetection').textContent`),/^Found at http:\/\/127\.0\.0\.1:18081\/v1 · 3 chat models$/);
+  assert.deepEqual(await js(`[...document.querySelectorAll('#apiChatModel optgroup')].map(g=>g.label)`),['Favorites','Recent','openai']);
   assert.equal(await js(`document.getElementById('apiChatModel').value`),'claude-sonnet-5-5');
   await js(`(()=>{const k=document.getElementById('apiChatKey');k.value='sk-synthetic-key';document.getElementById('apiChatSaveKey').click();})()`);
-  await until(`document.getElementById('apiChatKeyState').textContent==='Há uma chave salva'`);
+  await until(`document.getElementById('apiChatKeyState').textContent==='A key is saved'`);
   assert.equal(await js(`document.getElementById('apiChatKey').value`),'','The key field empties after saving');
   await js(`document.getElementById('apiChatTest').click()`);
-  await until(`document.getElementById('apiChatResult').textContent==='claude-sonnet-5-5 respondeu.'`);
+  await until(`document.getElementById('apiChatResult').textContent==='claude-sonnet-5-5 answered.'`);
   await until(`document.querySelector('#apiChatModel option[value="claude-sonnet-5-5"]').textContent==='claude-sonnet-5-5 ✓'`);
   assert.equal(await js(`document.getElementById('apiChatKeyNeeded').hidden`),true);
   await js(`document.getElementById('apiChatSettings').scrollIntoView({block:'center'})`);

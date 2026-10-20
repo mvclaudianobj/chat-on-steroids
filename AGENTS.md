@@ -1343,6 +1343,25 @@ reasoning, process output and stderr remain private to the CLI, and the renderer
 shell, executable or arbitrary IPC authority. Stop/Disable also cancels headless CLI
 processes. An actual CLI account is required to prove provider-side responses.
 
+### Chat Marks API chats (CLIProxy)
+
+A native conversation provider, not a terminal module: an API chat is a local session whose
+model runs through an OpenAI-compatible endpoint (CLIProxyAPI at `http://127.0.0.1:18081/v1`
+by default) instead of a ChatGPT tab. Its conversation id is minted in the `cosapi-` namespace
+(`shared/api-chat.ts` `isApiConversationId`), which no ChatGPT id uses, so ChatGPT-only owners
+can refuse it by id. `main/api-chat/client.ts` streams completions (tool-call fragments
+assembled by index, bounded records, `[DONE]`, in-stream errors, http only on loopback).
+`main/api-chat/catalog.ts` keeps every listed model with its exact id, classified by modality
+(chat, image, audio, embedding, moderation); chat surfaces list chat models only.
+`main/api-chat/settings.ts` owns the Marks durable `marks-api-chat-settings` (endpoint,
+default model, effort, favorites, recents) and `marks-api-chat-availability` (the outcome of the
+last real request per endpoint and model: a listing never proves a model answers). The key is
+the encrypted secret `marks:cliproxyApiKey`, independent of the MarksPanel login; IPC
+`marksApiChat:request` (`main/api-chat/ipc.ts`, sender/frame checked) only writes it and
+answers `hasKey`/`keyRequired`, never the key. Detection is learned from the endpoint's own
+model list, and a 401 without a stored key asks for the key. The settings live in
+`renderer/api-chat-settings-ui.ts` inside Modules > CLIProxyAPI.
+
 ### MarksPanel application admission
 
 `main/markspanel-auth.ts` owns the mandatory MarksPanel login boundary. On every startup,
