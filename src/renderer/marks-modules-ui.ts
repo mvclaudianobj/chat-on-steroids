@@ -4,6 +4,7 @@ import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 import { $, toast } from './dom.js';
 import { t, onLanguageChange } from './i18n.js';
 import { createCliModulesUi, type CliModuleSummary } from './cli-modules-ui.js';
+import { createApiChatSettingsUi } from './api-chat-settings-ui.js';
 
 export interface MarksModulesUiHooks {
   showTab(name: string): void;
@@ -25,6 +26,7 @@ export interface MarksModulesUiController {
 
 export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): MarksModulesUiController {
   const cli = createCliModulesUi(api, hooks);
+  const apiChat = createApiChatSettingsUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!);
   let cliProxyModule: MarksModuleState | null = null;
   let moduleChecked = false;
   let moduleLoading = false;
@@ -197,7 +199,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     }
   }
 
-  $('moduleRefresh').addEventListener('click', () => void refreshModules());
+  $('moduleRefresh').addEventListener('click', () => { void refreshModules(); void apiChat.refresh(); });
   $('moduleCliReopen').addEventListener('click', () => void actOnModule('open'));
   $<HTMLInputElement>('moduleCliActive').addEventListener('change', () =>
     setModuleUiActive($<HTMLInputElement>('moduleCliActive').checked));
@@ -218,7 +220,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     createSession: cli.createSession,
     cliModules: cli.cliModules,
     normalizeTab: name => cli.normalizeTab(name === 'module-cli-proxy' && !moduleUiActive ? 'modules' : name),
-    onTabOpening: name => { if (name === 'modules') void refreshModules(); cli.onTabOpening(name); },
+    onTabOpening: name => { if (name === 'modules') { void refreshModules(); void apiChat.refresh(); } cli.onTabOpening(name); },
     onTabShown: name => { if (name === 'module-cli-proxy') void openSelectedModuleConsole(); cli.onTabShown(name); },
     paintNavigation: name => {
       cli.paintNavigation(name);

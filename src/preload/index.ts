@@ -134,6 +134,12 @@ const api = {
     return () => ipcRenderer.removeListener('cliChat:event', wrapped);
   },
   marksPanelLogout: () => call<boolean>('markspanel:logout'),
+  apiChatStatus: () => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'status' }),
+  /** Stores (or, empty, removes) the API chat key; the reply never contains it. */
+  apiChatSetKey: (key: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setKey', key }),
+  apiChatSetSettings: (settings: Partial<import('../shared/api-chat.js').ApiChatSettings>) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setSettings', settings }),
+  apiChatModels: (query = '', offset = 0, limit = 50) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit }),
+  apiChatTest: () => call<{ model: string }>('marksApiChat:request', { action: 'test' }),
   cliAction: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', action: 'enable' | 'disable' | 'install' | 'update' | 'stop') => call<unknown>('marksCli:request', { action, module }),
   cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),
   cliCreateSession: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', projectId: string | null) => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId }),

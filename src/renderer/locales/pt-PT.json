@@ -2943,5 +2943,15 @@
   "MarksPanel is signing out; local actions are blocked": "O MarksPanel está a terminar a sessão; as ações locais estão bloqueadas",
   "Marks Agency skills use the verified Agency catalog, not the generic GitHub linker.": "As skills do Marks Agency utilizam o catálogo Agency verificado, e não a ligação genérica do GitHub.",
   "Check Marks Agency skills through their official catalog.": "Consulte as skills do Marks Agency no catálogo oficial.",
-  "Update Marks Agency skills through their verified individual update flow.": "Atualize as skills do Marks Agency através do respetivo processo individual de atualização verificada."
+  "Update Marks Agency skills through their verified individual update flow.": "Atualize as skills do Marks Agency através do respetivo processo individual de atualização verificada.",
+  "Chat with CLIProxy": "Chat com CLIProxy",
+  "Use CLIProxyAPI models in Chat Marks chats, with this app's local tools.": "Use modelos do CLIProxyAPI nos chats do Chat Marks, com as ferramentas locais desta app.",
+  "API address": "Endereço da API",
+  "Save key": "Guardar chave",
+  "A key is saved": "Há uma chave guardada",
+  "No key saved": "Nenhuma chave guardada",
+  "Default model": "Modelo predefinido",
+  "Test connection": "Testar ligação",
+  "Testing…": "A testar…",
+  "{0} answered.": "{0} respondeu."
 }

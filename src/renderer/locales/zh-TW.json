@@ -2853,5 +2853,15 @@
   "MarksPanel is signing out; local actions are blocked": "MarksPanel 正在登出；本機操作已遭封鎖",
   "Marks Agency skills use the verified Agency catalog, not the generic GitHub linker.": "Marks Agency 技能使用經驗證的 Agency 目錄，而非一般 GitHub 連結。",
   "Check Marks Agency skills through their official catalog.": "請透過官方目錄檢查 Marks Agency 技能。",
-  "Update Marks Agency skills through their verified individual update flow.": "請透過經驗證的個別更新流程更新 Marks Agency 技能。"
+  "Update Marks Agency skills through their verified individual update flow.": "請透過經驗證的個別更新流程更新 Marks Agency 技能。",
+  "Chat with CLIProxy": "使用 CLIProxy 聊天",
+  "Use CLIProxyAPI models in Chat Marks chats, with this app's local tools.": "在 Chat Marks 聊天中使用 CLIProxyAPI 模型，並搭配本應用程式的本機工具。",
+  "API address": "API 位址",
+  "Save key": "儲存金鑰",
+  "A key is saved": "已儲存金鑰",
+  "No key saved": "未儲存金鑰",
+  "Default model": "預設模型",
+  "Test connection": "測試連線",
+  "Testing…": "正在測試…",
+  "{0} answered.": "{0} 已回覆。"
 }

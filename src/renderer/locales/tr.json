@@ -2898,5 +2898,15 @@
   "MarksPanel is signing out; local actions are blocked": "MarksPanel oturumu kapatıyor; yerel işlemler engellendi",
   "Marks Agency skills use the verified Agency catalog, not the generic GitHub linker.": "Marks Agency becerileri genel GitHub bağlantısını değil, doğrulanmış Agency kataloğunu kullanır.",
   "Check Marks Agency skills through their official catalog.": "Marks Agency becerilerini resmi kataloglarından kontrol edin.",
-  "Update Marks Agency skills through their verified individual update flow.": "Marks Agency becerilerini doğrulanmış ayrı güncelleme akışlarıyla güncelleyin."
+  "Update Marks Agency skills through their verified individual update flow.": "Marks Agency becerilerini doğrulanmış ayrı güncelleme akışlarıyla güncelleyin.",
+  "Chat with CLIProxy": "CLIProxy ile sohbet",
+  "Use CLIProxyAPI models in Chat Marks chats, with this app's local tools.": "Chat Marks sohbetlerinde CLIProxyAPI modellerini bu uygulamanın yerel araçlarıyla kullanın.",
+  "API address": "API adresi",
+  "Save key": "Anahtarı kaydet",
+  "A key is saved": "Kayıtlı bir anahtar var",
+  "No key saved": "Kayıtlı anahtar yok",
+  "Default model": "Varsayılan model",
+  "Test connection": "Bağlantıyı test et",
+  "Testing…": "Test ediliyor…",
+  "{0} answered.": "{0} yanıt verdi."
 }

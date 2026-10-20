@@ -2853,5 +2853,15 @@
   "MarksPanel is signing out; local actions are blocked": "MarksPanel에서 로그아웃 중이므로 로컬 작업이 차단됩니다",
   "Marks Agency skills use the verified Agency catalog, not the generic GitHub linker.": "Marks Agency 스킬은 일반 GitHub 링크가 아닌 검증된 Agency 카탈로그를 사용합니다.",
   "Check Marks Agency skills through their official catalog.": "공식 카탈로그에서 Marks Agency 스킬을 확인하세요.",
-  "Update Marks Agency skills through their verified individual update flow.": "각 스킬의 검증된 개별 업데이트 절차로 Marks Agency 스킬을 업데이트하세요."
+  "Update Marks Agency skills through their verified individual update flow.": "각 스킬의 검증된 개별 업데이트 절차로 Marks Agency 스킬을 업데이트하세요.",
+  "Chat with CLIProxy": "CLIProxy로 채팅",
+  "Use CLIProxyAPI models in Chat Marks chats, with this app's local tools.": "Chat Marks 채팅에서 이 앱의 로컬 도구와 함께 CLIProxyAPI 모델을 사용합니다.",
+  "API address": "API 주소",
+  "Save key": "키 저장",
+  "A key is saved": "키가 저장되어 있습니다",
+  "No key saved": "저장된 키가 없습니다",
+  "Default model": "기본 모델",
+  "Test connection": "연결 테스트",
+  "Testing…": "테스트 중…",
+  "{0} answered.": "{0}이(가) 응답했습니다."
 }

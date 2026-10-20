@@ -1,6 +1,7 @@
 import { modulesStatus, moduleAction } from './modules.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { registerCliModuleIpc } from './cli-modules.js';
+import { registerApiChatIpc } from './api-chat/ipc.js';
 import { registerCliChatIpc } from './cli-chat.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
@@ -642,6 +643,7 @@ export async function openSessionChat(id: string): Promise<void> {
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerWorkspaceTerminalIpc(getWindow);
   registerCliModuleIpc(getWindow);
+  registerApiChatIpc(getWindow);
   registerCliChatIpc(getWindow);
   // Sign out is an application admission transition. End this process after
   // clearing its secure session so the next startup must authenticate again.

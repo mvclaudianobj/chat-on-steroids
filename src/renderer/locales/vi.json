@@ -2853,5 +2853,15 @@
   "MarksPanel is signing out; local actions are blocked": "MarksPanel đang đăng xuất; các thao tác cục bộ bị chặn",
   "Marks Agency skills use the verified Agency catalog, not the generic GitHub linker.": "Các kỹ năng Marks Agency sử dụng danh mục Agency đã xác minh, không dùng liên kết GitHub thông thường.",
   "Check Marks Agency skills through their official catalog.": "Kiểm tra kỹ năng Marks Agency trong danh mục chính thức.",
-  "Update Marks Agency skills through their verified individual update flow.": "Cập nhật từng kỹ năng Marks Agency qua quy trình cập nhật đã xác minh."
+  "Update Marks Agency skills through their verified individual update flow.": "Cập nhật từng kỹ năng Marks Agency qua quy trình cập nhật đã xác minh.",
+  "Chat with CLIProxy": "Trò chuyện với CLIProxy",
+  "Use CLIProxyAPI models in Chat Marks chats, with this app's local tools.": "Dùng các mô hình CLIProxyAPI trong cuộc trò chuyện Chat Marks, cùng công cụ cục bộ của ứng dụng này.",
+  "API address": "Địa chỉ API",
+  "Save key": "Lưu khóa",
+  "A key is saved": "Đã lưu một khóa",
+  "No key saved": "Chưa lưu khóa nào",
+  "Default model": "Mô hình mặc định",
+  "Test connection": "Kiểm tra kết nối",
+  "Testing…": "Đang kiểm tra…",
+  "{0} answered.": "{0} đã trả lời."
 }

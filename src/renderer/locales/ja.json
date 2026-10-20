@@ -2853,5 +2853,15 @@
   "MarksPanel is signing out; local actions are blocked": "MarksPanel はログアウト中です。ローカル操作はブロックされています",
   "Marks Agency skills use the verified Agency catalog, not the generic GitHub linker.": "Marks Agency のスキルは、一般的な GitHub リンクではなく、検証済みの Agency カタログを使用します。",
   "Check Marks Agency skills through their official catalog.": "Marks Agency のスキルは公式カタログで確認してください。",
-  "Update Marks Agency skills through their verified individual update flow.": "Marks Agency のスキルは、個別の検証済み更新手順で更新してください。"
+  "Update Marks Agency skills through their verified individual update flow.": "Marks Agency のスキルは、個別の検証済み更新手順で更新してください。",
+  "Chat with CLIProxy": "CLIProxy でチャット",
+  "Use CLIProxyAPI models in Chat Marks chats, with this app's local tools.": "Chat Marks のチャットで CLIProxyAPI のモデルを、このアプリのローカルツールとともに使います。",
+  "API address": "API アドレス",
+  "Save key": "キーを保存",
+  "A key is saved": "キーは保存済みです",
+  "No key saved": "キーは保存されていません",
+  "Default model": "既定のモデル",
+  "Test connection": "接続をテスト",
+  "Testing…": "テスト中…",
+  "{0} answered.": "{0} が応答しました。"
 }
