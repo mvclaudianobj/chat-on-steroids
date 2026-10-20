@@ -66,6 +66,8 @@ export function verifySignedFirefoxXpi(xpi, version, exec = execFileSync, addonI
 export function firefoxUpdateManifest({ version, sha256 }) {
   if (!VERSION.test(version)) throw new Error(`Not a release version: ${version}`);
   if (!/^[0-9a-f]{64}$/.test(sha256)) throw new Error('Not a sha256 digest');
+  // Chat Marks: the fourth part is the Marks revision and part of the tag (v2.1.43.1), so the
+  // link names the whole version; upstream's Firefox-only fourth part does not exist here.
   return {
     addons: {
       [FIREFOX_ADDON_ID]: {

@@ -160,6 +160,13 @@ const UNCONFIRMED_SEND = 'Stopped waiting for delivery confirmation. The message
  * opening read back with `&#x20;` for spaces). The same code in extension/content.js.
  */
 const RECEIPT_UNCONFIRMED = 'Native Send receipt was not confirmed.';
+/** extension/content.js reports this, word for word, when ChatGPT offered no Send for a fresh-turn continue. */
+export const ROTATION_DECLINED = 'Fresh-turn continue declined: no Send while ChatGPT works.';
+/**
+ * Continues the page declined, for the call held for each to answer at once. Kept here, not as the
+ * row's error: a cancelled continue with an error is shown in the chat as a failed message.
+ */
+const declinedRotations = new Set<string>();
 /** The page clicked Send, yet its exact text stayed in the composer and no new user row appeared. */
 const SEND_NOT_TAKEN = 'Native Send did not take the message.';
 const NOT_TAKEN_FAILED = 'Not sent: ChatGPT did not accept the message.';
@@ -833,9 +840,10 @@ export function fileRotationInput(sessionId: string, turnId: string): Promise<In
  * Where a fresh-turn continue (#1402) stands, for the tool call held for it (#1662): not yet sent,
  * being sent (Send is authorized), or settled either way.
  */
-export async function rotationDelivery(id: string): Promise<'pending' | 'sending' | 'settled'> {
+export async function rotationDelivery(id: string): Promise<'pending' | 'sending' | 'declined' | 'settled'> {
   const row = (await load()).find(entry => entry.id === id);
   if (!row || row.purpose !== 'rotation') return 'settled';
+  if (row.state === 'cancelled' && declinedRotations.has(id)) return 'declined';
   if (row.state === 'queued' || (row.state === 'browser' && row.sendAuthorizedAt === undefined)) return 'pending';
   return row.state === 'browser' ? 'sending' : 'settled';
 }
@@ -1318,7 +1326,11 @@ async function eligibleStageEnd(entry: InputEntry): Promise<string | null> {
   // Queue intent names the turn we were waiting for, not when Chrome reported it.
   // Other turns and legacy rows retain the later-completion rule. A rebind cannot
   // lend this reference to another frontend, even if its turn id happens to match.
-  const queuedHere = entry.queuedTurn?.conversationId === session.conversationId && entry.queuedTurn?.turnId === end.turnId;
+  // A silence ticket names its source turn the same way: that turn completing releases the message
+  // even when it completed before the message was queued, which is when the app still took a chat
+  // whose final it could not read yet for busy (2026-10-19). Its end is the one it waited for.
+  const queuedHere = (entry.queuedTurn?.conversationId === session.conversationId && entry.queuedTurn?.turnId === end.turnId) ||
+    (entry.silenceBoundary?.conversationId === session.conversationId && entry.silenceBoundary.turnId === end.turnId);
   if (!queuedHere && end.time < entry.createdAt) return null;
   if (!(await sessionInputPolicy(entry.sessionId)).settled) return null;
   return end.turnId;
@@ -1961,7 +1973,7 @@ export function offerToolInput(sessionId: string | null | undefined, conversatio
   });
 }
 
-export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); }
+export function resetInputForTests(): void { entries = null; chain = Promise.resolve(); offered.clear(); decisionWaiters.clear(); declinedRotations.clear(); }
 
 export async function pausedBrowserHelpers(): Promise<Array<{ id: string; sourceSessionId: string }>> {
   return (await listInputs()).filter(row => row.purpose === 'decision' && row.state === 'cancelled' && row.cancelledByUser === true && !row.conversationId && row.decisionSourceSessionId)
@@ -2044,6 +2056,15 @@ export function failBrowserInput(id: string, owner: string, error: string, detai
     const current = await load();
     const entry = current.find((row) => row.id === id && row.owner === owner && row.state === 'browser');
     if (!entry || companionOf(current, entry)) return false;
+    // ChatGPT showed Stop and offered no Send for a fresh-turn continue; nothing was sent. The call
+    // held for it answers now, and a later tool result may try again (turn-rotation.ts).
+    if (entry.purpose === 'rotation' && entry.sendAuthorizedAt === undefined && error === ROTATION_DECLINED) {
+      logInfo(`input ${entry.id}: ChatGPT offered no Send for the fresh-turn continue; a later tool result tries again`);
+      await commit(current.map(row => row === entry ? { ...row, state: 'cancelled', owner: null } : row));
+      declinedRotations.add(entry.id);
+      if (declinedRotations.size > 200) declinedRotations.delete(declinedRotations.values().next().value!);
+      return true;
+    }
     // The page clicked Send and could not prove the result (#821). This is the outcome an
     // unreported send reaches in expireQueued, without the wait: the session is free again,
     // nothing is replayed, and a late exact receipt still confirms it (acknowledgeBrowserInput

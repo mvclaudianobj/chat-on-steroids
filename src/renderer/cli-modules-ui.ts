@@ -2,6 +2,7 @@ import type { AppApi } from '../preload/index.js';
 import type { CliSession } from '../main/cli-modules.js';
 import { createWorkspaceTerminal, type TerminalTransport } from './workspace-terminal.js';
 import { openRowMenu } from './row-menu.js';
+import { t } from './i18n.js';
 
 const IDS = ['markscode', 'codex', 'claude', 'marksclaw'] as const;
 type Id = typeof IDS[number];
@@ -16,7 +17,6 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
   const sidebar = document.getElementById('cliModuleChats')!;
   const sidebarPrimary = document.getElementById('sidebarPrimary')!;
   const newChatBtn = document.getElementById('newChat')!;
-  let lastSidebarBtn: Element = newChatBtn;
   const chatBody = document.getElementById('chatBody')!;
   const composer = document.getElementById('composer');
   const composerDock = document.getElementById('composerDock');
@@ -38,7 +38,6 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
   const sessions = new Map<string, CliSession>();
   const terminalManagers = new Map<string, ReturnType<typeof createWorkspaceTerminal>>();
   const terminalMounts = new Map<string, HTMLElement>();
-  const sidebarButtons = new Map<Id, HTMLButtonElement>();
   const sessionButtons = new Map<string, HTMLButtonElement>();
   let selectedSessionId: string | null = null;
 
@@ -48,15 +47,6 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     navigation.type = 'button'; navigation.className = 'modules-subnav'; navigation.dataset.modulePage = `module-${id}`;
     navigation.textContent = name; navigation.hidden = true;
     tabs.insertBefore(navigation, nav.nextSibling);
-    const sidebarButton = document.createElement('button');
-    sidebarButton.type = 'button';
-    sidebarButton.className = 'btn sidebar-primary-link cli-module-chat';
-    sidebarButton.innerHTML = '<i class="ico ph ph-terminal-window" aria-hidden="true"></i>';
-    sidebarButton.append(document.createTextNode(`Novo ${name}`));
-    sidebarButton.hidden = true;
-    sidebarButton.addEventListener('click', () => void createSession(id, hooks.workspace()));
-    sidebarPrimary.insertBefore(sidebarButton, lastSidebarBtn.nextSibling); lastSidebarBtn = sidebarButton;
-    sidebarButtons.set(id, sidebarButton);
     const row = document.createElement('section'); row.className = 'appearance-section';
     row.append(text('h2', name));
     const surface = document.createElement('div'); surface.className = 'settings-surface modules-service';
@@ -88,6 +78,39 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     activeCheck.addEventListener('change', () => void operate(id, activeCheck.checked ? 'enable' : 'disable'));
   }
 
+  // One "New chat" for every kind of chat: with a CLI module enabled it opens a menu whose first
+  // item is the app's own ChatGPT chat; without one it stays the plain ChatGPT button. The
+  // upstream button and its handlers are untouched: this listens before them, on the parent.
+  const enabledModules = (): Id[] => IDS.filter(id => current.get(id)?.enabled);
+  let chatgptPassThrough = false;
+  const paintNewChat = (): void => {
+    if (enabledModules().length) newChatBtn.setAttribute('aria-haspopup', 'menu');
+    else newChatBtn.removeAttribute('aria-haspopup');
+  };
+  sidebarPrimary.addEventListener('click', event => {
+    if (chatgptPassThrough || !(event.target as Element | null)?.closest?.('#newChat') || !enabledModules().length) return;
+    event.stopPropagation();
+    event.preventDefault();
+    openRowMenu({
+      owner: 'new-chat',
+      anchor: () => newChatBtn,
+      label: () => t('New chat'),
+      items: () => [
+        {
+          action: 'new-chat-chatgpt', icon: 'i-pencil', label: () => 'ChatGPT',
+          run: () => {
+            chatgptPassThrough = true;
+            try { newChatBtn.click(); } finally { chatgptPassThrough = false; }
+          }
+        },
+        ...enabledModules().map((id, index) => ({
+          action: `new-chat-${id}`, icon: 'i-terminal', label: () => current.get(id)?.name ?? id, separated: index === 0,
+          run: () => void createSession(id, hooks.workspace())
+        }))
+      ]
+    });
+  }, { capture: true });
+
   async function refresh(): Promise<void> {
     try {
       const reply = await api.cliStatus();
@@ -106,10 +129,9 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
         row.detail.classList.remove('modules-error');
         row.active.checked = status.enabled;
         row.navigation.hidden = !status.enabled;
-        const sidebarButton = sidebarButtons.get(status.id);
-        if (sidebarButton) sidebarButton.hidden = !status.enabled;
         row.detail.textContent = `${status.version ?? 'Not installed'} · ${status.running ? 'Running · ' : ''}${status.detail}`;
       }
+      paintNewChat();
       const catalog = await api.cliSessions();
       if (catalog.ok && Array.isArray(catalog.data)) {
         sessions.clear();
@@ -306,7 +328,6 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     if (composerDock) composerDock.hidden = true;
     if (subhead) subhead.hidden = true;
     if (chatHead) chatHead.hidden = true;
-    for (const button of sidebarButtons.values()) button.classList.remove('is-sel');
     for (const [buttonId, button] of sessionButtons) button.classList.toggle('is-sel', buttonId === sessionId);
     const manager = managerFor(session);
     const mount = terminalMounts.get(sessionId)!;
@@ -330,7 +351,6 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
         if (composerDock) composerDock.hidden = false;
         if (subhead) subhead.hidden = false;
         if (chatHead) chatHead.hidden = false;
-        for (const button of sidebarButtons.values()) button.classList.remove('is-sel');
         for (const button of sessionButtons.values()) button.classList.remove('is-sel');
       }
     },
