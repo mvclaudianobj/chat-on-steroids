@@ -1,3 +1,4 @@
+import './dev-profile.js';
 import { closeRemoteSessions } from './remote/ssh.js';
 import { stopInputStartup } from './session/start-input.js';
 import { browserExtensionRequired } from '../shared/types.js';
