@@ -3,24 +3,13 @@ import { createReadStream, existsSync, readFileSync, writeFileSync } from 'node:
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { strFromU8, unzipSync } from 'fflate';
+import { releaseTargets } from './release-targets.mjs';
 
-/** The files release.yml publishes, in its SHA256SUMS.txt order. */
-export const RELEASE_FILES = [
-  'Chat-Marks-Setup-x64.exe',
-  'Chat-Marks-Setup-arm64.exe',
-  'Chat-Marks-macOS-x64.dmg',
-  'Chat-Marks-macOS-x64.zip',
-  'Chat-Marks-macOS-arm64.dmg',
-  'Chat-Marks-macOS-arm64.zip',
-  'Chat-Marks-Linux-x64.AppImage',
-  'Chat-Marks-Linux-x64.deb',
-  'Chat-Marks-Linux-arm64.AppImage',
-  'Chat-Marks-Linux-arm64.deb',
-  'Chat-Marks-Extension.zip',
-  'Chat-Marks-Native-Sources.tar.gz',
-  'Chat-Marks-Firefox.xpi',
-  'firefox-updates.json'
-];
+/**
+ * The files a release publishes, in its SHA256SUMS.txt order: every enabled target in
+ * .github/release-targets.json, then the extension, native sources and Firefox add-on.
+ */
+export const RELEASE_FILES = [...releaseTargets('all').files, 'Chat-Marks-Firefox.xpi', 'firefox-updates.json'];
 const EXTENSION = 'Chat-Marks-Extension.zip';
 const FIREFOX = 'Chat-Marks-Firefox.xpi';
 const FIREFOX_UPDATES = 'firefox-updates.json';

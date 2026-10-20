@@ -219,10 +219,6 @@ jobs:
           gh release create "$TAG" \
             publish/Chat-Marks-Setup-x64.exe \
             publish/Chat-Marks-Setup-arm64.exe \
-            publish/Chat-Marks-macOS-x64.dmg \
-            publish/Chat-Marks-macOS-x64.zip \
-            publish/Chat-Marks-macOS-arm64.dmg \
-            publish/Chat-Marks-macOS-arm64.zip \
             publish/Chat-Marks-Linux-x64.AppImage \
             publish/Chat-Marks-Linux-x64.deb \
             publish/Chat-Marks-Linux-arm64.AppImage \

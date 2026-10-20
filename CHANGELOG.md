@@ -16,6 +16,7 @@ the app refuses the extension and asks you to reload the matching copy.
 - Linux menus, launchers and the taskbar show the Marks icon (a full hicolor size set instead of one 1024px file), and the Windows taskbar groups the window with its shortcut (AppUserModelId).
 - Setup recognizes the app's own four-part extension version (2.1.43.1); every version check now shares one pattern.
 - `npm run dev` uses its own profile and runs beside the installed app; `dev` and `build` rewrite the extension build stamp.
+- No macOS build for now: its release targets stay declared but disabled, so CI and releases run on Windows and Linux only (`MARKS_MACOS=true` re-enables the macOS UI checks).
 - AI Hero skills in the Book of Skills, dependency security updates, and new guard tests that fail when a merge brings back a three-number version check, a stale extension stamp or upstream branding in new UI text.
 
 ## [2.1.43] — See what sub-agents do, long work that keeps going, and clearer Settings
