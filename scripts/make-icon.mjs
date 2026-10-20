@@ -6,6 +6,8 @@
  *   build/icon.png            1024px source for macOS/Linux packaging (Retina-ready ICNS input)
  *   build/icon-preview.png    256px preview, for looking at what changed
  *   build/runtime-icon.png    256px Linux/Windows BrowserWindow icon, packaged as a real resource
+ *   build/icons/NxN.png       Linux hicolor set: menus, launchers and the taskbar look the icon up
+ *                             by size, and themes list no 1024px folder (only 1024px was blank)
  *   extension/icons/*.png     16/32/48/128 for the Chrome extension
  *   src/renderer/browser-icons/cos.png  in-app browser and brand logo
  *
@@ -22,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICO_SIZES = [256, 128, 64, 48, 32, 16];
 const EXTENSION_SIZES = [128, 48, 32, 16];
+const LINUX_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512];
 const SOURCE_PATH = path.join(root, 'icon_marks.png');
 
 // ------------------------------------------------------------- source png
@@ -315,6 +318,11 @@ writeFileSync(path.join(root, 'build', 'installerSidebar.bmp'), encodeBmp(164, 3
 console.log(
   `Wrote build/icon.ico (${ICO_SIZES.join(', ')}), build/icon.png, build/icon-preview.png, build/runtime-icon.png, build/installerHeader.bmp and build/installerSidebar.bmp`
 );
+
+const linuxDir = path.join(root, 'build', 'icons');
+mkdirSync(linuxDir, { recursive: true });
+for (const size of LINUX_SIZES) writeFileSync(path.join(linuxDir, `${size}x${size}.png`), pngFor(size));
+console.log(`Wrote build/icons/{${LINUX_SIZES.map((size) => `${size}x${size}`).join(',')}}.png`);
 
 const iconsDir = path.join(root, 'extension', 'icons');
 mkdirSync(iconsDir, { recursive: true });
