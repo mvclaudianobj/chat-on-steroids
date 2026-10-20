@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { RELEASE_VERSION_PATTERN } from '../shared/types.js';
 
 /** Localize the updater's authored reasons; unknown external diagnostics remain verbatim. */
 export function updateErrorText(source: string): string {
@@ -20,7 +21,7 @@ export function updateErrorText(source: string): string {
   if (http) return t('Could not check for updates: HTTP {0}.', [http[1]]);
   const download = /^(.+) answered (\d{3})$/.exec(source);
   if (download) return t('Could not download {0}: HTTP {1}.', [download[1], download[2]]);
-  const absent = /^release (\d+\.\d+\.\d+) publishes no (.+)$/.exec(source);
+  const absent = new RegExp(`^release (${RELEASE_VERSION_PATTERN}) publishes no (.+)$`).exec(source);
   if (absent) return t('Release {0} does not include {1}.', [absent[1], absent[2]]);
   if (/^downloading .+ returned no content$/.test(source)) return t('The update download returned no data.');
   if (/^.+ is not the published file: sha256 [a-f\d]{64} instead of [a-f\d]{64}$/.test(source)) {

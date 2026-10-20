@@ -778,6 +778,18 @@ export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors' | 
 export const RELEASES_PAGE = 'https://github.com/mvclaudianobj/chat-on-steroids/releases/latest';
 
 /**
+ * A release version: three community numbers and an optional fourth Marks revision (2.1.42.1).
+ * Every version check in the app goes through this one pattern; a copy that forgets the fourth
+ * number rejects every Marks build (Setup refused extension 2.1.42.1, 2026-10-20), and
+ * test/release-version-format.test.ts fails when one appears.
+ */
+export const RELEASE_VERSION_PATTERN = String.raw`\d+\.\d+\.\d+(?:\.\d+)?`;
+const RELEASE_VERSION = new RegExp(`^${RELEASE_VERSION_PATTERN}$`);
+export function isReleaseVersion(value: unknown): value is string {
+  return typeof value === 'string' && RELEASE_VERSION.test(value);
+}
+
+/**
  * Whether `candidate` is a later release, including an optional fourth revision number.
  *
  * String inequality is not enough: a downgrade published by mistake, or a pre-release tag left
@@ -786,7 +798,7 @@ export const RELEASES_PAGE = 'https://github.com/mvclaudianobj/chat-on-steroids/
  * copies of a comparison are two chances to read a version difference the wrong way round.
  */
 export function isNewer(candidate: string, current: string): boolean {
-  if (!/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(candidate) || !/^\d+\.\d+\.\d+(?:\.\d+)?$/.test(current)) return false;
+  if (!isReleaseVersion(candidate) || !isReleaseVersion(current)) return false;
   const left = candidate.split('.').map(Number);
   const right = current.split('.').map(Number);
   for (let index = 0; index < 4; index += 1) {

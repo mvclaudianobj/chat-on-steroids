@@ -45,7 +45,7 @@ import { pipeline } from 'node:stream/promises';
 import { app } from 'electron';
 import { logInfo, logWarn } from './logger.js';
 import { APP_VERSION } from './version.js';
-import { isNewer, type UpdateStatus } from '../shared/types.js';
+import { isNewer, isReleaseVersion, type UpdateStatus } from '../shared/types.js';
 
 // Fork releases are the only safe update authority for the Marks-branded build.
 const REPO = 'mvclaudianobj/chat-on-steroids';
@@ -159,7 +159,7 @@ export function manualDownloadUrl(version: string | null, name: string | null = 
 export function releaseVersion(tag: unknown): string | null {
   if (typeof tag !== 'string') return null;
   const version = tag.trim().replace(/^v/, '');
-  return /^\d+\.\d+\.\d+(?:\.\d+)?$/.test(version) ? version : null;
+  return isReleaseVersion(version) ? version : null;
 }
 
 const CLEAR: UpdateStatus = { current: APP_VERSION, latest: null, stage: 'idle', error: null, checkedAt: null };
@@ -208,7 +208,7 @@ export async function restoreUpdateHandoff(): Promise<void> {
   let note: { version?: unknown } | null = null;
   try { note = JSON.parse(await readFile(handoffNote(), 'utf8')); } catch { return; }
   await rm(handoffNote(), { force: true }).catch(() => undefined);
-  const version = typeof note?.version === 'string' && /^\d+\.\d+\.\d+(?:\.\d+)?$/.test(note.version) ? note.version : null;
+  const version = isReleaseVersion(note?.version) ? note.version : null;
   if (version && isNewer(version, APP_VERSION)) {
     set({ notInstalled: version });
     logWarn(`update: ${version} was handed to its installer, but this is still ${APP_VERSION}; it did not install`);
