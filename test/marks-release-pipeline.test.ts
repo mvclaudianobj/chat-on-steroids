@@ -29,9 +29,12 @@ it('checks only the Marks GitHub release and downloads its platform-specific bin
 
 it('makes the published file list exactly match the release planner and the packager', () => {
   const planned = releaseTargets('all').files as string[];
-  // The six-platform reusable build produces 12 core assets; the tag-only Mozilla
-  // signing job adds the signed Firefox add-on and update manifest at publish time.
-  expect(planned).toHaveLength(12);
+  // The four enabled platforms (macOS is declared but disabled for now) produce 8 core assets;
+  // the tag-only Mozilla signing job adds the signed Firefox add-on and update manifest.
+  expect(planned).toHaveLength(8);
+  const targets = JSON.parse(read('.github/release-targets.json')) as Array<{ platform: string; enabled?: boolean }>;
+  expect(targets.filter(target => target.platform === 'darwin').map(target => target.enabled)).toEqual([false, false]);
+  expect(planned.some(name => name.includes('macOS'))).toBe(false);
   expect(RELEASE_FILES).toEqual([...planned, 'Chat-Marks-Firefox.xpi', 'firefox-updates.json']);
   expect(planned.every(name => name.startsWith('Chat-Marks-'))).toBe(true);
   const builder = loadYaml(read('electron-builder.yml')) as any;
@@ -63,7 +66,7 @@ it('builds and publishes Marks tag releases, with checksums and post-release ver
   expect(workflow.jobs.assemble.needs).toContain('contracts');
   const contractJobs = workflow.jobs.contracts.strategy.matrix.include;
   expect(contractJobs.map(({ platform, runner }: any) => [platform, runner])).toEqual([
-    ['win32', 'windows-2025'], ['darwin', 'macos-15'], ['linux', 'ubuntu-24.04']
+    ['win32', 'windows-2025'], ['linux', 'ubuntu-24.04']
   ]);
   expect(workflow.jobs.contracts.steps.find((step: any) => step.name === 'Verify OS contracts').run).toBe('npm run verify:ci');
   expect(workflow.jobs.contracts.steps.find((step: any) => step.name === 'Verify OS contracts').env.COS_TEST_RETRY).toContain("matrix.platform == 'win32'");

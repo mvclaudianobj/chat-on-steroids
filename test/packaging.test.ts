@@ -185,9 +185,9 @@ describe('cross-platform packaging targets', () => {
   });
 
   it('builds canaries only for the targets most installs use, and releases for all of them', () => {
-    expect(releaseTargets('common').include.map((target: { name: string }) => target.name)).toEqual(['Windows x64', 'macOS arm64', 'Linux x64']);
-    expect(releaseTargets('common').files).toEqual(['Chat-Marks-Setup-x64.exe', 'Chat-Marks-macOS-arm64.dmg',
-      'Chat-Marks-macOS-arm64.zip', 'Chat-Marks-Linux-x64.AppImage', 'Chat-Marks-Linux-x64.deb',
+    // Chat Marks ships no macOS build for now: its targets stay declared but disabled.
+    expect(releaseTargets('common').include.map((target: { name: string }) => target.name)).toEqual(['Windows x64', 'Linux x64']);
+    expect(releaseTargets('common').files).toEqual(['Chat-Marks-Setup-x64.exe', 'Chat-Marks-Linux-x64.AppImage', 'Chat-Marks-Linux-x64.deb',
       'Chat-Marks-Extension.zip', 'Chat-Marks-Native-Sources.tar.gz']);
     expect(() => releaseTargets('some')).toThrow();
     const canary = yamlFile('.github/workflows/canary.yml');
@@ -333,7 +333,7 @@ describe('cross-platform packaging targets', () => {
     expect(parsed.jobs.package.strategy.matrix.include).toBe('${{ fromJSON(needs.plan.outputs.include) }}');
     expect(parsed.jobs.plan.steps.at(-1).run).toBe('node scripts/release-targets.mjs "$PLATFORMS"');
     const matrix = releaseTargets('all').include;
-    expect(matrix).toHaveLength(6);
+    expect(matrix).toHaveLength(4);
     expect(matrix).toEqual([
       {
         name: 'Windows x64', platform: 'win32', arch: 'x64', runner: 'windows-2025',
@@ -342,16 +342,6 @@ describe('cross-platform packaging targets', () => {
       {
         name: 'Windows arm64', platform: 'win32', arch: 'arm64', runner: 'windows-11-arm',
         script: 'dist:arm64', artifact: 'package-windows-arm64', files: 'release/Chat-Marks-Setup-arm64.exe'
-      },
-      {
-        name: 'macOS x64', platform: 'darwin', arch: 'x64', runner: 'macos-15-intel',
-        script: 'dist:mac:x64', artifact: 'package-macos-x64',
-        files: 'release/Chat-Marks-macOS-x64.dmg\nrelease/Chat-Marks-macOS-x64.zip'
-      },
-      {
-        name: 'macOS arm64', platform: 'darwin', arch: 'arm64', runner: 'macos-15',
-        script: 'dist:mac:arm64', artifact: 'package-macos-arm64',
-        files: 'release/Chat-Marks-macOS-arm64.dmg\nrelease/Chat-Marks-macOS-arm64.zip'
       },
       {
         name: 'Linux x64', platform: 'linux', arch: 'x64', runner: 'ubuntu-24.04',
@@ -906,10 +896,6 @@ Load command 11
     const artifacts = [
       'Chat-Marks-Setup-x64.exe',
       'Chat-Marks-Setup-arm64.exe',
-      'Chat-Marks-macOS-x64.dmg',
-      'Chat-Marks-macOS-x64.zip',
-      'Chat-Marks-macOS-arm64.dmg',
-      'Chat-Marks-macOS-arm64.zip',
       'Chat-Marks-Linux-x64.AppImage',
       'Chat-Marks-Linux-x64.deb',
       'Chat-Marks-Linux-arm64.AppImage',
