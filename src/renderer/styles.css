@@ -76,6 +76,15 @@
 .skill-library-update:hover { text-decoration: underline; text-underline-offset: 3px; }
 .skill-source-url { margin: 10px 0 0; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); overflow-wrap: anywhere; user-select: text; }
 #skillGithubDialog[aria-busy='true'] .plugin-dialog-head button, #skillGithubDialog[aria-busy='true'] #skillGithubCancel { opacity: .45; pointer-events: none; }
+/* AI Hero is a discoverable external catalog; it never shares installed-card identity. */
+.skill-aihero-filters { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 14px; }
+.skill-aihero-filters .btn[aria-pressed='true'] { border-color: var(--accent); color: var(--accent); }
+.skill-aihero-card.pet-library-card .plugin-entry { align-items: stretch; min-height: 154px; padding: 16px; }
+.skill-aihero-card .plugin-card-title { display: flex; flex-direction: column; min-width: 0; }
+.skill-aihero-card .plugin-card-foot { margin-top: auto; padding-top: 12px; flex-wrap: wrap; gap: 7px 12px; font-size: calc(11px * var(--text-scale, 1)); }
+.skill-aihero-card .skill-library-source { margin-left: 0; white-space: normal; }
+.skill-aihero-card .skill-aihero-install { margin-left: auto; }
+.skill-aihero-card .plugin-error { overflow-wrap: anywhere; }
 /* Pets library (desktop pets). */
 .pet-library-grid { align-items: stretch; }
 .pet-library-card { height: 100%; }

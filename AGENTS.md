@@ -503,6 +503,13 @@ grouped under their folder, written once, as `<entry>: /<id> — description` (d
 one closing line saying the user can pick them with `/`.
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
+The Book of Skills also projects the pinned metadata-only AI Hero catalog (`shared/aihero-skills.ts`,
+from mattpocock/skills, with aihero.dev attribution). `renderer/aihero-skills.ts` filters these
+public links alongside installed Skills and asks for explicit confirmation before using the
+existing bounded `skills:githubImport` path. This catalog creates no separate file downloader,
+root, execution authority or installed-state ledger: the managed library and verified GitHub
+origin own installation and version checking. A colliding local or foreign-source id cannot
+be silently overwritten; import errors remain in the catalog for an explicit retry.
 When `CODEX_HOME` has a plugin cache (approved or as a user Skill area), that same read-only
 catalog may project Skills from the last `codex plugin list --json` installed/enabled snapshot.
 Only explicit `skills:library` inspection may create or refresh that runtime snapshot; session
