@@ -2,7 +2,9 @@
 //
 // `all` is every target and is what a release builds. `common` is the targets most installs use,
 // measured by release downloads (2.1.25: Windows x64 1066, macOS arm64 73, Linux x64 69, each other
-// target under 10); canaries build only those. Usage in a workflow:
+// target under 10); canaries build only those. A target with `"enabled": false` (Chat Marks: macOS
+// for now) is neither built nor published, so its runners never hold up CI or a release.
+// Usage in a workflow:
 //   node scripts/release-targets.mjs <all|common>   -> `include` and `files` in $GITHUB_OUTPUT
 import { appendFileSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -11,9 +13,9 @@ const ALWAYS = ['Chat-Marks-Extension.zip', 'Chat-Marks-Native-Sources.tar.gz'];
 
 export function releaseTargets(platforms = 'all', targets = JSON.parse(readFileSync(new URL('../.github/release-targets.json', import.meta.url), 'utf8'))) {
   if (platforms !== 'all' && platforms !== 'common') throw new Error(`platforms must be all or common, got ${platforms}`);
-  const chosen = targets.filter(target => platforms === 'all' || target.common === true);
+  const chosen = targets.filter(target => target.enabled !== false && (platforms === 'all' || target.common === true));
   return {
-    include: chosen.map(({ common, files, ...target }) => ({ ...target, files: files.map(file => `release/${file}`).join('\n') })),
+    include: chosen.map(({ common, enabled, files, ...target }) => ({ ...target, files: files.map(file => `release/${file}`).join('\n') })),
     files: [...chosen.flatMap(target => target.files), ...ALWAYS]
   };
 }

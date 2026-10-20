@@ -34,7 +34,8 @@
       "Chat-Marks-macOS-x64.dmg",
       "Chat-Marks-macOS-x64.zip"
     ],
-    "common": false
+    "common": false,
+    "enabled": false
   },
   {
     "name": "macOS arm64",
@@ -47,7 +48,8 @@
       "Chat-Marks-macOS-arm64.dmg",
       "Chat-Marks-macOS-arm64.zip"
     ],
-    "common": true
+    "common": true,
+    "enabled": false
   },
   {
     "name": "Linux x64",
