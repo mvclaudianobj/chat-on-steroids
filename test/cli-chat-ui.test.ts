@@ -57,7 +57,9 @@ it('shows enabled modules in the terminal details section without a backend sele
   expect(dom.window.document.querySelector('#chatsSection')!.compareDocumentPosition(section)
     & dom.window.Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(section.querySelector('#cliModuleChatsHeading')?.textContent).toContain('Terminals');
-  expect(dom.window.document.querySelector('#sidebarPrimary .cli-module-chat')?.textContent).toContain('Novo MarksCode');
+  // The module is offered from New chat's menu, not as a separate sidebar button.
+  expect(dom.window.document.querySelector('#sidebarPrimary .cli-module-chat')).toBeNull();
+  expect(dom.window.document.getElementById('newChat')?.getAttribute('aria-haspopup')).toBe('menu');
   expect(section.querySelector('#cliModuleChatsEmpty')?.textContent).toContain('No terminal sessions yet.');
   expect(dom.window.document.querySelector('#cliChatBackend')).toBeNull();
 });
@@ -82,11 +84,50 @@ it('opens the selected CLI module in the central terminal view', async () => {
     cliAction: async () => ({ ok: true as const, data: undefined })
   } as any;
   createCliModulesUi(api, { showTab: () => undefined, openChatView, workspace: () => 'project-1' });
-  await vi.waitFor(() => expect(dom.window.document.querySelector<HTMLButtonElement>('.cli-module-chat:not([hidden])')).toBeTruthy());
-  const button = [...dom.window.document.querySelectorAll<HTMLButtonElement>('.cli-module-chat')]
-    .find(item => item.textContent?.includes('Novo Codex'))!;
-  button.click();
+  await vi.waitFor(() => expect(dom.window.document.getElementById('newChat')?.getAttribute('aria-haspopup')).toBe('menu'));
+  dom.window.document.getElementById('newChat')!.click();
+  const item = await vi.waitFor(() => {
+    const found = dom.window.document.querySelector<HTMLButtonElement>('[data-row-action="new-chat-codex"]');
+    expect(found).toBeTruthy();
+    return found!;
+  });
+  item.click();
   await vi.waitFor(() => expect(createSession).toHaveBeenCalledWith('codex', 'project-1'));
   await vi.waitFor(() => expect(openChatView).toHaveBeenCalledWith('cli-module'));
   expect(dom.window.document.querySelector<HTMLElement>('[data-view="cli-module"]')?.hidden).toBe(false);
+});
+
+const statusOf = (enabled: boolean) => ({
+  cliStatus: async () => ({ ok: true as const, data: [{ id: 'claude', name: 'Claude', installed: true, enabled, running: true, supported: true, version: '1', detail: 'ready' }] }),
+  cliSessions: async () => ({ ok: true as const, data: [] }),
+  listProjects: async () => ({ ok: true as const, data: [] }),
+  cliAction: async () => ({ ok: true as const, data: undefined })
+}) as any;
+
+it('opens one New chat menu whose ChatGPT item keeps the app\'s own new chat', async () => {
+  const chatgpt = vi.fn();
+  dom.window.document.getElementById('newChat')!.addEventListener('click', chatgpt);
+  createCliModulesUi(statusOf(true), { showTab: () => undefined, openChatView: () => undefined, workspace: () => null });
+  await vi.waitFor(() => expect(dom.window.document.getElementById('newChat')?.getAttribute('aria-haspopup')).toBe('menu'));
+  dom.window.document.getElementById('newChat')!.click();
+  expect(chatgpt).not.toHaveBeenCalled();
+  const items = await vi.waitFor(() => {
+    const found = [...dom.window.document.querySelectorAll<HTMLElement>('[data-row-action^="new-chat-"]')];
+    expect(found.length).toBe(2);
+    return found;
+  });
+  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'new-chat-claude']);
+  items[0]!.click();
+  await vi.waitFor(() => expect(chatgpt).toHaveBeenCalledTimes(1));
+});
+
+it('keeps New chat a plain ChatGPT button while no CLI module is enabled', async () => {
+  const chatgpt = vi.fn();
+  dom.window.document.getElementById('newChat')!.addEventListener('click', chatgpt);
+  createCliModulesUi(statusOf(false), { showTab: () => undefined, openChatView: () => undefined, workspace: () => null });
+  await new Promise(resolve => setTimeout(resolve, 10));
+  expect(dom.window.document.getElementById('newChat')?.hasAttribute('aria-haspopup')).toBe(false);
+  dom.window.document.getElementById('newChat')!.click();
+  expect(chatgpt).toHaveBeenCalledTimes(1);
+  expect(dom.window.document.querySelector('[data-row-action^="new-chat-"]')).toBeNull();
 });
