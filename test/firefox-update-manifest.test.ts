@@ -42,6 +42,23 @@ describe('Firefox update manifest', () => {
     });
   });
 
+  it('links a Marks revision to its own whole tag', () => {
+    // Chat Marks: the fourth part is the Marks revision and part of the tag (v2.1.43.1). The
+    // community's Firefox-only fourth part (2.1.43.1 linking to v2.1.43) does not exist here.
+    expect(firefoxUpdateManifest({ version: '2.1.43.1', sha256: 'b'.repeat(64) })).toEqual({
+      addons: {
+        [FIREFOX_ADDON_ID]: {
+          updates: [{
+            version: '2.1.43.1',
+            update_link: `https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.43.1/${FIREFOX_XPI}`,
+            update_hash: `sha256:${'b'.repeat(64)}`
+          }]
+        }
+      }
+    });
+    expect(() => firefoxUpdateManifest({ version: '2.1.43.1.2', sha256: 'b'.repeat(64) })).toThrow();
+  });
+
   it('refuses anything that is not a release version or a sha256', () => {
     expect(firefoxUpdateManifest({ version: '2.1.38.1', sha256: 'a'.repeat(64) })).toBeTruthy();
     expect(() => firefoxUpdateManifest({ version: '2.1', sha256: 'a'.repeat(64) })).toThrow();
