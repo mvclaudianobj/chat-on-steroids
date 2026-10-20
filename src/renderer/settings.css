@@ -34,6 +34,13 @@
 .modules-error { margin: 0; padding: 12px 0 16px; border-top: 1px solid var(--line); color: var(--red); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; }
 .modules-panel :is(button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 @media (max-width: 520px) { .modules-service-actions .btn { flex: 1 1 80px; } .modules-console > .btn { width: 100%; } }
+.api-chat-settings { margin-top: 12px; padding: 16px 18px 4px; }
+.api-chat-settings > .setting-text { display: grid; gap: 4px; padding-bottom: 12px; }
+.api-chat-settings .api-chat-field { gap: 12px; }
+.api-chat-settings :is(input[type='url'], input[type='search'], input[type='password']) { flex: 1 1 220px; min-width: 0; max-width: 360px; min-height: 36px; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--page); color: var(--ink); font: calc(12px * var(--text-scale, 1)) var(--mono); }
+.api-chat-key, .api-chat-model { display: flex; flex: 1 1 320px; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.api-chat-settings > #apiChatTest { min-height: 36px; margin: 14px 0 8px; padding: 8px 12px; }
+.api-chat-settings > #apiChatResult { padding-bottom: 14px; }
 .appearance-panel .appearance-settings-card { padding: 4px 18px; gap: 0; overflow: visible; }
 .appearance-panel .setting { min-width: 0; min-height: 64px; padding: 14px 0; flex-wrap: wrap; gap: 12px; }
 .appearance-panel .setting-text { flex: 1 1 180px; }
