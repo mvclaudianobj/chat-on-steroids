@@ -2908,5 +2908,12 @@
   "Default model": "Varsayılan model",
   "Test connection": "Bağlantıyı test et",
   "Testing…": "Test ediliyor…",
-  "{0} answered.": "{0} yanıt verdi."
+  "{0} answered.": "{0} yanıt verdi.",
+  "CLIProxy asked for an API key. Paste it above to use its models.": "CLIProxy bir API anahtarı istedi. Modellerini kullanmak için yukarıya yapıştırın.",
+  "Refresh list": "Listeyi yenile",
+  "Found at {0} · {1} chat models": "{0} adresinde bulundu · {1} sohbet modeli",
+  "Nothing answered at {0}": "{0} adresinde yanıt veren yok",
+  "Remove from favorites": "Favorilerden kaldır",
+  "Add to favorites": "Favorilere ekle",
+  "Other": "Diğer"
 }

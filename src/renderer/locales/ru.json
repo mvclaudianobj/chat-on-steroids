@@ -2998,5 +2998,12 @@
   "Default model": "Модель по умолчанию",
   "Test connection": "Проверить подключение",
   "Testing…": "Проверка…",
-  "{0} answered.": "{0} ответила."
+  "{0} answered.": "{0} ответила.",
+  "CLIProxy asked for an API key. Paste it above to use its models.": "CLIProxy запросил ключ API. Вставьте его выше, чтобы пользоваться его моделями.",
+  "Refresh list": "Обновить список",
+  "Found at {0} · {1} chat models": "Найден по адресу {0} · моделей чата: {1}",
+  "Nothing answered at {0}": "По адресу {0} ничего не ответило",
+  "Remove from favorites": "Убрать из избранного",
+  "Add to favorites": "Добавить в избранное",
+  "Other": "Другие"
 }

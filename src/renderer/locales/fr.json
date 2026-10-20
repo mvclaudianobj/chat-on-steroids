@@ -2953,5 +2953,12 @@
   "Default model": "Modèle par défaut",
   "Test connection": "Tester la connexion",
   "Testing…": "Test en cours…",
-  "{0} answered.": "{0} a répondu."
+  "{0} answered.": "{0} a répondu.",
+  "CLIProxy asked for an API key. Paste it above to use its models.": "CLIProxy a demandé une clé d’API. Collez-la ci-dessus pour utiliser ses modèles.",
+  "Refresh list": "Actualiser la liste",
+  "Found at {0} · {1} chat models": "Trouvé à {0} · {1} modèles de chat",
+  "Nothing answered at {0}": "Rien n’a répondu à {0}",
+  "Remove from favorites": "Retirer des favoris",
+  "Add to favorites": "Ajouter aux favoris",
+  "Other": "Autres"
 }

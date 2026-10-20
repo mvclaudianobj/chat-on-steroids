@@ -12,15 +12,17 @@ const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let server, win;
 const fixture = `(() => {
  const old=window.api,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
- const status={endpoint:'http://127.0.0.1:18081/v1',model:'claude-sonnet-5-5',effort:null,hasKey:false};
+ const status={endpoint:'http://127.0.0.1:18081/v1',model:'claude-sonnet-5-5',effort:null,favorites:['claude-opus-5-5'],recents:['claude-sonnet-5-5'],hasKey:false,detected:true,keyRequired:true};
+ const row=(id,ownedBy,extra={})=>({id,ownedBy,modality:'chat',favorite:status.favorites.includes(id),recent:status.recents.includes(id),availability:null,...extra});
  window.sentKeys=[];
  const methods={
   getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'pt-BR',theme:'dark'};return r;},
   apiChatStatus:()=>ok(status),
-  apiChatSetKey:key=>{window.sentKeys.push(key.length);status.hasKey=key.length>0;return ok(status);},
+  apiChatSetKey:key=>{window.sentKeys.push(key.length);status.hasKey=key.length>0;status.keyRequired=!status.hasKey;return ok(status);},
+  apiChatToggleFavorite:id=>{status.favorites=status.favorites.includes(id)?status.favorites.filter(x=>x!==id):[id,...status.favorites];return ok(status);},
   apiChatSetSettings:patch=>{Object.assign(status,patch);return ok(status);},
-  apiChatModels:()=>ok({models:[{id:'claude-opus-5-5',ownedBy:'anthropic'},{id:'claude-sonnet-5-5',ownedBy:'anthropic'},{id:'gpt-6-sol',ownedBy:'openai'}],total:3}),
-  apiChatTest:()=>ok({model:status.model})
+  apiChatModels:()=>ok({models:[row('claude-opus-5-5','anthropic'),row('claude-sonnet-5-5','anthropic',{availability:window.tested?{ok:true,at:1}:null}),row('gpt-6-sol','openai')],total:3}),
+  apiChatTest:()=>{window.tested=true;return ok({model:status.model});}
  };
  window.api=new Proxy(methods,{get:(target,key)=>key in target?target[key]:old[key]});
 })();`;
@@ -45,12 +47,17 @@ app.whenReady().then(async () => {
   await js(`document.querySelector('[data-tab="modules"]').click()`);
   await until(`document.querySelectorAll('#apiChatModel option').length===3`);
   assert.equal(await js(`document.getElementById('apiChatKeyState').textContent`),'Nenhuma chave salva');
+  assert.equal(await js(`document.getElementById('apiChatKeyNeeded').hidden`),false,'Asks for the key the proxy required');
+  assert.match(await js(`document.getElementById('apiChatDetection').textContent`),/^Encontrado em http:\/\/127\.0\.0\.1:18081\/v1 · 3 modelos de chat$/);
+  assert.deepEqual(await js(`[...document.querySelectorAll('#apiChatModel optgroup')].map(g=>g.label)`),['Favoritos','Recentes','openai']);
   assert.equal(await js(`document.getElementById('apiChatModel').value`),'claude-sonnet-5-5');
   await js(`(()=>{const k=document.getElementById('apiChatKey');k.value='sk-synthetic-key';document.getElementById('apiChatSaveKey').click();})()`);
   await until(`document.getElementById('apiChatKeyState').textContent==='Há uma chave salva'`);
   assert.equal(await js(`document.getElementById('apiChatKey').value`),'','The key field empties after saving');
   await js(`document.getElementById('apiChatTest').click()`);
   await until(`document.getElementById('apiChatResult').textContent==='claude-sonnet-5-5 respondeu.'`);
+  await until(`document.querySelector('#apiChatModel option[value="claude-sonnet-5-5"]').textContent==='claude-sonnet-5-5 ✓'`);
+  assert.equal(await js(`document.getElementById('apiChatKeyNeeded').hidden`),true);
   await js(`document.getElementById('apiChatSettings').scrollIntoView({block:'center'})`);
   await capture('settings.png');
   assert.deepEqual(errors,[]);

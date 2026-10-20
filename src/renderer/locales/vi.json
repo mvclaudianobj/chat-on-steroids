@@ -2863,5 +2863,12 @@
   "Default model": "Mô hình mặc định",
   "Test connection": "Kiểm tra kết nối",
   "Testing…": "Đang kiểm tra…",
-  "{0} answered.": "{0} đã trả lời."
+  "{0} answered.": "{0} đã trả lời.",
+  "CLIProxy asked for an API key. Paste it above to use its models.": "CLIProxy yêu cầu khóa API. Dán khóa ở trên để dùng các mô hình của nó.",
+  "Refresh list": "Làm mới danh sách",
+  "Found at {0} · {1} chat models": "Đã tìm thấy tại {0} · {1} mô hình trò chuyện",
+  "Nothing answered at {0}": "Không có gì phản hồi tại {0}",
+  "Remove from favorites": "Xóa khỏi mục yêu thích",
+  "Add to favorites": "Thêm vào mục yêu thích",
+  "Other": "Khác"
 }
