@@ -31,6 +31,17 @@ describe('Firefox companion packaging groundwork', () => {
     }
   });
 
+  it('adds a Firefox-only build number only to a three-part version, and only digits', async () => {
+    // Mozilla never signs a version twice (2.1.43, 2026-10-20): the community's publish run can ask
+    // for 2.1.43.1. A Chat Marks version already has four parts, so it publishes a new revision.
+    const source = JSON.parse(await fs.readFile(path.join(extensionRoot, 'manifest.json'), 'utf8'));
+    expect(firefoxManifest({ ...source, version: '2.1.43' }, '1').version).toBe('2.1.43.1');
+    expect(() => firefoxManifest({ ...source, version: '2.1.43.1' }, '1')).toThrow('publish the next Marks revision');
+    expect(firefoxManifest(source, '').version).toBe(APP_VERSION);
+    expect(firefoxManifest(source).version).toBe(APP_VERSION);
+    for (const bad of ['0', '01', 'a', '1.2', '1000']) expect(() => firefoxManifest({ ...source, version: '2.1.43' }, bad), bad).toThrow();
+  });
+
   it('derives only the Gecko manifest delta from the canonical companion manifest', async () => {
     const source = JSON.parse(await fs.readFile(path.join(extensionRoot, 'manifest.json'), 'utf8'));
     const manifest = firefoxManifest(source);
