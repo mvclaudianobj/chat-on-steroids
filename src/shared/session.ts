@@ -6,6 +6,7 @@
  * agree on exactly.
  */
 import { workerOwnTask } from './worker-brief.js';
+import type { AgentEngineId } from './agent-engine.js';
 
 /** Where an event came from. The extension is untrusted UI observation; mcp is ours. */
 export type EventSource = 'extension' | 'mcp' | 'app';
@@ -187,7 +188,9 @@ export type CallAttribution =
   | 'turn'
   | 'agent'
   | 'generation'
-  | 'inferred';
+  | 'inferred'
+  /** Chat Marks: written by the chat's own agent engine session (a coding CLI), not by a connector call. */
+  | 'engine';
 
 /**
  * What each grade of attribution actually rests on, in the words shown to the user.
@@ -215,7 +218,8 @@ export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
   agent: 'agent key',
   turn: 'tool block on the page',
   generation: 'the only chat generating',
-  inferred: 'not placed in a chat'
+  inferred: 'not placed in a chat',
+  engine: "the chat's own engine session"
 };
 
 export interface ToolCallRecord {
@@ -234,7 +238,9 @@ export interface ToolCallRecord {
   /** Conversation proven by that request id, or null when ownership was unresolved. */
   conversationId: string | null;
   /** Deterministic placement outcome for current, unresolved, or deliberately retired callers. */
-  attributionMethod: 'request_id' | 'unattributed' | 'superseded';
+  attributionMethod: 'request_id' | 'unattributed' | 'superseded' | 'engine';
+  /** Chat Marks: the agent engine whose own tool this row records (never a kernel call). */
+  engine?: AgentEngineId;
   /** Exact arguments as JSON. Cut inline past the cap, with the whole text in an asset. */
   args: StoredText;
   result: StoredText;

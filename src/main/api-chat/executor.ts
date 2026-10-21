@@ -1,12 +1,13 @@
 /**
- * Runs Chat Marks API chats: text turns of a local session whose model answers through the
- * OpenAI-compatible endpoint instead of a ChatGPT tab.
+ * Runs Chat Marks API chats of the `cliproxy` engine: text turns of a local session whose model
+ * answers through the OpenAI-compatible endpoint instead of a ChatGPT tab. The agent-engine
+ * registry routes a chat here by its ledger record (`engine` absent or `cliproxy`).
  *
  * The session store owns the history (messages and turn boundaries, written with the same
- * writers the recorder uses); this module owns only what the store has no place for, in the
- * Marks durable `marks-api-chat-sessions`: each chat's model and effort, and the turn it has
- * open. A turn open in that ledger at startup was cut by the restart and is closed
- * `interrupted`: nothing resumes a generation this process did not start.
+ * writers the recorder uses); the chat ledger (`agent-engine/ledger.ts`, the Marks durable
+ * `marks-api-chat-sessions`) holds each chat's model and effort, and the turn it has open. A
+ * turn open in that ledger at startup was cut by the restart and is closed `interrupted`:
+ * nothing resumes a generation this process did not start.
  *
  * D4: the model may call the app's own Core tools (`tools.ts`) in a loop of at most
  * MAX_TOOL_STEPS completions per turn. Edits and commands follow the chat's approval mode
@@ -14,7 +15,6 @@
  */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { readDurable, writeDurableNow } from '../durable.js';
 import { logInfo, logWarn } from '../logger.js';
 import { currentCoreInstructions } from '../mcp/instructions.js';
 import { getSessionProject, projectWorkspace } from '../projects.js';
@@ -22,21 +22,22 @@ import { strictChatAllowlistEnabled } from '../session/conversation-access.js';
 import { setChatsTrusted } from '../session/trusted-chats.js';
 import { notifyChanged } from '../session/recorder.js';
 import {
-  appendEvent, bindSessionProject, createSession, getSession, MAX_USER_MESSAGE_CHARS, readEvents, upsertMessageEvent,
-  writeOverflowText
+  appendEvent, bindSessionProject, createSession, getSession, MAX_USER_MESSAGE_CHARS, readEvents, upsertMessageEvent
 } from '../session/store.js';
 import {
-  API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS, API_CONVERSATION_PREFIX, isApiConversationId, type ApiChatApprovalDecision, type ApiChatApprovalMode,
-  type ApiChatEffort, type ApiChatPendingApproval, type ApiChatView
+  API_CHAT_APPROVAL_MODES, API_CONVERSATION_PREFIX, isApiConversationId, type ApiChatApprovalDecision, type ApiChatApprovalMode,
+  type ApiChatEffort, type ApiChatView
 } from '../../shared/api-chat.js';
-import type { SessionEvent, StoredText, TurnOutcome } from '../../shared/session.js';
+import type { SessionEvent, TurnOutcome } from '../../shared/session.js';
+import { ApprovalGate, type ApprovalOutcome } from '../agent-engine/approval.js';
+import { chatRecords, engineOf, resetChatLedgerForTests, storedChatRecord, updateChatRecord, withoutTurn, type ChatRecord } from '../agent-engine/ledger.js';
+import { assistantMessageId, MAX_ASSISTANT_CHARS, storedText, userMessageId } from '../agent-engine/transcript.js';
 import { ApiChatHttpError, streamCompletion, type ApiChatMessage, type ApiCompletion, type ApiToolCall } from './client.js';
 import { apiChatTools, approvalSummary, argsHash, needsApproval, parseToolCall, runApiChatTool, toolDefinitions } from './tools.js';
 import { apiChatKey, apiChatSettings, noteKeyRequired, noteModelAvailability, noteRecentModel } from './settings.js';
 
-export const API_CHAT_SESSIONS_STATE = 'marks-api-chat-sessions';
+export { API_CHAT_SESSIONS_STATE } from '../agent-engine/ledger.js';
 export const MAX_API_CHAT_INPUT_CHARS = 100_000;
-const MAX_ASSISTANT_CHARS = 256_000;
 const CONTEXT_MESSAGES = 60;
 const CONTEXT_CHARS = 120_000;
 const STREAM_WRITE_MS = 1_000;
@@ -46,17 +47,7 @@ export const MAX_TOOL_STEPS = 40;
 export const DECLINED_RESULT = 'The user declined this action. It was not run.';
 
 const modelId = z.string().min(1).max(200);
-const turnSchema = z.object({ turnId: z.string().min(1).max(100), startedAt: z.number() });
-const chatSchema = z.object({
-  model: modelId.nullable(), effort: z.enum(API_CHAT_EFFORTS).nullable(),
-  /** Absent means `ask`, the default. */
-  approval: z.enum(API_CHAT_APPROVAL_MODES).optional(),
-  openTurn: turnSchema.optional()
-});
-const ledgerSchema = z.record(z.string().max(128), chatSchema);
-type ChatRecord = z.infer<typeof chatSchema>;
 
-interface PendingApproval { view: ApiChatPendingApproval; hash: string; resolve(decision: 'approve' | 'deny' | 'stop'): void }
 interface RunningTurn {
   turnId: string;
   /** The turn's tool identity, `cosapi:<uuid>`: unforgeable over HTTP (see tools.ts). */
@@ -66,66 +57,26 @@ interface RunningTurn {
   /** Settles when Stop is pressed, so a turn never waits on a tool that keeps running. */
   stoppedSignal: Promise<void>;
   stop(): void;
-  pending: PendingApproval | null;
+  /** Its paused calls (D4); the shared binding every engine uses. */
+  approvals: ApprovalGate;
   done: Promise<TurnOutcome>;
 }
 
-let ledger: Record<string, ChatRecord> | null = null;
-let ledgerWrites: Promise<void> = Promise.resolve();
 let recovery: Promise<void> | null = null;
 /** Process memory: the only proof a turn is generating right now. */
 const running = new Map<string, RunningTurn>();
-
-async function chats(): Promise<Record<string, ChatRecord>> {
-  if (ledger) return ledger;
-  const stored = ledgerSchema.safeParse(await readDurable<unknown>(API_CHAT_SESSIONS_STATE));
-  ledger ??= stored.success ? stored.data : {};
-  return ledger;
-}
-
-/** Serialized durable change of one chat's record; memory follows the write. */
-function updateChat(sessionId: string, change: (record: ChatRecord | undefined) => ChatRecord | undefined): Promise<void> {
-  const write = ledgerWrites.then(async () => {
-    const next = { ...(await chats()) };
-    const record = change(next[sessionId]);
-    if (record) next[sessionId] = record;
-    else delete next[sessionId];
-    await writeDurableNow(API_CHAT_SESSIONS_STATE, next);
-    ledger = next;
-  });
-  ledgerWrites = write.catch(() => undefined);
-  return write;
-}
-
-/** The record without its open turn; the chat's model, effort and approval mode stay. */
-function withoutTurn(current: ChatRecord | undefined): ChatRecord | undefined {
-  if (!current) return undefined;
-  const { openTurn: _open, ...rest } = current;
-  void _open;
-  return rest;
-}
-
-const userMessageId = (turnId: string): string => `api-user:${turnId}`;
-/** Step 0 keeps the D2 id; each later completion of the same turn has its own message. */
-const assistantMessageId = (turnId: string, step = 0): string => step ? `api-assistant:${turnId}:${step}` : `api-assistant:${turnId}`;
-
-/** Bounded inline text, complete in an overflow asset when longer, like the recorder's. */
-async function storedText(sessionId: string, value: string, cap: number): Promise<StoredText> {
-  if (value.length <= cap) return { text: value, truncated: false, chars: value.length };
-  const assetId = await writeOverflowText(sessionId, value);
-  return { text: `${value.slice(0, cap)}\n…[${value.length - cap} more characters${assetId ? ` stored in full as ${assetId}` : ' were too large to store and are lost'}]`,
-    truncated: true, chars: value.length, ...(assetId ? { assetId } : {}) };
-}
 
 /** The session behind an API chat id; anything else is refused by its conversation id. */
 async function apiSession(sessionId: string): Promise<{ id: string; conversationId: string }> {
   const session = await getSession(sessionId);
   if (!session || !isApiConversationId(session.conversationId)) throw new Error('This is not an API chat');
+  // The registry routes by the same record; this owner never runs another engine's chat.
+  if (engineOf(await storedChatRecord(session.id)) !== 'cliproxy') throw new Error('This chat runs on another engine');
   return { id: session.id, conversationId: session.conversationId };
 }
 
 async function chatRecord(sessionId: string): Promise<ChatRecord> {
-  const record = (await chats())[sessionId];
+  const record = await storedChatRecord(sessionId);
   if (record) return record;
   const settings = await apiChatSettings();
   return { model: settings.model, effort: settings.effort };
@@ -138,7 +89,7 @@ export async function createApiChat(options: { projectId?: string | null; model?
   const summary = await createSession({ title: 'New API chat', titleSource: 'fallback', conversationId: `${API_CONVERSATION_PREFIX}${randomUUID()}` });
   if (options.projectId) await bindSessionProject(summary.id, options.projectId);
   const record: ChatRecord = { model: options.model ?? settings.model, effort: settings.effort };
-  await updateChat(summary.id, () => record);
+  await updateChatRecord(summary.id, () => record);
   // A chat explicitly started from New chat is trusted like a composer opening, once its
   // session is durable and only while strict mode is on. A failed write leaves it untrusted:
   // its tools are then refused by the kernel's strict check, never run.
@@ -155,8 +106,8 @@ export async function apiChatView(sessionId: string): Promise<ApiChatView> {
   const record = await chatRecord(session.id);
   const turn = running.get(session.id);
   return {
-    sessionId: session.id, conversationId: session.conversationId, model: record.model, effort: record.effort, running: !!turn,
-    approval: record.approval ?? 'ask', pending: turn?.pending ? { ...turn.pending.view, files: [...turn.pending.view.files] } : null
+    sessionId: session.id, conversationId: session.conversationId, engine: 'cliproxy', model: record.model, effort: record.effort, running: !!turn,
+    approval: record.approval ?? 'ask', pending: turn?.approvals.view() ?? null
   };
 }
 
@@ -167,7 +118,7 @@ export async function setApiChatSettings(
 ): Promise<ApiChatView> {
   const session = await apiSession(sessionId);
   const base = await chatRecord(session.id);
-  await updateChat(session.id, record => ({
+  await updateChatRecord(session.id, record => ({
     ...(record ?? base),
     ...(patch.model !== undefined ? { model: modelId.parse(patch.model) } : {}),
     ...(patch.effort !== undefined ? { effort: patch.effort } : {}),
@@ -182,16 +133,14 @@ export async function setApiChatSettings(
  */
 export async function approveApiChat(sessionId: string, approvalId: string, decision: ApiChatApprovalDecision): Promise<ApiChatView> {
   const session = await apiSession(sessionId);
-  const pendingNow = (): PendingApproval | null => {
-    const pending = running.get(session.id)?.pending ?? null;
-    return pending?.view.approvalId === approvalId ? pending : null;
+  const gate = (): ApprovalGate | null => {
+    const approvals = running.get(session.id)?.approvals;
+    return approvals?.has(approvalId) ? approvals : null;
   };
-  if (!pendingNow()) throw new Error('This approval is no longer pending');
+  if (!gate()) throw new Error('This approval is no longer pending');
   if (decision === 'always') await setApiChatSettings(session.id, { approval: 'auto' });
   // The settings write awaited: Stop may have answered it meanwhile.
-  const pending = pendingNow();
-  if (!pending) throw new Error('This approval is no longer pending');
-  pending.resolve(decision === 'deny' ? 'deny' : 'approve');
+  if (!gate()?.answer(approvalId, decision)) throw new Error('This approval is no longer pending');
   return apiChatView(session.id);
 }
 
@@ -263,8 +212,8 @@ export async function sendApiChat(sessionId: string, text: string, fetchImpl?: t
   let stop!: () => void;
   const stoppedSignal = new Promise<void>(resolve => { stop = resolve; });
   const turn: RunningTurn = {
-    turnId, requestId: `cosapi:${randomUUID()}`, abort: new AbortController(), stopped: false, stoppedSignal, stop, pending: null,
-    done: Promise.resolve('failed')
+    turnId, requestId: `cosapi:${randomUUID()}`, abort: new AbortController(), stopped: false, stoppedSignal, stop,
+    approvals: new ApprovalGate(() => notifyChanged(session.id)), done: Promise.resolve('failed')
   };
   running.set(session.id, turn);
   let started = false;
@@ -276,7 +225,7 @@ export async function sendApiChat(sessionId: string, text: string, fetchImpl?: t
     const messages: ApiChatMessage[] = [{ role: 'system', content: await systemPrompt(session.id) }, ...await apiChatContext(session.id), { role: 'user', content: text }];
     const startedAt = Date.now();
     // Open in the ledger before the boundary exists, so a crash after it is always closed.
-    await updateChat(session.id, current => ({ ...(current ?? record), openTurn: { turnId, startedAt } }));
+    await updateChatRecord(session.id, current => ({ ...(current ?? record), openTurn: { turnId, startedAt } }));
     await upsertMessageEvent(session.id, {
       time: startedAt, source: 'app', kind: 'user_message', messageId: userMessageId(turnId),
       message: await storedText(session.id, text, MAX_USER_MESSAGE_CHARS)
@@ -288,7 +237,7 @@ export async function sendApiChat(sessionId: string, text: string, fetchImpl?: t
     return { turnId, done: turn.done };
   } catch (error) {
     if (started) await endTurn(session.id, turnId, 'failed').catch(() => undefined);
-    else await updateChat(session.id, current => withoutTurn(current)).catch(() => undefined);
+    else await updateChatRecord(session.id, current => withoutTurn(current)).catch(() => undefined);
     running.delete(session.id);
     throw error;
   }
@@ -304,7 +253,7 @@ export function stopApiChat(sessionId: string): boolean {
   if (!turn) return false;
   turn.stopped = true;
   turn.abort.abort();
-  turn.pending?.resolve('stop');
+  turn.approvals.stop();
   turn.stop();
   return true;
 }
@@ -360,23 +309,10 @@ async function streamStep(sessionId: string, turn: RunningTurn, step: number, re
 }
 
 /** Waits for the user's answer to one call; Stop answers `stop`. */
-function askApproval(sessionId: string, turn: RunningTurn, call: ApiToolCall, name: string, args: Record<string, unknown>): Promise<'approve' | 'deny' | 'stop'> {
+function askApproval(turn: RunningTurn, call: ApiToolCall, name: string, args: Record<string, unknown>): Promise<ApprovalOutcome> {
   if (turn.stopped) return Promise.resolve('stop');
   const { summary, files } = approvalSummary(name, args);
-  return new Promise(resolve => {
-    const pending: PendingApproval = {
-      view: { approvalId: randomUUID(), turnId: turn.turnId, toolCallId: call.id, tool: name, summary, files, requestedAt: Date.now() },
-      hash: argsHash(name, args),
-      resolve: decision => {
-        if (turn.pending !== pending) return;
-        turn.pending = null;
-        notifyChanged(sessionId);
-        resolve(decision);
-      }
-    };
-    turn.pending = pending;
-    notifyChanged(sessionId);
-  });
+  return turn.approvals.request({ turnId: turn.turnId, toolCallId: call.id, tool: name, summary, files, action: args });
 }
 
 /** One tool call to its result text for the model, or null when Stop ended the turn. */
@@ -385,10 +321,10 @@ async function executeCall(session: { id: string; conversationId: string }, turn
   const parsed = await parseToolCall(call, tools);
   const caller = { requestId: turn.requestId, conversationId: session.conversationId, sessionId: session.id, messageId: assistantMessageId(turn.turnId) };
   if (!parsed.ok) return parsed.error;
-  if (needsApproval(parsed.tool.name, parsed.args) && ((await chats())[session.id]?.approval ?? 'ask') !== 'auto') {
+  if (needsApproval(parsed.tool.name, parsed.args) && ((await storedChatRecord(session.id))?.approval ?? 'ask') !== 'auto') {
     const approvedHash = argsHash(parsed.tool.name, parsed.args);
-    const decision = await askApproval(session.id, turn, call, parsed.tool.name, parsed.args);
-    if (decision === 'stop' || turn.stopped) return null;
+    const decision = await askApproval(turn, call, parsed.tool.name, parsed.args);
+    if (decision === 'stop' || decision === 'resolved' || turn.stopped) return null;
     if (decision === 'deny') return DECLINED_RESULT;
     // An approval covers exactly the arguments it showed.
     if (approvedHash !== argsHash(parsed.tool.name, parsed.args)) return 'APPROVAL_MISMATCH: the action changed after approval and was not run.';
@@ -452,7 +388,7 @@ async function runTurn(session: { id: string; conversationId: string }, turn: Ru
   } catch (error) {
     logWarn(`API chat ${sessionId}: turn notice not stored: ${(error as Error).message}`);
   }
-  turn.pending = null;
+  turn.approvals.stop();
   await endTurn(sessionId, turn.turnId, outcome).catch(error =>
     logWarn(`API chat ${sessionId}: turn end not stored: ${(error as Error).message}`));
   if (running.get(sessionId) === turn) running.delete(sessionId);
@@ -462,14 +398,15 @@ async function runTurn(session: { id: string; conversationId: string }, turn: Ru
 
 async function endTurn(sessionId: string, turnId: string, outcome: TurnOutcome, detail?: string): Promise<void> {
   await appendEvent(sessionId, { time: Date.now(), source: 'app', kind: 'turn_end', turnId, outcome, ...(detail ? { detail } : {}) });
-  await updateChat(sessionId, current => withoutTurn(current));
+  await updateChatRecord(sessionId, current => withoutTurn(current));
   notifyChanged(sessionId);
 }
 
 /** Closes every turn the previous process left open. Once per process; sends wait for it. */
 export function recoverApiChats(): Promise<void> {
   recovery ??= (async () => {
-    for (const [sessionId, record] of Object.entries(await chats())) {
+    // Engine-neutral: no backend session survives this process, so every engine's open turn closes here.
+    for (const [sessionId, record] of Object.entries(await chatRecords())) {
       const open = record.openTurn;
       if (!open || running.has(sessionId)) continue;
       try {
@@ -488,7 +425,7 @@ export function recoverApiChats(): Promise<void> {
             logInfo(`API chat ${sessionId}: closed turn ${open.turnId} left open by the previous run as interrupted`);
           }
         }
-        await updateChat(sessionId, current => withoutTurn(current));
+        await updateChatRecord(sessionId, current => withoutTurn(current));
         notifyChanged(sessionId);
       } catch (error) {
         logWarn(`API chat ${sessionId}: open turn not recovered: ${(error as Error).message}`);
@@ -499,9 +436,8 @@ export function recoverApiChats(): Promise<void> {
 }
 
 export function resetApiChatExecutorForTests(): void {
-  for (const turn of running.values()) { turn.stopped = true; turn.abort.abort(); turn.pending?.resolve('stop'); turn.stop(); }
+  for (const turn of running.values()) { turn.stopped = true; turn.abort.abort(); turn.approvals.stop(); turn.stop(); }
   running.clear();
-  ledger = null;
-  ledgerWrites = Promise.resolve();
+  resetChatLedgerForTests();
   recovery = null;
 }

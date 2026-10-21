@@ -3018,5 +3018,7 @@
   "Approve": "İzin ver",
   "Approve and don't ask again in this chat": "İzin ver ve bu sohbette bir daha sorma",
   "This approval is no longer pending": "Bu onay artık beklemede değil",
-  "New CLIProxy chat in this project": "Bu projede yeni CLIProxy sohbeti"
+  "New CLIProxy chat in this project": "Bu projede yeni CLIProxy sohbeti",
+  "Chat with {0}": "{0} ile sohbet",
+  "New {0} chat in this project": "Bu projede yeni {0} sohbeti"
 }

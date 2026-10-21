@@ -46,6 +46,10 @@ const fixture = `(() => {
   listProjects:()=>ok([{id:'${PROJECT_ID}',name:'dom_agent',path:'/work/dom_agent',createdAt:1}]),
   getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'en',theme:'dark'};return r;},
   apiChatStatus:()=>ok(status),
+  // Main's engine registry: CLIProxy available, the reserved engines listed but not offered.
+  apiChatEngines:()=>ok([{id:'cliproxy',label:'CLIProxy',available:true,detail:'http://127.0.0.1:18081/v1',terminal:null},
+   {id:'markscode',label:'MarksCode',available:false,detail:'',terminal:'live'},{id:'codex',label:'Codex',available:false,detail:'',terminal:'live'},
+   {id:'claude',label:'Claude Code',available:false,detail:'',terminal:'handover'}]),
   apiChatModels:()=>ok({models:[row('claude-opus-5-5','anthropic'),row('claude-sonnet-5-5','anthropic'),row('gpt-6-sol','openai'),row('gpt-image-2','openai','image')],total:4}),
   apiChatCreate:options=>{created=true;window.apiChatFixture.createdWith=options;changed();return ok(view);},
   apiChatChatSettings:()=>ok(view),

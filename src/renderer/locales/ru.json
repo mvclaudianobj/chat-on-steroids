@@ -3108,5 +3108,7 @@
   "Approve": "Разрешить",
   "Approve and don't ask again in this chat": "Разрешить и больше не спрашивать в этом чате",
   "This approval is no longer pending": "Это подтверждение больше не ожидается",
-  "New CLIProxy chat in this project": "Новый чат CLIProxy в этом проекте"
+  "New CLIProxy chat in this project": "Новый чат CLIProxy в этом проекте",
+  "Chat with {0}": "Чат через {0}",
+  "New {0} chat in this project": "Новый чат {0} в этом проекте"
 }

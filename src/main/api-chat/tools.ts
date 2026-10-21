@@ -11,7 +11,6 @@
  * which HTTP ingress `requestIdFromHeader` never accepts, so no connector request can carry
  * it) and correlates it to the chat's exact conversation and session before the first call.
  */
-import { createHash } from 'node:crypto';
 import type { z } from 'zod';
 import { effectiveCapabilities, getConfig } from '../config.js';
 import { createRegistrar, dispatch, type SurfaceRegistrar, type ToolContext, type ToolResult } from '../mcp/kernel.js';
@@ -19,6 +18,7 @@ import { registerCoreTools } from '../mcp/tools-core.js';
 import { toolSchemaJson } from '../mcp/tool-declarations.js';
 import { commitRequestCorrelations, observeRequestCorrelation, requestCorrelation } from '../session/correlation.js';
 import { withManagedSkills } from '../skill-access.js';
+import { argsHash, canonicalJson } from '../agent-engine/approval.js';
 import type { ApiToolCall, ApiToolDefinition } from './client.js';
 
 /** v1 allowlist, by the exact registered names. Agents, finish, images, usage and code mode stay out. */
@@ -76,17 +76,8 @@ export function toolDefinitions(tools: Map<string, ApiChatTool>): ApiToolDefinit
   });
 }
 
-/** Stable JSON with sorted keys: the exact arguments an approval is bound to. */
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
-  if (value && typeof value === 'object') {
-    return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonicalJson((value as Record<string, unknown>)[key])}`).join(',')}}`;
-  }
-  return JSON.stringify(value) ?? 'null';
-}
-
-export const argsHash = (name: string, args: unknown): string =>
-  createHash('sha256').update(`${name}\n${canonicalJson(args)}`).digest('hex');
+// The approval binding is shared by every engine (agent-engine/approval.ts).
+export { argsHash, canonicalJson };
 
 const clip = (text: string, max = MAX_SUMMARY_CHARS): string => text.length > max ? `${text.slice(0, max)}…` : text;
 

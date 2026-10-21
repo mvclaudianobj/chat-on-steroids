@@ -38,9 +38,16 @@ afterEach(() => { Object.assign(globalThis, old); });
 const view = (over: Partial<{ model: string | null; effort: 'low' | 'medium' | 'high' | null; running: boolean }> = {}) =>
   ({ sessionId: 'session-api', conversationId: 'cosapi-1', model: 'gpt-5', effort: null, running: false, ...over });
 
+const engineList = (available: string[] = ['cliproxy']) => (['cliproxy', 'markscode', 'codex', 'claude'] as const).map(id => ({
+  id, label: { cliproxy: 'CLIProxy', markscode: 'MarksCode', codex: 'Codex', claude: 'Claude Code' }[id], available: available.includes(id), detail: '',
+  terminal: id === 'cliproxy' ? null : id === 'claude' ? 'handover' : 'live'
+}));
+
 function apiMock(over: Record<string, unknown> = {}) {
   return {
     apiChatStatus: vi.fn(async () => ({ ok: true as const, data: { endpoint: 'http://127.0.0.1:18081/v1', model: 'gpt-5', effort: null, favorites: [], recents: [], hasKey: true, detected: true, keyRequired: false } })),
+    // Main's engine registry: only CLIProxy is available; the reserved engines are listed unavailable.
+    apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList() })),
     apiChatCreate: vi.fn(async () => ({ ok: true as const, data: view() })),
     apiChatSend: vi.fn(async () => ({ ok: true as const, data: { turnId: 'turn-1' } })),
     apiChatStop: vi.fn(async () => ({ ok: true as const, data: { stopped: true } })),
@@ -230,4 +237,39 @@ it('shows a pending edit or command, answers exactly that approval and switches 
   mode.dispatchEvent(new dom.window.Event('change'));
   await vi.waitFor(() => expect(api.apiChatSetChatSettings).toHaveBeenCalledWith('session-api', { approval: 'auto' }));
   await vi.waitFor(() => expect(mode.value).toBe('auto'));
+});
+
+it('offers only the engines main reports available, in New chat and in a project menu', async () => {
+  const api = apiMock({ apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'codex']) })) });
+  const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => 'project-1', selectChat: vi.fn(), selectedChat: () => null });
+  await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(2));
+  expect(chats.newChatItems().map(item => `${item.action}=${item.label()}`)).toEqual(['new-chat-cliproxy=CLIProxy', 'new-chat-codex=Codex']);
+  expect(chats.newChatItems()[1]!.title!()).toBe('Chat with Codex');
+  expect(chats.projectChatItems('menu-project').map(item => item.label())).toEqual(['New CLIProxy chat in this project', 'New Codex chat in this project']);
+  // A CLI engine needs no CLIProxy setup: the chat is created on that engine, in that project.
+  chats.projectChatItems('menu-project')[1]!.run!();
+  await vi.waitFor(() => expect(api.apiChatCreate).toHaveBeenCalledWith({ projectId: 'menu-project', engine: 'codex' }));
+  expect(api.apiChatStatus).toHaveBeenCalledTimes(0);
+});
+
+it('offers nothing before the registry answers or when it fails', async () => {
+  const api = apiMock({ apiChatEngines: vi.fn(async () => ({ ok: false as const, error: 'Window not authorized' })) });
+  const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => null });
+  expect(chats.newChatItems()).toEqual([]);
+  await vi.waitFor(() => expect(api.apiChatEngines).toHaveBeenCalled());
+  await chats.refresh();
+  expect(chats.newChatItems()).toEqual([]);
+  expect(chats.projectChatItems('p')).toEqual([]);
+});
+
+it("names the chat's engine in the header and loads that engine's models", async () => {
+  const api = apiMock({
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'gpt-6-codex' }), engine: 'codex', approval: 'ask', pending: null } })),
+    apiChatModels: vi.fn(async () => ({ ok: true as const, data: { total: 1, models: [{ id: 'gpt-6-codex', ownedBy: 'openai', modality: 'chat', favorite: false, recent: false, availability: null }] } }))
+  });
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
+  chats.sync();
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Codex · gpt-6-codex'));
+  await vi.waitFor(() => expect(api.apiChatModels).toHaveBeenCalledWith('', 0, 200, false, 'codex'));
+  await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerModel').options].map(option => option.value)).toEqual(['gpt-6-codex']));
 });

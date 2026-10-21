@@ -5,9 +5,12 @@
  * outbox, the chat's own model and effort, and hiding the ChatGPT-only controls (`is-api-chat`
  * on the chat panel, styled in settings.css). D4 adds the chat's approval mode and the card that
  * answers a paused edit or command (main owns the pending call; this only shows and answers it).
+ * Engines: the New chat and project menu items come from main's engine registry (only available
+ * engines), and the chat's own engine names the header and chooses which model list to load.
  */
 import type { AppApi } from '../preload/index.js';
 import { isApiConversationId, type ApiChatApprovalDecision, type ApiChatApprovalMode, type ApiChatEffort, type ApiChatModel, type ApiChatView } from '../shared/api-chat.js';
+import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineInfo } from '../shared/agent-engine.js';
 import { toast } from './dom.js';
 import { t, ui } from './i18n.js';
 import type { RowMenuItem } from './row-menu.js';
@@ -22,14 +25,29 @@ export interface ApiChatUiHooks {
 }
 
 export interface ApiChatUi {
-  /** New chat's menu items: CLIProxy once its settings answered. */
+  /** New chat's menu items: one per available engine (CLIProxy once its settings answered). */
   newChatItems(): RowMenuItem[];
-  /** A project's menu items: a CLIProxy chat that belongs to that project. */
+  /** A project's menu items: a chat of each available engine that belongs to that project. */
   projectChatItems(projectId: string): RowMenuItem[];
   /** Follows the selected chat: called whenever the chat list or selection repaints. */
   sync(): void;
-  create(projectId?: string | null): Promise<void>;
+  create(projectId?: string | null, engine?: AgentEngineId): Promise<void>;
   refresh(): Promise<void>;
+}
+
+/** The menu wording of each engine; the reserved ones are offered once main reports them available. */
+const ENGINE_MENU: Readonly<Record<AgentEngineId, { title(): string; project(): string }>> = {
+  cliproxy: { title: () => t('Chat with CLIProxy'), project: () => t('New CLIProxy chat in this project') },
+  markscode: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.markscode]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.markscode]) },
+  codex: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.codex]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.codex]) },
+  claude: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.claude]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.claude]) }
+};
+
+/** The engines a new chat may use, in the registry's fixed order. */
+export function availableEngines(list: unknown): AgentEngineId[] {
+  if (!Array.isArray(list)) return [];
+  const shown = new Set((list as AgentEngineInfo[]).filter(item => item?.available === true).map(item => item.id));
+  return AGENT_ENGINE_IDS.filter(id => shown.has(id));
 }
 
 export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailability: () => void = () => undefined): ApiChatUi {
@@ -121,11 +139,13 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
 
   /** Sessions this window created before the chat list carried their summary. */
   const created = new Set<string>();
-  let available = false;
+  let engines: AgentEngineId[] = [];
   let shownFor: string | null = null;
   let view: ApiChatView | null = null;
-  let models: ApiChatModel[] = [];
-  let modelsLoaded = false;
+  /** Each engine's chat models, loaded once per engine. */
+  const modelsBy = new Map<AgentEngineId, ApiChatModel[]>();
+  const modelsLoading = new Set<AgentEngineId>();
+  const engineOf = (): AgentEngineId => view?.engine ?? DEFAULT_AGENT_ENGINE;
   let busy = false;
   let answering = false;
 
@@ -141,7 +161,8 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     label.hidden = !id;
     paintApproval(id ? view?.pending ?? null : null);
     if (!id) return;
-    label.textContent = `CLIProxy · ${view?.model ?? '—'}`;
+    label.textContent = `${AGENT_ENGINE_LABELS[engineOf()] ?? AGENT_ENGINE_LABELS.cliproxy} · ${view?.model ?? '—'}`;
+    const models = modelsBy.get(engineOf()) ?? [];
     const current = view?.model ?? '';
     const options: HTMLOptionElement[] = [];
     const option = (value: string, text: string): HTMLOptionElement => Object.assign(document.createElement('option'), { value, textContent: text });
@@ -190,15 +211,17 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     const reply = await api.apiChatChatSettings(id).catch(() => null);
     if (shownFor !== id) return;
     if (reply?.ok) view = reply.data;
+    void loadModels(engineOf());
     paint();
   }
 
-  async function loadModels(): Promise<void> {
-    if (modelsLoaded) return;
-    modelsLoaded = true;
-    const reply = await api.apiChatModels('', 0, 200, false).catch(() => null);
-    if (reply?.ok && Array.isArray(reply.data?.models)) models = reply.data.models.filter(item => item.modality === 'chat');
-    else modelsLoaded = false;
+  /** The chat's own engine decides which list its model select shows. */
+  async function loadModels(engine: AgentEngineId): Promise<void> {
+    if (modelsBy.has(engine) || modelsLoading.has(engine)) return;
+    modelsLoading.add(engine);
+    const reply = await api.apiChatModels('', 0, 200, false, engine).catch(() => null);
+    modelsLoading.delete(engine);
+    if (reply?.ok && Array.isArray(reply.data?.models)) modelsBy.set(engine, reply.data.models.filter(item => item.modality === 'chat'));
     paint();
   }
 
@@ -207,7 +230,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     if (id !== shownFor) {
       shownFor = id;
       view = null;
-      if (id) { void loadView(id); void loadModels(); }
+      if (id) void loadView(id);
     }
     paint();
   }
@@ -237,19 +260,23 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   }
 
   /** `projectId` is the project whose menu was used; New chat uses the selected workspace. */
-  async function create(projectId?: string | null): Promise<void> {
-    const status = await api.apiChatStatus().catch(() => null);
-    if (!status?.ok) { openSettings(status?.error ?? t('CLIProxy is not set up yet.')); return; }
-    if (status.data.keyRequired && !status.data.hasKey) { openSettings(t('CLIProxy needs an API key. Add it in Settings > Modules.')); return; }
-    if (!status.data.model) { openSettings(t('Choose a default CLIProxy model in Settings > Modules first.')); return; }
-    const reply = await api.apiChatCreate({ projectId: projectId === undefined ? hooks.workspace() : projectId });
+  async function create(projectId?: string | null, engine: AgentEngineId = DEFAULT_AGENT_ENGINE): Promise<void> {
+    if (engine === 'cliproxy') {
+      // CLIProxy's own setup: a missing key or default model is fixed in Settings > Modules.
+      const status = await api.apiChatStatus().catch(() => null);
+      if (!status?.ok) { openSettings(status?.error ?? t('CLIProxy is not set up yet.')); return; }
+      if (status.data.keyRequired && !status.data.hasKey) { openSettings(t('CLIProxy needs an API key. Add it in Settings > Modules.')); return; }
+      if (!status.data.model) { openSettings(t('Choose a default CLIProxy model in Settings > Modules first.')); return; }
+    }
+    const target = projectId === undefined ? hooks.workspace() : projectId;
+    const reply = await api.apiChatCreate(engine === 'cliproxy' ? { projectId: target } : { projectId: target, engine });
     if (!reply.ok) { toast(t(reply.error)); return; }
     created.add(reply.data.sessionId);
     hooks.showTab('chat');
     await hooks.selectChat?.(reply.data.sessionId);
     shownFor = reply.data.sessionId;
     view = reply.data;
-    void loadModels();
+    void loadModels(engineOf());
     paint();
     input?.focus();
   }
@@ -291,22 +318,23 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     if (shownFor && (!notice?.sessionIds || notice.sessionIds.includes(shownFor))) void loadView(shownFor);
   });
 
+  /** Main's registry says which engines a new chat can use; nothing is offered until it answers. */
   async function refresh(): Promise<void> {
-    const reply = await api.apiChatStatus?.().catch(() => null);
-    const next = !!reply?.ok && !!reply.data?.endpoint;
-    if (next !== available) { available = next; onAvailability(); }
+    const reply = await api.apiChatEngines?.().catch(() => null);
+    const next = reply?.ok ? availableEngines(reply.data) : [];
+    if (next.join() !== engines.join()) { engines = next; onAvailability(); }
   }
   void refresh();
 
   return {
-    newChatItems: () => available ? [{
-      action: 'new-chat-cliproxy', icon: 'i-chat', label: () => 'CLIProxy', title: () => t('Chat with CLIProxy'),
-      run: () => void create()
-    }] : [],
-    projectChatItems: projectId => available ? [{
-      action: 'new-chat-cliproxy', icon: 'i-chat', label: () => t('New CLIProxy chat in this project'),
-      run: () => void create(projectId)
-    }] : [],
+    newChatItems: () => engines.map((engine): RowMenuItem => ({
+      action: `new-chat-${engine}`, icon: 'i-chat', label: () => AGENT_ENGINE_LABELS[engine], title: ENGINE_MENU[engine].title,
+      run: () => void create(undefined, engine)
+    })),
+    projectChatItems: projectId => engines.map((engine): RowMenuItem => ({
+      action: `new-chat-${engine}`, icon: 'i-chat', label: ENGINE_MENU[engine].project,
+      run: () => void create(projectId, engine)
+    })),
     sync,
     create,
     refresh
