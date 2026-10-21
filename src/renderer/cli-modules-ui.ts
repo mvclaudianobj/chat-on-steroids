@@ -1,7 +1,7 @@
 import type { AppApi } from '../preload/index.js';
 import type { CliSession } from '../main/cli-modules.js';
 import { createWorkspaceTerminal, type TerminalTransport } from './workspace-terminal.js';
-import { openRowMenu } from './row-menu.js';
+import { openRowMenu, type RowMenuItem } from './row-menu.js';
 import { t } from './i18n.js';
 
 const IDS = ['markscode', 'codex', 'claude', 'marksclaw'] as const;
@@ -9,7 +9,7 @@ type Id = typeof IDS[number];
 type Status = { id: Id; name: string; installed: boolean; enabled: boolean; running: boolean; supported: boolean; version: string | null; detail: string };
 export type CliModuleSummary = { id: string; name: string; enabled: boolean };
 
-export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): void; openChatView(name: string): void; workspace(): string | null }) {
+export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): void; openChatView(name: string): void; workspace(): string | null; newChatItems?(): RowMenuItem[] }) {
   const nav = document.getElementById('moduleCliNav')!;
   const tabs = nav.parentElement!;
   const parent = document.querySelector('[data-panel="modules"] .appearance-content')!;
@@ -78,21 +78,24 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     activeCheck.addEventListener('change', () => void operate(id, activeCheck.checked ? 'enable' : 'disable'));
   }
 
-  // One "New chat" for every kind of chat: with a CLI module enabled it opens a menu whose first
+  // One "New chat" for every kind of chat: with CLIProxy or a CLI module available it opens a menu whose first
   // item is the app's own ChatGPT chat; without one it stays the plain ChatGPT button. Both
   // upstream buttons keep their handlers: the Projects sidebar's #newChat and the Inbox
   // layout's compose button, which the Inbox repaints. This listens before them, on the document.
   const NEW_CHAT_BUTTONS = '#newChat, [data-inbox-control="compose"]';
   const enabledModules = (): Id[] => IDS.filter(id => current.get(id)?.enabled);
+  // Native providers beside ChatGPT (CLIProxy API chats) come right after it, before the terminals.
+  const providerItems = (): RowMenuItem[] => hooks.newChatItems?.() ?? [];
+  const hasMenu = (): boolean => enabledModules().length > 0 || providerItems().length > 0;
   const paintNewChat = (): void => {
-    if (enabledModules().length) newChatBtn.setAttribute('aria-haspopup', 'menu');
+    if (hasMenu()) newChatBtn.setAttribute('aria-haspopup', 'menu');
     else newChatBtn.removeAttribute('aria-haspopup');
   };
   document.addEventListener('click', event => {
     const source = (event.target as Element | null)?.closest?.<HTMLElement>(NEW_CHAT_BUTTONS);
     // A ChatGPT pick replays the click on its button, marked so it reaches the upstream handler.
     // A sidebar that is no longer on screen belongs to a replaced view and answers nothing.
-    if (!source || source.dataset.newChatPassThrough === 'true' || !sidebarPrimary.isConnected || !enabledModules().length) return;
+    if (!source || source.dataset.newChatPassThrough === 'true' || !sidebarPrimary.isConnected || !hasMenu()) return;
     event.stopPropagation();
     event.preventDefault();
     const inbox = source !== newChatBtn;
@@ -112,6 +115,7 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
             try { target.click(); } finally { delete target.dataset.newChatPassThrough; }
           }
         },
+        ...providerItems(),
         ...enabledModules().map((id, index) => ({
           action: `new-chat-${id}`, icon: 'i-terminal', label: () => current.get(id)?.name ?? id, separated: index === 0,
           run: () => void createSession(id, hooks.workspace())
@@ -371,6 +375,7 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
       for (const [id, row] of rows) row.navigation.classList.toggle('is-sel', name === `module-${id}`);
     },
     modulePage: (button: HTMLElement | null | undefined) => button?.dataset.modulePage && IDS.some(id => button.dataset.modulePage === `module-${id}`) ? button.dataset.modulePage : null,
-    repaintSessions: paintSessions
+    repaintSessions: paintSessions,
+    repaintNewChat: paintNewChat
   };
 }

@@ -41,6 +41,20 @@
 .api-chat-key, .api-chat-model { display: flex; flex: 1 1 320px; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
 .api-chat-settings > #apiChatTest { min-height: 36px; margin: 14px 0 8px; padding: 8px 12px; }
 .api-chat-settings > #apiChatResult { padding-bottom: 14px; }
+/* Chat Marks API chats in the chat view (renderer/api-chat-ui.ts): the chat's own model and effort
+   take the ChatGPT model menu's place, and ChatGPT-only controls leave the composer. */
+.composer .api-chat-controls { grid-column: 3; grid-row: 2; display: flex; align-items: center; gap: 4px; min-width: 0; }
+.composer .api-chat-controls[hidden] { display: none; }
+.api-chat-controls select { flex: none; width: auto; max-width: 240px; min-width: 0; white-space: nowrap; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: calc(12px * var(--text-scale, 1)); text-overflow: ellipsis; cursor: pointer; }
+.api-chat-controls select:hover { background: var(--hover); }
+.api-chat-controls select:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.api-chat-controls #apiChatComposerEffort { color: var(--soft); }
+.api-chat-controls select::picker(select) { width: max-content; min-width: anchor-size(width); max-width: min(320px, calc(100vw - 24px)); }
+.api-chat-label[hidden] { display: none; }
+.api-chat-label { flex: 0 1 auto; min-width: 0; max-width: 32%; overflow: hidden; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); white-space: nowrap; text-overflow: ellipsis; }
+.is-api-chat :is(#attachmentMenu, #composerSettings, #createPlan, #modelMenu, #contextMeter, #generateFinishGoal, #sendOptions,
+  #activeGoalRow, #agentPlan, #taskPlanPreview, #finishQueue, #recoveryStatus, #branchDraft, #skillPicker, #composerSelectedSkills) { display: none !important; }
+.composer:has(.composer-selected-skills:not([hidden]), #composerImages:not([hidden])) .api-chat-controls { grid-row: 3; }
 .appearance-panel .appearance-settings-card { padding: 4px 18px; gap: 0; overflow: visible; }
 .appearance-panel .setting { min-width: 0; min-height: 64px; padding: 14px 0; flex-wrap: wrap; gap: 12px; }
 .appearance-panel .setting-text { flex: 1 1 180px; }
