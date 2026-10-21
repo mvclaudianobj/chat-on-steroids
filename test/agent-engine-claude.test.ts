@@ -50,7 +50,7 @@ function makeEngine(): ClaudeEngine {
   });
 }
 
-interface LogEntry { pid: number; argv?: string[]; cwd?: string; in?: Record<string, any> }
+interface LogEntry { pid: number; argv?: string[]; cwd?: string; background?: string | null; cron?: string | null; in?: Record<string, any> }
 const logEntries = (): LogEntry[] => existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as LogEntry) : [];
 const launches = (): LogEntry[] => logEntries().filter(entry => entry.argv);
 const controlResponses = (): Array<Record<string, any>> => logEntries().map(entry => entry.in).filter((message): message is Record<string, any> => message?.type === 'control_response');
@@ -111,9 +111,10 @@ describe('Claude Code engine: argv and pure mapping', () => {
     expect(start).toEqual([
       '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
       '--permission-prompt-tool', 'stdio', '--permission-mode', 'default', '--settings', claude.CLAUDE_FLAG_SETTINGS,
+      '--disallowedTools', 'ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList',
       '--model=opus', '--effort', 'high', `--session-id=${id}`
     ]);
-    expect(claude.claudeArgs({ sessionId: id, mode: 'resume', permissionMode: 'manual' }).slice(-3)).toEqual(['--permission-mode', 'manual', '--settings', claude.CLAUDE_FLAG_SETTINGS, `--resume=${id}`].slice(-3));
+    expect(claude.claudeArgs({ sessionId: id, mode: 'resume', permissionMode: 'manual' }).slice(-5)).toEqual(['--settings', claude.CLAUDE_FLAG_SETTINGS, '--disallowedTools', 'ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList', `--resume=${id}`]);
     expect(start.join(' ')).not.toMatch(/dangerously|bypassPermissions|acceptEdits|dontAsk/);
     expect(() => claude.claudeArgs({ sessionId: 'not-a-uuid', mode: 'start', permissionMode: 'default' })).toThrow();
     expect(() => claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', model: '--dangerously-skip-permissions' })).toThrow();
@@ -176,6 +177,8 @@ describe('Claude Code engine against a fake CLI', () => {
     expect(launch!.cwd).toBe(project);
     expect(launch!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default' }));
     expect(launch!.argv!.join(' ')).not.toMatch(/dangerously|bypass/);
+    // Nothing wakes this session after its result: background work and wake-up tools are off.
+    expect(launch).toMatchObject({ background: '1', cron: '1' });
     expect(controlRequests('initialize')).toHaveLength(1);
     const user = logEntries().map(entry => entry.in).find(message => message?.type === 'user');
     expect(user).toEqual({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'full' }] }, parent_tool_use_id: null });

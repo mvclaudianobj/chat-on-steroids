@@ -195,7 +195,7 @@ describe('Codex protocol (pure)', () => {
   it('starts every Codex process without a bypass flag, approvals and sandbox pinned', () => {
     const argvs = [protocol.codexServerArgv(SOCKET), protocol.codexProxyArgv(SOCKET), protocol.codexTerminalArgv('thread-1', SOCKET), protocol.codexVersionArgv()];
     expect(argvs).toEqual([
-      ['app-server', '-c', 'approval_policy="untrusted"', '-c', 'sandbox_mode="workspace-write"', '-c', 'approvals_reviewer="user"', '--listen', `unix://${SOCKET}`],
+      ['app-server', '-c', 'approval_policy="on-request"', '-c', 'sandbox_mode="workspace-write"', '-c', 'approvals_reviewer="user"', '--listen', `unix://${SOCKET}`],
       ['app-server', 'proxy', '--sock', SOCKET],
       ['resume', 'thread-1', '--remote', `unix://${SOCKET}`],
       ['--version']

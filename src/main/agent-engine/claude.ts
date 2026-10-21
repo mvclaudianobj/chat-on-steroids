@@ -56,6 +56,14 @@ const STATUS_CACHE_MS = 60_000;
  * the session from ever entering bypass mode and keeps the CLI's own permission default.
  */
 export const CLAUDE_FLAG_SETTINGS = JSON.stringify({ permissions: { disableBypassPermissionsMode: 'disable' } });
+/**
+ * A chat turn ends at its `result`: nothing re-invokes this session afterwards. Live 2026-10-21, a
+ * Claude Code chat launched a background agent and a 20-minute `ScheduleWakeup`, ended its turn on
+ * "I will report back", and its findings never reached the chat. Background work runs in the
+ * foreground here, and the tools that only finish on a later wake-up are not offered.
+ */
+export const CLAUDE_DEFERRED_TOOLS = ['ScheduleWakeup', 'Monitor', 'CronCreate', 'CronDelete', 'CronList'] as const;
+export const CLAUDE_CHAT_ENV = { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', CLAUDE_CODE_DISABLE_CRON: '1' } as const;
 
 /** Aliases Claude Code resolves to its current models (`--model` help); the CLI's reported ids join them. */
 export const CLAUDE_MODEL_ALIASES = ['fable', 'opus', 'sonnet', 'haiku'] as const;
@@ -114,6 +122,7 @@ export function claudeArgs(options: {
   return [
     '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--permission-prompt-tool', 'stdio', '--permission-mode', options.permissionMode, '--settings', CLAUDE_FLAG_SETTINGS,
+    '--disallowedTools', CLAUDE_DEFERRED_TOOLS.join(','),
     ...(options.model ? [`--model=${modelId.parse(options.model)}`] : []),
     ...(options.effort ? ['--effort', z.enum(API_CHAT_EFFORTS).parse(options.effort)] : []),
     options.mode === 'resume' ? `--resume=${options.sessionId}` : `--session-id=${options.sessionId}`
@@ -384,7 +393,7 @@ export class ClaudeEngine implements AgentEngine {
   }
 
   private spawnChild(runtime: ClaudeRuntime, args: string[]): ChildProcessWithoutNullStreams {
-    const env = { ...(this.deps.env?.() ?? process.env) };
+    const env: NodeJS.ProcessEnv = { ...(this.deps.env?.() ?? process.env), ...CLAUDE_CHAT_ENV };
     // A Claude Code session that launched the app must not make this one think it is nested.
     delete env.CLAUDECODE;
     delete env.ELECTRON_RUN_AS_NODE;

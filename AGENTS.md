@@ -1522,7 +1522,7 @@ later. E0 changes no CLIProxy behavior.
   and the session's tool count stays exact.
 - Codex engine (F, `codex.ts`, `codex-protocol.ts`, `jsonrpc.ts`; codex-cli 0.163, experimental
   app-server protocol). Process model: ONE shared app-server per app instance, started lazily:
-  `codex app-server -c approval_policy="untrusted" -c sandbox_mode="workspace-write"
+  `codex app-server -c approval_policy="on-request" -c sandbox_mode="workspace-write"
   -c approvals_reviewer="user" --listen unix://<userData>/codex/<sha256(userData)[:16]>.sock`
   (0700 dir, owner/symlink checked; tmp fallback when the path exceeds ~100 bytes; pidfile so a
   crashed instance's orphan is stopped), and our client `codex app-server proxy --sock <sock>`
@@ -1582,10 +1582,11 @@ later. E0 changes no CLIProxy behavior.
   shared `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
   `backendSessionId` (no strict-mode trust: its tools never touch the MCP kernel).
   One long-lived process per chat, spawned on send in the canonical project folder (home without
-  a project) with `CLAUDECODE`/`ELECTRON_RUN_AS_NODE` removed: `-p --input-format stream-json
+  a project) with `CLAUDECODE`/`ELECTRON_RUN_AS_NODE` removed and
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 CLAUDE_CODE_DISABLE_CRON=1` set: `-p --input-format stream-json
   --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio
   --permission-mode <default|manual> --settings {"permissions":{"disableBypassPermissionsMode":"disable"}}
-  [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
+  --disallowedTools ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
   it without `default` (2.1.306 renamed the choice). Never a bypass flag or mode; a `system/init`
   reporting `bypassPermissions` kills the process and fails the turn. User/project/local settings
   still load (auth helpers, env, MCP and the user's own rules keep working, and the terminal

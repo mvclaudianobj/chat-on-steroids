@@ -8,9 +8,12 @@
  * (Ask) or `on-request` (Auto), never `never`; the sandbox is `workspace-write` rooted at the
  * chat's canonical project folder, never `danger-full-access`; approvals go to the user
  * (`approvalsReviewer: "user"`), never to Codex's own auto reviewer. The server is also started
- * with the same values as `-c` overrides, so a user `config.toml` (or profile) that sets
+ * with safe `-c` overrides, so a user `config.toml` (or profile) that sets
  * `approval_policy = "never"`, a dangerous `sandbox_mode` or an automatic reviewer cannot apply to
- * anything this app runs, even a request that would fall back to the config defaults.
+ * anything this app runs, even a request that would fall back to the config defaults. Codex
+ * 0.163 refuses `approval_policy = "untrusted"` as configuration ("no longer supported") and
+ * exits, while each thread and turn still accepts and keeps `approvalPolicy: "untrusted"`; the
+ * server's fallback is therefore `on-request`, the strictest value it still starts with.
  */
 import type { ApiChatApprovalMode, ApiChatEffort, ApiChatModel } from '../../shared/api-chat.js';
 import type { TurnOutcome } from '../../shared/session.js';
@@ -26,9 +29,9 @@ export const CODEX_FORBIDDEN_ARGS = [
   '--ask-for-approval', '-a', '--sandbox', '-s'
 ] as const;
 
-/** The `-c` overrides the app-server starts with: the same safe values as every thread/turn. */
+/** The `-c` overrides the app-server starts with; every thread and turn sets its own policy. */
 export const CODEX_SAFE_OVERRIDES = [
-  'approval_policy="untrusted"',
+  'approval_policy="on-request"',
   'sandbox_mode="workspace-write"',
   'approvals_reviewer="user"'
 ] as const;

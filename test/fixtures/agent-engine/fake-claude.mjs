@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline';
 const log = (entry) => { if (process.env.FAKE_CLAUDE_LOG) appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify({ pid: process.pid, ...entry })}\n`); };
 const out = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const argv = process.argv.slice(2);
-log({ argv, cwd: process.cwd() });
+log({ argv, cwd: process.cwd(), background: process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS ?? null, cron: process.env.CLAUDE_CODE_DISABLE_CRON ?? null });
 
 const flag = (name) => argv.find(item => item.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
 const sessionId = flag('--resume') ?? flag('--session-id');
