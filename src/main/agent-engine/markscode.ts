@@ -19,6 +19,10 @@
  *   permissions, `/api/session/active` and the session's messages.
  * - recover: a turn left open by the previous process is re-attached while its session still
  *   runs; otherwise what finished is imported and the turn closes.
+ * - terminal: live. The app holds no MarksCode process of its own: both the chat and the TUI
+ *   are clients of the same service session, so the terminal may open while a turn runs (a
+ *   permission answered there dismisses the chat's card). `openTerminal` goes through the shared
+ *   seam (`cliEngineTerminal('markscode', …)`); every attach first checks the service answers.
  */
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -36,9 +40,10 @@ import {
   type ApiChatApprovalDecision, type ApiChatApprovalMode, type ApiChatEffort, type ApiChatModel, type ApiChatView
 } from '../../shared/api-chat.js';
 import type { TurnOutcome } from '../../shared/session.js';
-import { closeTurnInterrupted, MAX_API_CHAT_INPUT_CHARS } from '../api-chat/executor.js';
+import { MAX_API_CHAT_INPUT_CHARS } from '../api-chat/executor.js';
 import { ApprovalGate, argsHash, marksCodeApprovalDecision, type ApprovalOutcome } from './approval.js';
 import { chatRecords, storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
+import { claimTurnRecovery, closeInterruptedTurn } from './recovery.js';
 import { storeProjectorSink, TurnProjector, type ProjectorSink } from './projector.js';
 import { engineToolCallId } from './tool-row.js';
 import { assistantMessageId } from './transcript.js';
@@ -70,6 +75,10 @@ export interface MarksCodeDeps {
   registration(): Promise<string | null>;
   /** `markscode service start`: only ever called by `startMarksCodeService()`. */
   startService(binary: string): Promise<void>;
+  /** The chat's durable module terminal (cli-modules `cliEngineTerminal('markscode', …)`). */
+  openTerminal(chat: { sessionId: string; projectId: string; args: string[]; title: string }): Promise<{ id: string }>;
+  /** Registers the check every MarksCode engine terminal runs before it attaches (cli-modules open hook). */
+  onTerminalOpen(check: () => Promise<void>): void;
   fetch: typeof fetch;
   reconnectDelaysMs?: readonly number[];
   stopGraceMs?: number;
@@ -110,6 +119,11 @@ const defaultDeps: MarksCodeDeps = {
     await run(process.platform === 'win32' ? 'wsl.exe' : binary, [...(process.platform === 'win32' ? ['--exec', binary] : []), 'service', 'start'],
       { timeout: 60_000, maxBuffer: 65_536 });
   },
+  openTerminal: async chat => (await import('../cli-modules.js')).cliEngineTerminal('markscode', chat),
+  onTerminalOpen: check => {
+    void import('../cli-modules.js').then(({ registerCliEngineOpenHook }) => registerCliEngineOpenHook('markscode', () => check()))
+      .catch(error => logWarn(`MarksCode chats: terminal hook not registered: ${(error as Error).message}`));
+  },
   fetch: (...args) => fetch(...args)
 };
 
@@ -118,6 +132,7 @@ let deps: MarksCodeDeps = defaultDeps;
 /** Tests replace the service, module and project lookups; null restores the real ones. */
 export function setMarksCodeDepsForTests(next: Partial<MarksCodeDeps> | null): void {
   deps = next ? { ...defaultDeps, ...next } : defaultDeps;
+  terminalHooked = false;
 }
 
 // ---------------------------------------------------------------- endpoint and status
@@ -671,7 +686,7 @@ function stepOf(messageId: string, turnId: string): number | null {
 
 async function recoverChat(sessionId: string, chat: ChatRecord): Promise<void> {
   const open = chat.openTurn!;
-  const closed = (detail: string): Promise<void> => closeTurnInterrupted(sessionId, open, detail);
+  const closed = async (detail: string): Promise<void> => { await closeInterruptedTurn(sessionId, open.turnId, detail); };
   const session = await getSession(sessionId);
   if (!session || !chat.backendSessionId || !BACKEND_ID.test(chat.backendSessionId)) return closed('Chat Marks closed before MarksCode finished');
   const events = (await readEvents(sessionId)).filter(event => event.turnId === open.turnId || (event.kind === 'user_message' && event.messageId === `api-user:${open.turnId}`));
@@ -736,6 +751,7 @@ async function recoverChat(sessionId: string, chat: ChatRecord): Promise<void> {
 }
 
 export function recoverMarksCodeChats(): Promise<void> {
+  hookTerminals();
   recovery ??= (async () => {
     for (const [sessionId, chat] of Object.entries(await chatRecords())) {
       if (chat.engine !== ENGINE || !chat.openTurn || running.has(sessionId)) continue;
@@ -744,11 +760,52 @@ export function recoverMarksCodeChats(): Promise<void> {
       } catch (error) {
         logWarn(`MarksCode chat ${sessionId}: open turn not recovered: ${(error as Error).message}`);
         running.delete(sessionId);
-        await closeTurnInterrupted(sessionId, chat.openTurn).catch(() => undefined);
+        await closeInterruptedTurn(sessionId, chat.openTurn.turnId, 'Chat Marks closed before MarksCode finished').catch(() => undefined);
       }
     }
   })();
   return recovery;
+}
+
+// ---------------------------------------------------------------- terminal
+
+/** A session id the terminal argv may carry: never starting with `-` (cli-modules checks the same). */
+const TERMINAL_SESSION = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
+let terminalHooked = false;
+
+/** The live terminal attaches to the service session: it must answer, or the TUI would run on its own. */
+async function serviceReady(): Promise<void> {
+  const status = await marksCodeStatus();
+  if (!status.available) throw new Error(status.detail);
+}
+
+function hookTerminals(): void {
+  if (terminalHooked) return;
+  terminalHooked = true;
+  deps.onTerminalOpen(serviceReady);
+}
+
+function terminalOf(backendSessionId: string | null): EngineTerminal | null {
+  if (!backendSessionId || !BACKEND_ID.test(backendSessionId) || !TERMINAL_SESSION.test(backendSessionId)) return null;
+  return { argv: ['-s', backendSessionId, '.'], mode: 'live' };
+}
+
+/**
+ * Live: `markscode -s <session> .` in the chat's project folder, attached to the same service
+ * session the chat runs on, so it may open while a turn runs. One durable tmux terminal per chat.
+ */
+async function openTerminal(sessionId: string): Promise<{ cliSessionId: string }> {
+  hookTerminals();
+  const { session, record } = await marksChat(sessionId);
+  const terminal = terminalOf(record.backendSessionId ?? null);
+  if (!terminal) throw new Error('This chat has no engine session yet');
+  if (!session.projectId) throw new Error('This MarksCode chat has no project');
+  // Still the approved local project folder (server projects are refused, as for create/send).
+  await deps.projectFolder(session.projectId);
+  await serviceReady();
+  const title = (await getSession(session.id))?.title ?? '';
+  const opened = await deps.openTerminal({ sessionId: session.id, projectId: session.projectId, args: terminal.argv, title: `${LABEL} · ${title.slice(0, 80)}`.trim() });
+  return { cliSessionId: opened.id };
 }
 
 // ---------------------------------------------------------------- engine
@@ -920,12 +977,14 @@ export const marksCodeEngine: AgentEngine = {
 
   recover: () => recoverMarksCodeChats(),
 
-  /** `markscode -s <session> .` in the project folder: the TUI attached to the same live session. */
-  terminal(chat: EngineChatRef): EngineTerminal | null {
-    if (!chat.backendSessionId || !BACKEND_ID.test(chat.backendSessionId)) return null;
-    return { argv: ['markscode', '-s', chat.backendSessionId, '.'], mode: 'live' };
-  }
+  /** The arguments after the binary: `-s <session> .`, the TUI attached to the same live session. */
+  terminal: (chat: EngineChatRef): EngineTerminal | null => terminalOf(chat.backendSessionId),
+
+  openTerminal
 };
+
+// MarksCode re-attaches its own open turns on startup; the CLIProxy recovery leaves its records alone.
+claimTurnRecovery(ENGINE);
 
 /** App quit: close every event stream without ending its turn; the next start re-attaches. */
 export function shutdownMarksCodeEngine(): void {

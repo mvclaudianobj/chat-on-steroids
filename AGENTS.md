@@ -1386,8 +1386,8 @@ turn through the store's `session:changed` notices. Fences by id: `bridge.ts`
 
 The chat view is the same for both providers: `renderer/api-chat-ui.ts` (created by
 `marks-modules-ui.ts`) owns only what differs. New chat's menu (`cli-modules-ui.ts`
-`newChatItems`) shows one item per engine `apiChatEngines` reports available (today only
-**CLIProxy**) after ChatGPT; for CLIProxy, without a default model or with a required key missing
+`newChatItems`) shows one item per engine `apiChatEngines` reports available (**CLIProxy**,
+**Claude Code**) after ChatGPT; for CLIProxy, without a default model or with a required key missing
 it opens Settings > Modules with a toast instead. Creating
 calls `apiChatCreate({projectId})` and selects the session through `chat.ts`
 `selectChatSession` (reloads the list first, so a stale read cannot drop the new selection). A
@@ -1476,11 +1476,13 @@ later. E0 changes no CLIProxy behavior.
 - Contract (`types.ts` `AgentEngine`): `id`, `label`, `terminalMode`, `status()` (available +
   one-line detail, never throws for "not set up"), `models(query)` (the catalog's row shape),
   `create`, `view`, `send` (resolves once the question is recorded), `stop`, `approve`,
-  `setChatSettings`, `recover`, optional `terminal(chat)` → `{argv, mode: live|handover}`.
-  Ids (`shared/agent-engine.ts`): `cliproxy`, and reserved `markscode`, `codex`, `claude`.
-- Registry (`registry.ts`): `cliproxy.ts` wraps the executor and catalog unchanged; the reserved
-  engines are registered unavailable and refuse every action until their PR calls
-  `registerAgentEngine`. IPC `createChat` takes `engine` (default `cliproxy`; refused while the
+  `setChatSettings`, `recover`, optional `terminal(chat)` → `{argv, mode: live|handover}` and
+  optional `openTerminal(sessionId)` → `{cliSessionId}` (IPC `terminal`).
+  Ids (`shared/agent-engine.ts`): `cliproxy`, `markscode`, `codex`, `claude`.
+- Registry (`registry.ts`): `cliproxy.ts` wraps the executor and catalog unchanged; `markscode.ts`,
+  `codex.ts` and `claude.ts` are the real MarksCode, Codex and Claude Code engines (below), each
+  available only while its own `status()` is; `reservedEngine` remains for an id registered before
+  its engine plugs in (`registerAgentEngine`). IPC `createChat` takes `engine` (default `cliproxy`; refused while the
   engine's status is unavailable); `send/stop/approve/chatSettings/setChatSettings` route by the
   chat's ledger record; `models` takes `engine` (default `cliproxy`); `engines` lists every
   engine with its status. `ApiChatView.engine` names the chat's engine. The executor refuses a
@@ -1490,8 +1492,9 @@ later. E0 changes no CLIProxy behavior.
   engine's own session/thread id. Records are parsed one by one: one this version cannot read
   (an engine added later) is kept verbatim, written back untouched, and its chat refused
   ("created by a newer version") instead of reset. The `cosapi-` id and every fence are unchanged.
-  Startup recovery (`recoverApiChats`) is engine-neutral: no backend survives the process, so
-  every open turn closes `interrupted` (except MarksCode, which recovers itself; see below).
+  Startup recovery (`recoverApiChats`) closes every open turn `interrupted` (shared helper
+  `recovery.ts` `closeInterruptedTurn`), except records of an engine that claimed its own
+  recovery (`claimTurnRecovery`; Codex and MarksCode do).
 - Approvals (`approval.ts` `ApprovalGate`): the app mints the approval id and binds it to
   `argsHash` (sha256 of the tool name and canonical action), process memory only, oldest pending
   shown. The engine's own request id (Codex JSON-RPC id, Claude `request_id`, MarksCode permission
@@ -1517,9 +1520,141 @@ later. E0 changes no CLIProxy behavior.
   (`reviewUnavailable: 'not-kept'`), credentials redacted. Request-id placement only reads
   `source: 'mcp'` rows, so the row is placed by its turnId. Written once, it needs no revision
   and the session's tool count stays exact.
+- Codex engine (F, `codex.ts`, `codex-protocol.ts`, `jsonrpc.ts`; codex-cli 0.163, experimental
+  app-server protocol). Process model: ONE shared app-server per app instance, started lazily:
+  `codex app-server -c approval_policy="untrusted" -c sandbox_mode="workspace-write"
+  -c approvals_reviewer="user" --listen unix://<userData>/codex/<sha256(userData)[:16]>.sock`
+  (0700 dir, owner/symlink checked; tmp fallback when the path exceeds ~100 bytes; pidfile so a
+  crashed instance's orphan is stopped), and our client `codex app-server proxy --sock <sock>`
+  whose stdio carries JSON-RPC lines (no `jsonrpc` member, as Codex sends; 16 MiB line cap,
+  per-request timeouts, stderr kept as a redacted 4 KB tail, never logged). Both die on
+  `will-quit`, on Codex module Stop/Disable, or when either exits (running turns fail). The `-c`
+  overrides keep a user `config.toml`/profile from turning approvals off; no bypass/`never`/
+  `danger-full-access` flag is ever passed (argv snapshot test). Windows: same argv through
+  `wsl.exe --exec`, socket under the WSL home, folders `wslpath -a` (untested).
+  - `status()`: cli-modules gates (`cliEngineRuntime`: command capability, module enabled, binary
+    from userData/modules, node_modules/.bin, `which`), `codex --version` gate (other major or
+    older minor refused; newer minor available with a warning), `account/read` (no account and
+    `requiresOpenaiAuth` → unavailable "Codex is not signed in…"; login stays the user's). 30 s cache.
+  - `models()`: `model/list` (paged, 5 min cache) → rows with `label`, Codex's own `efforts` and
+    `defaultEffort`; the renderer disables the efforts a model lacks; an unsupported chat effort
+    is omitted from `turn/start`.
+  - `create`: `thread/start {model, cwd, approvalPolicy, approvalsReviewer:"user",
+    sandbox:"workspace-write", ephemeral:false}` first (cwd = canonical local project root, else
+    home; a server project is refused), then the `cosapi-` session and the ledger record
+    (`backendSessionId` = thread id). `send`: thread resumed if this server has not loaded it
+    (a chat that never ran starts a new thread instead), then `turn/start {threadId,
+    input:[text], model, effort?, cwd, approvalPolicy (Ask `untrusted`, Auto `on-request`),
+    approvalsReviewer:"user", sandboxPolicy: workspaceWrite [cwd], network off}`.
+  - Events: `item/agentMessage/delta` → text_delta, `item/completed agentMessage` → text_final;
+    commandExecution → command row (outputDelta chunks, `aggregatedOutput`, exit code);
+    fileChange → patch row (changes, diff counts); mcpToolCall → `mcp:<server>/<tool>`;
+    webSearch/dynamicToolCall → other; `thread/tokenUsage/updated` → usage (turn delta of totals);
+    `error` → chat_error (recoverable when `willRetry`, else fatal); `turn/completed` → turn end
+    (completed/failed; interrupted, or `stopped` after Stop). Only the chat's own thread and turn
+    are projected; turns typed in the TUI are not mirrored.
+  - Approvals: `item/commandExecution|fileChange/requestApproval` bound in the ApprovalGate to
+    the JSON-RPC id, thread, turn, item, Codex approvalId and the command+cwd or the item's
+    changes (sha256 via `argsHash`); approve→`accept`, always→`acceptForSession` (+ chat to Auto),
+    deny→`decline`, Stop→`cancel`, each sent once to that exact id. `serverRequest/resolved`
+    (answered in the TUI) removes the card and sends nothing. Legacy `execCommandApproval`/
+    `applyPatchApproval` → `{decision:{denied:{rejection}}}`; any other server request →
+    JSON-RPC error -32601; an approval for a turn the app did not start is left to the TUI.
+  - Stop: gate stopped (pending → `cancel`), `turn/interrupt {threadId, turnId}`, outcome
+    `stopped` on Codex's confirmation or after 15 s.
+  - `recover()`: per open Codex turn, `thread/resume` (and `turn/interrupt` if Codex still
+    reports it `inProgress`), then closed `interrupted` with a detail saying the thread was resumed.
+  - Terminal (live, through the shared seam below): `openTerminal` starts the server if needed
+    and opens `codex resume <thread> --remote unix://<sock>` in the chat's Codex module terminal;
+    allowed while a turn runs (same server and thread, so the TUI sees the turn and its approvals).
+    Codex's open hook only makes sure the server runs before the pane attaches.
+  Proof: `test/agent-engine-codex.test.ts` (fake app-server
+  `test/fixtures/agent-engine/codex-fake-app-server.cjs`; params and replies validated against
+  the checked-in schema subset `codex-app-server-schema.json` from `generate-json-schema`),
+  `test/cli-modules.test.ts` (engine terminal), `test/api-chat-ui.test.ts` (terminal button).
+  Needs a real run: login state, the proxy/socket transport and TUI `--remote` attach, Windows.
+- **Claude Code (`claude.ts`, G).** Registered as `claude` (label "Claude Code", terminal
+  `handover`); New chat and the project menus offer it once `status()` is available: Claude
+  module active and Command on (cli-modules `cliChatRuntime`: binary, canonical cwd, `wsl.exe
+  --cd … --exec` on Windows), `--version` answers and `claude auth status --json` does not say
+  `loggedIn:false` (cached 60 s; an auth-looking failure clears the cache). `models()` lists the
+  aliases `fable, opus, sonnet, haiku` plus every model a `system/init` reported; effort is the
+  shared `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
+  `backendSessionId` (no strict-mode trust: its tools never touch the MCP kernel).
+  One long-lived process per chat, spawned on send in the canonical project folder (home without
+  a project) with `CLAUDECODE`/`ELECTRON_RUN_AS_NODE` removed: `-p --input-format stream-json
+  --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio
+  --permission-mode <default|manual> --settings {"permissions":{"disableBypassPermissionsMode":"disable"}}
+  [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
+  it without `default` (2.1.306 renamed the choice). Never a bypass flag or mode; a `system/init`
+  reporting `bypassPermissions` kills the process and fails the turn. User/project/local settings
+  still load (auth helpers, env, MCP and the user's own rules keep working, and the terminal
+  resumes with the same settings); the flag layer only forbids bypass. A user allow rule can
+  therefore skip a prompt; the tool still appears as its row. `--resume` when the store has an
+  earlier `turn_start` of the chat, else `--session-id`; a process that exits before any output
+  with "No conversation found" / "already in use" is retried once with the other flag. A
+  model/effort change restarts the idle process with `--resume` on the next send; an idle process
+  ends after 10 minutes. Module Stop/Disable ends every host (running turns `stopped`).
+  Wire (Agent SDK protocol): host sends `control_request {subtype:'initialize', hooks:null}`
+  first (an error answer is accepted), then per turn `{type:'user', message:{role:'user',
+  content:[{type:'text',text}]}, parent_tool_use_id:null}`. Mapping: `stream_event`
+  `content_block_delta/text_delta` → `text_delta`; `assistant` text block → `text_final`
+  (authoritative); `tool_use` → `tool_started` (Bash/PowerShell `command`; Edit/Write/MultiEdit/
+  NotebookEdit `patch` with files and a diff from the input or `structuredPatch`; Read/Grep/Glob/
+  LS `read`; `mcp__s__t` `mcp` named `s/t`; else `other`); `user` `tool_result` → `tool_finished`
+  (`declined` when the user denied it, `failed` on `is_error`); messages with a
+  `parent_tool_use_id` (sub-agents) are skipped; `result` → `usage` (input incl. cache, output,
+  cached) then `turn_end` `completed`, or a fatal `chat_error` + `failed` when `is_error` or the
+  subtype is not `success`. A process exit mid-turn is a fatal error with the redacted
+  (`redactSecretText`) last stderr lines, then `failed`.
+  Approvals: `control_request {subtype:'can_use_tool', tool_name, input, tool_use_id,
+  permission_suggestions}` → the gate (action `{tool_use_id, input}` hashed with the tool name;
+  the CLI `request_id` stays main-side). The chat's `auto` mode answers allow with the input at
+  once (no card). Answers are `control_response {subtype:'success', request_id, response}`:
+  approve `{behavior:'allow', updatedInput:<the shown input>}`; always adds `updatedPermissions`
+  = the CLI's `addRules`(allow)/`addDirectories` suggestions with `destination:'session'` (never
+  `setMode`; the chat's mode is unchanged); deny/stop `{behavior:'deny', message}`. A
+  `control_cancel_request {request_id}` removes the card and is never answered; any other CLI
+  control request gets `{subtype:'error'}`. Stop sends `control_request {subtype:'interrupt'}`,
+  answers pending cards `stop` and ends the turn `stopped` at once; the stopped turn's own late
+  `result` is drained (a process that sends none within 5 s is ended). Recovery: no process
+  survives the app; `recover()` is the engine-neutral `recoverApiChats` (open turn →
+  `interrupted`), and the next send resumes with `--resume`.
+  Hand-over terminal: IPC `terminal {sessionId}` (preload `apiChatTerminal`, the composer's "Open
+  in terminal" button for engines with a terminal) → `openTerminal`: refused while a turn runs,
+  else the host process is stopped and cli-modules `cliEngineTerminal` creates or reuses the
+  chat's Claude module terminal (`engineChat` + `args` `--resume <uuid>`, or `--session-id <uuid>`
+  before the first turn; strictly validated) and the renderer shows it
+  (`cli-modules-ui` `openSession`). tmux starts `sh -c 'exec "$@"' marks-cli <bin> <args>`. Every
+  open of such a terminal (also from the sidebar) first runs the engine's hook, which refuses
+  while the chat answers and stops its host. Return rule: the next send asks
+  `cliEngineTerminalState` — `attached` (a terminal view is connected) refuses the send ("Disconnect
+  that terminal view, then send again"); `detached` kills that tmux session, then the host
+  restarts with `--resume`. The TUI and the host never run at once. Still needs a real run: auth
+  detection wording, `manual` vs `default`, `initialize`/`interrupt` answers and suggestion shapes
+  of the installed CLI.
+- **Terminals (one seam for every engine).** Contract: `terminal(chat)` describes the argv and
+  mode (`live` | `handover`); `openTerminal(sessionId) → {cliSessionId}` is the only entry point.
+  IPC `marksApiChat` `terminal {sessionId}` (preload `apiChatTerminal`) routes by the chat's
+  record to it; a chat without one answers "This chat has no terminal". One composer button
+  ("Open in terminal") shows for engines the registry lists with a terminal mode; its tooltip
+  follows the mode, and it is disabled while a turn runs only for `handover`. The renderer then
+  shows the module terminal by id (`cli-modules-ui` `openSession`: reload, show).
+  cli-modules `cliEngineTerminal(module, {sessionId, projectId, args, title})` keeps one durable
+  session per chat (`engineChat` + `args`, reused with new args); args are validated per module
+  (Claude: `--resume|--session-id <uuid>`; Codex: `resume <thread> --remote unix:///<abs>.sock`;
+  MarksCode: `-s <session> .`, the id never starting with `-`; anything else refused, also when a
+  stored session is loaded). tmux starts
+  `sh -c 'exec "$@"' marks-cli <bin> <args>`. Every open (also from the sidebar) first runs that
+  module's hook (`registerCliEngineOpenHook(module, hook)`): required for hand-over modules
+  (Claude: refuses while answering, stops its host), optional for live ones (Codex: starts the
+  server; MarksCode: refuses while its background service does not answer, never starts it). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
 Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
-`test/api-chat-ui.test.ts` (only available engines are offered).
+`test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,
+turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over),
+`test/cli-modules.test.ts` (engine terminal args and open hook),
+`test/api-chat-ui.test.ts` (only available engines are offered; the terminal button).
 
 **MarksCode engine (E: MarksCode).** `agent-engine/markscode.ts` + `markscode-client.ts` (Marks-owned)
 run a chat's turns in a session of the MarksCode 2.0.25 shared background service over its HTTP API
@@ -1559,20 +1694,26 @@ run a chat's turns in a session of the MarksCode 2.0.25 shared background servic
   messages after this turn's question (finished tools, settled texts not yet shown), pending
   permissions (new cards / vanished cards), and, when no longer running and idle since the prompt,
   the session `outcome`. App quit aborts streams without ending turns.
-- Recovery: `ledger.SELF_RECOVERING_ENGINES` keeps the engine-neutral `recoverApiChats` away from
-  MarksCode records. `recoverMarksCodeChats` re-attaches a turn whose session still runs (projector
+- Recovery: `claimTurnRecovery('markscode')` (`recovery.ts`) keeps the engine-neutral
+  `recoverApiChats` away from MarksCode records; closing uses the shared `closeInterruptedTurn`. `recoverMarksCodeChats` re-attaches a turn whose session still runs (projector
   continues after the stored steps; stored tool rows are not repeated) and reconciles on connect;
   otherwise it imports what finished and closes it completed/failed by the session outcome, or
   interrupted (also when the service is unreachable).
-- Terminal: `terminal(chat)` = `markscode -s <session> .` (live). IPC `terminal` → `cli-modules.ts`
-  `cliEngineSession` keeps one durable tmux session per chat (`CliSession.args`, `engineChat`; tmux
-  runs `sh -c 'exec "$@"' marks-cli <bin> <args…>`, no shell parsing) and the chat's "Open in terminal"
-  button shows it in the module terminal view. Existing terminal menu items are unchanged.
+- Terminal (live, through the shared seam above): `terminal(chat)` = args `-s <session> .`;
+  `openTerminal` checks the approved local project and that the service answers, then
+  `cliEngineTerminal('markscode', …)` creates or reuses the chat's MarksCode module terminal and the
+  composer's one "Open in terminal" button shows it (`openSession`). Live, not hand-over: the app
+  runs no MarksCode process of its own; the chat and the TUI are both clients of the same service
+  session, so it opens while a turn runs (a permission answered there dismisses the chat's card; a
+  send while the TUI's own turn runs is refused). MarksCode's open hook (also from the sidebar)
+  refuses while the service does not answer, so the TUI never runs detached from that session.
+  Existing terminal menu items are unchanged.
 Proof: `test/agent-engine-markscode.test.ts` (fake HTTP+SSE service: status/start, ruleset and
 location, full turn, approvals once/always/reject/stale/changed, TUI reply, Stop, SSE drop + reconcile,
-restart re-attach vs interrupted, auth header present and never logged, SSE parser bounds),
-`test/cli-modules.test.ts` (engine terminal argv), `test/api-chat-ui.test.ts` (MarksCode item and
-terminal button).
+restart re-attach vs interrupted, auth header present and never logged, SSE parser bounds, terminal
+through the seam), `test/cli-modules.test.ts` (MarksCode args validation and open hook),
+`test/api-chat-ui.test.ts` (MarksCode item and terminal button). Needs a real run: `markscode -s`
+attaching to the service session, Windows.
 
 ### CLIProxyAPI module management
 

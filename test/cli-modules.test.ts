@@ -20,7 +20,10 @@ vi.mock('node-pty', () => ({ spawn: vi.fn(() => fixture.pty) }));
 vi.mock('node:child_process', () => {
   const execFile = (file: string, args: string[], _options: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
     fixture.commands.push([file, ...args]);
-    if (fixture.missingSession && args.includes('has-session')) { callback(Object.assign(new Error("can't find session"), { code: 1 }), '', ''); return; }
+    if (fixture.missingSession && args.includes('has-session')) {
+      callback(Object.assign(new Error("can't find session"), { code: 1 }), '', "can't find session");
+      return;
+    }
     if (fixture.blockHasSession && args.includes('has-session')) {
       fixture.blockHasSession = false;
       fixture.resumeHasSession = () => callback(null, '', '');
@@ -37,6 +40,8 @@ vi.mock('node:child_process', () => {
     if (file === '/usr/bin/env' && args[0] === 'which') {
       if (args[1] === 'tmux') callback(null, '/usr/bin/tmux\n', '');
       else if (args[1] === 'codex') callback(null, '/usr/local/bin/codex\n', '');
+      else if (args[1] === 'claude') callback(null, '/usr/local/bin/claude\n', '');
+      else if (args[1] === 'markscode') callback(null, '/usr/local/bin/markscode\n', '');
       else callback(new Error('missing'), '', '');
     } else if (file === '/usr/local/bin/codex') callback(null, 'codex-cli 1.0\n', '');
     else callback(null, '', '');
@@ -57,31 +62,14 @@ vi.mock('../src/main/durable.js', () => ({
 }));
 vi.mock('../src/main/cli-source-install.js', () => ({ installFork: vi.fn() }));
 
-import { cliAction, cliChatRuntime, cliCreateSession, cliEngineSession, cliModuleState, cliOpen, cliSessions, cliStatus, registerCliModuleIpc, registerCliModuleStopHook } from '../src/main/cli-modules.js';
+import {
+  cliAction, cliChatRuntime, cliCreateSession, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
+  registerCliEngineOpenHook, registerCliModuleIpc, registerCliModuleStopHook
+} from '../src/main/cli-modules.js';
 
 beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
 
 describe('Persistent coding CLI terminal', () => {
-  it('gives an agent-engine chat one durable terminal that runs the binary with the engine arguments', async () => {
-    try {
-      expect(await cliModuleState('codex')).toMatchObject({ enabled: true, command: true, binary: process.platform === 'win32' ? expect.any(String) : '/usr/local/bin/codex' });
-      expect(await cliModuleState('markscode')).toEqual({ enabled: false, command: true, binary: null });
-      const first = await cliEngineSession('codex', 'a-workspace', ['-s', 'ses_123', '.'], 'session-chat-1', 'Codex · chat');
-      expect(first).toMatchObject({ module: 'codex', projectId: 'a-workspace', args: ['-s', 'ses_123', '.'], engineChat: 'session-chat-1', title: 'Codex · chat' });
-      // The same chat asks again: the same tmux identity, not a second terminal.
-      expect((await cliEngineSession('codex', 'a-workspace', ['-s', 'ses_123', '.'], 'session-chat-1', 'Codex · chat')).id).toBe(first.id);
-      await expect(cliEngineSession('codex', 'a-workspace', ['bad\u0000arg'], 'session-chat-1', 'x')).rejects.toThrow('Invalid terminal arguments');
-      fixture.missingSession = true;
-      const info = await cliOpen(first.id, 80, 24, 'engine-1');
-      const created = fixture.commands.find(args => args.includes('new-session'));
-      // "$@" passes the binary and each argument as argv: nothing is parsed by a shell.
-      expect(created?.slice(created.indexOf('sh'))).toEqual(['sh', '-c', 'exec "$@"', 'marks-cli', process.platform === 'win32' ? expect.any(String) : '/usr/local/bin/codex', '-s', 'ses_123', '.']);
-      expect(info.session).toBe(first.tmuxSession);
-    } finally {
-      await cliAction('codex', 'stop');
-    }
-  });
-
   it('creates independent durable sessions and reopens each stable tmux identity', async () => {
     try {
       const firstSession = await cliCreateSession('codex', 'a-workspace');
@@ -169,6 +157,39 @@ describe('Persistent coding CLI terminal', () => {
     unsubscribe();
   });
 
+  it('opens an engine chat\'s hand-over terminal with its exact resume arguments, only after the engine lets go', async () => {
+    if (process.platform === 'win32') return;
+    await cliAction('claude', 'enable');
+    const id = '3f2b8c1e-0d4a-4c3b-9e2f-1a2b3c4d5e6f';
+    try {
+      await expect(cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--dangerously-skip-permissions', id], title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      const session = await cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--session-id', id], title: 'Claude Code · Chat' });
+      expect(session).toMatchObject({ module: 'claude', engineChat: 'session-0001', args: ['--session-id', id], title: 'Claude Code · Chat' });
+      // The same chat reuses its terminal with the new arguments.
+      const again = await cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--resume', id], title: 'ignored' });
+      expect(again).toMatchObject({ id: session.id, args: ['--resume', id] });
+      expect((await cliSessions()).filter(item => item.engineChat === 'session-0001')).toHaveLength(1);
+
+      fixture.missingSession = true;
+      const hook = vi.fn(async (_session: unknown): Promise<void> => { throw new Error('Claude Code is still answering in this chat.'); });
+      registerCliEngineOpenHook('claude', hook);
+      await expect(cliOpen(session.id, 80, 24, 'engine-busy')).rejects.toThrow('still answering');
+      expect(fixture.commands.some(args => args.includes('new-session'))).toBe(false);
+      hook.mockImplementation(async () => undefined);
+      await cliOpen(session.id, 80, 24, 'engine-open');
+      expect(hook).toHaveBeenLastCalledWith(expect.objectContaining({ engineChat: 'session-0001' }));
+      const created = fixture.commands.find(args => args.includes('new-session'))!;
+      expect(created.slice(created.indexOf('sh'))).toEqual(['sh', '-c', 'exec "$@"', 'marks-cli', '/usr/local/bin/claude', '--resume', id]);
+      fixture.missingSession = false;
+      expect(await cliEngineTerminalState('session-0001')).toBe('attached');
+      expect(await cliEngineTerminalState('session-other')).toBe('none');
+    } finally {
+      registerCliEngineOpenHook('claude', null);
+      await cliAction('claude', 'stop');
+      await cliAction('claude', 'disable');
+    }
+  });
+
   it('keeps macOS on the host tmux path without WSL mappings', async () => {
     vi.spyOn(process, 'platform', 'get').mockReturnValue('darwin');
     try {
@@ -179,5 +200,67 @@ describe('Persistent coding CLI terminal', () => {
       expect(opened.cwd).toBe('/approved/project');
       expect(fixture.commands.some(args => args[0] === 'wsl.exe')).toBe(false);
     } finally { vi.restoreAllMocks(); }
+  });
+  it('attaches a Codex chat\'s live terminal with its exact remote arguments, starting the server first', async () => {
+    if (process.platform === 'win32') return;
+    expect(await cliEngineRuntime('codex')).toEqual({ ok: true, binary: '/usr/local/bin/codex', windows: false });
+    const args = ['resume', 'thread-1', '--remote', 'unix:///home/test/.config/chat-marks/codex/0123.sock'];
+    try {
+      for (const bad of [['resume', 'thread-1', '--remote', 'ws://evil:1'], ['resume', 'thread-1', '--dangerously-bypass-approvals-and-sandbox', 'unix:///s.sock'], ['--resume', '3f2b8c1e-0d4a-4c3b-9e2f-1a2b3c4d5e6f']]) {
+        await expect(cliEngineTerminal('codex', { sessionId: 'chat-session-1', projectId: null, args: bad, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      }
+      const session = await cliEngineTerminal('codex', { sessionId: 'chat-session-1', projectId: null, args, title: 'Codex · My chat' });
+      expect(session).toMatchObject({ module: 'codex', projectId: null, cwd: '/home/test', title: 'Codex · My chat', engineChat: 'chat-session-1', args });
+      const again = await cliEngineTerminal('codex', { sessionId: 'chat-session-1', projectId: null, args, title: 'other' });
+      expect(again.id).toBe(session.id);
+      expect((await cliSessions()).filter(row => row.engineChat === 'chat-session-1')).toHaveLength(1);
+      fixture.missingSession = true;
+      // A live engine needs no hand-over: without a hook it still opens; with one, the hook runs first.
+      const hook = vi.fn(async (_session: unknown): Promise<void> => undefined);
+      registerCliEngineOpenHook('codex', hook);
+      await cliOpen(session.id, 80, 24, 'engine-terminal');
+      expect(hook).toHaveBeenCalledWith(expect.objectContaining({ engineChat: 'chat-session-1' }));
+      expect(fixture.commands.find(command => command.includes('new-session'))).toEqual([
+        'tmux', '-L', expect.any(String), 'new-session', '-d', '-s', session.tmuxSession, '-c', '/home/test', 'sh', '-c', 'exec "$@"', 'marks-cli', '/usr/local/bin/codex', ...args
+      ]);
+    } finally {
+      registerCliEngineOpenHook('codex', null);
+      fixture.missingSession = false;
+    }
+  });
+  it('attaches a MarksCode chat\'s live terminal through the shared seam with only `-s <session> .`', async () => {
+    if (process.platform === 'win32') return;
+    expect(await cliModuleState('markscode')).toEqual({ enabled: false, command: true, binary: null });
+    const args = ['-s', 'ses_123', '.'];
+    try {
+      await cliAction('markscode', 'enable');
+      expect(await cliModuleState('markscode')).toEqual({ enabled: true, command: true, binary: '/usr/local/bin/markscode' });
+      for (const bad of [['-s', '--dangerously-skip', '.'], ['-s', 'ses_123'], ['-s', 'ses_123', '/'], ['-s', 'ses 1', '.'], ['serve', 'ses_123', '.'],
+        ['resume', 'thread-1', '--remote', 'unix:///home/test/a.sock'], ['--resume', '3f2b8c1e-0d4a-4c3b-9e2f-1a2b3c4d5e6f'], ['-s', 'ses_1\u0000', '.']]) {
+        await expect(cliEngineTerminal('markscode', { sessionId: 'chat-session-m', projectId: null, args: bad, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      }
+      // Another module's shape is refused for MarksCode, and MarksCode's for Codex.
+      await expect(cliEngineTerminal('codex', { sessionId: 'chat-session-m', projectId: null, args, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      const session = await cliEngineTerminal('markscode', { sessionId: 'chat-session-m', projectId: null, args, title: 'MarksCode · My chat' });
+      expect(session).toMatchObject({ module: 'markscode', projectId: null, title: 'MarksCode · My chat', engineChat: 'chat-session-m', args });
+      expect((await cliEngineTerminal('markscode', { sessionId: 'chat-session-m', projectId: null, args, title: 'other' })).id).toBe(session.id);
+      fixture.missingSession = true;
+      // The open hook (the service must answer) runs before tmux starts; a refusal stops the attach.
+      registerCliEngineOpenHook('markscode', async () => { throw new Error('The MarksCode service is stopped. Start it from Settings > Modules.'); });
+      await expect(cliOpen(session.id, 80, 24, 'markscode-refused')).rejects.toThrow('service is stopped');
+      expect(fixture.commands.some(command => command.includes('new-session'))).toBe(false);
+      const hook = vi.fn(async (_session: unknown): Promise<void> => undefined);
+      registerCliEngineOpenHook('markscode', hook);
+      await cliOpen(session.id, 80, 24, 'markscode-terminal');
+      expect(hook).toHaveBeenCalledWith(expect.objectContaining({ engineChat: 'chat-session-m' }));
+      // "$@" passes the binary and each argument as argv: nothing is parsed by a shell.
+      expect(fixture.commands.find(command => command.includes('new-session'))).toEqual([
+        'tmux', '-L', expect.any(String), 'new-session', '-d', '-s', session.tmuxSession, '-c', '/home/test', 'sh', '-c', 'exec "$@"', 'marks-cli', '/usr/local/bin/markscode', ...args
+      ]);
+    } finally {
+      registerCliEngineOpenHook('markscode', null);
+      fixture.missingSession = false;
+      await cliAction('markscode', 'disable');
+    }
   });
 });

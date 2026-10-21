@@ -178,6 +178,8 @@ describe('MarksCode agent engine (fake HTTP+SSE service)', () => {
   let registration: string | null = null;
   let module = { enabled: true, command: true, binary: '/usr/local/bin/markscode' as string | null };
   const startService = vi.fn(async () => { registration = fake.registration(); });
+  const openTerminal = vi.fn(async (_chat: { sessionId: string; projectId: string; args: string[]; title: string }) => ({ id: 'cli-markscode-1' }));
+  let terminalCheck: (() => Promise<void>) | null = null;
 
   beforeAll(async () => {
     directory = await makeTempDir('cos-markscode-');
@@ -202,7 +204,11 @@ describe('MarksCode agent engine (fake HTTP+SSE service)', () => {
     registration = fake.registration();
     module = { enabled: true, command: true, binary: '/usr/local/bin/markscode' };
     startService.mockClear();
+    openTerminal.mockClear();
+    terminalCheck = null;
     engine.setMarksCodeDepsForTests({
+      openTerminal,
+      onTerminalOpen: check => { terminalCheck = check; },
       moduleState: async () => ({ ...module }),
       projectFolder: async projectId => {
         if (projectId !== PROJECT) throw new Error('Project not found');
@@ -284,7 +290,9 @@ describe('MarksCode agent engine (fake HTTP+SSE service)', () => {
     expect(await ledger.storedChatRecord(view.sessionId)).toEqual({ engine: 'markscode', backendSessionId: 'ses_1', model: 'anthropic/sonnet-5', effort: null });
     expect((await store.getSession(view.sessionId))?.projectId).toBe(PROJECT);
     expect(engine.marksCodeEngine.terminal!({ sessionId: view.sessionId, conversationId: view.conversationId, backendSessionId: 'ses_1', cwd: directory }))
-      .toEqual({ argv: ['markscode', '-s', 'ses_1', '.'], mode: 'live' });
+      .toEqual({ argv: ['-s', 'ses_1', '.'], mode: 'live' });
+    // A session id that could read as an option is never put in a terminal argv.
+    expect(engine.marksCodeEngine.terminal!({ sessionId: view.sessionId, conversationId: view.conversationId, backendSessionId: '-rf', cwd: directory })).toBeNull();
     // Models: the service's enabled models, its default first; effort becomes a variant only where one exists.
     const models = await engine.marksCodeEngine.models({});
     expect(models.models.map(item => item.id)).toEqual(['anthropic/sonnet-5', 'openai/gpt-6']);
@@ -292,6 +300,25 @@ describe('MarksCode agent engine (fake HTTP+SSE service)', () => {
     expect(fake.calls('POST', '/api/session/ses_1/model').at(-1)!.body).toEqual({ model: { providerID: 'openai', id: 'gpt-6', variant: 'high' } });
     expect(fake.calls('PATCH', '/api/session/ses_1').at(-1)!.body.permissions.slice(0, 2).map((rule: any) => rule.effect)).toEqual(['allow', 'allow']);
     expect(fake.calls('PATCH', '/api/session/ses_1').at(-1)!.body.permissions.at(-1)).toEqual({ action: 'external_directory', resource: '*', effect: 'deny' });
+  });
+
+  it('opens its live terminal through the shared seam, only while the service answers', async () => {
+    const view = await create();
+    const opened = await engine.marksCodeEngine.openTerminal!(view.sessionId);
+    expect(opened).toEqual({ cliSessionId: 'cli-markscode-1' });
+    expect(openTerminal).toHaveBeenCalledWith({ sessionId: view.sessionId, projectId: PROJECT, args: ['-s', 'ses_1', '.'], title: 'MarksCode · New MarksCode chat' });
+    // Every attach (also a sidebar reopen) runs the same check through the cli-modules open hook.
+    expect(terminalCheck).not.toBeNull();
+    await expect(terminalCheck!()).resolves.toBeUndefined();
+    registration = null;
+    await expect(terminalCheck!()).rejects.toThrow(engine.SERVICE_STOPPED);
+    await expect(engine.marksCodeEngine.openTerminal!(view.sessionId)).rejects.toThrow(engine.SERVICE_STOPPED);
+    expect(openTerminal).toHaveBeenCalledTimes(1);
+    expect(startService).not.toHaveBeenCalled();
+    // The IPC action routes by the chat's record to the same entry point.
+    registration = fake.registration();
+    const { chatAction } = await import('../src/main/api-chat/ipc.js');
+    expect(await chatAction({ action: 'terminal', sessionId: view.sessionId })).toEqual({ cliSessionId: 'cli-markscode-1' });
   });
 
   it('streams a full turn: answer text, a shell row and an edit row with its diff', async () => {

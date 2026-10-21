@@ -3022,7 +3022,15 @@
   "Chat with {0}": "{0} ile sohbet",
   "New {0} chat in this project": "Bu projede yeni {0} sohbeti",
   "Open in terminal": "Terminalde aç",
-  "Open this chat's session live in its terminal": "Bu sohbetin oturumunu terminalinde canlı aç",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "Bu sohbete bir terminalde devam edin. Uygulama önce kendi oturumunu durdurur; buradaki bir sonraki mesajınız oturumu sürdürür.",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "Bu sohbet bir Claude Code terminalinde açık. O terminal görünümünün bağlantısını kesin, sonra yeniden gönderin.",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code bu sohbette hâlâ yanıt veriyor. Durdurun veya bekleyin, sonra terminali açın.",
+  "This chat has no terminal": "Bu sohbetin terminali yok",
+  "Open this chat's {0} session in a terminal": "Bu sohbetin {0} oturumunu bir terminalde aç",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex'te oturum açılmamış. Bir terminalde `codex login` komutunu çalıştırın, sonra yeniden deneyin.",
+  "Codex chats need a project folder on this computer": "Codex sohbetleri bu bilgisayarda bir proje klasörü gerektirir",
+  "Enable the Codex module in Settings > Modules first": "Önce Ayarlar > Modüller bölümünde Codex modülünü etkinleştirin",
+  "This chat has no engine session yet": "Bu sohbetin henüz bir motor oturumu yok",
   "Start MarksCode service": "MarksCode hizmetini başlat",
   "Starting the MarksCode service…": "MarksCode hizmeti başlatılıyor…",
   "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode hizmeti çalışıyor. MarksCode sohbetleri Yeni sohbet altında kullanılabilir.",
@@ -3031,6 +3039,5 @@
   "Enable the MarksCode module in Settings > Modules": "Ayarlar > Modüller bölümünden MarksCode modülünü etkinleştirin",
   "MarksCode is not installed": "MarksCode yüklü değil",
   "The MarksCode service refused its saved password": "MarksCode hizmeti kayıtlı parolasını reddetti",
-  "This chat has no terminal yet": "Bu sohbetin henüz terminali yok",
   "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode bu oturumda (terminalinde) hâlâ çalışıyor. Bitince yeniden gönderin."
 }

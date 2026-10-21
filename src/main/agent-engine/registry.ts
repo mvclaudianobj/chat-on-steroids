@@ -2,13 +2,15 @@
  * Which engine runs which API chat. IPC `marksApiChat:request` asks here for every chat
  * action: a new chat names its engine (default `cliproxy`), an existing chat is routed by its
  * ledger record. Only an engine whose status is available can create a chat. MarksCode
- * (markscode.ts) is available while its module is enabled and its service answers; the reserved
- * engines (Codex, Claude Code) are registered unavailable until their PRs plug in.
+ * (`markscode.ts`) is available while its module is enabled and its service answers; Codex
+ * (`codex.ts`) and Claude Code (`claude.ts`) once their module, binary, version and sign-in are.
  */
 import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineInfo, type AgentEngineTerminalMode } from '../../shared/agent-engine.js';
 import type { ApiChatView } from '../../shared/api-chat.js';
 import { logWarn } from '../logger.js';
+import { claudeEngine } from './claude.js';
 import { cliProxyEngine } from './cliproxy.js';
+import { codexEngine } from './codex.js';
 import { marksCodeEngine } from './markscode.js';
 import { chatEngine } from './ledger.js';
 import type { AgentEngine } from './types.js';
@@ -29,8 +31,8 @@ export function reservedEngine(id: AgentEngineId, terminalMode: AgentEngineTermi
 const defaults = (): AgentEngine[] => [
   cliProxyEngine,
   marksCodeEngine,
-  reservedEngine('codex', 'live'),
-  reservedEngine('claude', 'handover')
+  codexEngine(),
+  claudeEngine
 ];
 
 const engines = new Map<AgentEngineId, AgentEngine>(defaults().map(engine => [engine.id, engine]));

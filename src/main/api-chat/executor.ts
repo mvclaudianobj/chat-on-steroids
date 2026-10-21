@@ -30,8 +30,9 @@ import {
 } from '../../shared/api-chat.js';
 import type { SessionEvent, TurnOutcome } from '../../shared/session.js';
 import { ApprovalGate, type ApprovalOutcome } from '../agent-engine/approval.js';
-import { chatRecords, engineOf, resetChatLedgerForTests, SELF_RECOVERING_ENGINES, storedChatRecord, updateChatRecord, withoutTurn, type ChatRecord } from '../agent-engine/ledger.js';
+import { chatRecords, engineOf, resetChatLedgerForTests, storedChatRecord, updateChatRecord, withoutTurn, type ChatRecord } from '../agent-engine/ledger.js';
 import { assistantMessageId, MAX_ASSISTANT_CHARS, storedText, userMessageId } from '../agent-engine/transcript.js';
+import { closeInterruptedTurn, recoversOwnTurns } from '../agent-engine/recovery.js';
 import { ApiChatHttpError, streamCompletion, type ApiChatMessage, type ApiCompletion, type ApiToolCall } from './client.js';
 import { apiChatTools, approvalSummary, argsHash, needsApproval, parseToolCall, runApiChatTool, toolDefinitions } from './tools.js';
 import { apiChatKey, apiChatSettings, noteKeyRequired, noteModelAvailability, noteRecentModel } from './settings.js';
@@ -402,40 +403,19 @@ async function endTurn(sessionId: string, turnId: string, outcome: TurnOutcome, 
   notifyChanged(sessionId);
 }
 
-/**
- * Closes one turn a previous process left open as `interrupted`: settles each answer step left
- * streaming, appends `turn_end` when the turn started and never ended, and clears the ledger's
- * open turn. Engine-neutral; MarksCode calls it when its session no longer runs.
- */
-export async function closeTurnInterrupted(sessionId: string, open: { turnId: string }, detail = 'Chat Marks closed before the API answer finished'): Promise<void> {
-  if (await getSession(sessionId)) {
-    const events = await readEvents(sessionId, { kinds: ['turn_start', 'turn_end', 'assistant_message'] });
-    const ofTurn = events.filter(event => event.turnId === open.turnId);
-    if (ofTurn.some(event => event.kind === 'turn_start') && !ofTurn.some(event => event.kind === 'turn_end')) {
-      // Every step of the turn has its own answer message; settle each one left streaming.
-      for (const answer of ofTurn) {
-        if (answer.kind !== 'assistant_message' || answer.final || !answer.messageId?.startsWith(assistantMessageId(open.turnId))) continue;
-        await upsertMessageEvent(sessionId, { time: answer.time, source: 'app', kind: 'assistant_message', turnId: open.turnId,
-          messageId: answer.messageId, message: answer.message, state: 'final', final: true });
-      }
-      await appendEvent(sessionId, { time: Date.now(), source: 'app', kind: 'turn_end', turnId: open.turnId, outcome: 'interrupted', detail });
-      logInfo(`API chat ${sessionId}: closed turn ${open.turnId} left open by the previous run as interrupted`);
-    }
-  }
-  await updateChatRecord(sessionId, current => current?.openTurn?.turnId === open.turnId ? withoutTurn(current) : current);
-  notifyChanged(sessionId);
-}
-
 /** Closes every turn the previous process left open. Once per process; sends wait for it. */
 export function recoverApiChats(): Promise<void> {
   recovery ??= (async () => {
     // Engine-neutral: no backend session survives this process, so every engine's open turn closes
-    // here, except an engine whose backend outlives it (MarksCode): its own recovery re-attaches.
+    // here, except an engine that recovers its own (Codex resumes its thread, MarksCode re-attaches
+    // to its still-running service session).
     for (const [sessionId, record] of Object.entries(await chatRecords())) {
       const open = record.openTurn;
-      if (!open || running.has(sessionId) || SELF_RECOVERING_ENGINES.has(engineOf(record))) continue;
+      if (!open || running.has(sessionId) || recoversOwnTurns(engineOf(record))) continue;
       try {
-        await closeTurnInterrupted(sessionId, open);
+        if (await closeInterruptedTurn(sessionId, open.turnId, 'Chat Marks closed before the API answer finished')) {
+          logInfo(`API chat ${sessionId}: closed turn ${open.turnId} left open by the previous run as interrupted`);
+        }
       } catch (error) {
         logWarn(`API chat ${sessionId}: open turn not recovered: ${(error as Error).message}`);
       }

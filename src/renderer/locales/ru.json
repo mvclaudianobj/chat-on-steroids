@@ -3112,7 +3112,15 @@
   "Chat with {0}": "Чат через {0}",
   "New {0} chat in this project": "Новый чат {0} в этом проекте",
   "Open in terminal": "Открыть в терминале",
-  "Open this chat's session live in its terminal": "Открыть сеанс этого чата в его терминале в реальном времени",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "Продолжите этот чат в терминале. Приложение сначала остановит свой сеанс; ваше следующее сообщение здесь возобновит его.",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "Этот чат открыт в терминале Claude Code. Отключите это представление терминала и отправьте снова.",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code ещё отвечает в этом чате. Остановите его или подождите, затем откройте терминал.",
+  "This chat has no terminal": "У этого чата нет терминала",
+  "Open this chat's {0} session in a terminal": "Открыть сеанс {0} этого чата в терминале",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex не выполнил вход. Запустите `codex login` в терминале и повторите попытку.",
+  "Codex chats need a project folder on this computer": "Чатам Codex нужна папка проекта на этом компьютере",
+  "Enable the Codex module in Settings > Modules first": "Сначала включите модуль Codex в Настройки > Модули",
+  "This chat has no engine session yet": "У этого чата ещё нет сеанса движка",
   "Start MarksCode service": "Запустить службу MarksCode",
   "Starting the MarksCode service…": "Запуск службы MarksCode…",
   "MarksCode service running. MarksCode chats are available in New chat.": "Служба MarksCode запущена. Чаты MarksCode доступны в «Новый чат».",
@@ -3121,6 +3129,5 @@
   "Enable the MarksCode module in Settings > Modules": "Включите модуль MarksCode в Настройки > Модули",
   "MarksCode is not installed": "MarksCode не установлен",
   "The MarksCode service refused its saved password": "Служба MarksCode отклонила сохранённый пароль",
-  "This chat has no terminal yet": "У этого чата ещё нет терминала",
   "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode всё ещё работает в этом сеансе (в его терминале). Отправьте снова, когда он закончит."
 }

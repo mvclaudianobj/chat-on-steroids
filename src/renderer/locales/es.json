@@ -3067,7 +3067,15 @@
   "Chat with {0}": "Chat con {0}",
   "New {0} chat in this project": "Nuevo chat de {0} en este proyecto",
   "Open in terminal": "Abrir en el terminal",
-  "Open this chat's session live in its terminal": "Abrir la sesión de este chat en directo en su terminal",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "Continúa este chat en un terminal. La app detiene antes su propia sesión; tu próximo mensaje aquí la reanuda.",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "Este chat está abierto en un terminal de Claude Code. Desconecta esa vista de terminal y vuelve a enviar.",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code sigue respondiendo en este chat. Detenlo o espera y luego abre el terminal.",
+  "This chat has no terminal": "Este chat no tiene terminal",
+  "Open this chat's {0} session in a terminal": "Abrir la sesión de {0} de este chat en un terminal",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex no ha iniciado sesión. Ejecuta `codex login` en un terminal y vuelve a intentarlo.",
+  "Codex chats need a project folder on this computer": "Los chats de Codex necesitan una carpeta de proyecto en este equipo",
+  "Enable the Codex module in Settings > Modules first": "Activa primero el módulo Codex en Ajustes > Módulos",
+  "This chat has no engine session yet": "Este chat aún no tiene una sesión del motor",
   "Start MarksCode service": "Iniciar el servicio de MarksCode",
   "Starting the MarksCode service…": "Iniciando el servicio de MarksCode…",
   "MarksCode service running. MarksCode chats are available in New chat.": "El servicio de MarksCode está en marcha. Los chats de MarksCode están disponibles en Nuevo chat.",
@@ -3076,6 +3084,5 @@
   "Enable the MarksCode module in Settings > Modules": "Activa el módulo MarksCode en Ajustes > Módulos",
   "MarksCode is not installed": "MarksCode no está instalado",
   "The MarksCode service refused its saved password": "El servicio de MarksCode rechazó su contraseña guardada",
-  "This chat has no terminal yet": "Este chat aún no tiene terminal",
   "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode sigue trabajando en esta sesión (en su terminal). Vuelve a enviar cuando termine."
 }

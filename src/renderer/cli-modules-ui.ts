@@ -188,12 +188,6 @@ export function createCliModulesUi(api: AppApi, hooks: {
       button.disabled = false;
     }
   }
-  /** Shows a session main created elsewhere (an agent chat's live terminal) in the module view. */
-  async function openSession(session: CliSession): Promise<void> {
-    sessions.set(session.id, session);
-    paintSessions();
-    await showSession(session.id);
-  }
   async function setProjects(id: Id): Promise<void> {
     const select = rows.get(id)!.project;
     const previous = select.value;
@@ -374,6 +368,11 @@ export function createCliModulesUi(api: AppApi, hooks: {
     const mount = terminalMounts.get(sessionId)!;
     mount.hidden = false;
     manager.show(mount, true);
+  }
+  /** Shows a terminal main just created or updated (an engine chat's live or hand-over terminal), after reloading the list. */
+  async function openSession(sessionId: string): Promise<void> {
+    await refresh();
+    await showSession(sessionId);
   }
   void refresh();
   return {

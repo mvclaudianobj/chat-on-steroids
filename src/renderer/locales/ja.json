@@ -2977,7 +2977,15 @@
   "Chat with {0}": "{0} でチャット",
   "New {0} chat in this project": "このプロジェクトで新しい {0} チャット",
   "Open in terminal": "ターミナルで開く",
-  "Open this chat's session live in its terminal": "このチャットのセッションをターミナルでライブ表示",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "このチャットをターミナルで続けます。アプリは先に自身のセッションを停止し、ここでの次のメッセージで再開します。",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "このチャットは Claude Code のターミナルで開かれています。そのターミナル表示を切断してから、もう一度送信してください。",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code はこのチャットでまだ応答中です。停止するか待ってから、ターミナルを開いてください。",
+  "This chat has no terminal": "このチャットにはターミナルがありません",
+  "Open this chat's {0} session in a terminal": "このチャットの {0} セッションをターミナルで開く",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex にサインインしていません。ターミナルで `codex login` を実行してから、もう一度お試しください。",
+  "Codex chats need a project folder on this computer": "Codex チャットにはこのコンピューター上のプロジェクトフォルダーが必要です",
+  "Enable the Codex module in Settings > Modules first": "先に 設定 > モジュール で Codex モジュールを有効にしてください",
+  "This chat has no engine session yet": "このチャットにはまだエンジンセッションがありません",
   "Start MarksCode service": "MarksCode サービスを開始",
   "Starting the MarksCode service…": "MarksCode サービスを開始しています…",
   "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode サービスが実行中です。新しいチャットで MarksCode チャットを使えます。",
@@ -2986,6 +2994,5 @@
   "Enable the MarksCode module in Settings > Modules": "設定 > モジュールで MarksCode モジュールを有効にしてください",
   "MarksCode is not installed": "MarksCode はインストールされていません",
   "The MarksCode service refused its saved password": "MarksCode サービスが保存済みのパスワードを拒否しました",
-  "This chat has no terminal yet": "このチャットにはまだターミナルがありません",
   "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode はこのセッション（ターミナル）でまだ作業中です。終わってから再送信してください。"
 }
