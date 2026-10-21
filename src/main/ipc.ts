@@ -2,6 +2,7 @@ import { modulesStatus, moduleAction } from './modules.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { registerCliModuleIpc } from './cli-modules.js';
 import { registerApiChatIpc } from './api-chat/ipc.js';
+import { registerCliProxyIpc } from './cliproxy/ipc.js';
 import { registerCliChatIpc } from './cli-chat.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
@@ -646,6 +647,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   registerWorkspaceTerminalIpc(getWindow);
   registerCliModuleIpc(getWindow);
   registerApiChatIpc(getWindow);
+  registerCliProxyIpc(getWindow); // Chat Marks: CLIProxyAPI versions, install/update, management keys.
   registerCliChatIpc(getWindow);
   // Sign out is an application admission transition. End this process after
   // clearing its secure session so the next startup must authenticate again.
@@ -1352,7 +1354,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // reaches the window through the ordinary state push; this returns before the check does.
   handle('modules:status', async () => modulesStatus());
   handle('modules:action', async payload => {
-    const request = z.object({ id: z.literal('cli-proxy-api'), action: z.enum(['install', 'start', 'stop', 'restart', 'enable', 'disable', 'open']), managementUrl: z.string().max(256).optional() }).strict().parse(payload);
+    const request = z.object({ id: z.literal('cli-proxy-api'), action: z.enum(['install', 'update', 'start', 'stop', 'restart', 'enable', 'disable', 'open']), managementUrl: z.string().max(256).optional() }).strict().parse(payload);
     return moduleAction(request.action, request.managementUrl);
   });
 

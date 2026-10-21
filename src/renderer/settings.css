@@ -34,6 +34,20 @@
 .modules-error { margin: 0; padding: 12px 0 16px; border-top: 1px solid var(--line); color: var(--red); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; }
 .modules-panel :is(button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 @media (max-width: 520px) { .modules-service-actions .btn { flex: 1 1 80px; } .modules-console > .btn { width: 100%; } }
+/* Chat Marks CLIProxyAPI management (renderer/cliproxy-manage-ui.ts). */
+.cliproxy-versions { display: grid; justify-items: start; gap: 4px; }
+.modules-status[data-state='update'] { color: var(--accent); border-color: var(--accent); }
+.cliproxy-manage { border-top: 1px solid var(--line); }
+.cliproxy-field { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-height: 64px; padding: 12px 0; }
+.cliproxy-field > .setting-text { flex: 1 1 220px; min-width: 0; }
+.cliproxy-field input[type='password'] { flex: 1 1 220px; min-width: 0; max-width: 360px; min-height: 36px; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--page); color: var(--ink); font: calc(12px * var(--text-scale, 1)) var(--mono); }
+.cliproxy-field .btn, .cliproxy-keys .btn { min-height: 32px; padding: 6px 12px; }
+.cliproxy-keys { display: grid; gap: 6px; margin: 0; padding: 0 0 10px; list-style: none; }
+.cliproxy-keys li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.cliproxy-key { font: calc(12px * var(--text-scale, 1)) var(--mono); color: var(--ink); }
+.cliproxy-keys li .btn { margin-left: auto; }
+.cliproxy-message { padding-bottom: 12px; }
+.cliproxy-message:empty { display: none; }
 .api-chat-settings { margin-top: 12px; padding: 16px 18px 4px; }
 .api-chat-settings > .setting-text { display: grid; gap: 4px; padding-bottom: 12px; }
 .api-chat-settings .api-chat-field { gap: 12px; }

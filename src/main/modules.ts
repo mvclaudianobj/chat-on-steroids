@@ -5,6 +5,7 @@ import { access, readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { BrowserWindow, shell } from 'electron';
 import { MARKS_MODULE_SOURCES } from '../shared/module-sources.js';
+import { managementKey } from './cliproxy/management.js';
 import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 
 const exec = promisify(execFile);
@@ -48,22 +49,25 @@ async function serviceConfigPort(): Promise<number | null> {
   }
 }
 
-/** Validate both upstream routes; version headers ALONE cannot identify a server. */
+/**
+ * Validate both upstream routes (the root banner and the console page title). The identity
+ * probe never calls the management API without a key: CLIProxyAPI counts every unauthenticated
+ * management request as a failed login and bans the loopback client for 30 minutes after five.
+ */
 async function probeConsole(port: number): Promise<boolean> {
   const base = `http://127.0.0.1:${port}`;
   try {
-    const status = await fetch(`${base}/v8/management/config`, {
+    const status = await fetch(`${base}/`, {
       redirect: 'manual', signal: AbortSignal.timeout(2_000)
     });
-    const serverName = status.headers.get('x-cpa-version') ?? status.headers.get('x-cpa-build-date');
     const apiType = status.headers.get('content-type') ?? '';
-    if (status.status !== 403 || !serverName || !apiType.includes('application/json')) {
+    if (status.status !== 200 || !apiType.includes('application/json')) {
       await status.body?.cancel();
       return false;
     }
     const response = await status.json() as unknown;
     if (!response || typeof response !== 'object' || Array.isArray(response) ||
-        typeof (response as { error?: unknown }).error !== 'string') return false;
+        (response as { message?: unknown }).message !== 'CLI Proxy API Server') return false;
 
     const page = await fetch(`${base}${MANAGER_PATH}`, {
       redirect: 'manual', signal: AbortSignal.timeout(2_000)
@@ -115,6 +119,24 @@ function navigable(destination: string, origin: string, mainFrame: boolean): boo
   }
 }
 
+/**
+ * Chat Marks: open the console already signed in. The bundled management page restores a
+ * remembered login from its own localStorage (`managementKey`, `apiBase`, `isLoggedIn`; plain
+ * JSON values are re-obfuscated by the page itself). They are written into the fresh ephemeral
+ * partition on a script-free same-origin document (`/healthz`, JSON) before the console loads,
+ * only when a management password is stored and only after that document's origin is checked.
+ */
+export async function seedConsoleLogin(window: Pick<BrowserWindow, 'loadURL' | 'webContents'>, origin: string): Promise<boolean> {
+  const key = await managementKey();
+  if (!key) return false;
+  await window.loadURL(`${origin}/healthz`);
+  if (new URL(window.webContents.getURL()).origin !== origin) return false;
+  const values = { apiBase: JSON.stringify(origin), managementKey: JSON.stringify(key), isLoggedIn: 'true' };
+  await window.webContents.executeJavaScript(
+    `(values => { for (const [name, value] of Object.entries(values)) localStorage.setItem(name, value); })(${JSON.stringify(values)})`);
+  return true;
+}
+
 /** Dedicated, ephemeral session. Never reuse cookies between ports or app sessions. */
 async function openConsole(url: string): Promise<void> {
   const origin = new URL(url).origin;
@@ -152,6 +174,7 @@ async function openConsole(url: string): Promise<void> {
     callback({ cancel: !navigable(details.url, origin, false) });
   });
   try {
+    await seedConsoleLogin(window, origin);
     await window.loadURL(url);
   } catch {
     if (!window.isDestroyed()) window.close();
@@ -189,6 +212,14 @@ async function verifiedPort(preferred?: number): Promise<number | null> {
   return valid.length === 1 && (preferred === undefined || preferred === valid[0]) ? valid[0]! : null;
 }
 
+/** Chat Marks: the verified local service origin for management requests, or null. */
+export async function verifiedManagementBase(): Promise<string | null> {
+  if (process.platform !== 'linux') return null;
+  const service = await serviceState();
+  const port = service.installed && service.running ? await verifiedPort() : null;
+  return port !== null ? `http://127.0.0.1:${port}` : null;
+}
+
 export async function modulesStatus(): Promise<MarksModuleState[]> {
   const base: MarksModuleState = {
     id: 'cli-proxy-api', name: 'CLIProxyAPI', description: 'API proxy and management console',
@@ -209,6 +240,9 @@ export async function modulesStatus(): Promise<MarksModuleState[]> {
 }
 
 export async function moduleAction(action: MarksModuleAction, managementUrl?: string): Promise<MarksModuleState[]> {
+  // Chat Marks: on Linux x64/arm64 the renderer installs and updates through the verified
+  // release installer (`cliproxy/installer.ts`, explicit confirmation); these stay the guides
+  // for every other platform.
   if (action === 'install') {
     // Installation is opt-in and stays with the official upstream. Never
     // execute remote install scripts or elevate during a catalog action.

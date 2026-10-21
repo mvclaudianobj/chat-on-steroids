@@ -6,6 +6,7 @@ import { t, onLanguageChange } from './i18n.js';
 import { createCliModulesUi, type CliModuleSummary } from './cli-modules-ui.js';
 import { createApiChatSettingsUi } from './api-chat-settings-ui.js';
 import { createApiChatUi } from './api-chat-ui.js';
+import { createCliProxyManageUi } from './cliproxy-manage-ui.js';
 
 export interface MarksModulesUiHooks {
   showTab(name: string): void;
@@ -36,6 +37,9 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
   const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems });
   repaintNewChat = cli.repaintNewChat;
   const apiChat = createApiChatSettingsUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!);
+  // Versions, verified install/update, management password and API keys inside the same card.
+  const manage = createCliProxyManageUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!,
+    () => cliProxyModule, async () => { await refreshModules(); void apiChat.refresh(); }, () => paintModules());
   let cliProxyModule: MarksModuleState | null = null;
   let moduleChecked = false;
   let moduleLoading = false;
@@ -105,6 +109,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
       !current.running || current.consoleAvailable === false || !$<HTMLInputElement>('moduleCliConsoleUrl').value.trim();
     $<HTMLButtonElement>('moduleCliReopen').disabled = blocked || !moduleUiActive || !current?.supported || !current.installed ||
       !current.running || current.consoleAvailable === false || !current.managementUrl;
+    manage.paint();
   }
 
   function readModuleReply(modules: MarksModuleState[]): MarksModuleState {
@@ -161,12 +166,13 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
       const reply = await api.moduleAction('cli-proxy-api', action, url);
       if (!reply.ok) throw new Error(reply.error);
       acceptModuleStatus(reply.data);
+      if (action !== 'open') void manage.refresh();
       if (action === 'install') {
         // The backend opens the official instructions; installation itself is user-managed.
         toast(t('Installation guide opened. Follow the instructions to install CLIProxyAPI.'));
       }
       if (action === 'update') {
-        toast('Official CLIProxyAPI releases opened. Follow the publisher instructions to update the separately installed service.');
+        toast(t('Official CLIProxyAPI releases opened. Follow the publisher instructions to update the separately installed service.'));
       }
     } catch (error) {
       moduleError = (error as Error).message || 'Could not complete the module action.';
@@ -208,7 +214,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     }
   }
 
-  $('moduleRefresh').addEventListener('click', () => { void refreshModules(); void apiChat.refresh(); void apiChatChats.refresh(); });
+  $('moduleRefresh').addEventListener('click', () => { void refreshModules().then(() => manage.refresh(true)); void apiChat.refresh(); void apiChatChats.refresh(); });
   $('moduleCliReopen').addEventListener('click', () => void actOnModule('open'));
   $<HTMLInputElement>('moduleCliActive').addEventListener('change', () =>
     setModuleUiActive($<HTMLInputElement>('moduleCliActive').checked));
@@ -218,7 +224,11 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     ['moduleCliEnable', 'enable'], ['moduleCliDisable', 'disable'],
     ['moduleCliOpen', 'open']
   ] as const) {
-    $(button).addEventListener('click', () => void actOnModule(action));
+    $(button).addEventListener('click', () => {
+      if (action === 'install' || action === 'update') {
+        void manage.installOrUpdate(action).then(handled => { if (!handled) void actOnModule(action); });
+      } else void actOnModule(action);
+    });
   }
   $('moduleCliConsoleUrl').addEventListener('input', () => {
     consoleUrlEdited = true;
@@ -230,7 +240,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     cliModules: cli.cliModules,
     normalizeTab: name => cli.normalizeTab(name === 'module-cli-proxy' && !moduleUiActive ? 'modules' : name),
     onTabOpening: name => {
-      if (name === 'modules') { void refreshModules(); void apiChat.refresh(); }
+      if (name === 'modules') { void refreshModules().then(() => manage.refresh()); void apiChat.refresh(); }
       if (name === 'chat') void apiChatChats.refresh();
       cli.onTabOpening(name);
     },
