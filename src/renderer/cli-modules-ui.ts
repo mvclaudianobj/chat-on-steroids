@@ -347,14 +347,12 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     mount.hidden = false;
     manager.show(mount, true);
   }
-  void refresh();
-  /** An agent engine chat's terminal session (main created it): listed and shown like any other. */
-  async function openSession(session: CliSession): Promise<void> {
-    if (!current.get(session.module)?.enabled) await refresh();
-    sessions.set(session.id, session);
-    paintSessions();
-    await showSession(session.id);
+  /** Shows a terminal main just created or updated (an engine chat's live or hand-over terminal), after reloading the list. */
+  async function openSession(sessionId: string): Promise<void> {
+    await refresh();
+    await showSession(sessionId);
   }
+  void refresh();
   return {
     createSession,
     openSession,

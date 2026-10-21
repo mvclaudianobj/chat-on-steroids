@@ -9,9 +9,8 @@
  * engines), and the chat's own engine names the header and chooses which model list to load.
  */
 import type { AppApi } from '../preload/index.js';
-import type { CliSession } from '../main/cli-modules.js';
 import { isApiConversationId, type ApiChatApprovalDecision, type ApiChatApprovalMode, type ApiChatEffort, type ApiChatModel, type ApiChatView } from '../shared/api-chat.js';
-import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineInfo } from '../shared/agent-engine.js';
+import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineInfo, type AgentEngineTerminalMode } from '../shared/agent-engine.js';
 import { toast } from './dom.js';
 import { t, ui } from './i18n.js';
 import type { RowMenuItem } from './row-menu.js';
@@ -23,8 +22,8 @@ export interface ApiChatUiHooks {
   selectedChat?(): { id: string; conversationId: string | null } | null;
   /** Shows that session in the normal chat view. */
   selectChat?(id: string): void | Promise<void>;
-  /** Shows a module terminal session (a CLI engine chat's live terminal). */
-  openCliSession?(session: CliSession): void | Promise<void>;
+  /** Shows that module terminal (an engine chat's live or hand-over terminal), by its id. */
+  openCliSession?(id: string): void | Promise<void>;
 }
 
 export interface ApiChatUi {
@@ -88,11 +87,12 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     ui(option, 'textContent', text);
     approval.append(option);
   }
-  // A CLI engine chat (Codex) can attach its own TUI to the same session: a durable module terminal.
+  // Engines with a terminal: Codex attaches its TUI live to the same session, Claude Code hands
+  // its session over. One button; its wording and whether it waits for the turn follow the mode.
   const terminal = document.createElement('button');
   terminal.type = 'button';
   terminal.id = 'apiChatTerminal';
-  terminal.className = 'api-chat-terminal';
+  terminal.className = 'btn api-chat-terminal';
   terminal.hidden = true;
   ui(terminal, 'textContent', () => t('Open in terminal'));
   terminal.addEventListener('click', () => void openTerminal());
@@ -151,6 +151,8 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   /** Sessions this window created before the chat list carried their summary. */
   const created = new Set<string>();
   let engines: AgentEngineId[] = [];
+  /** Engines whose chats can open a terminal, as main's registry reports them. */
+  let terminalEngines = new Map<AgentEngineId, AgentEngineTerminalMode>();
   let shownFor: string | null = null;
   let view: ApiChatView | null = null;
   /** Each engine's chat models, loaded once per engine. */
@@ -191,17 +193,28 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     // A CLI engine lists each model's own efforts; the ones that model lacks are not offered.
     const efforts = models.find(item => item.id === current)?.efforts;
     for (const choice of effort.options) choice.disabled = !!choice.value && !!efforts?.length && !efforts.includes(choice.value);
-    terminal.hidden = !view?.terminal || !hooks.openCliSession;
-    terminal.disabled = !view;
-    terminal.title = t("Open this chat's {0} session in a terminal", [AGENT_ENGINE_LABELS[engineOf()]]);
+    const mode = terminalEngines.get(engineOf()) ?? null;
+    terminal.hidden = !view || !mode;
+    // A hand-over stops the app's own session, so it waits for the turn; a live attach does not.
+    terminal.disabled = !view || busy || (mode === 'handover' && view.running);
+    terminal.title = mode === 'live'
+      ? t("Open this chat's {0} session in a terminal", [AGENT_ENGINE_LABELS[engineOf()]])
+      : t('Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.');
   }
 
   async function openTerminal(): Promise<void> {
     const id = shownFor;
-    if (!id || !hooks.openCliSession) return;
-    const reply = await api.apiChatTerminal(id).catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }));
-    if (!reply.ok) { toast(t(reply.error)); return; }
-    await hooks.openCliSession(reply.data);
+    if (!id || busy) return;
+    busy = true;
+    paint();
+    try {
+      const reply = await api.apiChatTerminal(id);
+      if (!reply.ok) toast(t(reply.error));
+      else await hooks.openCliSession?.(reply.data.cliSessionId);
+    } finally {
+      busy = false;
+      paint();
+    }
   }
 
   function paintApproval(pending: ApiChatView['pending'] | null): void {
@@ -347,7 +360,9 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   async function refresh(): Promise<void> {
     const reply = await api.apiChatEngines?.().catch(() => null);
     const next = reply?.ok ? availableEngines(reply.data) : [];
+    terminalEngines = new Map(reply?.ok && Array.isArray(reply.data) ? reply.data.filter(item => item?.terminal).map(item => [item.id, item.terminal!] as const) : []);
     if (next.join() !== engines.join()) { engines = next; onAvailability(); }
+    paint();
   }
   void refresh();
 

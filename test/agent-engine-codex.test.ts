@@ -94,6 +94,8 @@ function fakeHost(options: { script?: Record<string, unknown>; version?: string;
   writeFileSync(scriptFile, JSON.stringify(options.script ?? {}));
   const env = { ...process.env, CODEX_FAKE_LOG: logFile, CODEX_FAKE_SCRIPT: scriptFile, CODEX_FAKE_VERSION: options.version ?? '0.163.0' };
   const opened: string[][] = [];
+  const terminals: Array<{ sessionId: string; projectId: string | null; args: string[]; title: string }> = [];
+  let terminalHook: (() => Promise<void>) | null = null;
   const host: CodexHost = {
     runtime: async () => options.unavailable ? { ok: false, detail: options.unavailable } : { ok: true, runtime: { binary: FAKE, windows: false } },
     run: async (_runtime, args) => (await run(process.execPath, [FAKE, ...args], { env })).stdout.trim(),
@@ -105,10 +107,12 @@ function fakeHost(options: { script?: Record<string, unknown>; version?: string;
       return { client, server: null, socket: SOCKET };
     },
     workspace: async () => cwd,
-    appVersion: async () => '2.1.42'
+    appVersion: async () => '2.1.42',
+    openTerminal: async chat => { terminals.push(chat); return { id: 'cli-codex-1' }; },
+    onTerminalOpen: listener => { terminalHook = listener; }
   };
   const messages = (): Logged[] => existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Logged) : [];
-  return { host, messages, opened, requests: (method: string) => messages().filter(message => message.method === method) };
+  return { host, messages, opened, terminals, terminalHook: () => terminalHook, requests: (method: string) => messages().filter(message => message.method === method) };
 }
 
 async function until<T>(check: () => Promise<T | null | undefined | false> | T | null | undefined | false, what = 'condition'): Promise<T> {
@@ -275,7 +279,7 @@ describe('Codex engine (fake app-server)', () => {
     ]);
     const { fake, engine } = start({ script: { turns: [steps], models: [{ id: 'gpt-5.5-codex', model: 'gpt-5.5-codex', displayName: 'GPT-5.5 Codex', hidden: false, isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'medium', description: '' }], defaultReasoningEffort: 'medium' }] } });
     const chat = await engine.create({ projectId: null });
-    expect(chat).toMatchObject({ engine: 'codex', model: 'gpt-5.5-codex', approval: 'ask', running: false, terminal: 'live' });
+    expect(chat).toMatchObject({ engine: 'codex', model: 'gpt-5.5-codex', approval: 'ask', running: false });
     expect((await ledger.storedChatRecord(chat.sessionId))).toMatchObject({ engine: 'codex', backendSessionId: 'thread-1' });
     await engine.setChatSettings(chat.sessionId, { effort: 'medium' });
     await engine.send(chat.sessionId, 'Fix the failing test');
@@ -315,8 +319,12 @@ describe('Codex engine (fake app-server)', () => {
     expect(tools[1]).toMatchObject({ call: { changes: [{ path: 'src/sum.ts', added: 2, removed: 1 }] } });
     expect((await ledger.storedChatRecord(chat.sessionId))?.openTurn).toBeUndefined();
     expect((await engine.view(chat.sessionId)).running).toBe(false);
-    expect(await engine.terminal!({ sessionId: chat.sessionId, conversationId: chat.conversationId, backendSessionId: 'thread-1', cwd: null }))
+    expect(engine.terminal!({ sessionId: chat.sessionId, conversationId: chat.conversationId, backendSessionId: 'thread-1', cwd: null }))
       .toEqual({ argv: ['resume', 'thread-1', '--remote', `unix://${SOCKET}`], mode: 'live' });
+    // The unified seam: a live attach opens the chat's module terminal on the same server and thread.
+    expect(await engine.openTerminal!(chat.sessionId)).toEqual({ cliSessionId: 'cli-codex-1' });
+    expect(fake.terminals).toEqual([{ sessionId: chat.sessionId, projectId: null, args: ['resume', 'thread-1', '--remote', `unix://${SOCKET}`], title: 'Codex · Fix the failing test' }]);
+    expect(fake.terminalHook()).not.toBeNull();
   });
 
   it('asks Codex for on-request approvals in Auto mode', async () => {
@@ -405,6 +413,8 @@ describe('Codex engine (fake app-server)', () => {
     const chat = await engine.create({ projectId: null, model: 'gpt-5.5-codex' });
     await engine.send(chat.sessionId, 'go');
     await until(async () => (await engine.view(chat.sessionId)).pending, 'card');
+    // Live: the terminal may open while the turn runs (no hand-over).
+    expect(await engine.openTerminal!(chat.sessionId)).toEqual({ cliSessionId: 'cli-codex-1' });
     const done = engine.turnDone(chat.sessionId)!;
     expect(await engine.stop(chat.sessionId)).toBe(true);
     expect(await done).toBe('stopped');

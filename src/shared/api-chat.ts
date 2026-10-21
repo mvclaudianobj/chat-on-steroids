@@ -6,7 +6,7 @@
  * Their conversation ids are minted by the app in a namespace no ChatGPT conversation uses, so
  * every ChatGPT-only owner (bridge, extension, Compact & Resume, Goal/Loop) can refuse them by id.
  */
-import type { AgentEngineId, AgentEngineTerminalMode } from './agent-engine.js';
+import type { AgentEngineId } from './agent-engine.js';
 
 export const API_CONVERSATION_PREFIX = 'cosapi-';
 export const DEFAULT_API_CHAT_ENDPOINT = 'http://127.0.0.1:18081/v1';
@@ -96,8 +96,6 @@ export interface ApiChatView {
   approval: ApiChatApprovalMode;
   /** The tool call this chat's running turn waits on, if any. */
   pending: ApiChatPendingApproval | null;
-  /** Whether the chat's engine session can be opened in a terminal now (Codex: `live`). */
-  terminal?: AgentEngineTerminalMode | null;
 }
 
 /** Whether an API chat asks before running a tool that edits files or runs commands. */

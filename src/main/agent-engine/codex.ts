@@ -90,6 +90,10 @@ export interface CodexHost {
   appVersion(): Promise<string>;
   /** Called when the Codex module is stopped or disabled, and when the app quits. */
   onShutdown?(listener: () => void): void;
+  /** The chat's durable module terminal (cli-modules `cliEngineTerminal('codex', …)`). */
+  openTerminal?(chat: { sessionId: string; projectId: string | null; args: string[]; title: string }): Promise<{ id: string }>;
+  /** Runs before a Codex chat terminal attaches (from the chat or the sidebar): the server must run. */
+  onTerminalOpen?(listener: () => Promise<void>): void;
 }
 
 const run = promisify(execFile);
@@ -206,6 +210,10 @@ export function defaultCodexHost(): CodexHost {
     appVersion: async () => {
       try { return (await electron()).getVersion(); } catch { return '0'; }
     },
+    openTerminal: async chat => (await modules()).cliEngineTerminal('codex', chat),
+    onTerminalOpen: listener => {
+      void modules().then(({ registerCliEngineOpenHook }) => registerCliEngineOpenHook('codex', () => listener())).catch(() => undefined);
+    },
     onShutdown: listener => {
       void electron().then(app => { app?.on?.('will-quit', listener); }).catch(() => undefined);
       void modules().then(({ registerCliModuleStopHook }) => registerCliModuleStopHook(id => { if (id === 'codex') listener(); })).catch(() => undefined);
@@ -269,6 +277,8 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
   const byThread = new Map<string, CodexTurn>();
 
   let shutdownHooked = false;
+  let terminalHooked = false;
+  let lastSocket: string | null = null;
 
   function shutdown(): void {
     const connection = current;
@@ -340,6 +350,7 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
         throw new Error(`Codex app-server did not start: ${(error as Error).message}${tail ? ` (${tail})` : ''}`);
       }
       current = connection;
+      lastSocket = processes.socket;
       return connection;
     })().finally(() => { connecting = null; });
     return connecting;
@@ -493,8 +504,7 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     const turn = running.get(session.id);
     return {
       sessionId: session.id, conversationId: session.conversationId, engine: 'codex', model: session.record.model,
-      effort: session.record.effort, running: !!turn, approval: session.record.approval ?? 'ask', pending: turn?.gate.view() ?? null,
-      terminal: session.record.backendSessionId ? 'live' : null
+      effort: session.record.effort, running: !!turn, approval: session.record.approval ?? 'ask', pending: turn?.gate.view() ?? null
     };
   }
 
@@ -697,6 +707,7 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
    * and accepts the next turn; then the chat's turn is closed `interrupted`.
    */
   function recover(): Promise<void> {
+    hookTerminals();
     recovery ??= (async () => {
       for (const [sessionId, record] of Object.entries(await chatRecords())) {
         const open = record.openTurn;
@@ -733,15 +744,40 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     return recovery;
   }
 
-  async function terminal(chat: { backendSessionId: string | null }): Promise<EngineTerminal | null> {
-    if (!chat.backendSessionId) return null;
+  /** The live terminal's argv once the server's socket is known (it is fixed per profile). */
+  function terminal(chat: { backendSessionId: string | null }): EngineTerminal | null {
+    const socket = current?.processes.socket ?? lastSocket;
+    return chat.backendSessionId && socket ? { argv: codexTerminalArgv(chat.backendSessionId, socket), mode: 'live' } : null;
+  }
+
+  function hookTerminals(): void {
+    if (terminalHooked) return;
+    terminalHooked = true;
+    host.onTerminalOpen?.(async () => { await connection_(); });
+  }
+
+  /**
+   * Live: the chat's Codex TUI attaches to the server and thread the chat runs on, so it may open
+   * while a turn runs; approvals answered there clear the chat's card (serverRequest/resolved).
+   */
+  async function openTerminal(sessionId: string): Promise<{ cliSessionId: string }> {
+    hookTerminals();
+    const session = await codexSession(sessionId);
+    if (!host.openTerminal) throw new Error('Terminals are not available');
+    const threadId = session.record.backendSessionId;
+    if (!threadId) throw new Error('This chat has no engine session yet');
     const connection = await connection_();
-    return { argv: codexTerminalArgv(chat.backendSessionId, connection.processes.socket), mode: 'live' };
+    const chat = await getSession(session.id);
+    const opened = await host.openTerminal({
+      sessionId: session.id, projectId: session.projectId, args: codexTerminalArgv(threadId, connection.processes.socket),
+      title: `${LABEL} · ${(chat?.title ?? '').slice(0, 80)}`.trim()
+    });
+    return { cliSessionId: opened.id };
   }
 
   return {
     id: 'codex', label: LABEL, terminalMode: 'live',
-    status, models, create, view, send, stop, approve, setChatSettings, recover, terminal, shutdown,
+    status, models, create, view, send, stop, approve, setChatSettings, recover, terminal, openTerminal, shutdown,
     turnDone: sessionId => running.get(sessionId)?.done ?? null
   };
 }

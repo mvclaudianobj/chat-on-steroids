@@ -10,8 +10,6 @@ import { logWarn } from '../logger.js';
 import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS } from '../../shared/api-chat.js';
 import { AGENT_ENGINE_IDS, DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
 import { agentEngine, createAgentChat, engineForChat, listAgentEngines, recoverAgentEngines } from '../agent-engine/registry.js';
-import { storedChatRecord } from '../agent-engine/ledger.js';
-import { getSession } from '../session/store.js';
 import { ApiChatHttpError, streamCompletion } from './client.js';
 import { MAX_API_CHAT_INPUT_CHARS } from './executor.js';
 import {
@@ -44,7 +42,8 @@ const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
   z.object({ action: z.literal('chatSettings'), sessionId }).strict(),
-  // A CLI engine chat's live terminal (Codex `resume <thread> --remote`), as a durable module session.
+  // Agent engines: open the chat's backend session in its module terminal (Codex attaches live,
+  // Claude Code hands over).
   z.object({ action: z.literal('terminal'), sessionId }).strict(),
   z.object({
     action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional(),
@@ -86,19 +85,6 @@ export async function testApiChat(model?: string, fetchImpl?: typeof fetch): Pro
   }
 }
 
-/** The chat's engine session in a durable module terminal; the module's own gates apply. */
-async function openEngineTerminal(sessionId: string): Promise<unknown> {
-  const engine = await engineForChat(sessionId);
-  const view = await engine.view(sessionId);
-  if (engine.id === 'cliproxy' || !engine.terminal) throw new Error('This chat has no terminal');
-  const session = await getSession(view.sessionId);
-  const record = await storedChatRecord(view.sessionId);
-  const terminal = await engine.terminal({ sessionId: view.sessionId, conversationId: view.conversationId, backendSessionId: record?.backendSessionId ?? null, cwd: null });
-  if (!terminal) throw new Error('This chat has no engine session yet');
-  const { cliEngineTerminal } = await import('../cli-modules.js');
-  return cliEngineTerminal(engine.id, session?.projectId ?? null, terminal.argv, view.sessionId, `${engine.label} · ${session?.title ?? ''}`.trim());
-}
-
 export async function chatAction(input: z.infer<typeof request>): Promise<unknown> {
   switch (input.action) {
     case 'engines': return listAgentEngines();
@@ -112,7 +98,11 @@ export async function chatAction(input: z.infer<typeof request>): Promise<unknow
     case 'send': return { turnId: (await (await engineForChat(input.sessionId)).send(input.sessionId, input.text)).turnId };
     case 'stop': return { stopped: await (await engineForChat(input.sessionId)).stop(input.sessionId) };
     case 'chatSettings': return (await engineForChat(input.sessionId)).view(input.sessionId);
-    case 'terminal': return openEngineTerminal(input.sessionId);
+    case 'terminal': {
+      const owner = await engineForChat(input.sessionId);
+      if (!owner.openTerminal) throw new Error('This chat has no terminal');
+      return owner.openTerminal(input.sessionId);
+    }
     case 'setChatSettings': return (await engineForChat(input.sessionId)).setChatSettings(input.sessionId, {
       ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {}),
       ...(input.approval !== undefined ? { approval: input.approval } : {})

@@ -3067,10 +3067,13 @@
   "Chat with {0}": "Chat com {0}",
   "New {0} chat in this project": "Novo chat {0} neste projeto",
   "Open in terminal": "Abrir no terminal",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "Continue este chat num terminal. A app termina primeiro a sua própria sessão; a sua próxima mensagem aqui retoma-a.",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "Este chat está aberto num terminal do Claude Code. Desligue essa vista de terminal e envie novamente.",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "O Claude Code ainda está a responder neste chat. Pare-o ou aguarde e depois abra o terminal.",
+  "This chat has no terminal": "Este chat não tem terminal",
   "Open this chat's {0} session in a terminal": "Abrir a sessão {0} deste chat num terminal",
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "O Codex não tem sessão iniciada. Execute `codex login` num terminal e tente novamente.",
   "Codex chats need a project folder on this computer": "Os chats do Codex precisam de uma pasta de projeto neste computador",
   "Enable the Codex module in Settings > Modules first": "Ative primeiro o módulo Codex em Definições > Módulos",
-  "This chat has no engine session yet": "Este chat ainda não tem uma sessão do motor",
-  "This chat has no terminal": "Este chat não tem terminal"
+  "This chat has no engine session yet": "Este chat ainda não tem uma sessão do motor"
 }

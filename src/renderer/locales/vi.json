@@ -2977,10 +2977,13 @@
   "Chat with {0}": "Trò chuyện với {0}",
   "New {0} chat in this project": "Cuộc trò chuyện {0} mới trong dự án này",
   "Open in terminal": "Mở trong terminal",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "Tiếp tục cuộc trò chuyện này trong terminal. Ứng dụng dừng phiên của chính nó trước; tin nhắn tiếp theo của bạn ở đây sẽ tiếp tục phiên đó.",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "Cuộc trò chuyện này đang mở trong một terminal Claude Code. Hãy ngắt kết nối chế độ xem terminal đó rồi gửi lại.",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code vẫn đang trả lời trong cuộc trò chuyện này. Hãy dừng hoặc chờ, rồi mở terminal.",
+  "This chat has no terminal": "Cuộc trò chuyện này không có terminal",
   "Open this chat's {0} session in a terminal": "Mở phiên {0} của cuộc trò chuyện này trong terminal",
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex chưa đăng nhập. Hãy chạy `codex login` trong terminal rồi thử lại.",
   "Codex chats need a project folder on this computer": "Cuộc trò chuyện Codex cần một thư mục dự án trên máy tính này",
   "Enable the Codex module in Settings > Modules first": "Hãy bật mô-đun Codex trong Cài đặt > Mô-đun trước",
-  "This chat has no engine session yet": "Cuộc trò chuyện này chưa có phiên của engine",
-  "This chat has no terminal": "Cuộc trò chuyện này không có terminal"
+  "This chat has no engine session yet": "Cuộc trò chuyện này chưa có phiên của engine"
 }
