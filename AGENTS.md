@@ -3267,6 +3267,9 @@ Continue also refreshes the current native assistant response before recovery St
 before and after asynchronous Send authorization. Its exact final message vetoes Continue
 even when the browser journal has not reached the app or a stale Stop control remains.
 A final from before the latest native question cannot veto recovery of that newer question.
+Nor can an answer that later tool calls of the same turn went past (`turnEndMessageId`, shell
+`end_turn`): live 2026-10-21, GPT-6 answered, ran more calls after a tool approval and ended on a
+plan card with no answer, and the stale end refused the Continue that turn needed.
 
 A trusted native Stop click immediately blocks automatic page input, without emitting a terminal
 observation while native generation continues. Authorized app Stop records the same local intent
