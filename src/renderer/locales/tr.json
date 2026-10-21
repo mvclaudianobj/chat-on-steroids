@@ -3020,5 +3020,10 @@
   "This approval is no longer pending": "Bu onay artık beklemede değil",
   "New CLIProxy chat in this project": "Bu projede yeni CLIProxy sohbeti",
   "Chat with {0}": "{0} ile sohbet",
-  "New {0} chat in this project": "Bu projede yeni {0} sohbeti"
+  "New {0} chat in this project": "Bu projede yeni {0} sohbeti",
+  "Open in terminal": "Terminalde aç",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "Bu sohbete bir terminalde devam edin. Uygulama önce kendi oturumunu durdurur; buradaki bir sonraki mesajınız oturumu sürdürür.",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "Bu sohbet bir Claude Code terminalinde açık. O terminal görünümünün bağlantısını kesin, sonra yeniden gönderin.",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code bu sohbette hâlâ yanıt veriyor. Durdurun veya bekleyin, sonra terminali açın.",
+  "This chat has no terminal": "Bu sohbetin terminali yok"
 }

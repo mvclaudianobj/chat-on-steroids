@@ -2975,5 +2975,10 @@
   "This approval is no longer pending": "Yêu cầu phê duyệt này không còn chờ xử lý",
   "New CLIProxy chat in this project": "Cuộc trò chuyện CLIProxy mới trong dự án này",
   "Chat with {0}": "Trò chuyện với {0}",
-  "New {0} chat in this project": "Cuộc trò chuyện {0} mới trong dự án này"
+  "New {0} chat in this project": "Cuộc trò chuyện {0} mới trong dự án này",
+  "Open in terminal": "Mở trong terminal",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "Tiếp tục cuộc trò chuyện này trong terminal. Ứng dụng dừng phiên của chính nó trước; tin nhắn tiếp theo của bạn ở đây sẽ tiếp tục phiên đó.",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "Cuộc trò chuyện này đang mở trong một terminal Claude Code. Hãy ngắt kết nối chế độ xem terminal đó rồi gửi lại.",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code vẫn đang trả lời trong cuộc trò chuyện này. Hãy dừng hoặc chờ, rồi mở terminal.",
+  "This chat has no terminal": "Cuộc trò chuyện này không có terminal"
 }

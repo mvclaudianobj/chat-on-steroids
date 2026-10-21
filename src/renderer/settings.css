@@ -59,6 +59,8 @@
    take the ChatGPT model menu's place, and ChatGPT-only controls leave the composer. */
 .composer .api-chat-controls { grid-column: 3; grid-row: 2; display: flex; align-items: center; gap: 4px; min-width: 0; }
 .composer .api-chat-controls[hidden] { display: none; }
+.api-chat-controls .api-chat-terminal { flex: none; min-height: 32px; padding: 6px 8px; font-size: calc(12px * var(--text-scale, 1)); white-space: nowrap; }
+.api-chat-controls .api-chat-terminal[hidden] { display: none; }
 .api-chat-controls select { flex: none; width: auto; max-width: 240px; min-width: 0; white-space: nowrap; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: calc(12px * var(--text-scale, 1)); text-overflow: ellipsis; cursor: pointer; }
 .api-chat-controls select:hover { background: var(--hover); }
 .api-chat-controls select:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }

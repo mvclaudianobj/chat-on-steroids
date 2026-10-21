@@ -2975,5 +2975,10 @@
   "This approval is no longer pending": "此审批已不再待处理",
   "New CLIProxy chat in this project": "在此项目中新建 CLIProxy 聊天",
   "Chat with {0}": "使用 {0} 聊天",
-  "New {0} chat in this project": "在此项目中新建 {0} 聊天"
+  "New {0} chat in this project": "在此项目中新建 {0} 聊天",
+  "Open in terminal": "在终端中打开",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "在终端中继续此聊天。应用会先停止自己的会话；你在这里发送的下一条消息会恢复它。",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "此聊天已在 Claude Code 终端中打开。请先断开该终端视图，然后再发送。",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code 仍在此聊天中回答。请先停止或等待，然后再打开终端。",
+  "This chat has no terminal": "此聊天没有终端"
 }

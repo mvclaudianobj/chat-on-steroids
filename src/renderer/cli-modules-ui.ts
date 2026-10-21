@@ -347,9 +347,15 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     mount.hidden = false;
     manager.show(mount, true);
   }
+  /** Shows a terminal main just created or updated (an engine chat's hand-over), after reloading the list. */
+  async function openSession(sessionId: string): Promise<void> {
+    await refresh();
+    await showSession(sessionId);
+  }
   void refresh();
   return {
     createSession,
+    openSession,
     cliModules: (): ReadonlyArray<CliModuleSummary> => [...current.values()].map(status => ({
       id: status.id,
       name: status.name,

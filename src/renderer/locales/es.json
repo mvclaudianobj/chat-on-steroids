@@ -3065,5 +3065,10 @@
   "This approval is no longer pending": "Esta aprobación ya no está pendiente",
   "New CLIProxy chat in this project": "Nuevo chat de CLIProxy en este proyecto",
   "Chat with {0}": "Chat con {0}",
-  "New {0} chat in this project": "Nuevo chat de {0} en este proyecto"
+  "New {0} chat in this project": "Nuevo chat de {0} en este proyecto",
+  "Open in terminal": "Abrir en el terminal",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "Continúa este chat en un terminal. La app detiene antes su propia sesión; tu próximo mensaje aquí la reanuda.",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "Este chat está abierto en un terminal de Claude Code. Desconecta esa vista de terminal y vuelve a enviar.",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code sigue respondiendo en este chat. Detenlo o espera y luego abre el terminal.",
+  "This chat has no terminal": "Este chat no tiene terminal"
 }

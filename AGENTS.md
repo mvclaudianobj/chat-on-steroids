@@ -1386,8 +1386,8 @@ turn through the store's `session:changed` notices. Fences by id: `bridge.ts`
 
 The chat view is the same for both providers: `renderer/api-chat-ui.ts` (created by
 `marks-modules-ui.ts`) owns only what differs. New chat's menu (`cli-modules-ui.ts`
-`newChatItems`) shows one item per engine `apiChatEngines` reports available (today only
-**CLIProxy**) after ChatGPT; for CLIProxy, without a default model or with a required key missing
+`newChatItems`) shows one item per engine `apiChatEngines` reports available (**CLIProxy**,
+**Claude Code**) after ChatGPT; for CLIProxy, without a default model or with a required key missing
 it opens Settings > Modules with a toast instead. Creating
 calls `apiChatCreate({projectId})` and selects the session through `chat.ts`
 `selectChatSession` (reloads the list first, so a stale read cannot drop the new selection). A
@@ -1476,10 +1476,11 @@ later. E0 changes no CLIProxy behavior.
 - Contract (`types.ts` `AgentEngine`): `id`, `label`, `terminalMode`, `status()` (available +
   one-line detail, never throws for "not set up"), `models(query)` (the catalog's row shape),
   `create`, `view`, `send` (resolves once the question is recorded), `stop`, `approve`,
-  `setChatSettings`, `recover`, optional `terminal(chat)` → `{argv, mode: live|handover}`.
+  `setChatSettings`, `recover`, optional `terminal(chat)` → `{argv, mode: live|handover}` and
+  optional `openTerminal(sessionId)` → `{cliSessionId}` (IPC `terminal`).
   Ids (`shared/agent-engine.ts`): `cliproxy`, and reserved `markscode`, `codex`, `claude`.
-- Registry (`registry.ts`): `cliproxy.ts` wraps the executor and catalog unchanged; the reserved
-  engines are registered unavailable and refuse every action until their PR calls
+- Registry (`registry.ts`): `cliproxy.ts` wraps the executor and catalog unchanged; `claude.ts`
+  is the real Claude Code engine (below); the other reserved engines are registered unavailable and refuse every action until their PR calls
   `registerAgentEngine`. IPC `createChat` takes `engine` (default `cliproxy`; refused while the
   engine's status is unavailable); `send/stop/approve/chatSettings/setChatSettings` route by the
   chat's ledger record; `models` takes `engine` (default `cliproxy`); `engines` lists every
@@ -1517,9 +1518,72 @@ later. E0 changes no CLIProxy behavior.
   (`reviewUnavailable: 'not-kept'`), credentials redacted. Request-id placement only reads
   `source: 'mcp'` rows, so the row is placed by its turnId. Written once, it needs no revision
   and the session's tool count stays exact.
+- **Claude Code (`claude.ts`, G).** Registered as `claude` (label "Claude Code", terminal
+  `handover`); New chat and the project menus offer it once `status()` is available: Claude
+  module active and Command on (cli-modules `cliChatRuntime`: binary, canonical cwd, `wsl.exe
+  --cd … --exec` on Windows), `--version` answers and `claude auth status --json` does not say
+  `loggedIn:false` (cached 60 s; an auth-looking failure clears the cache). `models()` lists the
+  aliases `fable, opus, sonnet, haiku` plus every model a `system/init` reported; effort is the
+  shared `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
+  `backendSessionId` (no strict-mode trust: its tools never touch the MCP kernel).
+  One long-lived process per chat, spawned on send in the canonical project folder (home without
+  a project) with `CLAUDECODE`/`ELECTRON_RUN_AS_NODE` removed: `-p --input-format stream-json
+  --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio
+  --permission-mode <default|manual> --settings {"permissions":{"disableBypassPermissionsMode":"disable"}}
+  [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
+  it without `default` (2.1.306 renamed the choice). Never a bypass flag or mode; a `system/init`
+  reporting `bypassPermissions` kills the process and fails the turn. User/project/local settings
+  still load (auth helpers, env, MCP and the user's own rules keep working, and the terminal
+  resumes with the same settings); the flag layer only forbids bypass. A user allow rule can
+  therefore skip a prompt; the tool still appears as its row. `--resume` when the store has an
+  earlier `turn_start` of the chat, else `--session-id`; a process that exits before any output
+  with "No conversation found" / "already in use" is retried once with the other flag. A
+  model/effort change restarts the idle process with `--resume` on the next send; an idle process
+  ends after 10 minutes. Module Stop/Disable ends every host (running turns `stopped`).
+  Wire (Agent SDK protocol): host sends `control_request {subtype:'initialize', hooks:null}`
+  first (an error answer is accepted), then per turn `{type:'user', message:{role:'user',
+  content:[{type:'text',text}]}, parent_tool_use_id:null}`. Mapping: `stream_event`
+  `content_block_delta/text_delta` → `text_delta`; `assistant` text block → `text_final`
+  (authoritative); `tool_use` → `tool_started` (Bash/PowerShell `command`; Edit/Write/MultiEdit/
+  NotebookEdit `patch` with files and a diff from the input or `structuredPatch`; Read/Grep/Glob/
+  LS `read`; `mcp__s__t` `mcp` named `s/t`; else `other`); `user` `tool_result` → `tool_finished`
+  (`declined` when the user denied it, `failed` on `is_error`); messages with a
+  `parent_tool_use_id` (sub-agents) are skipped; `result` → `usage` (input incl. cache, output,
+  cached) then `turn_end` `completed`, or a fatal `chat_error` + `failed` when `is_error` or the
+  subtype is not `success`. A process exit mid-turn is a fatal error with the redacted
+  (`redactSecretText`) last stderr lines, then `failed`.
+  Approvals: `control_request {subtype:'can_use_tool', tool_name, input, tool_use_id,
+  permission_suggestions}` → the gate (action `{tool_use_id, input}` hashed with the tool name;
+  the CLI `request_id` stays main-side). The chat's `auto` mode answers allow with the input at
+  once (no card). Answers are `control_response {subtype:'success', request_id, response}`:
+  approve `{behavior:'allow', updatedInput:<the shown input>}`; always adds `updatedPermissions`
+  = the CLI's `addRules`(allow)/`addDirectories` suggestions with `destination:'session'` (never
+  `setMode`; the chat's mode is unchanged); deny/stop `{behavior:'deny', message}`. A
+  `control_cancel_request {request_id}` removes the card and is never answered; any other CLI
+  control request gets `{subtype:'error'}`. Stop sends `control_request {subtype:'interrupt'}`,
+  answers pending cards `stop` and ends the turn `stopped` at once; the stopped turn's own late
+  `result` is drained (a process that sends none within 5 s is ended). Recovery: no process
+  survives the app; `recover()` is the engine-neutral `recoverApiChats` (open turn →
+  `interrupted`), and the next send resumes with `--resume`.
+  Hand-over terminal: IPC `terminal {sessionId}` (preload `apiChatTerminal`, the composer's "Open
+  in terminal" button for engines with a terminal) → `openTerminal`: refused while a turn runs,
+  else the host process is stopped and cli-modules `cliEngineTerminal` creates or reuses the
+  chat's Claude module terminal (`engineChat` + `args` `--resume <uuid>`, or `--session-id <uuid>`
+  before the first turn; strictly validated) and the renderer shows it
+  (`cli-modules-ui` `openSession`). tmux starts `sh -c 'exec "$@"' marks-cli <bin> <args>`. Every
+  open of such a terminal (also from the sidebar) first runs the engine's hook, which refuses
+  while the chat answers and stops its host. Return rule: the next send asks
+  `cliEngineTerminalState` — `attached` (a terminal view is connected) refuses the send ("Disconnect
+  that terminal view, then send again"); `detached` kills that tmux session, then the host
+  restarts with `--resume`. The TUI and the host never run at once. Still needs a real run: auth
+  detection wording, `manual` vs `default`, `initialize`/`interrupt` answers and suggestion shapes
+  of the installed CLI.
 Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
-`test/api-chat-ui.test.ts` (only available engines are offered).
+`test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,
+turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over),
+`test/cli-modules.test.ts` (engine terminal args and open hook),
+`test/api-chat-ui.test.ts` (only available engines are offered; the terminal button).
 
 ### CLIProxyAPI module management
 

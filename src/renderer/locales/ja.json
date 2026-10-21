@@ -2975,5 +2975,10 @@
   "This approval is no longer pending": "この承認はすでに保留中ではありません",
   "New CLIProxy chat in this project": "このプロジェクトで新しい CLIProxy チャット",
   "Chat with {0}": "{0} でチャット",
-  "New {0} chat in this project": "このプロジェクトで新しい {0} チャット"
+  "New {0} chat in this project": "このプロジェクトで新しい {0} チャット",
+  "Open in terminal": "ターミナルで開く",
+  "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "このチャットをターミナルで続けます。アプリは先に自身のセッションを停止し、ここでの次のメッセージで再開します。",
+  "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "このチャットは Claude Code のターミナルで開かれています。そのターミナル表示を切断してから、もう一度送信してください。",
+  "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code はこのチャットでまだ応答中です。停止するか待ってから、ターミナルを開いてください。",
+  "This chat has no terminal": "このチャットにはターミナルがありません"
 }
