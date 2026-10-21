@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const durable = new Map<string, unknown>();
+const modules = vi.hoisted(() => ({ enabled: new Set<string>() }));
 vi.mock('../src/main/durable.js', () => ({
   readDurable: async (name: string) => structuredClone(durable.get(name) ?? null),
   writeDurableNow: async (name: string, value: unknown) => { durable.set(name, structuredClone(value)); }
@@ -48,14 +49,38 @@ beforeEach(() => {
   ledger.resetChatLedgerForTests();
   registry.resetAgentEnginesForTests();
   settings.resetApiChatSettingsForTests();
+  modules.enabled.clear();
+  registry.setAgentEngineModulesForTests(async id => modules.enabled.has(id));
 });
 
 describe('agent engine registry', () => {
   it('lists every engine in order; Codex and MarksCode are unavailable while their modules are off', async () => {
-    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; terminal: string | null }>;
-    expect(engines.map(engine => `${engine.id}:${engine.available}:${engine.terminal}`)).toEqual([
-      'cliproxy:true:null', 'markscode:false:live', 'codex:false:live', 'claude:false:handover'
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; hidden: boolean; terminal: string | null }>;
+    expect(engines.map(engine => `${engine.id}:${engine.available}:${engine.enabled}:${engine.hidden}:${engine.terminal}`)).toEqual([
+      'cliproxy:true:true:false:null', 'markscode:false:false:true:live', 'codex:false:false:false:live', 'claude:false:false:false:handover'
     ]);
+  });
+
+  it('reports an engine whose module is on but which cannot run as enabled, with its reason', async () => {
+    registry.registerAgentEngine(fakeEngine('claude', false));
+    modules.enabled.add('claude');
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; detail: string }>;
+    expect(engines.find(engine => engine.id === 'claude')).toMatchObject({ available: false, enabled: true, detail: 'off' });
+    expect(engines.find(engine => engine.id === 'codex')).toMatchObject({ available: false, enabled: false });
+  });
+
+  it('hides MarksCode from new chats in this version, without probing it, and keeps its existing chats working', async () => {
+    const markscode = fakeEngine('markscode');
+    registry.registerAgentEngine(markscode);
+    modules.enabled.add('markscode');
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; hidden: boolean; terminal: string | null }>;
+    expect(engines.find(engine => engine.id === 'markscode')).toMatchObject({ available: false, enabled: false, hidden: true });
+    expect(markscode.status).not.toHaveBeenCalled();
+    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('New MarksCode chats are not offered in this version');
+    expect(markscode.create).not.toHaveBeenCalled();
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, { [SESSION]: { engine: 'markscode', backendSessionId: 'ses_1', model: null, effort: null } });
+    expect(await request({ action: 'chatSettings', sessionId: SESSION })).toMatchObject({ engine: 'markscode' });
+    expect(await request({ action: 'send', sessionId: SESSION, text: 'hi' })).toEqual({ turnId: 'markscode-turn' });
   });
 
   it('routes every chat action by the chat ledger record, and a record without engine to CLIProxy', async () => {
@@ -91,7 +116,7 @@ describe('agent engine registry', () => {
     expect(cliproxy.create).toHaveBeenCalledWith({ projectId: null });
     await expect(request({ action: 'createChat', engine: 'claude' })).rejects.toThrow('off');
     await expect(request({ action: 'createChat', engine: 'codex' })).rejects.toThrow('Enable the Codex module in Settings > Modules first');
-    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('Enable the MarksCode module in Settings > Modules');
+    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('not offered in this version');
     expect(() => parseApiChatRequest({ action: 'createChat', engine: 'gemini' })).toThrow();
   });
 

@@ -7,6 +7,7 @@ const fixture = vi.hoisted(() => ({
   handle: null as null | ((event: any, payload: unknown) => Promise<any>),
   blockHasSession: false,
   missingSession: false,
+  clients: '',
   resumeHasSession: null as null | (() => void),
   pty: { onData: vi.fn(), onExit: vi.fn(), write: vi.fn(), resize: vi.fn(), kill: vi.fn(), pause: vi.fn(), resume: vi.fn() },
   durable: ['codex'] as unknown,
@@ -24,6 +25,7 @@ vi.mock('node:child_process', () => {
       callback(Object.assign(new Error("can't find session"), { code: 1 }), '', "can't find session");
       return;
     }
+    if (args.includes('list-clients')) { callback(null, fixture.clients, ''); return; }
     if (fixture.blockHasSession && args.includes('has-session')) {
       fixture.blockHasSession = false;
       fixture.resumeHasSession = () => callback(null, '', '');
@@ -63,11 +65,11 @@ vi.mock('../src/main/durable.js', () => ({
 vi.mock('../src/main/cli-source-install.js', () => ({ installFork: vi.fn() }));
 
 import {
-  cliAction, cliChatRuntime, cliCreateSession, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
+  cliAction, cliChatRuntime, cliCreateSession, cliEndEngineTerminal, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
   registerCliEngineOpenHook, registerCliModuleIpc, registerCliModuleStopHook
 } from '../src/main/cli-modules.js';
 
-beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
+beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.clients = ''; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
 
 describe('Persistent coding CLI terminal', () => {
   it('creates independent durable sessions and reopens each stable tmux identity', async () => {
@@ -183,6 +185,19 @@ describe('Persistent coding CLI terminal', () => {
       fixture.missingSession = false;
       expect(await cliEngineTerminalState('session-0001')).toBe('attached');
       expect(await cliEngineTerminalState('session-other')).toBe('none');
+      // The app's view is one tmux client; a second one is a terminal outside the app.
+      fixture.clients = 'app-view\n';
+      expect(await cliEngineTerminalState('session-0001')).toBe('attached');
+      fixture.clients = 'app-view\nexternal-ssh\n';
+      expect(await cliEngineTerminalState('session-0001')).toBe('external');
+      // The take-back: the app's own view is detached first, then the terminal's tmux session ends.
+      fixture.pty.kill.mockClear();
+      fixture.commands.length = 0;
+      await cliEndEngineTerminal('session-0001');
+      expect(fixture.pty.kill).toHaveBeenCalledTimes(1);
+      expect(fixture.commands.some(args => args.includes('kill-session') && args.includes(`=${session.tmuxSession}`))).toBe(true);
+      fixture.clients = '';
+      expect(await cliEngineTerminalState('session-0001')).toBe('detached');
     } finally {
       registerCliEngineOpenHook('claude', null);
       await cliAction('claude', 'stop');

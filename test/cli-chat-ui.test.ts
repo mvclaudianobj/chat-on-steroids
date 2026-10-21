@@ -87,7 +87,7 @@ it('opens the selected CLI module in the central terminal view', async () => {
   await vi.waitFor(() => expect(dom.window.document.getElementById('newChat')?.getAttribute('aria-haspopup')).toBe('menu'));
   dom.window.document.getElementById('newChat')!.click();
   const item = await vi.waitFor(() => {
-    const found = dom.window.document.querySelector<HTMLButtonElement>('[data-row-action="new-chat-codex"]');
+    const found = dom.window.document.querySelector<HTMLButtonElement>('[data-row-action="new-terminal-codex"]');
     expect(found).toBeTruthy();
     return found!;
   });
@@ -112,11 +112,11 @@ it('opens one New chat menu whose ChatGPT item keeps the app\'s own new chat', a
   dom.window.document.getElementById('newChat')!.click();
   expect(chatgpt).not.toHaveBeenCalled();
   const items = await vi.waitFor(() => {
-    const found = [...dom.window.document.querySelectorAll<HTMLElement>('[data-row-action^="new-chat-"]')];
+    const found = [...dom.window.document.querySelectorAll<HTMLElement>('.row-menu-item')];
     expect(found.length).toBe(2);
     return found;
   });
-  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'new-chat-claude']);
+  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'new-terminal-claude']);
   items[0]!.click();
   await vi.waitFor(() => expect(chatgpt).toHaveBeenCalledTimes(1));
 });
@@ -129,7 +129,7 @@ it('keeps New chat a plain ChatGPT button while no CLI module is enabled', async
   expect(dom.window.document.getElementById('newChat')?.hasAttribute('aria-haspopup')).toBe(false);
   dom.window.document.getElementById('newChat')!.click();
   expect(chatgpt).toHaveBeenCalledTimes(1);
-  expect(dom.window.document.querySelector('[data-row-action^="new-chat-"]')).toBeNull();
+  expect(dom.window.document.querySelector('.row-menu')).toBeNull();
 });
 
 it('opens the same New chat menu from the Inbox layout\'s compose button', async () => {
@@ -148,8 +148,37 @@ it('opens the same New chat menu from the Inbox layout\'s compose button', async
     expect(found).toBeTruthy();
     return found!;
   });
-  expect(dom.window.document.querySelector('[data-row-action="new-chat-claude"]')).toBeTruthy();
+  expect(dom.window.document.querySelector('[data-row-action="new-terminal-claude"]')).toBeTruthy();
   // ChatGPT keeps the Inbox's own new chat (it starts in the project the Inbox shows).
   item.click();
   await vi.waitFor(() => expect(compose).toHaveBeenCalledTimes(1));
+});
+
+it('keeps the Claude terminal module and the Claude Code engine apart when both are enabled', async () => {
+  // 2.1.43.3: both items used to be `new-chat-claude`, so one could trigger the other.
+  const createSession = vi.fn(async () => ({ ok: false as const, error: 'not in this test' }));
+  const engineChat = vi.fn();
+  const api = { ...statusOf(true), cliCreateSession: createSession } as any;
+  createCliModulesUi(api, {
+    showTab: () => undefined, openChatView: () => undefined, workspace: () => 'project-1',
+    newChatItems: () => [{ action: 'new-chat-engine-claude', label: () => 'Claude Code', run: engineChat }]
+  });
+  await vi.waitFor(() => expect(dom.window.document.getElementById('newChat')?.getAttribute('aria-haspopup')).toBe('menu'));
+  const open = async (): Promise<HTMLElement[]> => {
+    dom.window.document.getElementById('newChat')!.click();
+    return vi.waitFor(() => {
+      const found = [...dom.window.document.querySelectorAll<HTMLElement>('.row-menu-item')];
+      expect(found.length).toBe(3);
+      return found;
+    });
+  };
+  const items = await open();
+  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'new-chat-engine-claude', 'new-terminal-claude']);
+  expect(new Set(items.map(item => item.dataset.rowAction)).size).toBe(3);
+  items[1]!.click();
+  expect(engineChat).toHaveBeenCalledTimes(1);
+  expect(createSession).not.toHaveBeenCalled();
+  (await open())[2]!.click();
+  await vi.waitFor(() => expect(createSession).toHaveBeenCalledWith('claude', 'project-1'));
+  expect(engineChat).toHaveBeenCalledTimes(1);
 });

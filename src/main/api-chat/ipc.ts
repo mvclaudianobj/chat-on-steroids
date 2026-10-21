@@ -40,7 +40,8 @@ const request = z.discriminatedUnion('action', [
   }).strict(),
   z.object({ action: z.literal('test'), model: modelId.optional() }).strict(),
   z.object({ action: z.literal('createChat'), projectId: z.string().uuid().nullable().optional(), model: modelId.optional(), engine: engine.optional() }).strict(),
-  z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
+  // `takeBackTerminal`: the user chose "Close the terminal and continue here" (Claude Code hand-over).
+  z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS), takeBackTerminal: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
   // An explicit user action: start the engine's background service (`markscode service start`).
   z.object({ action: z.literal('startEngineService'), engine: z.literal('markscode') }).strict(),
@@ -98,7 +99,11 @@ export async function chatAction(input: z.infer<typeof request>): Promise<unknow
     }
     case 'createChat': return createAgentChat(input.engine ?? DEFAULT_AGENT_ENGINE, { projectId: input.projectId ?? null, ...(input.model ? { model: input.model } : {}) });
     // The turn streams on in main; the renderer follows it through session change notices.
-    case 'send': return { turnId: (await (await engineForChat(input.sessionId)).send(input.sessionId, input.text)).turnId };
+    case 'send': {
+      const owner = await engineForChat(input.sessionId);
+      const sent = input.takeBackTerminal ? await owner.send(input.sessionId, input.text, { takeBackTerminal: true }) : await owner.send(input.sessionId, input.text);
+      return { turnId: sent.turnId };
+    }
     case 'stop': return { stopped: await (await engineForChat(input.sessionId)).stop(input.sessionId) };
     case 'chatSettings': return (await engineForChat(input.sessionId)).view(input.sessionId);
     case 'startEngineService': return startMarksCodeService();

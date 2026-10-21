@@ -1945,6 +1945,32 @@ it('offers enabled CLI modules in a lazy project terminal submenu with the proje
   expect(w.document.querySelector('.row-menu [data-row-action="new-terminal"]')).toBeNull();
 });
 
+it("keeps a project's engine chat and its terminal of the same name apart", async () => {
+  // 2.1.43.3: the Claude terminal module and the Claude Code engine both enabled; each item runs its own action.
+  const project = { id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1 };
+  const createCliSession = vi.fn();
+  const engineChat = vi.fn();
+  const { w } = await boot([], false, [], [project]);
+  const { initChat } = await import('../src/renderer/chat.js');
+  initChat({
+    save: async () => undefined, state: () => null, cliModules: () => [{ id: 'claude', name: 'Claude', enabled: true }], createCliSession,
+    projectChatItems: projectId => [{ action: 'new-chat-engine-claude', label: () => 'New Claude Code chat in this project', run: () => engineChat(projectId) }]
+  });
+  await settle();
+
+  projectMenu(w, project.id);
+  expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction))
+    .toEqual(['new-chat', 'new-chat-engine-claude', 'new-terminal', 'color', 'remove']);
+  menuItem(w, 'new-chat-engine-claude').click();
+  expect(engineChat).toHaveBeenCalledExactlyOnceWith(project.id);
+  expect(createCliSession).not.toHaveBeenCalled();
+  projectMenu(w, project.id);
+  menuItem(w, 'new-terminal').click();
+  menuItem(w, 'new-terminal-claude').click();
+  expect(createCliSession).toHaveBeenCalledExactlyOnceWith('claude', project.id);
+  expect(engineChat).toHaveBeenCalledTimes(1);
+});
+
 it('picks and clears project color without changing project membership', async () => {
   const project = {
     id: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee', name: 'Workspace', path: 'C:\\workspace\\primary', createdAt: 1

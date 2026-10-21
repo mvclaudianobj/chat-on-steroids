@@ -46,8 +46,8 @@ app.whenReady().then(async () => {
   await capture('sidebar.png');
   await js(`document.getElementById('newChat').click()`);
   await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-chatgpt"]')`);
-  assert.deepEqual(await js(`[...document.querySelectorAll('.row-menu [data-row-action^="new-chat-"]')].map(b=>b.dataset.rowAction+'='+b.textContent.trim())`),
-    ['new-chat-chatgpt=ChatGPT','new-chat-markscode=MarksCode','new-chat-codex=Codex','new-chat-claude=Claude']);
+  assert.deepEqual(await js(`[...document.querySelectorAll('.row-menu .row-menu-item')].map(b=>b.dataset.rowAction+'='+b.textContent.trim())`),
+    ['new-chat-chatgpt=ChatGPT','new-terminal-markscode=MarksCode','new-terminal-codex=Codex','new-terminal-claude=Claude']);
   await capture('menu.png');
   // The Inbox layout's compose button opens the same menu.
   await js(`document.querySelector('.row-menu')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
@@ -55,8 +55,8 @@ app.whenReady().then(async () => {
   await until(`!!document.querySelector('[data-inbox-control="compose"]')`);
   await js(`document.querySelector('[data-inbox-control="compose"]').click()`);
   await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-chatgpt"]')`);
-  assert.deepEqual(await js(`[...document.querySelectorAll('.row-menu [data-row-action^="new-chat-"]')].map(b=>b.dataset.rowAction)`),
-    ['new-chat-chatgpt','new-chat-markscode','new-chat-codex','new-chat-claude']);
+  assert.deepEqual(await js(`[...document.querySelectorAll('.row-menu .row-menu-item')].map(b=>b.dataset.rowAction)`),
+    ['new-chat-chatgpt','new-terminal-markscode','new-terminal-codex','new-terminal-claude']);
   await capture('inbox-menu.png');
   assert.deepEqual(errors,[]);
   console.log('PASS: New chat opens one menu with ChatGPT first, then MarksCode, Codex and Claude, in the Projects and Inbox layouts');

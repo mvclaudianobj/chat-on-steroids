@@ -4,6 +4,8 @@
  * ledger record. Only an engine whose status is available can create a chat. MarksCode
  * (`markscode.ts`) is available while its module is enabled and its service answers; Codex
  * (`codex.ts`) and Claude Code (`claude.ts`) once their module, binary, version and sign-in are.
+ * The list names every engine with its status; New chat offers each enabled one (unavailable ones
+ * disabled, with their reason) except the hidden ones.
  */
 import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineInfo, type AgentEngineTerminalMode } from '../../shared/agent-engine.js';
 import type { ApiChatView } from '../../shared/api-chat.js';
@@ -26,6 +28,30 @@ export function reservedEngine(id: AgentEngineId, terminalMode: AgentEngineTermi
     stop: async () => false, approve: async () => refuse(), setChatSettings: async () => refuse(),
     recover: async () => undefined
   };
+}
+
+/**
+ * Registered and working, but not offered for new chats in this version: MarksCode (2.1.43.3) is
+ * to be replaced by an upstream OpenCode engine. Its existing chats keep routing to it, so their
+ * history, terminal and turns stay as they were; only `createChat` refuses it.
+ */
+const HIDDEN_ENGINES: ReadonlySet<AgentEngineId> = new Set<AgentEngineId>(['markscode']);
+const hiddenDetail = (id: AgentEngineId): string => `New ${AGENT_ENGINE_LABELS[id]} chats are not offered in this version`;
+
+type ModuleEngineId = Exclude<AgentEngineId, 'cliproxy'>;
+const cliModuleEnabled = async (id: ModuleEngineId): Promise<boolean> => (await (await import('../cli-modules.js')).cliModuleState(id)).enabled;
+let moduleEnabledOf = cliModuleEnabled;
+
+/** Whether the CLI module behind an engine is switched on; CLIProxy has none (its endpoint decides). */
+async function moduleEnabled(id: AgentEngineId): Promise<boolean> {
+  if (id === 'cliproxy') return false;
+  try { return await moduleEnabledOf(id); }
+  catch { return false; }
+}
+
+/** Tests: which CLI modules are switched on, without cli-modules' durable state. */
+export function setAgentEngineModulesForTests(enabled: ((id: ModuleEngineId) => Promise<boolean>) | null): void {
+  moduleEnabledOf = enabled ?? cliModuleEnabled;
 }
 
 const defaults = (): AgentEngine[] => [
@@ -55,20 +81,27 @@ export async function engineForChat(sessionId: string): Promise<AgentEngine> {
   return agentEngine(id);
 }
 
-/** Every registered engine with its status, in the fixed order; a failing status is unavailable. */
+/**
+ * Every registered engine with its status, in the fixed order; a failing status is unavailable.
+ * A hidden engine is listed (its chats keep their terminal button) without probing its status.
+ */
 export async function listAgentEngines(): Promise<AgentEngineInfo[]> {
-  return Promise.all(AGENT_ENGINE_IDS.filter(id => engines.has(id)).map(async id => {
+  return Promise.all(AGENT_ENGINE_IDS.filter(id => engines.has(id)).map(async (id): Promise<AgentEngineInfo> => {
     const engine = engines.get(id)!;
+    const base = { id, label: engine.label, terminal: engine.terminalMode };
+    if (HIDDEN_ENGINES.has(id)) return { ...base, available: false, enabled: false, hidden: true, detail: hiddenDetail(id) };
     const status = await engine.status().catch((error: unknown) => ({
       available: false, detail: error instanceof Error ? error.message.slice(0, 200) : 'Status unavailable'
     }));
-    return { id, label: engine.label, available: status.available, detail: status.detail.slice(0, 200), terminal: engine.terminalMode };
+    const enabled = status.available || await moduleEnabled(id);
+    return { ...base, available: status.available, enabled, hidden: false, detail: status.detail.slice(0, 200) };
   }));
 }
 
-/** A new chat on that engine; refused while the engine is unavailable. */
+/** A new chat on that engine; refused while the engine is unavailable or hidden. */
 export async function createAgentChat(id: AgentEngineId, options: { projectId: string | null; model?: string }): Promise<ApiChatView> {
   const engine = agentEngine(id);
+  if (HIDDEN_ENGINES.has(id)) throw new Error(hiddenDetail(id));
   const status = await engine.status();
   if (!status.available) throw new Error(status.detail || `${engine.label} is not available`);
   return engine.create(options);

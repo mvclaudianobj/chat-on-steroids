@@ -148,7 +148,8 @@ const api = {
   /** A new API chat: a local session in the `cosapi-` namespace, optionally in a project, on an engine (CLIProxy by default). */
   apiChatCreate: (options: { projectId?: string | null; model?: string; engine?: import('../shared/agent-engine.js').AgentEngineId } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
   /** Records the question and starts the answer; it streams into the session's history. */
-  apiChatSend: (sessionId: string, text: string) => call<{ turnId: string }>('marksApiChat:request', { action: 'send', sessionId, text }),
+  apiChatSend: (sessionId: string, text: string, options: { takeBackTerminal?: true } = {}) =>
+    call<{ turnId: string }>('marksApiChat:request', { action: 'send', sessionId, text, ...(options.takeBackTerminal ? { takeBackTerminal: true } : {}) }),
   apiChatStop: (sessionId: string) => call<{ stopped: boolean }>('marksApiChat:request', { action: 'stop', sessionId }),
   apiChatTerminal: (sessionId: string) => call<{ cliSessionId: string }>('marksApiChat:request', { action: 'terminal', sessionId }),
   apiChatChatSettings: (sessionId: string) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'chatSettings', sessionId }),

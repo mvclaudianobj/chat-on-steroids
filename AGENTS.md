@@ -1386,8 +1386,14 @@ turn through the store's `session:changed` notices. Fences by id: `bridge.ts`
 
 The chat view is the same for both providers: `renderer/api-chat-ui.ts` (created by
 `marks-modules-ui.ts`) owns only what differs. New chat's menu (`cli-modules-ui.ts`
-`newChatItems`) shows one item per engine `apiChatEngines` reports available (**CLIProxy**,
-**Claude Code**) after ChatGPT; for CLIProxy, without a default model or with a required key missing
+`newChatItems`) shows, after ChatGPT, one item per engine `apiChatEngines` reports enabled and not
+hidden (`offeredEngines`): an available one can be picked; an unavailable one (Codex not signed in,
+binary missing, …) is a disabled item whose second line and tooltip are its status `detail` (main's
+short, redacted reason), so the user sees why. An engine whose module is off is not listed, nor a
+hidden one (MarksCode in 2.1.43.3). Action ids have separate namespaces: engine items
+`new-chat-engine-<id>` (New chat and the project menu), terminal-module items `new-terminal-<id>`
+(New chat and the project menu's New terminal submenu), so the Claude terminal module and the
+Claude Code engine never share an id. For CLIProxy, without a default model or with a required key missing
 it opens Settings > Modules with a toast instead. Creating
 calls `apiChatCreate({projectId})` and selects the session through `chat.ts`
 `selectChatSession` (reloads the list first, so a stale read cannot drop the new selection). A
@@ -1503,7 +1509,11 @@ later. E0 changes no CLIProxy behavior.
   its engine plugs in (`registerAgentEngine`). IPC `createChat` takes `engine` (default `cliproxy`; refused while the
   engine's status is unavailable); `send/stop/approve/chatSettings/setChatSettings` route by the
   chat's ledger record; `models` takes `engine` (default `cliproxy`); `engines` lists every
-  engine with its status. `ApiChatView.engine` names the chat's engine. The executor refuses a
+  engine with its status: `available`, `enabled` (available, or its CLI module switched on per
+  cli-modules `cliModuleState`; CLIProxy: its endpoint is set), `hidden` and `detail`. A hidden engine
+  (`HIDDEN_ENGINES`: `markscode` in 2.1.43.3) is listed without probing its status and refused by
+  `createChat` ("New MarksCode chats are not offered in this version"); its existing chats still route
+  to it and keep working. `ApiChatView.engine` names the chat's engine. The executor refuses a
   chat of another engine.
 - Ledger (`ledger.ts`): a record without `engine` is a `cliproxy` chat, and `cliproxy` records
   are still written without it (older records keep their exact shape). `backendSessionId` is the
@@ -1658,9 +1668,17 @@ later. E0 changes no CLIProxy behavior.
   (`cli-modules-ui` `openSession`). tmux starts `sh -c 'exec "$@"' marks-cli <bin> <args>`. Every
   open of such a terminal (also from the sidebar) first runs the engine's hook, which refuses
   while the chat answers and stops its host. Return rule: the next send asks
-  `cliEngineTerminalState` — `attached` (a terminal view is connected) refuses the send ("Disconnect
-  that terminal view, then send again"); `detached` kills that tmux session, then the host
-  restarts with `--resume`. The TUI and the host never run at once. Still needs a real run: auth
+  `cliEngineTerminalState` — `attached` (only the app's own terminal view; each view is one tmux
+  client) or `external` (more tmux clients than app views: a terminal outside the app) refuses the
+  send with `ENGINE_TERMINAL_OPEN_IN_APP` / `_ELSEWHERE` (`shared/agent-engine.ts`). The composer
+  recognises those exact texts and shows a row above it with "Close the terminal and continue here"
+  (the external text says that terminal is closed too) and Cancel; only that click sends again with
+  IPC `send {takeBackTerminal: true}` (preload `apiChatSend(id, text, {takeBackTerminal})`). Then, and
+  for `detached` without asking, `cliEndEngineTerminal` tells the app's views of that tmux session
+  they exited, detaches them and kills the session (Claude Code saved its session), and the host
+  restarts with `--resume` and sends the message. Nothing kills the TUI without that action or a
+  detached terminal. Opening the terminal is still refused while the chat answers. The TUI and the
+  host never run at once. Still needs a real run: auth
   detection wording, `manual` vs `default`, `initialize`/`interrupt` answers and suggestion shapes
   of the installed CLI.
 - **Terminals (one seam for every engine).** Contract: `terminal(chat)` describes the argv and
@@ -1683,10 +1701,16 @@ Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
 `test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,
 turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over),
-`test/cli-modules.test.ts` (engine terminal args and open hook),
-`test/api-chat-ui.test.ts` (only available engines are offered; the terminal button).
+`test/cli-modules.test.ts` (engine terminal args, open hook, attached/external state, take-back end),
+`test/api-chat-ui.test.ts` (offered engines, unavailable ones disabled with their reason, hidden ones
+absent; the terminal button; the take-back offer), `test/cli-chat-ui.test.ts` and
+`test/renderer-timeline.test.ts` (engine and terminal items of the same name both enabled).
 
-**MarksCode engine (E: MarksCode).** `agent-engine/markscode.ts` + `markscode-client.ts` (Marks-owned)
+**MarksCode engine (E: MarksCode).** Hidden in 2.1.43.3: not offered for new chats (registry
+`HIDDEN_ENGINES`, `createChat` refuses it, New chat and the project menu never list it); a later
+release replaces this fork with an engine on upstream OpenCode. The code and its tests stay and
+compile; an existing MarksCode chat still routes here (history, turns, its live terminal).
+`agent-engine/markscode.ts` + `markscode-client.ts` (Marks-owned)
 run a chat's turns in a session of the MarksCode 2.0.25 shared background service over its HTTP API
 (opencode v2 fork; shapes from `packages/protocol/src/groups/*`, `packages/schema/src/*`).
 - Endpoint and auth: the service's own registration `<XDG_STATE_HOME|~/.local/state>/markscode/service.json`
@@ -1697,7 +1721,8 @@ run a chat's turns in a session of the MarksCode 2.0.25 shared background servic
   answering with the registered pid. A stopped service is reported (`fix: 'start'`); it is started only
   by the explicit action `startMarksCodeService()` (`markscode service start`; IPC
   `startEngineService`, the "Start MarksCode service" button in Settings > Modules > MarksCode).
-  The registry lists `markscode` available only while all of that holds.
+  Before 2.1.43.3 the registry listed `markscode` available only while all of that held; now it is
+  hidden regardless (above).
 - `create`: only in an approved local project (`projectWorkspace` + `cliChatRuntime`; WSL path on
   Windows; server projects refused). `POST /api/session {title, location:{directory}, model?, permissions}`
   with the ruleset `shell * ask`, `edit * ask`, `edit /* deny`, `read /* deny`, `external_directory * deny`

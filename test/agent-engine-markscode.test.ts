@@ -257,7 +257,8 @@ describe('MarksCode agent engine (fake HTTP+SSE service)', () => {
     expect(startService).toHaveBeenCalledWith('/usr/local/bin/markscode');
     expect(started).toMatchObject({ available: true, fix: null });
     expect(started.detail).toContain('MarksCode 2.0.25');
-    expect((await registry.listAgentEngines()).find(item => item.id === 'markscode')).toMatchObject({ available: true });
+    // 2.1.43.3: the engine answers, but the registry keeps MarksCode hidden from new chats.
+    expect((await registry.listAgentEngines()).find(item => item.id === 'markscode')).toMatchObject({ available: false, hidden: true, terminal: 'live' });
     // Wrong password: refused, with a reason, never the password.
     registration = JSON.stringify({ url: fake.url, pid: 4242, password: 'wrong' });
     expect(await engine.marksCodeStatus()).toEqual({ available: false, detail: 'The MarksCode service refused its saved password', fix: null });

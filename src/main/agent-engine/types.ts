@@ -56,8 +56,11 @@ export interface AgentEngine {
   models(query: EngineModelQuery): Promise<{ models: ApiChatModel[]; total: number }>;
   create(options: { projectId: string | null; model?: string }): Promise<ApiChatView>;
   view(sessionId: string): Promise<ApiChatView>;
-  /** Resolves once the question is recorded; the turn streams on in main. */
-  send(sessionId: string, text: string): Promise<{ turnId: string }>;
+  /**
+   * Resolves once the question is recorded; the turn streams on in main. `takeBackTerminal` is the
+   * user's explicit "Close the terminal and continue here" (hand-over engines only).
+   */
+  send(sessionId: string, text: string, options?: { takeBackTerminal?: boolean }): Promise<{ turnId: string }>;
   /** False when no turn of that chat runs in this process. */
   stop(sessionId: string): Promise<boolean>;
   approve(sessionId: string, approvalId: string, decision: ApiChatApprovalDecision): Promise<ApiChatView>;
