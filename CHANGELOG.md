@@ -11,7 +11,7 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ## [2.1.43.2] — Chat with CLIProxy and a complete CLIProxyAPI module
 
-- **Chat with CLIProxy.** New chat → CLIProxy opens a chat whose model runs through the local CLIProxyAPI, in the app's own chat screen: streamed answers, Stop, a model and reasoning choice per chat, history like any chat, and recovery of an answer cut off by a restart. Text only for now; local tools come next.
+- **Chat with CLIProxy.** New chat → CLIProxy opens a chat whose model runs through the local CLIProxyAPI, in the app's own chat screen: streamed answers, Stop, a model and reasoning choice per chat, history like any chat, and recovery of an answer cut off by a restart. It works in the chat's project with the app's local tools (read, search, edit, run commands), step by step, under the same folder, capability and command permissions as ChatGPT; edits and commands ask first unless the chat is set to run them automatically.
 - **CLIProxyAPI managed from Modules.** Installed and latest official versions, Install/Update from the official release with checksum verification, a confirmed repair so an existing service can save its settings, the console password stored once (the console opens signed in), and API keys you can create (saved for the CLIProxy chat) and revoke.
 - **Console sign-in fixed.** The module's status check called the management API without a password on every refresh; CLIProxyAPI counted each as a failed sign-in and locked 127.0.0.1 out for 30 minutes, so a correct password looked refused.
 - **New chat in every layout.** The Inbox layout's new chat button offers the same menu as the Projects sidebar.

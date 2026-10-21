@@ -2965,5 +2965,12 @@
   "New chat in every layout": "所有布局都能新建聊天",
   "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "收件箱布局的新建聊天按钮也提供 CLIProxy、MarksCode、Codex 和 Claude。",
   "Console sign-in fixed": "已修复控制台登录",
-  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "状态检查不再因登录失败而锁定 CLIProxyAPI 控制台。"
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "状态检查不再因登录失败而锁定 CLIProxyAPI 控制台。",
+  "Edits and commands": "编辑和命令",
+  "Ask before edits and commands": "编辑和运行命令前询问",
+  "Run edits and commands automatically": "自动执行编辑和命令",
+  "Approve this action?": "允许此操作？",
+  "Approve": "允许",
+  "Approve and don't ask again in this chat": "允许，并且在此聊天中不再询问",
+  "This approval is no longer pending": "此审批已不再待处理"
 }

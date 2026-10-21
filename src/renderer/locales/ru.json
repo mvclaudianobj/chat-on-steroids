@@ -3100,5 +3100,12 @@
   "New chat in every layout": "Новый чат в любом макете",
   "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "Кнопка нового чата в макете «Входящие» тоже предлагает CLIProxy, MarksCode, Codex и Claude.",
   "Console sign-in fixed": "Вход в консоль исправлен",
-  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Проверки состояния больше не блокируют консоль CLIProxyAPI неудачными входами."
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Проверки состояния больше не блокируют консоль CLIProxyAPI неудачными входами.",
+  "Edits and commands": "Правки и команды",
+  "Ask before edits and commands": "Спрашивать перед правками и командами",
+  "Run edits and commands automatically": "Выполнять правки и команды автоматически",
+  "Approve this action?": "Разрешить это действие?",
+  "Approve": "Разрешить",
+  "Approve and don't ask again in this chat": "Разрешить и больше не спрашивать в этом чате",
+  "This approval is no longer pending": "Это подтверждение больше не ожидается"
 }

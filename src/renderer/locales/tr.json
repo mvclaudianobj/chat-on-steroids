@@ -3010,5 +3010,12 @@
   "New chat in every layout": "Her düzende yeni sohbet",
   "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "Gelen kutusu düzenindeki yeni sohbet düğmesi de CLIProxy, MarksCode, Codex ve Claude sunar.",
   "Console sign-in fixed": "Konsol girişi düzeltildi",
-  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Durum denetimleri artık başarısız girişlerle CLIProxyAPI konsolunu kilitlemiyor."
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Durum denetimleri artık başarısız girişlerle CLIProxyAPI konsolunu kilitlemiyor.",
+  "Edits and commands": "Düzenlemeler ve komutlar",
+  "Ask before edits and commands": "Düzenlemelerden ve komutlardan önce sor",
+  "Run edits and commands automatically": "Düzenlemeleri ve komutları otomatik çalıştır",
+  "Approve this action?": "Bu işleme izin verilsin mi?",
+  "Approve": "İzin ver",
+  "Approve and don't ask again in this chat": "İzin ver ve bu sohbette bir daha sorma",
+  "This approval is no longer pending": "Bu onay artık beklemede değil"
 }

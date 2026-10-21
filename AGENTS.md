@@ -1362,7 +1362,7 @@ answers `hasKey`/`keyRequired`, never the key. Detection is learned from the end
 model list, and a 401 without a stored key asks for the key. The settings live in
 `renderer/api-chat-settings-ui.ts` inside Modules > CLIProxyAPI.
 
-`main/api-chat/executor.ts` runs the text turns (no tools yet). An API chat is an ordinary
+`main/api-chat/executor.ts` runs the turns (tools: see D4 below). An API chat is an ordinary
 `createSession` session (no origin, optional project) with a `cosapi-<uuid>` id that never
 changes. The session store owns its history: the question is an app `user_message`
 (`api-user:<turn>`), the answer an `assistant_message` (`api-assistant:<turn>`) written
@@ -1403,6 +1403,68 @@ spinner); the row menu drops Open in browser, Copy link, Block and Trust for API
 `selectedChatSession`/`selectChatSession` exports; `main.ts` passes them to
 `initMarksModulesUi`. `control-reads.ts` ignores `api_chat_session` like other expected misses.
 Proof: `test/api-chat-ui.test.ts`, `scripts/verify-api-chat-ui.cjs`.
+
+**D4 — local tools.** An API chat uses the app's own Core tools as OpenAI function tools, through
+the same kernel as ChatGPT. `main/api-chat/tools.ts` builds the list for each completion from a
+live `ToolContext` (`roots`, `effectiveCapabilities`, `readOnly`, `privacyScreenshots`,
+`agentTools:false`, `withManagedSkills`). It runs `registerCoreTools` on a
+`createRegistrar(null, ctx, 'core')` wrapped so it captures each `(config, handler)`. The
+allowlist is `read`, `find`, `apply_patch`, `exec_command`, `write_stdin` and `update_plan`, under
+their registered names. Agents, `session_finish`, `save_image`, `usage`, `view_image` and code-mode
+`exec` are never offered. With no `exposedCaps`, a tool whose capability is off is not offered
+(Read-only hides the patch and terminal tools, and `find` replaces the terminal tools when
+command execution is off). Schemas come from `toolSchemaJson` with an object root and no
+`$schema`.
+
+Identity is never taken from the model. Each turn mints `requestId = cosapi:<uuid>`. Ingress
+`requestIdFromHeader` accepts only `[a-z0-9_-]`, so the colon makes this id impossible over HTTP.
+Before the first call, `correlateCaller` files the id with `observeRequestCorrelation({conversationId:
+cosapi-…, sessionId, messageId, tool:'api-chat'})` and `commitRequestCorrelations()`. First proof
+wins, and an id owned elsewhere refuses the call. Each call then runs
+`dispatch(name, args, null, requestId, 'core', handler, undefined, null, { local: true })`, so the
+blocked/strict-Trust, superseded, compaction, capability, Read-only, root, command-allowlist and
+exec-custody checks all apply. The kernel records the tool row (`recordToolCall`, exact delivered
+content, `attribution: request_id`); the executor writes none. `local` is the kernel's only Chat
+Marks edit. It skips `noteTransportIdentity`, `surfaceToolCallAt`, `noteConnectorUse` and
+`noteServedRequest`, because those mean "ChatGPT used this connector". Recorded rows carry no
+`turnId`, since the recorder's live map has no API chat. They sit in order between the turn's
+boundaries.
+
+The turn streams with `tools` (`tool_choice:'auto'`) for at most `MAX_TOOL_STEPS` (40)
+completions. Each step's text is its own assistant message: `api-assistant:<turn>` for step 0,
+`:<step>` after that, written `final` before that step's calls run. The assistant message with
+`tool_calls` and one `tool` message per call (the exact delivered text, at most 100k chars,
+images as a short note) are appended, and calls run one at a time, in order. The following are
+returned to the model as error results, with no row and no crash: an unknown name
+(`UNKNOWN_TOOL`), malformed JSON or a non-object (`INVALID_ARGUMENTS`), and a schema failure
+(`INVALID_ARGUMENTS`). When the cap is reached, the turn ends `completed` with a `note` asking the
+user to send a message to continue: nothing failed. The system message is the Chat Marks line,
+the tools' names, `currentCoreInstructions()`, and the project's virtual directory (the form the
+tools take; relative paths and an omitted `workdir` resolve there through the session binding).
+Replayed context stays user and final answer text only, with a turn's steps joined. Recovery
+settles every streaming step of an interrupted turn.
+
+Approvals: `read`, `find`, `update_plan` and a `write_stdin` poll (no `chars`) run without asking.
+`apply_patch`, `exec_command` and `write_stdin` with input follow the chat's ledger `approval`
+(`ask` when absent, or `auto`). In `ask`, the turn pauses on a process-memory pending approval:
+`{approvalId, turnId, toolCallId, tool, summary, files}` plus the sha256 of the canonical
+arguments. IPC `approve {sessionId, approvalId, decision: approve|deny|always}` (sender/frame
+checked; never a notification) answers only that exact id; a stale or answered id is refused.
+`always` also sets `auto`. Deny returns "The user declined this action. It was not run." to the
+model, which continues. `chatSettings` returns `approval` and `pending`, and `setChatSettings`
+takes `approval` (preload `apiChatApprove`, `apiChatSetChatSettings`). The renderer shows the card
+as a composer-dock row: tool, command or patch file list, Approve / Deny / Approve and don't ask
+again. Beside the model and effort selects it shows the mode select "Ask before edits and
+commands / Run edits and commands automatically".
+
+Stop aborts the stream, answers a pending approval `stop`, and ends the turn `stopped` at once,
+even while a tool runs. A running handler is not killed: it finishes under the kernel and exec
+custody (an exec child stays owned by the session and can be stopped from the background-command
+UI) and records its row after the turn ended. Strict mode: `createApiChat` trusts the new chat
+(`setChatsTrusted`) after its session and ledger record are durable, only while strict mode is
+on. This mirrors a composer opening. A chat created while strict mode was off stays untrusted, and
+its tools are refused (the row menu offers no Trust for API chats). Proof:
+`test/api-chat-tools.test.ts`.
 
 ### CLIProxyAPI module management
 

@@ -3,10 +3,10 @@ import { ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { markspanelAccessBlocked } from '../markspanel-auth.js';
 import { logWarn } from '../logger.js';
-import { API_CHAT_EFFORTS } from '../../shared/api-chat.js';
+import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS } from '../../shared/api-chat.js';
 import { listApiChatModels } from './catalog.js';
 import { ApiChatHttpError, streamCompletion } from './client.js';
-import { apiChatView, createApiChat, MAX_API_CHAT_INPUT_CHARS, recoverApiChats, sendApiChat, setApiChatSettings, stopApiChat } from './executor.js';
+import { apiChatView, approveApiChat, createApiChat, MAX_API_CHAT_INPUT_CHARS, recoverApiChats, sendApiChat, setApiChatSettings, stopApiChat } from './executor.js';
 import {
   apiChatKey, apiChatSettings, apiChatStatus, noteKeyRequired, noteModelAvailability, setApiChatKey,
   toggleFavoriteModel, updateApiChatSettings
@@ -34,7 +34,12 @@ const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
   z.object({ action: z.literal('chatSettings'), sessionId }).strict(),
-  z.object({ action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional() }).strict()
+  z.object({
+    action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional(),
+    approval: z.enum(API_CHAT_APPROVAL_MODES).optional()
+  }).strict(),
+  // Chat Marks D4: only this authenticated window answers an approval, never a notification.
+  z.object({ action: z.literal('approve'), sessionId, approvalId: z.string().uuid(), decision: z.enum(['approve', 'deny', 'always']) }).strict()
 ]);
 
 /**
@@ -77,8 +82,10 @@ async function chatAction(input: z.infer<typeof request>): Promise<unknown> {
     case 'stop': await apiChatView(input.sessionId); return { stopped: stopApiChat(input.sessionId) };
     case 'chatSettings': return apiChatView(input.sessionId);
     case 'setChatSettings': return setApiChatSettings(input.sessionId, {
-      ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {})
+      ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {}),
+      ...(input.approval !== undefined ? { approval: input.approval } : {})
     });
+    case 'approve': return approveApiChat(input.sessionId, input.approvalId, input.decision);
     default: throw new Error('Unknown API chat action');
   }
 }

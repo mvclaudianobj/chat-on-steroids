@@ -2965,5 +2965,12 @@
   "New chat in every layout": "どのレイアウトでも新しいチャット",
   "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "受信トレイ レイアウトの新しいチャット ボタンでも CLIProxy、MarksCode、Codex、Claude を選べます。",
   "Console sign-in fixed": "コンソールのサインインを修正",
-  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "状態確認でサインインに失敗し CLIProxyAPI コンソールがロックされることはなくなりました。"
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "状態確認でサインインに失敗し CLIProxyAPI コンソールがロックされることはなくなりました。",
+  "Edits and commands": "編集とコマンド",
+  "Ask before edits and commands": "編集とコマンドの前に確認する",
+  "Run edits and commands automatically": "編集とコマンドを自動で実行する",
+  "Approve this action?": "この操作を許可しますか？",
+  "Approve": "許可",
+  "Approve and don't ask again in this chat": "許可して、このチャットでは今後確認しない",
+  "This approval is no longer pending": "この承認はすでに保留中ではありません"
 }

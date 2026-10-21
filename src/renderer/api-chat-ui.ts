@@ -3,10 +3,11 @@
  * sidebar lists it and the timeline paints its events. This module owns only what differs:
  * New chat's CLIProxy item, sending and stopping through the executor instead of the ChatGPT
  * outbox, the chat's own model and effort, and hiding the ChatGPT-only controls (`is-api-chat`
- * on the chat panel, styled in settings.css).
+ * on the chat panel, styled in settings.css). D4 adds the chat's approval mode and the card that
+ * answers a paused edit or command (main owns the pending call; this only shows and answers it).
  */
 import type { AppApi } from '../preload/index.js';
-import { isApiConversationId, type ApiChatEffort, type ApiChatModel, type ApiChatView } from '../shared/api-chat.js';
+import { isApiConversationId, type ApiChatApprovalDecision, type ApiChatApprovalMode, type ApiChatEffort, type ApiChatModel, type ApiChatView } from '../shared/api-chat.js';
 import { toast } from './dom.js';
 import { t, ui } from './i18n.js';
 import type { RowMenuItem } from './row-menu.js';
@@ -54,7 +55,54 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     ui(option, 'textContent', text);
     effort.append(option);
   }
-  controls.append(model, effort);
+  const approval = document.createElement('select');
+  approval.id = 'apiChatComposerApproval';
+  ui(approval, 'aria-label', () => t('Edits and commands'));
+  ui(approval, 'title', () => t('Edits and commands'));
+  for (const [value, text] of [['ask', () => t('Ask before edits and commands')], ['auto', () => t('Run edits and commands automatically')]] as const) {
+    const option = document.createElement('option');
+    option.value = value;
+    ui(option, 'textContent', text);
+    approval.append(option);
+  }
+  controls.append(model, effort, approval);
+
+  // The paused call of the running turn: tool, readable arguments and the three answers.
+  const card = document.createElement('section');
+  card.className = 'api-chat-approval';
+  card.id = 'apiChatApproval';
+  card.hidden = true;
+  card.setAttribute('role', 'alertdialog');
+  ui(card, 'aria-label', () => t('Approve this action?'));
+  const cardTitle = document.createElement('strong');
+  const cardTool = document.createElement('code');
+  cardTool.setAttribute('translate', 'no');
+  const cardSummary = document.createElement('pre');
+  cardSummary.setAttribute('translate', 'no');
+  const cardFiles = document.createElement('ul');
+  cardFiles.setAttribute('translate', 'no');
+  const actions = document.createElement('div');
+  actions.className = 'api-chat-approval-actions';
+  const answer = (decision: ApiChatApprovalDecision, text: () => string, primary = false): HTMLButtonElement => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.decision = decision;
+    if (primary) button.className = 'primary';
+    ui(button, 'textContent', text);
+    button.addEventListener('click', () => void decide(decision));
+    return button;
+  };
+  actions.append(answer('approve', () => t('Approve'), true), answer('deny', () => t('Deny')), answer('always', () => t('Approve and don\'t ask again in this chat')));
+  const head = document.createElement('div');
+  head.className = 'api-chat-approval-head';
+  head.append(cardTitle, cardTool);
+  card.append(head, cardSummary, cardFiles, actions);
+  ui(cardTitle, 'textContent', () => t('Approve this action?'));
+  // A row of the composer dock, like the queue and plan rows: directly above the composer.
+  const dockBody = document.querySelector('#composerDock .composer-dock-body');
+  if (dockBody) dockBody.append(card);
+  else if (composer) composer.before(card);
+  else host.append(card);
   const modelMenu = document.getElementById('modelMenu');
   if (modelMenu?.parentElement) modelMenu.before(controls);
   else composer?.querySelector('.composer-toolbar')?.append(controls);
@@ -65,9 +113,9 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   label.hidden = true;
   label.setAttribute('translate', 'no');
   // The chat's header names its provider and model, where a ChatGPT chat shows its project.
-  const head = document.querySelector('.is-session .chat-head');
-  const anchor = head?.querySelector('#chatProjectContext') ?? head?.querySelector('#chatTitle');
-  if (anchor) anchor.after(label); else head?.prepend(label);
+  const chatHead = document.querySelector('.is-session .chat-head');
+  const anchor = chatHead?.querySelector('#chatProjectContext') ?? chatHead?.querySelector('#chatTitle');
+  if (anchor) anchor.after(label); else chatHead?.prepend(label);
 
   /** Sessions this window created before the chat list carried their summary. */
   const created = new Set<string>();
@@ -77,6 +125,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   let models: ApiChatModel[] = [];
   let modelsLoaded = false;
   let busy = false;
+  let answering = false;
 
   const selectedApiChat = (): string | null => {
     const selected = hooks.selectedChat?.() ?? null;
@@ -88,6 +137,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     host.classList.toggle('is-api-chat', !!id);
     controls.hidden = !id;
     label.hidden = !id;
+    paintApproval(id ? view?.pending ?? null : null);
     if (!id) return;
     label.textContent = `CLIProxy · ${view?.model ?? '—'}`;
     const current = view?.model ?? '';
@@ -100,8 +150,38 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     model.replaceChildren(...options);
     model.value = current;
     effort.value = view?.effort ?? '';
+    approval.value = view?.approval ?? 'ask';
     model.disabled = !view || busy;
     effort.disabled = !view || busy;
+    approval.disabled = !view || busy;
+  }
+
+  function paintApproval(pending: ApiChatView['pending'] | null): void {
+    card.hidden = !pending;
+    if (!pending) { delete card.dataset.approvalId; return; }
+    card.dataset.approvalId = pending.approvalId;
+    cardTool.textContent = pending.tool;
+    cardSummary.textContent = pending.summary;
+    cardFiles.replaceChildren(...pending.files.map(file => Object.assign(document.createElement('li'), { textContent: file })));
+    cardFiles.hidden = !pending.files.length;
+    for (const button of actions.querySelectorAll('button')) button.disabled = answering;
+  }
+
+  /** Answers exactly the call the card shows; main refuses a stale id. */
+  async function decide(decision: ApiChatApprovalDecision): Promise<void> {
+    const id = shownFor;
+    const approvalId = card.dataset.approvalId;
+    if (!id || !approvalId || answering) return;
+    answering = true;
+    paint();
+    try {
+      const reply = await api.apiChatApprove(id, approvalId, decision);
+      if (!reply.ok) toast(t(reply.error));
+      else if (shownFor === id) view = reply.data;
+    } finally {
+      answering = false;
+      paint();
+    }
   }
 
   async function loadView(id: string): Promise<void> {
@@ -130,7 +210,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     paint();
   }
 
-  async function change(settings: { model?: string; effort?: ApiChatEffort | null }): Promise<void> {
+  async function change(settings: { model?: string; effort?: ApiChatEffort | null; approval?: ApiChatApprovalMode }): Promise<void> {
     const id = shownFor;
     if (!id) return;
     busy = true;
@@ -146,6 +226,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   }
   model.addEventListener('change', () => { if (model.value) void change({ model: model.value }); });
   effort.addEventListener('change', () => void change({ effort: (effort.value || null) as ApiChatEffort | null }));
+  approval.addEventListener('change', () => void change({ approval: approval.value === 'auto' ? 'auto' : 'ask' }));
 
   function openSettings(message: string): void {
     toast(message);

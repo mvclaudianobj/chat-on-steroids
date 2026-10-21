@@ -87,7 +87,7 @@ describe('API chat executor', () => {
     await expect(executor.createApiChat({ projectId: randomUUID() })).rejects.toThrow('Project not found');
   });
 
-  it('records the question, the streamed answer and a completed turn, text only', async () => {
+  it('records the question, the streamed answer and a completed turn', async () => {
     const chat = await executor.createApiChat();
     let stream!: ReturnType<typeof liveStream>;
     const fetchImpl = vi.fn(async (_url: string, init: RequestInit) => (stream = liveStream(init)).response);
@@ -107,8 +107,10 @@ describe('API chat executor', () => {
     expect(events[2]).toMatchObject({ turnId, state: 'final', final: true, message: { text: 'Hi, how can I help?' } });
     expect(events[3]).toMatchObject({ turnId, outcome: 'completed' });
     const body = bodyOf(fetchImpl);
-    expect(body.tools).toBeUndefined();
-    expect(body).toMatchObject({ model: 'claude-opus-5-5', reasoning_effort: 'medium' });
+    // D4: the live Core tools are offered (only the allowlisted ones), with tool_choice auto.
+    const offered = (body.tools as Array<{ function: { name: string } }>).map(tool => tool.function.name);
+    expect(offered.every(name => ['read', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'update_plan'].includes(name))).toBe(true);
+    expect(body).toMatchObject({ model: 'claude-opus-5-5', reasoning_effort: 'medium', tool_choice: 'auto' });
     expect(body.messages.map(message => message.role)).toEqual(['system', 'user']);
     expect((await executor.apiChatView(chat.sessionId)).running).toBe(false);
     expect((await store.getSession(chat.sessionId))?.title).toBe('Hello there');

@@ -67,4 +67,11 @@ describe('Chat Marks API chat fences', () => {
     expect(body(recorder, 'export async function sessionForConversation(')).toContain('if (isApiConversationId(conversationId)) return null;');
     expect(body(recorder, 'export async function recordRequestEvidence(')).toContain('if (isApiConversationId(conversationId)) return null;');
   });
+
+  it('keeps the kernel local dispatch that runs API chat tools without connector proof', () => {
+    const kernel = source('mcp/kernel.ts');
+    expect(kernel).toContain('options: { local?: boolean } = {}');
+    expect(kernel).toContain('if (!local) noteTransportIdentity(transportKey);');
+    expect(source('api-chat/tools.ts')).toContain('{ local: true }');
+  });
 });
