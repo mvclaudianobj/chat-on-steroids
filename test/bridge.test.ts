@@ -880,9 +880,34 @@ describe('who is allowed to talk to it', () => {
     expect(reply.body.bridge).toBe(BRIDGE_PROTOCOL);
     expect(reply.body.paired).toBe(false);
     // Identification must not double as a status leak.
-    expect(Object.keys(reply.body)).toEqual(['app', 'version', 'bridge', 'compatible', 'paired', 'disconnected']);
+    expect(Object.keys(reply.body)).toEqual(['app', 'version', 'bridge', 'compatible', 'paired', 'disconnected', 'instance']);
     expect(reply.body.disconnected).toBe(false);
     expect(reply.body.compatible).toBe(true);
+  });
+
+  it('names its app profile with one stable instance id, so an extension can tell two running apps apart', async () => {
+    const first = (await request('GET', '/hello', { auth: null })).body.instance as string;
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    // Persisted in the profile, not the process: a restarted bridge answers the same id.
+    expect(JSON.parse(readFileSync(`${dir}/state/bridge-instance.json`, 'utf8'))).toEqual({ instance: first });
+    await stopBridge();
+    base = `http://127.0.0.1:${await startBridge()}`;
+    expect((await request('GET', '/hello', { auth: null })).body.instance).toBe(first);
+    // `/pair` names the instance that minted the token.
+    expect((await request('POST', '/pair', { auth: null, body: { reuse: true } })).body.instance).toBe(first);
+    // Another profile (the `npm run dev` one beside an installed app) is another instance.
+    const other = await makeTempDir('clf-bridge-other-');
+    try {
+      initDurableStore(other);
+      const second = (await request('GET', '/hello', { auth: null })).body.instance as string;
+      expect(second).toMatch(/^[0-9a-f]{32}$/);
+      expect(second).not.toBe(first);
+      expect((await request('GET', '/hello', { auth: null })).body.instance).toBe(second);
+    } finally {
+      initDurableStore(dir);
+      await removeTempDir(other);
+    }
+    expect((await request('GET', '/hello', { auth: null })).body.instance).toBe(first);
   });
 
   it('refuses every web page origin, chatgpt.com included', async () => {

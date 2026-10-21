@@ -69,6 +69,7 @@ export { CHAT_ACTIVE_MS, CHAT_SILENCE_MS } from '../shared/session.js';
 import { effectiveCapabilities, getConfig, updateConfig } from './config.js';
 import { BROWSER_BRIDGE_AUTO_PORTS } from '../shared/browser-bridge.js';
 import { bridgePortSelection } from './bridge-ports.js';
+import { bridgeInstance } from './bridge-instance.js';
 import { isNewer, type Config } from '../shared/types.js';
 import type { PluginSurface } from '../shared/plugin-refresh.js';
 import { getSecret, secureStorageStatus, setSecret } from './secrets.js';
@@ -2374,7 +2375,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         // Unknown, not incompatible, for a caller that states no protocol (curl in a bug report).
         compatible: extensionProtocol(req) === null ? null : protocolCompatible(req),
         paired: stored !== null && stored !== BROWSER_DISCONNECTED,
-        disconnected: stored === BROWSER_DISCONNECTED
+        disconnected: stored === BROWSER_DISCONNECTED,
+        // Which app profile this is (bridge-instance.ts): a paired extension skips another one.
+        instance: await bridgeInstance()
       },
       origin
     );
@@ -2448,7 +2451,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       logInfo('bridge: browser extension connected and provisioned');
     }
     if (!provisioned.reused || appeared) changed();
-    return json(res, 200, { token: provisioned.token }, origin);
+    return json(res, 200, { token: provisioned.token, instance: await bridgeInstance() }, origin);
   }
 
   // A deliberate revocation is different from a stale credential. The extension repairs a

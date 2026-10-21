@@ -13,6 +13,7 @@ import path from 'node:path';
 import { defaultAppearance, paletteTokens } from '../../shared/appearance.js';
 import { getConfig } from '../config.js';
 import { extensionDir } from '../extension-path.js';
+import { bridgeInstance } from '../bridge-instance.js';
 import { logInfo, logWarn } from '../logger.js';
 import { callChromeApi, type BrowserControl, type DebuggerTarget } from './chrome-api.js';
 import { ExtensionWorkerLink, type WorkerRegistry } from './extension-worker.js';
@@ -297,6 +298,9 @@ export class CosBrowser {
 
   /** One `chrome.*` call from the extension worker. */
   private async answer(name: string, args: unknown): Promise<unknown> {
+    // Not a chrome.* API: the companion asks which app it belongs to, so it pairs with this
+    // app's bridge and never with another profile's on an earlier port (bridge-instance.ts).
+    if (name === 'app.bridgeInstance') return { ok: true, value: await bridgeInstance() };
     const label = TRACE ? `${name}(${Array.isArray(args) ? traceIds(args) : ''})` : '';
     const late = TRACE ? setTimeout(() => logWarn(`cos browser trace: ${label} still pending after 10 s`), 10_000) : null;
     try {
