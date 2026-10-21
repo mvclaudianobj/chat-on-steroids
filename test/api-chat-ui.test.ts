@@ -273,3 +273,30 @@ it("names the chat's engine in the header and loads that engine's models", async
   await vi.waitFor(() => expect(api.apiChatModels).toHaveBeenCalledWith('', 0, 200, false, 'codex'));
   await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerModel').options].map(option => option.value)).toEqual(['gpt-6-codex']));
 });
+
+it('offers Claude Code once main reports it available, and opens a Claude chat in its hand-over terminal', async () => {
+  const api = apiMock({
+    apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'claude']) })),
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'opus' }), engine: 'claude', approval: 'ask', pending: null } })),
+    apiChatTerminal: vi.fn(async () => ({ ok: true as const, data: { cliSessionId: 'cli-claude-1' } }))
+  });
+  const openCliSession = vi.fn();
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, openCliSession, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
+  await vi.waitFor(() => expect(chats.newChatItems().map(item => item.action)).toEqual(['new-chat-cliproxy', 'new-chat-claude']));
+  expect(chats.newChatItems()[1]!.label()).toBe('Claude Code');
+  expect(chats.projectChatItems('p')[1]!.label()).toBe('New Claude Code chat in this project');
+  chats.sync();
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Claude Code · opus'));
+  await vi.waitFor(() => expect($('apiChatTerminal').hidden).toBe(false));
+  $('apiChatTerminal').click();
+  await vi.waitFor(() => expect(openCliSession).toHaveBeenCalledWith('cli-claude-1'));
+  expect(api.apiChatTerminal).toHaveBeenCalledWith('session-api');
+});
+
+it('keeps the terminal button hidden for a CLIProxy chat', async () => {
+  const api = apiMock({ apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view(), engine: 'cliproxy', approval: 'ask', pending: null } })) });
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
+  chats.sync();
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('CLIProxy · gpt-5'));
+  expect($('apiChatTerminal').hidden).toBe(true);
+});

@@ -30,9 +30,16 @@ export type CliSession = {
   tmuxSession: string;
   createdAt: number;
   updatedAt: number;
+  /**
+   * Chat Marks agent engines (handover terminal): the API chat this terminal resumes and the
+   * exact arguments after the binary (`--resume <uuid>` or `--session-id <uuid>`). Absent for an
+   * ordinary module terminal, which starts the bare binary.
+   */
+  engineChat?: string;
+  args?: string[];
 };
 type StoredState = { enabled: CliId[]; sessions: CliSession[] };
-type Entry = { cli: CliId; projectId: string | null; nativeCwd: string; cwd: string; pty: IPty; unacked: number; paused: boolean };
+type Entry = { cli: CliId; projectId: string | null; nativeCwd: string; cwd: string; tmuxSession: string; pty: IPty; unacked: number; paused: boolean };
 const run = promisify(execFile);
 const STATE = 'marks-cli-modules';
 const installedRoot = () => path.join(app.getPath('userData'), 'modules');
@@ -45,6 +52,15 @@ const openingAttachments = new Set<string>();
 const installations = new Set<CliId>();
 let emit: ((id: string, event: { data?: string; exitCode?: number }) => void) | null = null;
 const stopListeners = new Set<(id: CliId) => void>();
+/** Runs before an engine-bound terminal attaches; it throws to refuse (the chat's host is busy). */
+let engineOpenHook: ((session: Readonly<CliSession>) => Promise<void>) | null = null;
+export function registerCliEngineOpenHook(hook: ((session: Readonly<CliSession>) => Promise<void>) | null): void {
+  engineOpenHook = hook;
+}
+const ENGINE_TERMINAL_ARGS = /^--(resume|session-id)$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const validEngineArgs = (args: unknown): args is string[] =>
+  Array.isArray(args) && args.length === 2 && typeof args[0] === 'string' && ENGINE_TERMINAL_ARGS.test(args[0]) && typeof args[1] === 'string' && UUID.test(args[1]);
 export function registerCliModuleStopHook(listener: (id: CliId) => void): () => void {
   stopListeners.add(listener);
   return () => { stopListeners.delete(listener); };
@@ -92,7 +108,9 @@ function validSession(value: unknown): value is CliSession {
     && typeof row.cwd === 'string' && typeof row.title === 'string'
     && typeof row.tmuxSession === 'string' && /^marks_(markscode|codex|claude|marksclaw)_[0-9a-f]{18}$/.test(row.tmuxSession)
     && typeof row.createdAt === 'number' && Number.isFinite(row.createdAt)
-    && typeof row.updatedAt === 'number' && Number.isFinite(row.updatedAt);
+    && typeof row.updatedAt === 'number' && Number.isFinite(row.updatedAt)
+    && (row.engineChat === undefined || (row.module === 'claude' && typeof row.engineChat === 'string' && /^[0-9a-z-]{8,64}$/i.test(row.engineChat) && validEngineArgs(row.args)))
+    && (row.args === undefined || row.engineChat !== undefined);
 }
 
 async function saveCliModules(nextEnabled: Set<CliId>, nextSessions: CliSession[]): Promise<void> {
@@ -264,6 +282,54 @@ export async function cliSessions(): Promise<CliSession[]> {
 }
 
 export async function cliCreateSession(id: CliId, projectId: string | null): Promise<CliSession> {
+  return createSessionRecord(id, projectId, null);
+}
+
+/**
+ * Chat Marks agent engines: the handover terminal of one API chat (Claude Code). One per chat:
+ * an existing one is reused with the new arguments; it starts `<binary> <args>` in the chat's
+ * project folder through the same tmux mechanism as every module terminal.
+ */
+export async function cliEngineTerminal(id: 'claude', chat: { sessionId: string; projectId: string | null; args: string[]; title: string }): Promise<CliSession> {
+  if (!validEngineArgs(chat.args) || !/^[0-9a-z-]{8,64}$/i.test(chat.sessionId)) throw new Error('Invalid terminal arguments');
+  await loadCliModules();
+  const existing = sessions.find(session => session.module === id && session.engineChat === chat.sessionId);
+  if (!existing) return createSessionRecord(id, chat.projectId, { engineChat: chat.sessionId, args: [...chat.args], title: chat.title.slice(0, 120) });
+  return onModule(id, async () => {
+    const operation = enabledOperations.then(async () => {
+      const index = sessions.findIndex(session => session.id === existing.id);
+      if (index < 0) throw new Error('CLI session not found');
+      const nextSessions = sessions.slice();
+      nextSessions[index] = { ...sessions[index]!, args: [...chat.args], updatedAt: Date.now() };
+      await saveCliModules(enabled, nextSessions);
+      sessions = nextSessions;
+    });
+    enabledOperations = operation.then(() => undefined, () => undefined);
+    await operation;
+    return { ...sessions.find(session => session.id === existing.id)! };
+  });
+}
+
+/** Whether a chat's handover terminal runs, and whether a terminal view is attached to it now. */
+export async function cliEngineTerminalState(chatSessionId: string): Promise<'none' | 'detached' | 'attached'> {
+  await loadCliModules();
+  const session = sessions.find(candidate => candidate.engineChat === chatSessionId);
+  if (!session) return 'none';
+  try { await tmux(['has-session', '-t', `=${session.tmuxSession}`]); } catch { return 'none'; }
+  for (const entry of attachments.values()) if (entry.tmuxSession === session.tmuxSession) return 'attached';
+  const clients = await tmux(['list-clients', '-t', `=${session.tmuxSession}`, '-F', '#{client_name}']).catch(() => '');
+  return clients.trim() ? 'attached' : 'detached';
+}
+
+/** Ends a chat's handover terminal session (tmux), keeping its sidebar entry for the next hand-over. */
+export async function cliEndEngineTerminal(chatSessionId: string): Promise<void> {
+  await loadCliModules();
+  const session = sessions.find(candidate => candidate.engineChat === chatSessionId);
+  if (!session) return;
+  await tmux(['kill-session', '-t', `=${session.tmuxSession}`]).catch(() => undefined);
+}
+
+async function createSessionRecord(id: CliId, projectId: string | null, engine: { engineChat: string; args: string[]; title: string } | null): Promise<CliSession> {
   await loadCliModules();
   return onModule(id, async () => {
     if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
@@ -285,10 +351,11 @@ export async function cliCreateSession(id: CliId, projectId: string | null): Pro
       module: id,
       projectId,
       cwd,
-      title: `${manifest[id].name} ${sequence}`,
+      title: engine?.title || `${manifest[id].name} ${sequence}`,
       tmuxSession: sessionName(id, sessionId),
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      ...(engine ? { engineChat: engine.engineChat, args: engine.args } : {})
     };
     const operation = enabledOperations.then(async () => {
       if (!effectiveCapabilities(getConfig()).command || !enabled.has(id)) throw new Error('This module has been disabled');
@@ -353,11 +420,18 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
   if (projectId && (await projectWorkspace(projectId)).real !== nativeCwd) throw new Error('Workspace changed while opening terminal');
   if (attachments.has(attachmentId)) throw new Error('Terminal already attached');
   const session = currentSession.tmuxSession;
+  // An engine's handover terminal: its chat's app-side host stops first (or the open is refused).
+  if (currentSession.engineChat) {
+    if (!engineOpenHook) throw new Error('This terminal belongs to a chat engine that is not available');
+    await engineOpenHook(currentSession);
+    checkAccess();
+  }
+  const args = currentSession.engineChat && validEngineArgs(currentSession.args) ? currentSession.args : [];
   let created = false;
   try { await tmux(['has-session', '-t', `=${session}`]); }
   catch {
     checkAccess();
-    await tmux(['new-session', '-d', '-s', session, '-c', cwd, 'sh', '-c', 'exec "$1"', 'marks-cli', bin]);
+    await tmux(['new-session', '-d', '-s', session, '-c', cwd, 'sh', '-c', 'exec "$@"', 'marks-cli', bin, ...args]);
     created = true;
   }
   try { checkAccess(); }
@@ -392,7 +466,7 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
   }
   try { checkAccess(); }
   catch (error) { pty.kill(); if (created) await tmux(['kill-session', '-t', `=${session}`]).catch(() => undefined); throw error; }
-  const entry: Entry = { cli: id, projectId, nativeCwd, cwd, pty, unacked: 0, paused: false };
+  const entry: Entry = { cli: id, projectId, nativeCwd, cwd, tmuxSession: session, pty, unacked: 0, paused: false };
   attachments.set(attachmentId, entry);
   pty.onData(data => {
     if (attachments.get(attachmentId) !== entry) return;

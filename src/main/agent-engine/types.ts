@@ -66,6 +66,11 @@ export interface AgentEngine {
   recover(): Promise<void>;
   /** The terminal that opens this chat's backend session, or null when it has none yet. */
   terminal?(chat: EngineChatRef): EngineTerminal | null;
+  /**
+   * Opens the chat's backend session in its module terminal (cli-modules tmux) and answers that
+   * terminal's id. A `handover` engine stops its own process first and refuses while a turn runs.
+   */
+  openTerminal?(sessionId: string): Promise<{ cliSessionId: string }>;
 }
 
 // ---------------------------------------------------------------- CLI engine event stream

@@ -42,6 +42,8 @@ const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
   z.object({ action: z.literal('chatSettings'), sessionId }).strict(),
+  // Agent engines: open the chat's backend session in its module terminal (Claude Code hands over).
+  z.object({ action: z.literal('terminal'), sessionId }).strict(),
   z.object({
     action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional(),
     approval: z.enum(API_CHAT_APPROVAL_MODES).optional()
@@ -95,6 +97,11 @@ export async function chatAction(input: z.infer<typeof request>): Promise<unknow
     case 'send': return { turnId: (await (await engineForChat(input.sessionId)).send(input.sessionId, input.text)).turnId };
     case 'stop': return { stopped: await (await engineForChat(input.sessionId)).stop(input.sessionId) };
     case 'chatSettings': return (await engineForChat(input.sessionId)).view(input.sessionId);
+    case 'terminal': {
+      const owner = await engineForChat(input.sessionId);
+      if (!owner.openTerminal) throw new Error('This chat has no terminal');
+      return owner.openTerminal(input.sessionId);
+    }
     case 'setChatSettings': return (await engineForChat(input.sessionId)).setChatSettings(input.sessionId, {
       ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {}),
       ...(input.approval !== undefined ? { approval: input.approval } : {})
