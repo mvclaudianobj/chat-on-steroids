@@ -2985,5 +2985,14 @@
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex にサインインしていません。ターミナルで `codex login` を実行してから、もう一度お試しください。",
   "Codex chats need a project folder on this computer": "Codex チャットにはこのコンピューター上のプロジェクトフォルダーが必要です",
   "Enable the Codex module in Settings > Modules first": "先に 設定 > モジュール で Codex モジュールを有効にしてください",
-  "This chat has no engine session yet": "このチャットにはまだエンジンセッションがありません"
+  "This chat has no engine session yet": "このチャットにはまだエンジンセッションがありません",
+  "Start MarksCode service": "MarksCode サービスを開始",
+  "Starting the MarksCode service…": "MarksCode サービスを開始しています…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode サービスが実行中です。新しいチャットで MarksCode チャットを使えます。",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "MarksCode サービスは停止しています。設定 > モジュールで開始してください。",
+  "Choose a project for a MarksCode chat first": "まず MarksCode チャット用のプロジェクトを選択してください",
+  "Enable the MarksCode module in Settings > Modules": "設定 > モジュールで MarksCode モジュールを有効にしてください",
+  "MarksCode is not installed": "MarksCode はインストールされていません",
+  "The MarksCode service refused its saved password": "MarksCode サービスが保存済みのパスワードを拒否しました",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode はこのセッション（ターミナル）でまだ作業中です。終わってから再送信してください。"
 }

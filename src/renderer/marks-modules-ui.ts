@@ -38,7 +38,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
   let repaintNewChat = (): void => undefined;
   let openCliSession = async (_id: string): Promise<void> => undefined;
   const apiChatChats = createApiChatUi(api, { ...hooks, openCliSession: id => openCliSession(id) }, () => repaintNewChat());
-  const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems });
+  const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems, onEngineService: () => void apiChatChats.refresh() });
   repaintNewChat = cli.repaintNewChat;
   openCliSession = cli.openSession;
   const apiChat = createApiChatSettingsUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!);

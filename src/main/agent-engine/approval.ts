@@ -90,6 +90,11 @@ export class ApprovalGate {
     return this.entries.find(entry => entry.view.approvalId === approvalId)?.hash ?? null;
   }
 
+  /** The engine's own request id behind that approval, while it is pending (main-side only). */
+  engineRequestOf(approvalId: string): string | null {
+    return this.entries.find(entry => entry.view.approvalId === approvalId)?.engineRequestId ?? null;
+  }
+
   /** Answers only that exact id; a stale, answered or unknown id answers false. */
   answer(approvalId: string, decision: ApiChatApprovalDecision): boolean {
     const entry = this.entries.find(item => item.view.approvalId === approvalId);

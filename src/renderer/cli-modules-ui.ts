@@ -9,7 +9,11 @@ type Id = typeof IDS[number];
 type Status = { id: Id; name: string; installed: boolean; enabled: boolean; running: boolean; supported: boolean; version: string | null; detail: string };
 export type CliModuleSummary = { id: string; name: string; enabled: boolean };
 
-export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): void; openChatView(name: string): void; workspace(): string | null; newChatItems?(): RowMenuItem[] }) {
+export function createCliModulesUi(api: AppApi, hooks: {
+  showTab(name: string): void; openChatView(name: string): void; workspace(): string | null; newChatItems?(): RowMenuItem[];
+  /** After the MarksCode service was started from its row: the chat engines are listed again. */
+  onEngineService?(): void;
+}) {
   const nav = document.getElementById('moduleCliNav')!;
   const tabs = nav.parentElement!;
   const parent = document.querySelector('[data-panel="modules"] .appearance-content')!;
@@ -59,6 +63,13 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
       const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
       button.textContent = action === 'install' ? 'Install / instructions' : action === 'update' ? 'Update' : 'Stop session';
       button.addEventListener('click', () => void operate(id, action)); actions.append(button);
+    }
+    if (id === 'markscode') {
+      // MarksCode chats run on its shared background service; it starts only when asked here.
+      const start = document.createElement('button'); start.type = 'button'; start.className = 'btn'; start.id = 'markscodeServiceStart';
+      start.textContent = t('Start MarksCode service');
+      start.addEventListener('click', () => void startService(start, detail));
+      actions.append(start);
     }
     surface.append(enableLabel, detail, actions); row.append(surface); parent.append(row);
 
@@ -165,6 +176,17 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     if (!reply.ok) row.detail.textContent = reply.error;
     if (action === 'disable') for (const session of sessions.values()) if (session.module === id) void disconnect(session.id);
     await refresh();
+  }
+  async function startService(button: HTMLButtonElement, detail: HTMLElement): Promise<void> {
+    button.disabled = true;
+    detail.textContent = t('Starting the MarksCode service…');
+    try {
+      const reply = await api.apiChatStartEngineService('markscode');
+      detail.textContent = reply.ok ? (reply.data.available ? t('MarksCode service running. MarksCode chats are available in New chat.') : t(reply.data.detail)) : t(reply.error);
+      if (reply.ok && reply.data.available) hooks.onEngineService?.();
+    } finally {
+      button.disabled = false;
+    }
   }
   async function setProjects(id: Id): Promise<void> {
     const select = rows.get(id)!.project;

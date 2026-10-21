@@ -33,7 +33,8 @@ export type CliSession = {
   /**
    * Chat Marks agent engines: the API chat this terminal opens and the exact arguments after the
    * binary — Claude Code hands over (`--resume <uuid>` / `--session-id <uuid>`), Codex attaches
-   * live (`resume <thread> --remote unix://<sock>`). Absent for an ordinary module terminal,
+   * live (`resume <thread> --remote unix://<sock>`), MarksCode attaches live to its service
+   * session (`-s <session> .`). Absent for an ordinary module terminal,
    * which starts the bare binary.
    */
   engineChat?: string;
@@ -55,24 +56,28 @@ let emit: ((id: string, event: { data?: string; exitCode?: number }) => void) | 
 const stopListeners = new Set<(id: CliId) => void>();
 /**
  * Runs before an engine-bound terminal attaches, per module. A hand-over engine (Claude Code)
- * stops its host or throws to refuse (a turn runs); a live engine (Codex) makes sure the server
- * the terminal attaches to is running.
+ * stops its host or throws to refuse (a turn runs); a live engine makes sure the server the
+ * terminal attaches to is running (Codex starts its app-server, MarksCode refuses while its
+ * background service is stopped).
  */
 const engineOpenHooks = new Map<EngineTerminalModule, (session: Readonly<CliSession>) => Promise<void>>();
 export function registerCliEngineOpenHook(module: EngineTerminalModule, hook: ((session: Readonly<CliSession>) => Promise<void>) | null): void {
   if (hook) engineOpenHooks.set(module, hook); else engineOpenHooks.delete(module);
 }
-export type EngineTerminalModule = 'codex' | 'claude';
+export type EngineTerminalModule = 'markscode' | 'codex' | 'claude';
 /** Engines whose terminal takes the session over: their open hook is required. */
 const HANDOVER_MODULES: ReadonlySet<CliId> = new Set(['claude']);
 const ENGINE_TERMINAL_ARGS = /^--(resume|session-id)$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODEX_THREAD = /^[0-9a-z][0-9a-z-]{0,199}$/i;
 const CODEX_REMOTE = /^unix:\/\/\/[^\s\u0000]{1,900}\.sock$/;
+/** A MarksCode service session id (`ses_…`); never starts with `-`, so it cannot read as an option. */
+const MARKSCODE_SESSION = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
 /** The only argument shapes an engine terminal may carry, per module. */
 const validEngineArgs = (module: CliId, args: unknown): args is string[] => {
   if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) return false;
   if (module === 'claude') return args.length === 2 && ENGINE_TERMINAL_ARGS.test(args[0]!) && UUID.test(args[1]!);
+  if (module === 'markscode') return args.length === 3 && args[0] === '-s' && MARKSCODE_SESSION.test(args[1]!) && args[2] === '.';
   if (module === 'codex') return args.length === 4 && args[0] === 'resume' && CODEX_THREAD.test(args[1]!) && args[2] === '--remote' && CODEX_REMOTE.test(args[3]!);
   return false;
 };
@@ -203,6 +208,18 @@ export async function cliChatRuntime(id: 'markscode' | 'codex' | 'claude', proje
 }
 
 /**
+ * Whether a module can run here now, without throwing: enabled, the command capability, and
+ * the binary the module terminals use (userData/modules/<id>/bin, its node_modules/.bin, PATH;
+ * inside WSL on Windows). Agent engines read their status from it.
+ */
+export async function cliModuleState(id: CliId): Promise<{ enabled: boolean; command: boolean; binary: string | null }> {
+  await loadCliModules();
+  const command = effectiveCapabilities(getConfig()).command;
+  if (!enabled.has(id) || !command) return { enabled: enabled.has(id), command, binary: null };
+  return { enabled: true, command, binary: await runtimeBinary(id) };
+}
+
+/**
  * Chat Marks agent engines: the CLI an engine runs, behind the same gates as a module terminal
  * (command execution allowed, the module enabled, the binary resolved the same way). On Windows
  * the binary is a WSL path and runs through `wsl.exe --exec`.
@@ -320,8 +337,8 @@ export async function cliCreateSession(id: CliId, projectId: string | null): Pro
 }
 
 /**
- * Chat Marks agent engines: the terminal of one API chat (Claude Code hand-over, Codex live
- * attach). One per chat: an existing one is reused with the new arguments; it starts
+ * Chat Marks agent engines: the terminal of one API chat (Claude Code hand-over, Codex and
+ * MarksCode live attach). One per chat: an existing one is reused with the new arguments; it starts
  * `<binary> <args>` in the chat's project folder through the same tmux mechanism as every
  * module terminal.
  */

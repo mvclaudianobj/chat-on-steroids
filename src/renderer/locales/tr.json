@@ -3030,5 +3030,14 @@
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex'te oturum açılmamış. Bir terminalde `codex login` komutunu çalıştırın, sonra yeniden deneyin.",
   "Codex chats need a project folder on this computer": "Codex sohbetleri bu bilgisayarda bir proje klasörü gerektirir",
   "Enable the Codex module in Settings > Modules first": "Önce Ayarlar > Modüller bölümünde Codex modülünü etkinleştirin",
-  "This chat has no engine session yet": "Bu sohbetin henüz bir motor oturumu yok"
+  "This chat has no engine session yet": "Bu sohbetin henüz bir motor oturumu yok",
+  "Start MarksCode service": "MarksCode hizmetini başlat",
+  "Starting the MarksCode service…": "MarksCode hizmeti başlatılıyor…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode hizmeti çalışıyor. MarksCode sohbetleri Yeni sohbet altında kullanılabilir.",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "MarksCode hizmeti durduruldu. Ayarlar > Modüller bölümünden başlatın.",
+  "Choose a project for a MarksCode chat first": "Önce bir MarksCode sohbeti için proje seçin",
+  "Enable the MarksCode module in Settings > Modules": "Ayarlar > Modüller bölümünden MarksCode modülünü etkinleştirin",
+  "MarksCode is not installed": "MarksCode yüklü değil",
+  "The MarksCode service refused its saved password": "MarksCode hizmeti kayıtlı parolasını reddetti",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode bu oturumda (terminalinde) hâlâ çalışıyor. Bitince yeniden gönderin."
 }

@@ -3,13 +3,14 @@
  * only. Chat actions go through the agent-engine registry: a new chat names its engine
  * (default `cliproxy`), every other chat action is routed by the chat's ledger record.
  */
-import { ipcMain, type BrowserWindow } from 'electron';
+import { app, ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { markspanelAccessBlocked } from '../markspanel-auth.js';
 import { logWarn } from '../logger.js';
 import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS } from '../../shared/api-chat.js';
 import { AGENT_ENGINE_IDS, DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
 import { agentEngine, createAgentChat, engineForChat, listAgentEngines, recoverAgentEngines } from '../agent-engine/registry.js';
+import { shutdownMarksCodeEngine, startMarksCodeService } from '../agent-engine/markscode.js';
 import { ApiChatHttpError, streamCompletion } from './client.js';
 import { MAX_API_CHAT_INPUT_CHARS } from './executor.js';
 import {
@@ -41,9 +42,11 @@ const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('createChat'), projectId: z.string().uuid().nullable().optional(), model: modelId.optional(), engine: engine.optional() }).strict(),
   z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
+  // An explicit user action: start the engine's background service (`markscode service start`).
+  z.object({ action: z.literal('startEngineService'), engine: z.literal('markscode') }).strict(),
   z.object({ action: z.literal('chatSettings'), sessionId }).strict(),
-  // Agent engines: open the chat's backend session in its module terminal (Codex attaches live,
-  // Claude Code hands over).
+  // Agent engines: open the chat's backend session in its module terminal (Codex and MarksCode
+  // attach live, Claude Code hands over).
   z.object({ action: z.literal('terminal'), sessionId }).strict(),
   z.object({
     action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional(),
@@ -98,6 +101,7 @@ export async function chatAction(input: z.infer<typeof request>): Promise<unknow
     case 'send': return { turnId: (await (await engineForChat(input.sessionId)).send(input.sessionId, input.text)).turnId };
     case 'stop': return { stopped: await (await engineForChat(input.sessionId)).stop(input.sessionId) };
     case 'chatSettings': return (await engineForChat(input.sessionId)).view(input.sessionId);
+    case 'startEngineService': return startMarksCodeService();
     case 'terminal': {
       const owner = await engineForChat(input.sessionId);
       if (!owner.openTerminal) throw new Error('This chat has no terminal');
@@ -118,6 +122,8 @@ export const parseApiChatRequest = (payload: unknown): z.infer<typeof request> =
 export function registerApiChatIpc(getWindow: () => BrowserWindow | null): void {
   // Turns the previous run left open are closed as interrupted before any new one starts.
   void recoverAgentEngines().catch(error => logWarn(`API chat recovery failed: ${(error as Error).message}`));
+  // Quit closes MarksCode event streams without ending their turns: the next start re-attaches.
+  app.on('before-quit', shutdownMarksCodeEngine);
   ipcMain.handle('marksApiChat:request', async (event, payload: unknown) => {
     try {
       if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');

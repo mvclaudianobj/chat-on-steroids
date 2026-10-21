@@ -2985,5 +2985,14 @@
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex chưa đăng nhập. Hãy chạy `codex login` trong terminal rồi thử lại.",
   "Codex chats need a project folder on this computer": "Cuộc trò chuyện Codex cần một thư mục dự án trên máy tính này",
   "Enable the Codex module in Settings > Modules first": "Hãy bật mô-đun Codex trong Cài đặt > Mô-đun trước",
-  "This chat has no engine session yet": "Cuộc trò chuyện này chưa có phiên của engine"
+  "This chat has no engine session yet": "Cuộc trò chuyện này chưa có phiên của engine",
+  "Start MarksCode service": "Khởi động dịch vụ MarksCode",
+  "Starting the MarksCode service…": "Đang khởi động dịch vụ MarksCode…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "Dịch vụ MarksCode đang chạy. Các cuộc trò chuyện MarksCode có trong Trò chuyện mới.",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "Dịch vụ MarksCode đã dừng. Hãy khởi động nó trong Cài đặt > Mô-đun.",
+  "Choose a project for a MarksCode chat first": "Hãy chọn một dự án cho cuộc trò chuyện MarksCode trước",
+  "Enable the MarksCode module in Settings > Modules": "Hãy bật mô-đun MarksCode trong Cài đặt > Mô-đun",
+  "MarksCode is not installed": "MarksCode chưa được cài đặt",
+  "The MarksCode service refused its saved password": "Dịch vụ MarksCode đã từ chối mật khẩu đã lưu",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode vẫn đang làm việc trong phiên này (trong terminal). Hãy gửi lại khi xong."
 }

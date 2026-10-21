@@ -3120,5 +3120,14 @@
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex не выполнил вход. Запустите `codex login` в терминале и повторите попытку.",
   "Codex chats need a project folder on this computer": "Чатам Codex нужна папка проекта на этом компьютере",
   "Enable the Codex module in Settings > Modules first": "Сначала включите модуль Codex в Настройки > Модули",
-  "This chat has no engine session yet": "У этого чата ещё нет сеанса движка"
+  "This chat has no engine session yet": "У этого чата ещё нет сеанса движка",
+  "Start MarksCode service": "Запустить службу MarksCode",
+  "Starting the MarksCode service…": "Запуск службы MarksCode…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "Служба MarksCode запущена. Чаты MarksCode доступны в «Новый чат».",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "Служба MarksCode остановлена. Запустите её в Настройки > Модули.",
+  "Choose a project for a MarksCode chat first": "Сначала выберите проект для чата MarksCode",
+  "Enable the MarksCode module in Settings > Modules": "Включите модуль MarksCode в Настройки > Модули",
+  "MarksCode is not installed": "MarksCode не установлен",
+  "The MarksCode service refused its saved password": "Служба MarksCode отклонила сохранённый пароль",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode всё ещё работает в этом сеансе (в его терминале). Отправьте снова, когда он закончит."
 }

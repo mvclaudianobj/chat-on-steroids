@@ -87,8 +87,8 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     ui(option, 'textContent', text);
     approval.append(option);
   }
-  // Engines with a terminal: Codex attaches its TUI live to the same session, Claude Code hands
-  // its session over. One button; its wording and whether it waits for the turn follow the mode.
+  // Engines with a terminal: Codex and MarksCode attach their TUI live to the same session,
+  // Claude Code hands its session over. One button; its wording and whether it waits for the turn follow the mode.
   const terminal = document.createElement('button');
   terminal.type = 'button';
   terminal.id = 'apiChatTerminal';

@@ -2985,5 +2985,14 @@
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex 尚未登录。请在终端中运行 `codex login`，然后重试。",
   "Codex chats need a project folder on this computer": "Codex 聊天需要此电脑上的项目文件夹",
   "Enable the Codex module in Settings > Modules first": "请先在 设置 > 模块 中启用 Codex 模块",
-  "This chat has no engine session yet": "此聊天还没有引擎会话"
+  "This chat has no engine session yet": "此聊天还没有引擎会话",
+  "Start MarksCode service": "启动 MarksCode 服务",
+  "Starting the MarksCode service…": "正在启动 MarksCode 服务…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode 服务正在运行。可在“新建聊天”中使用 MarksCode 聊天。",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "MarksCode 服务已停止。请在 设置 > 模块 中启动。",
+  "Choose a project for a MarksCode chat first": "请先为 MarksCode 聊天选择一个项目",
+  "Enable the MarksCode module in Settings > Modules": "请在 设置 > 模块 中启用 MarksCode 模块",
+  "MarksCode is not installed": "未安装 MarksCode",
+  "The MarksCode service refused its saved password": "MarksCode 服务拒绝了已保存的密码",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode 仍在此会话（其终端）中工作。完成后再发送。"
 }

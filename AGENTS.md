@@ -1478,10 +1478,11 @@ later. E0 changes no CLIProxy behavior.
   `create`, `view`, `send` (resolves once the question is recorded), `stop`, `approve`,
   `setChatSettings`, `recover`, optional `terminal(chat)` → `{argv, mode: live|handover}` and
   optional `openTerminal(sessionId)` → `{cliSessionId}` (IPC `terminal`).
-  Ids (`shared/agent-engine.ts`): `cliproxy`, and reserved `markscode`, `codex`, `claude`.
-- Registry (`registry.ts`): `cliproxy.ts` wraps the executor and catalog unchanged; `claude.ts`
-  is the real Claude Code engine (below); the other reserved engines are registered unavailable and refuse every action until their PR calls
-  `registerAgentEngine`. IPC `createChat` takes `engine` (default `cliproxy`; refused while the
+  Ids (`shared/agent-engine.ts`): `cliproxy`, `markscode`, `codex`, `claude`.
+- Registry (`registry.ts`): `cliproxy.ts` wraps the executor and catalog unchanged; `markscode.ts`,
+  `codex.ts` and `claude.ts` are the real MarksCode, Codex and Claude Code engines (below), each
+  available only while its own `status()` is; `reservedEngine` remains for an id registered before
+  its engine plugs in (`registerAgentEngine`). IPC `createChat` takes `engine` (default `cliproxy`; refused while the
   engine's status is unavailable); `send/stop/approve/chatSettings/setChatSettings` route by the
   chat's ledger record; `models` takes `engine` (default `cliproxy`); `engines` lists every
   engine with its status. `ApiChatView.engine` names the chat's engine. The executor refuses a
@@ -1493,7 +1494,7 @@ later. E0 changes no CLIProxy behavior.
   ("created by a newer version") instead of reset. The `cosapi-` id and every fence are unchanged.
   Startup recovery (`recoverApiChats`) closes every open turn `interrupted` (shared helper
   `recovery.ts` `closeInterruptedTurn`), except records of an engine that claimed its own
-  recovery (`claimTurnRecovery`; Codex does).
+  recovery (`claimTurnRecovery`; Codex and MarksCode do).
 - Approvals (`approval.ts` `ApprovalGate`): the app mints the approval id and binds it to
   `argsHash` (sha256 of the tool name and canonical action), process memory only, oldest pending
   shown. The engine's own request id (Codex JSON-RPC id, Claude `request_id`, MarksCode permission
@@ -1642,17 +1643,77 @@ later. E0 changes no CLIProxy behavior.
   cli-modules `cliEngineTerminal(module, {sessionId, projectId, args, title})` keeps one durable
   session per chat (`engineChat` + `args`, reused with new args); args are validated per module
   (Claude: `--resume|--session-id <uuid>`; Codex: `resume <thread> --remote unix:///<abs>.sock`;
-  anything else refused, also when a stored session is loaded). tmux starts
+  MarksCode: `-s <session> .`, the id never starting with `-`; anything else refused, also when a
+  stored session is loaded). tmux starts
   `sh -c 'exec "$@"' marks-cli <bin> <args>`. Every open (also from the sidebar) first runs that
   module's hook (`registerCliEngineOpenHook(module, hook)`): required for hand-over modules
   (Claude: refuses while answering, stops its host), optional for live ones (Codex: starts the
-  server). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
+  server; MarksCode: refuses while its background service does not answer, never starts it). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
 Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
 `test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,
 turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over),
 `test/cli-modules.test.ts` (engine terminal args and open hook),
 `test/api-chat-ui.test.ts` (only available engines are offered; the terminal button).
+
+**MarksCode engine (E: MarksCode).** `agent-engine/markscode.ts` + `markscode-client.ts` (Marks-owned)
+run a chat's turns in a session of the MarksCode 2.0.25 shared background service over its HTTP API
+(opencode v2 fork; shapes from `packages/protocol/src/groups/*`, `packages/schema/src/*`).
+- Endpoint and auth: the service's own registration `<XDG_STATE_HOME|~/.local/state>/markscode/service.json`
+  (`{url,pid,password}`; read through `wsl.exe` on Windows); only a loopback `http:` URL is trusted with
+  the password. HTTP Basic `opencode:<password>` is built per request and never logged or put in an error.
+- `status()` never throws: command capability, module enabled and binary (`cli-modules.ts`
+  `cliModuleState`, same resolution as the terminals), registration present and `GET /api/info`
+  answering with the registered pid. A stopped service is reported (`fix: 'start'`); it is started only
+  by the explicit action `startMarksCodeService()` (`markscode service start`; IPC
+  `startEngineService`, the "Start MarksCode service" button in Settings > Modules > MarksCode).
+  The registry lists `markscode` available only while all of that holds.
+- `create`: only in an approved local project (`projectWorkspace` + `cliChatRuntime`; WSL path on
+  Windows; server projects refused). `POST /api/session {title, location:{directory}, model?, permissions}`
+  with the ruleset `shell * ask`, `edit * ask`, `edit /* deny`, `read /* deny`, `external_directory * deny`
+  (last match wins; a session deny beats saved "always" rules). Approval mode `auto` turns the first
+  two into `allow` (`PATCH /api/session/:id {permissions}`). The ledger stores `backendSessionId`.
+  Models: `GET /api/model` + `/api/model/default` as `provider/model` rows (default first); effort is
+  sent as `Model.Ref.variant` only when the model lists that variant (`POST /api/session/:id/model`).
+- `send`: refused while `/api/session/active` says the session runs (its TUI); the projector opens the
+  turn, `/api/event` connects (until `server.connected`), then `POST /api/session/:id/prompt {text}`.
+  Events (filtered by `data.sessionID`): `session.text.delta/ended` → text (ended = authoritative),
+  `tool.input.started` (name) + `tool.called/success/failed` → rows (`shell`→command with
+  `metadata.exit`, `edit/write/patch`→patch with `metadata.files` diffs, `read`→read, else other; a
+  failure after a rejected permission is "declined"), `session.shell.*` → command rows,
+  `usage.updated` → usage, `execution.succeeded/failed/interrupted` → turn end (reason `user` = stopped).
+- Approvals: `permission.asked` → ApprovalGate card bound to sha256 of
+  `{sessionID, requestID, action, resources}`; the MarksCode request id stays main-side
+  (`gate.engineRequestOf`). `approve` reads the live request back (`GET .../permission/:requestID`),
+  refuses a stale/answered id and an approve/always whose hash changed, then
+  `POST .../permission/:requestID/reply {decision: once|always|reject}`. A `permission.replied` this app
+  did not send (answered in the TUI) dismisses the card. Stop: `POST /api/session/:id/interrupt`, the
+  turn ends on `execution.interrupted` or after a 5 s grace.
+- The stream is volatile: bounded lines (1 MiB) and records (4 MiB), 45 s silence = dead, reconnect
+  with backoff (250 ms … 8 s, then the turn closes interrupted). After every reconnect it reconciles:
+  messages after this turn's question (finished tools, settled texts not yet shown), pending
+  permissions (new cards / vanished cards), and, when no longer running and idle since the prompt,
+  the session `outcome`. App quit aborts streams without ending turns.
+- Recovery: `claimTurnRecovery('markscode')` (`recovery.ts`) keeps the engine-neutral
+  `recoverApiChats` away from MarksCode records; closing uses the shared `closeInterruptedTurn`. `recoverMarksCodeChats` re-attaches a turn whose session still runs (projector
+  continues after the stored steps; stored tool rows are not repeated) and reconciles on connect;
+  otherwise it imports what finished and closes it completed/failed by the session outcome, or
+  interrupted (also when the service is unreachable).
+- Terminal (live, through the shared seam above): `terminal(chat)` = args `-s <session> .`;
+  `openTerminal` checks the approved local project and that the service answers, then
+  `cliEngineTerminal('markscode', …)` creates or reuses the chat's MarksCode module terminal and the
+  composer's one "Open in terminal" button shows it (`openSession`). Live, not hand-over: the app
+  runs no MarksCode process of its own; the chat and the TUI are both clients of the same service
+  session, so it opens while a turn runs (a permission answered there dismisses the chat's card; a
+  send while the TUI's own turn runs is refused). MarksCode's open hook (also from the sidebar)
+  refuses while the service does not answer, so the TUI never runs detached from that session.
+  Existing terminal menu items are unchanged.
+Proof: `test/agent-engine-markscode.test.ts` (fake HTTP+SSE service: status/start, ruleset and
+location, full turn, approvals once/always/reject/stale/changed, TUI reply, Stop, SSE drop + reconcile,
+restart re-attach vs interrupted, auth header present and never logged, SSE parser bounds, terminal
+through the seam), `test/cli-modules.test.ts` (MarksCode args validation and open hook),
+`test/api-chat-ui.test.ts` (MarksCode item and terminal button). Needs a real run: `markscode -s`
+attaching to the service session, Windows.
 
 ### CLIProxyAPI module management
 

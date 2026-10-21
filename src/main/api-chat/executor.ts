@@ -406,10 +406,11 @@ async function endTurn(sessionId: string, turnId: string, outcome: TurnOutcome, 
 /** Closes every turn the previous process left open. Once per process; sends wait for it. */
 export function recoverApiChats(): Promise<void> {
   recovery ??= (async () => {
-    // Engine-neutral: no backend session survives this process, so every engine's open turn closes here.
+    // Engine-neutral: no backend session survives this process, so every engine's open turn closes
+    // here, except an engine that recovers its own (Codex resumes its thread, MarksCode re-attaches
+    // to its still-running service session).
     for (const [sessionId, record] of Object.entries(await chatRecords())) {
       const open = record.openTurn;
-      // An engine that resumes its own backend (Codex) closes its turns in its own recover().
       if (!open || running.has(sessionId) || recoversOwnTurns(engineOf(record))) continue;
       try {
         if (await closeInterruptedTurn(sessionId, open.turnId, 'Chat Marks closed before the API answer finished')) {

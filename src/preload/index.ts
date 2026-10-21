@@ -154,6 +154,8 @@ const api = {
   apiChatChatSettings: (sessionId: string) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'chatSettings', sessionId }),
   apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
   apiChatApprove: (sessionId: string, approvalId: string, decision: import('../shared/api-chat.js').ApiChatApprovalDecision) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'approve', sessionId, approvalId, decision }),
+  /** Explicit user action: start the MarksCode background service, then its status. */
+  apiChatStartEngineService: (engine: 'markscode') => call<{ available: boolean; detail: string; fix: 'enable' | 'install' | 'start' | null }>('marksApiChat:request', { action: 'startEngineService', engine }),
   cliAction: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', action: 'enable' | 'disable' | 'install' | 'update' | 'stop') => call<unknown>('marksCli:request', { action, module }),
   cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),
   cliCreateSession: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', projectId: string | null) => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId }),

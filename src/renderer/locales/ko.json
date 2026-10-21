@@ -2985,5 +2985,14 @@
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex에 로그인되어 있지 않습니다. 터미널에서 `codex login`을 실행한 다음 다시 시도하세요.",
   "Codex chats need a project folder on this computer": "Codex 채팅에는 이 컴퓨터의 프로젝트 폴더가 필요합니다",
   "Enable the Codex module in Settings > Modules first": "먼저 설정 > 모듈에서 Codex 모듈을 활성화하세요",
-  "This chat has no engine session yet": "이 채팅에는 아직 엔진 세션이 없습니다"
+  "This chat has no engine session yet": "이 채팅에는 아직 엔진 세션이 없습니다",
+  "Start MarksCode service": "MarksCode 서비스 시작",
+  "Starting the MarksCode service…": "MarksCode 서비스를 시작하는 중…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode 서비스가 실행 중입니다. 새 채팅에서 MarksCode 채팅을 사용할 수 있습니다.",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "MarksCode 서비스가 중지되었습니다. 설정 > 모듈에서 시작하세요.",
+  "Choose a project for a MarksCode chat first": "먼저 MarksCode 채팅에 사용할 프로젝트를 선택하세요",
+  "Enable the MarksCode module in Settings > Modules": "설정 > 모듈에서 MarksCode 모듈을 켜세요",
+  "MarksCode is not installed": "MarksCode가 설치되어 있지 않습니다",
+  "The MarksCode service refused its saved password": "MarksCode 서비스가 저장된 비밀번호를 거부했습니다",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode가 이 세션(터미널)에서 아직 작업 중입니다. 끝나면 다시 보내세요."
 }

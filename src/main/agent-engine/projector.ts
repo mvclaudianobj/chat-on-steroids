@@ -66,6 +66,8 @@ export interface TurnProjectorOptions {
   sink: ProjectorSink;
   approvals: { gate: ApprovalGate; answer(engineRequestId: string, outcome: ApprovalOutcome): void };
   streamWriteMs?: number;
+  /** The first answer step's number: a turn re-attached after a restart continues after the steps already written. */
+  firstStep?: number;
 }
 
 interface OpenTool {
@@ -94,6 +96,7 @@ export class TurnProjector {
 
   constructor(private readonly options: TurnProjectorOptions) {
     this.streamWriteMs = options.streamWriteMs ?? STREAM_WRITE_MS;
+    this.step = Math.max(0, Math.floor(options.firstStep ?? 0));
   }
 
   get turnId(): string { return this.options.turnId; }

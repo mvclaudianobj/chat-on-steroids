@@ -2985,5 +2985,14 @@
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex 尚未登入。請在終端機中執行 `codex login`，然後再試一次。",
   "Codex chats need a project folder on this computer": "Codex 聊天需要此電腦上的專案資料夾",
   "Enable the Codex module in Settings > Modules first": "請先在 設定 > 模組 中啟用 Codex 模組",
-  "This chat has no engine session yet": "此聊天還沒有引擎工作階段"
+  "This chat has no engine session yet": "此聊天還沒有引擎工作階段",
+  "Start MarksCode service": "啟動 MarksCode 服務",
+  "Starting the MarksCode service…": "正在啟動 MarksCode 服務…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode 服務正在執行。可在「新聊天」中使用 MarksCode 聊天。",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "MarksCode 服務已停止。請在 設定 > 模組 中啟動。",
+  "Choose a project for a MarksCode chat first": "請先為 MarksCode 聊天選擇一個專案",
+  "Enable the MarksCode module in Settings > Modules": "請在 設定 > 模組 中啟用 MarksCode 模組",
+  "MarksCode is not installed": "未安裝 MarksCode",
+  "The MarksCode service refused its saved password": "MarksCode 服務拒絕了已儲存的密碼",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode 仍在此工作階段（其終端機）中工作。完成後再傳送。"
 }

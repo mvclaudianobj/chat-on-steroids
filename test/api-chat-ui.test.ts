@@ -274,6 +274,29 @@ it("names the chat's engine in the header and loads that engine's models", async
   await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerModel').options].map(option => option.value)).toEqual(['gpt-6-codex']));
 });
 
+it('offers a MarksCode chat once main reports it available, and opens its live terminal through the shared seam', async () => {
+  const api = apiMock({
+    apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'markscode']) })),
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'anthropic/sonnet-5' }), engine: 'markscode', approval: 'ask', pending: null, running: true } })),
+    apiChatTerminal: vi.fn(async () => ({ ok: true as const, data: { cliSessionId: 'cli-markscode-1' } }))
+  });
+  const openCliSession = vi.fn();
+  const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => 'project-1', selectChat: vi.fn(), selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }), openCliSession });
+  await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(2));
+  expect(chats.newChatItems().map(item => `${item.action}=${item.label()}`)).toEqual(['new-chat-cliproxy=CLIProxy', 'new-chat-markscode=MarksCode']);
+  expect(chats.projectChatItems('menu-project').map(item => item.label())).toEqual(['New CLIProxy chat in this project', 'New MarksCode chat in this project']);
+  chats.sync();
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('MarksCode · anthropic/sonnet-5'));
+  const button = $<HTMLButtonElement>('apiChatTerminal');
+  await vi.waitFor(() => expect(button.hidden).toBe(false));
+  // Live: the TUI joins the same service session, so it opens while a turn runs.
+  expect(button.disabled).toBe(false);
+  expect(button.title).toBe("Open this chat's MarksCode session in a terminal");
+  button.click();
+  await vi.waitFor(() => expect(openCliSession).toHaveBeenCalledWith('cli-markscode-1'));
+  expect(api.apiChatTerminal).toHaveBeenCalledWith('session-api');
+});
+
 it("opens a Codex chat's live terminal even while it answers, and limits efforts to the model's own", async () => {
   const api = apiMock({
     apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'gpt-6-codex' }), engine: 'codex', approval: 'ask', pending: null, running: true } })),

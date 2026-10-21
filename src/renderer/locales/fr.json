@@ -3075,5 +3075,14 @@
   "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex n'est pas connecté. Exécutez `codex login` dans un terminal, puis réessayez.",
   "Codex chats need a project folder on this computer": "Les chats Codex nécessitent un dossier de projet sur cet ordinateur",
   "Enable the Codex module in Settings > Modules first": "Activez d'abord le module Codex dans Réglages > Modules",
-  "This chat has no engine session yet": "Ce chat n'a pas encore de session de moteur"
+  "This chat has no engine session yet": "Ce chat n'a pas encore de session de moteur",
+  "Start MarksCode service": "Démarrer le service MarksCode",
+  "Starting the MarksCode service…": "Démarrage du service MarksCode…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "Le service MarksCode est en marche. Les chats MarksCode sont disponibles dans Nouveau chat.",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "Le service MarksCode est arrêté. Démarrez-le dans Réglages > Modules.",
+  "Choose a project for a MarksCode chat first": "Choisissez d’abord un projet pour un chat MarksCode",
+  "Enable the MarksCode module in Settings > Modules": "Activez le module MarksCode dans Réglages > Modules",
+  "MarksCode is not installed": "MarksCode n’est pas installé",
+  "The MarksCode service refused its saved password": "Le service MarksCode a refusé son mot de passe enregistré",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode travaille encore dans cette session (dans son terminal). Renvoyez quand il a terminé."
 }

@@ -5,9 +5,10 @@ vi.mock('../src/main/durable.js', () => ({
   readDurable: async (name: string) => structuredClone(durable.get(name) ?? null),
   writeDurableNow: async (name: string, value: unknown) => { durable.set(name, structuredClone(value)); }
 }));
-// Codex is registered for real; here its module is off, so it is listed unavailable.
+// Codex and MarksCode are registered for real; here their modules are off, so they are listed unavailable.
 vi.mock('../src/main/cli-modules.js', () => ({
-  cliEngineRuntime: async () => ({ ok: false, detail: 'Enable the Codex module in Settings > Modules first' })
+  cliEngineRuntime: async () => ({ ok: false, detail: 'Enable the Codex module in Settings > Modules first' }),
+  cliModuleState: async () => ({ enabled: false, command: true, binary: null })
 }));
 vi.mock('../src/main/secrets.js', () => ({
   getSecret: async () => null, hasSecret: async () => false, setSecret: async () => undefined, secretsRevision: () => 1
@@ -50,7 +51,7 @@ beforeEach(() => {
 });
 
 describe('agent engine registry', () => {
-  it('lists every engine in order; Codex is unavailable while its module is off', async () => {
+  it('lists every engine in order; Codex and MarksCode are unavailable while their modules are off', async () => {
     const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; terminal: string | null }>;
     expect(engines.map(engine => `${engine.id}:${engine.available}:${engine.terminal}`)).toEqual([
       'cliproxy:true:null', 'markscode:false:live', 'codex:false:live', 'claude:false:handover'
@@ -90,7 +91,7 @@ describe('agent engine registry', () => {
     expect(cliproxy.create).toHaveBeenCalledWith({ projectId: null });
     await expect(request({ action: 'createChat', engine: 'claude' })).rejects.toThrow('off');
     await expect(request({ action: 'createChat', engine: 'codex' })).rejects.toThrow('Enable the Codex module in Settings > Modules first');
-    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('MarksCode chats are not available in this version');
+    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('Enable the MarksCode module in Settings > Modules');
     expect(() => parseApiChatRequest({ action: 'createChat', engine: 'gemini' })).toThrow();
   });
 

@@ -41,6 +41,7 @@ vi.mock('node:child_process', () => {
       if (args[1] === 'tmux') callback(null, '/usr/bin/tmux\n', '');
       else if (args[1] === 'codex') callback(null, '/usr/local/bin/codex\n', '');
       else if (args[1] === 'claude') callback(null, '/usr/local/bin/claude\n', '');
+      else if (args[1] === 'markscode') callback(null, '/usr/local/bin/markscode\n', '');
       else callback(new Error('missing'), '', '');
     } else if (file === '/usr/local/bin/codex') callback(null, 'codex-cli 1.0\n', '');
     else callback(null, '', '');
@@ -62,7 +63,7 @@ vi.mock('../src/main/durable.js', () => ({
 vi.mock('../src/main/cli-source-install.js', () => ({ installFork: vi.fn() }));
 
 import {
-  cliAction, cliChatRuntime, cliCreateSession, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliOpen, cliSessions, cliStatus,
+  cliAction, cliChatRuntime, cliCreateSession, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
   registerCliEngineOpenHook, registerCliModuleIpc, registerCliModuleStopHook
 } from '../src/main/cli-modules.js';
 
@@ -225,6 +226,41 @@ describe('Persistent coding CLI terminal', () => {
     } finally {
       registerCliEngineOpenHook('codex', null);
       fixture.missingSession = false;
+    }
+  });
+  it('attaches a MarksCode chat\'s live terminal through the shared seam with only `-s <session> .`', async () => {
+    if (process.platform === 'win32') return;
+    expect(await cliModuleState('markscode')).toEqual({ enabled: false, command: true, binary: null });
+    const args = ['-s', 'ses_123', '.'];
+    try {
+      await cliAction('markscode', 'enable');
+      expect(await cliModuleState('markscode')).toEqual({ enabled: true, command: true, binary: '/usr/local/bin/markscode' });
+      for (const bad of [['-s', '--dangerously-skip', '.'], ['-s', 'ses_123'], ['-s', 'ses_123', '/'], ['-s', 'ses 1', '.'], ['serve', 'ses_123', '.'],
+        ['resume', 'thread-1', '--remote', 'unix:///home/test/a.sock'], ['--resume', '3f2b8c1e-0d4a-4c3b-9e2f-1a2b3c4d5e6f'], ['-s', 'ses_1\u0000', '.']]) {
+        await expect(cliEngineTerminal('markscode', { sessionId: 'chat-session-m', projectId: null, args: bad, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      }
+      // Another module's shape is refused for MarksCode, and MarksCode's for Codex.
+      await expect(cliEngineTerminal('codex', { sessionId: 'chat-session-m', projectId: null, args, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      const session = await cliEngineTerminal('markscode', { sessionId: 'chat-session-m', projectId: null, args, title: 'MarksCode · My chat' });
+      expect(session).toMatchObject({ module: 'markscode', projectId: null, title: 'MarksCode · My chat', engineChat: 'chat-session-m', args });
+      expect((await cliEngineTerminal('markscode', { sessionId: 'chat-session-m', projectId: null, args, title: 'other' })).id).toBe(session.id);
+      fixture.missingSession = true;
+      // The open hook (the service must answer) runs before tmux starts; a refusal stops the attach.
+      registerCliEngineOpenHook('markscode', async () => { throw new Error('The MarksCode service is stopped. Start it from Settings > Modules.'); });
+      await expect(cliOpen(session.id, 80, 24, 'markscode-refused')).rejects.toThrow('service is stopped');
+      expect(fixture.commands.some(command => command.includes('new-session'))).toBe(false);
+      const hook = vi.fn(async (_session: unknown): Promise<void> => undefined);
+      registerCliEngineOpenHook('markscode', hook);
+      await cliOpen(session.id, 80, 24, 'markscode-terminal');
+      expect(hook).toHaveBeenCalledWith(expect.objectContaining({ engineChat: 'chat-session-m' }));
+      // "$@" passes the binary and each argument as argv: nothing is parsed by a shell.
+      expect(fixture.commands.find(command => command.includes('new-session'))).toEqual([
+        'tmux', '-L', expect.any(String), 'new-session', '-d', '-s', session.tmuxSession, '-c', '/home/test', 'sh', '-c', 'exec "$@"', 'marks-cli', '/usr/local/bin/markscode', ...args
+      ]);
+    } finally {
+      registerCliEngineOpenHook('markscode', null);
+      fixture.missingSession = false;
+      await cliAction('markscode', 'disable');
     }
   });
 });
