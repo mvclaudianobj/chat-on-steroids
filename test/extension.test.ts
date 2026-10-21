@@ -6172,13 +6172,34 @@ describe('discovery finds the app instance this browser paired with', () => {
     expect((await local.get(['appInstance'])).appInstance).toBe(DEV);
   });
 
-  it('accepts an app too old to report an instance, as before', async () => {
+  it('accepts an app too old to report an instance while it wants no particular instance', async () => {
     const { fetch, pairs } = apps({ 8765: {} });
-    const local = new FakeStorageArea({ token: 'legacy-token', appInstance: PROD });
+    const local = new FakeStorageArea({ token: 'legacy-token' });
     const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
     expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8765, paired: true });
     expect(pairs).toEqual([]);
-    expect((await local.get(['appInstance'])).appInstance).toBe(PROD);
+  });
+
+  it('waits for its own instance instead of an app too old to report one, until an explicit Connect', async () => {
+    const { fetch, pairs, authorized } = apps({ 8765: {} });
+    const local = new FakeStorageArea({ token: 'token-8766', appInstance: PROD });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: false, port: null, paired: true });
+    expect(authorized.some(row => row.auth === 'Bearer token-8766')).toBe(false);
+    expect(await worker.sendPopup({ type: 'pair' })).toMatchObject({ ok: true });
+    expect(pairs).toEqual([8765]);
+  });
+
+  it('keeps a CoS browser copy off an older installed app that reports no instance (measured 2026-10-21)', async () => {
+    // The installed 2.1.43.1 on 8765 reports no instance; `npm run dev` beside it is on 8766.
+    const { fetch, pairs, authorized } = apps({ 8765: {}, 8766: { instance: DEV } });
+    const cosWorker = { call: vi.fn(async () => DEV), subscribe: () => undefined };
+    const local = new FakeStorageArea({ port: 8765, token: 'token-8765' });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch, cosWorker });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8766, paired: true });
+    expect(pairs.every(port => port === 8766)).toBe(true);
+    expect(authorized.some(row => row.port === 8765)).toBe(false);
+    expect((await local.get(['appInstance', 'port']))).toEqual({ appInstance: DEV, port: 8766 });
   });
 
   it('adopts the instance of the app a token from before instances already talks to', async () => {

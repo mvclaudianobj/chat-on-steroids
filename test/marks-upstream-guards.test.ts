@@ -85,7 +85,7 @@ describe('Chat Marks bridge instance', () => {
     const background = read('extension', 'background.js');
     const discover = background.slice(background.indexOf('async function discoverNow('), background.indexOf('/** Forgets that the app was ever confirmed'));
     expect(discover).toContain('const wanted = await wantedInstance();');
-    expect(discover).toContain('return !wanted || !reported || reported === wanted;');
+    expect(discover).toContain('return !wanted || reported === wanted;');
     expect(discover).toContain('if (!matches(body)) {');
     expect(background).toContain("globalThis.__cosBrowserWorker.call('app.bridgeInstance', [])");
     expect(background).toContain('await chrome.storage.local.set({ port, token, appInstance, disconnected });');

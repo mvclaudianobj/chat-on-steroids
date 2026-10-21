@@ -1217,9 +1217,12 @@ function acceptPort(candidate, body) {
 async function discoverNow(force, anyInstance = false) {
   await load();
   const wanted = await wantedInstance();
+  // An app that reports no instance (an older installed app) is somebody else's once this
+  // copy knows which instance it wants: the CoS copy beside an older installed app would
+  // otherwise take that app's port first. Without a wanted instance it is still accepted.
   const matches = body => {
     const reported = cleanInstance(body.instance);
-    return !wanted || !reported || reported === wanted;
+    return !wanted || reported === wanted;
   };
   // The CoS copy never leaves its own app, even on an explicit Connect.
   const fallbackAllowed = anyInstance && !cosAppInstance;
