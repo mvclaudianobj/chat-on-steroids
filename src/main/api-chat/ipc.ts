@@ -1,12 +1,17 @@
-/** Renderer access to Chat Marks API chat settings. The key travels in one direction only. */
+/**
+ * Renderer access to Chat Marks API chats and their settings. The key travels in one direction
+ * only. Chat actions go through the agent-engine registry: a new chat names its engine
+ * (default `cliproxy`), every other chat action is routed by the chat's ledger record.
+ */
 import { ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { markspanelAccessBlocked } from '../markspanel-auth.js';
 import { logWarn } from '../logger.js';
 import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS } from '../../shared/api-chat.js';
-import { listApiChatModels } from './catalog.js';
+import { AGENT_ENGINE_IDS, DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
+import { agentEngine, createAgentChat, engineForChat, listAgentEngines, recoverAgentEngines } from '../agent-engine/registry.js';
 import { ApiChatHttpError, streamCompletion } from './client.js';
-import { apiChatView, approveApiChat, createApiChat, MAX_API_CHAT_INPUT_CHARS, recoverApiChats, sendApiChat, setApiChatSettings, stopApiChat } from './executor.js';
+import { MAX_API_CHAT_INPUT_CHARS } from './executor.js';
 import {
   apiChatKey, apiChatSettings, apiChatStatus, noteKeyRequired, noteModelAvailability, setApiChatKey,
   toggleFavoriteModel, updateApiChatSettings
@@ -15,9 +20,11 @@ import {
 const TEST_TIMEOUT_MS = 30_000;
 const modelId = z.string().min(1).max(200);
 const sessionId = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
+const engine = z.enum(AGENT_ENGINE_IDS);
 
 const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }).strict(),
+  z.object({ action: z.literal('engines') }).strict(),
   z.object({ action: z.literal('setKey'), key: z.string().max(4096) }).strict(),
   z.object({ action: z.literal('setSettings'), settings: z.record(z.string(), z.unknown()) }).strict(),
   z.object({ action: z.literal('toggleFavorite'), model: modelId }).strict(),
@@ -27,10 +34,11 @@ const request = z.discriminatedUnion('action', [
     offset: z.number().int().min(0).optional(),
     limit: z.number().int().min(1).max(200).optional(),
     modality: z.enum(['chat', 'image', 'audio', 'embedding', 'moderation']).optional(),
-    refresh: z.boolean().optional()
+    refresh: z.boolean().optional(),
+    engine: engine.optional()
   }).strict(),
   z.object({ action: z.literal('test'), model: modelId.optional() }).strict(),
-  z.object({ action: z.literal('createChat'), projectId: z.string().uuid().nullable().optional(), model: modelId.optional() }).strict(),
+  z.object({ action: z.literal('createChat'), projectId: z.string().uuid().nullable().optional(), model: modelId.optional(), engine: engine.optional() }).strict(),
   z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
   z.object({ action: z.literal('chatSettings'), sessionId }).strict(),
@@ -74,38 +82,46 @@ export async function testApiChat(model?: string, fetchImpl?: typeof fetch): Pro
   }
 }
 
-async function chatAction(input: z.infer<typeof request>): Promise<unknown> {
+export async function chatAction(input: z.infer<typeof request>): Promise<unknown> {
   switch (input.action) {
-    case 'createChat': return createApiChat({ projectId: input.projectId ?? null, ...(input.model ? { model: input.model } : {}) });
+    case 'engines': return listAgentEngines();
+    case 'models': {
+      const { action: _action, engine: id, ...query } = input;
+      void _action;
+      return agentEngine(id ?? DEFAULT_AGENT_ENGINE).models(query);
+    }
+    case 'createChat': return createAgentChat(input.engine ?? DEFAULT_AGENT_ENGINE, { projectId: input.projectId ?? null, ...(input.model ? { model: input.model } : {}) });
     // The turn streams on in main; the renderer follows it through session change notices.
-    case 'send': return { turnId: (await sendApiChat(input.sessionId, input.text)).turnId };
-    case 'stop': await apiChatView(input.sessionId); return { stopped: stopApiChat(input.sessionId) };
-    case 'chatSettings': return apiChatView(input.sessionId);
-    case 'setChatSettings': return setApiChatSettings(input.sessionId, {
+    case 'send': return { turnId: (await (await engineForChat(input.sessionId)).send(input.sessionId, input.text)).turnId };
+    case 'stop': return { stopped: await (await engineForChat(input.sessionId)).stop(input.sessionId) };
+    case 'chatSettings': return (await engineForChat(input.sessionId)).view(input.sessionId);
+    case 'setChatSettings': return (await engineForChat(input.sessionId)).setChatSettings(input.sessionId, {
       ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {}),
       ...(input.approval !== undefined ? { approval: input.approval } : {})
     });
-    case 'approve': return approveApiChat(input.sessionId, input.approvalId, input.decision);
+    case 'approve': return (await engineForChat(input.sessionId)).approve(input.sessionId, input.approvalId, input.decision);
     default: throw new Error('Unknown API chat action');
   }
 }
 
+/** Validates one renderer request exactly as the IPC handler does. */
+export const parseApiChatRequest = (payload: unknown): z.infer<typeof request> => request.parse(payload);
+
 export function registerApiChatIpc(getWindow: () => BrowserWindow | null): void {
   // Turns the previous run left open are closed as interrupted before any new one starts.
-  void recoverApiChats().catch(error => logWarn(`API chat recovery failed: ${(error as Error).message}`));
+  void recoverAgentEngines().catch(error => logWarn(`API chat recovery failed: ${(error as Error).message}`));
   ipcMain.handle('marksApiChat:request', async (event, payload: unknown) => {
     try {
       if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
       const target = getWindow();
       if (!target || target.isDestroyed() || event.sender !== target.webContents || event.senderFrame !== target.webContents.mainFrame) throw new Error('Window not authorized');
-      const input = request.parse(payload);
+      const input = parseApiChatRequest(payload);
       const data = input.action === 'status' ? await apiChatStatus()
         : input.action === 'setKey' ? (await setApiChatKey(input.key), await apiChatStatus())
           : input.action === 'setSettings' ? (await updateApiChatSettings(input.settings), await apiChatStatus())
             : input.action === 'toggleFavorite' ? (await toggleFavoriteModel(input.model), await apiChatStatus())
-              : input.action === 'models' ? await listApiChatModels(input)
-                : input.action === 'test' ? await testApiChat(input.model)
-                  : await chatAction(input);
+              : input.action === 'test' ? await testApiChat(input.model)
+                : await chatAction(input);
       return { ok: true, data };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };

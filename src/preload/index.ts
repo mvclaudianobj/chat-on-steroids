@@ -138,12 +138,15 @@ const api = {
   /** Stores (or, empty, removes) the API chat key; the reply never contains it. */
   apiChatSetKey: (key: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setKey', key }),
   apiChatSetSettings: (settings: Partial<import('../shared/api-chat.js').ApiChatSettings>) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setSettings', settings }),
-  apiChatModels: (query = '', offset = 0, limit = 50, refresh = false) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit, refresh }),
+  /** A page of an engine's models (CLIProxy's catalog when `engine` is omitted). */
+  apiChatModels: (query = '', offset = 0, limit = 50, refresh = false, engine?: import('../shared/agent-engine.js').AgentEngineId) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit, refresh, ...(engine ? { engine } : {}) }),
+  /** Every chat engine with whether a new chat can use it now. */
+  apiChatEngines: () => call<import('../shared/agent-engine.js').AgentEngineInfo[]>('marksApiChat:request', { action: 'engines' }),
   apiChatToggleFavorite: (model: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'toggleFavorite', model }),
   /** A minimal real request with the model (the default one when omitted); records its availability. */
   apiChatTest: (model?: string) => call<{ model: string }>('marksApiChat:request', { action: 'test', ...(model ? { model } : {}) }),
-  /** A new API chat: a local session in the `cosapi-` namespace, optionally in a project. */
-  apiChatCreate: (options: { projectId?: string | null; model?: string } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
+  /** A new API chat: a local session in the `cosapi-` namespace, optionally in a project, on an engine (CLIProxy by default). */
+  apiChatCreate: (options: { projectId?: string | null; model?: string; engine?: import('../shared/agent-engine.js').AgentEngineId } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
   /** Records the question and starts the answer; it streams into the session's history. */
   apiChatSend: (sessionId: string, text: string) => call<{ turnId: string }>('marksApiChat:request', { action: 'send', sessionId, text }),
   apiChatStop: (sessionId: string) => call<{ stopped: boolean }>('marksApiChat:request', { action: 'stop', sessionId }),

@@ -6,6 +6,8 @@
  * Their conversation ids are minted by the app in a namespace no ChatGPT conversation uses, so
  * every ChatGPT-only owner (bridge, extension, Compact & Resume, Goal/Loop) can refuse them by id.
  */
+import type { AgentEngineId } from './agent-engine.js';
+
 export const API_CONVERSATION_PREFIX = 'cosapi-';
 export const DEFAULT_API_CHAT_ENDPOINT = 'http://127.0.0.1:18081/v1';
 export const API_CHAT_EFFORTS = ['low', 'medium', 'high'] as const;
@@ -80,6 +82,8 @@ export interface ApiChatStatus extends ApiChatSettings {
 export interface ApiChatView {
   sessionId: string;
   conversationId: string;
+  /** What runs this chat's model; fixed at creation (`cliproxy` for every older chat). */
+  engine: AgentEngineId;
   model: string | null;
   effort: ApiChatEffort | null;
   running: boolean;

@@ -1,0 +1,20 @@
+{
+  "engine": "codex",
+  "note": "Synthetic Codex 0.163 app-server turn, already translated to EngineEvents. `from` names the notification or request each event comes from.",
+  "steps": [
+    { "from": "item/agentMessage/delta", "event": { "type": "text_delta", "delta": "I'll run the tests " } },
+    { "from": "item/agentMessage/delta", "event": { "type": "text_delta", "delta": "first." } },
+    { "from": "item/completed agentMessage", "event": { "type": "text_final", "text": "I'll run the tests first." } },
+    { "from": "item/started commandExecution", "event": { "type": "tool_started", "toolId": "item-cmd-1", "kind": "command", "name": "commandExecution", "command": "npm test", "cwd": "/work/app" } },
+    { "from": "item/commandExecution/outputDelta", "event": { "type": "tool_output", "toolId": "item-cmd-1", "chunk": "1 failing\n" } },
+    { "from": "item/completed commandExecution{status:failed,exitCode:1,aggregatedOutput}", "event": { "type": "tool_finished", "toolId": "item-cmd-1", "status": "failed", "exitCode": 1, "output": "> app test\n1 failing\n" } },
+    { "from": "item/fileChange/requestApproval (server request id 7)", "event": { "type": "approval_requested", "requestId": "7", "toolId": "item-patch-1", "kind": "patch", "tool": "fileChange", "summary": "1 file", "files": ["update src/sum.ts"], "action": { "changes": [{ "path": "src/sum.ts", "kind": "update" }] } } },
+    { "from": "item/started fileChange", "event": { "type": "tool_started", "toolId": "item-patch-1", "kind": "patch", "name": "fileChange", "files": [{ "path": "/work/app/src/sum.ts", "kind": "update" }] } },
+    { "from": "item/completed fileChange{status:completed,changes[].diff}", "event": { "type": "tool_finished", "toolId": "item-patch-1", "status": "ok", "files": [{ "path": "/work/app/src/sum.ts", "kind": "update", "diff": "--- a/src/sum.ts\n+++ b/src/sum.ts\n@@ -1 +1,2 @@\n-return a - b;\n+return a + b;\n+// fixed\n" }] } },
+    { "from": "item/started mcpToolCall", "event": { "type": "tool_started", "toolId": "item-mcp-1", "kind": "mcp", "name": "docs/search", "input": { "query": "sum" } } },
+    { "from": "item/completed mcpToolCall", "event": { "type": "tool_finished", "toolId": "item-mcp-1", "status": "ok", "output": "2 results" } },
+    { "from": "item/agentMessage/delta", "event": { "type": "text_delta", "delta": "Fixed the sign in sum.ts." } },
+    { "from": "thread/tokenUsage/updated", "event": { "type": "usage", "inputTokens": 1200, "outputTokens": 80, "cachedInputTokens": 900, "reasoningTokens": 40 } },
+    { "from": "turn/completed{status:completed}", "event": { "type": "turn_end", "outcome": "completed" } }
+  ]
+}

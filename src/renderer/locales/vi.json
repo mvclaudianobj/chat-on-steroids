@@ -2973,5 +2973,7 @@
   "Approve": "Cho phép",
   "Approve and don't ask again in this chat": "Cho phép và không hỏi lại trong cuộc trò chuyện này",
   "This approval is no longer pending": "Yêu cầu phê duyệt này không còn chờ xử lý",
-  "New CLIProxy chat in this project": "Cuộc trò chuyện CLIProxy mới trong dự án này"
+  "New CLIProxy chat in this project": "Cuộc trò chuyện CLIProxy mới trong dự án này",
+  "Chat with {0}": "Trò chuyện với {0}",
+  "New {0} chat in this project": "Cuộc trò chuyện {0} mới trong dự án này"
 }

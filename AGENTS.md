@@ -1370,13 +1370,15 @@ changes. The session store owns its history: the question is an app `user_messag
 (`completed|stopped|failed|interrupted`); a failure adds a `chat_error`, and a stopped or
 failed answer keeps its partial text as final. Context is the session's own questions and
 settled answers, newest kept (60 messages / 120k chars), after one short system line. The
-Marks durable `marks-api-chat-sessions` holds only each chat's model, effort and `openTurn`;
+Marks durable `marks-api-chat-sessions` (owner `main/agent-engine/ledger.ts`) holds each chat's
+engine, backend session id, model, effort, approval mode and `openTurn`;
 the turn is opened there before its `turn_start`. Whether a turn runs is process memory
 (one per chat; Stop aborts that request). At IPC registration `recoverApiChats` closes every
 ledger `openTurn` as `interrupted`, settling a streaming answer; sends wait for it. Every
 completed or failed request updates the model's availability, a success its recents. IPC
-`marksApiChat:request` adds `createChat`, `send`, `stop`, `chatSettings`, `setChatSettings`
-(preload `apiChatCreate/Send/Stop/ChatSettings/SetChatSettings`); the renderer follows a
+`marksApiChat:request` adds `engines`, `createChat`, `send`, `stop`, `chatSettings`, `setChatSettings`
+(preload `apiChatEngines/Create/Send/Stop/ChatSettings/SetChatSettings`), routed by the agent-engine
+registry (below); the renderer follows a
 turn through the store's `session:changed` notices. Fences by id: `bridge.ts`
 `controlledConversation` (controls, Stop, Goal/Loop, Compact) throws `api_chat_session` and
 `noteCallAttribution` ignores API ids; `session/input.ts` `enqueueInput`, `goal.ts`
@@ -1384,8 +1386,9 @@ turn through the store's `session:changed` notices. Fences by id: `bridge.ts`
 
 The chat view is the same for both providers: `renderer/api-chat-ui.ts` (created by
 `marks-modules-ui.ts`) owns only what differs. New chat's menu (`cli-modules-ui.ts`
-`newChatItems`) shows **CLIProxy** after ChatGPT once `apiChatStatus` answers; without a default
-model or with a required key missing it opens Settings > Modules with a toast instead. Creating
+`newChatItems`) shows one item per engine `apiChatEngines` reports available (today only
+**CLIProxy**) after ChatGPT; for CLIProxy, without a default model or with a required key missing
+it opens Settings > Modules with a toast instead. Creating
 calls `apiChatCreate({projectId})` and selects the session through `chat.ts`
 `selectChatSession` (reloads the list first, so a stale read cannot drop the new selection). A
 document capture-phase `submit` listener takes the composer for the selected API chat: text goes
@@ -1393,7 +1396,8 @@ to `apiChatSend` (composer cleared on success, errors as toasts, attachments ref
 Send button showing Stop calls `apiChatStop`; ChatGPT chats keep the outbox path untouched. The
 chat's own model (chat-modality `apiChatModels`, favorites/recents first) and effort selects
 replace ChatGPT's model menu and write `apiChatSetChatSettings`; the header shows
-`CLIProxy · <model>`. `is-api-chat` on the chat panel hides the ChatGPT-only controls
+`<engine label> · <model>` (`CLIProxy · <model>`), and the model list is the chat's engine's
+(`apiChatModels(…, engine)`). `is-api-chat` on the chat panel hides the ChatGPT-only controls
 (attachments, Goal/Loop mode, Plan, model menu, context meter/Compact, delivery options, skill
 and mention menus) in `settings.css`. Hooks in upstream files, each marked `Chat Marks:`:
 `chat.ts` `refreshSessionControls` skips `sessions:controls` for API chats and takes the running
@@ -1465,6 +1469,57 @@ UI) and records its row after the turn ended. Strict mode: `createApiChat` trust
 on. This mirrors a composer opening. A chat created while strict mode was off stays untrusted, and
 its tools are refused (the row menu offers no Trust for API chats). Proof:
 `test/api-chat-tools.test.ts`.
+
+**Agent engines (E0).** `main/agent-engine/` (Marks-owned) puts an engine contract behind the
+same chat screen, so coding CLIs (MarksCode, Codex, Claude Code) can run an API chat's turns
+later. E0 changes no CLIProxy behavior.
+- Contract (`types.ts` `AgentEngine`): `id`, `label`, `terminalMode`, `status()` (available +
+  one-line detail, never throws for "not set up"), `models(query)` (the catalog's row shape),
+  `create`, `view`, `send` (resolves once the question is recorded), `stop`, `approve`,
+  `setChatSettings`, `recover`, optional `terminal(chat)` → `{argv, mode: live|handover}`.
+  Ids (`shared/agent-engine.ts`): `cliproxy`, and reserved `markscode`, `codex`, `claude`.
+- Registry (`registry.ts`): `cliproxy.ts` wraps the executor and catalog unchanged; the reserved
+  engines are registered unavailable and refuse every action until their PR calls
+  `registerAgentEngine`. IPC `createChat` takes `engine` (default `cliproxy`; refused while the
+  engine's status is unavailable); `send/stop/approve/chatSettings/setChatSettings` route by the
+  chat's ledger record; `models` takes `engine` (default `cliproxy`); `engines` lists every
+  engine with its status. `ApiChatView.engine` names the chat's engine. The executor refuses a
+  chat of another engine.
+- Ledger (`ledger.ts`): a record without `engine` is a `cliproxy` chat, and `cliproxy` records
+  are still written without it (older records keep their exact shape). `backendSessionId` is the
+  engine's own session/thread id. Records are parsed one by one: one this version cannot read
+  (an engine added later) is kept verbatim, written back untouched, and its chat refused
+  ("created by a newer version") instead of reset. The `cosapi-` id and every fence are unchanged.
+  Startup recovery (`recoverApiChats`) is engine-neutral: no backend survives the process, so
+  every open turn closes `interrupted`.
+- Approvals (`approval.ts` `ApprovalGate`): the app mints the approval id and binds it to
+  `argsHash` (sha256 of the tool name and canonical action), process memory only, oldest pending
+  shown. The engine's own request id (Codex JSON-RPC id, Claude `request_id`, MarksCode permission
+  id) stays main-side beside it; `dismiss(engineRequestId)` removes a card the engine settled
+  elsewhere (its TUI). `codex/claude/marksCodeApprovalDecision` map approve/always/deny/stop to
+  `accept|acceptForSession|decline|cancel`, `allow{updatedInput}|deny{message}`, `once|always|reject`.
+  The executor uses the same gate.
+- Projector (`projector.ts` `TurnProjector`): CLI adapters translate their stream into
+  engine-neutral `EngineEvent`s (`text_delta/final`, `tool_started/output/finished` with kind
+  `command|patch|read|mcp|other`, `approval_requested/resolved`, `usage`, `error`, `turn_end`).
+  It writes the API chat's shapes: ledger `openTurn`, `user_message` `api-user:<turn>`,
+  `turn_start`, one `assistant_message` per answer step (`api-assistant:<turn>[:<step>]`,
+  `streaming` at most once a second, `final` when the step closes before a tool/approval/end),
+  `chat_error` (a fatal one fails the turn), `turn_end`, then the ledger close. Usage is kept as
+  the turn's latest totals (not stored yet). Events after the end are ignored.
+- CLI tool rows (`tool-row.ts`): these tools ran inside the CLI, so nothing goes through the MCP
+  kernel, correlation or the recorder. One `tool_call` per finished tool (or per tool still open
+  at the end, as "did not finish") is appended with `appendEvent`: `source: 'app'`, the turn's
+  `turnId`, `attribution`/`attributionMethod: 'engine'` (new `CallAttribution`, label "the chat's
+  own engine session"), `engine`, `requestId: null`, a stable `callId` (hash of engine, turn and
+  tool id), tool name by kind (`exec_command`, `apply_patch`, `read`, `mcp:<name>`, else the
+  engine's), a summary in the recorder's wording, `changes` from unified diffs
+  (`reviewUnavailable: 'not-kept'`), credentials redacted. Request-id placement only reads
+  `source: 'mcp'` rows, so the row is placed by its turnId. Written once, it needs no revision
+  and the session's tool count stays exact.
+Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
+`test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
+`test/api-chat-ui.test.ts` (only available engines are offered).
 
 ### CLIProxyAPI module management
 
