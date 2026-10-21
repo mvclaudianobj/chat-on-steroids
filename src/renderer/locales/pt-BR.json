@@ -3065,5 +3065,17 @@
   "This approval is no longer pending": "Esta aprovação não está mais pendente",
   "New CLIProxy chat in this project": "Novo chat CLIProxy neste projeto",
   "Chat with {0}": "Chat com {0}",
-  "New {0} chat in this project": "Novo chat {0} neste projeto"
+  "New {0} chat in this project": "Novo chat {0} neste projeto",
+  "Open in terminal": "Abrir no terminal",
+  "Open this chat's session live in its terminal": "Abrir a sessão deste chat ao vivo no terminal",
+  "Start MarksCode service": "Iniciar o serviço do MarksCode",
+  "Starting the MarksCode service…": "Iniciando o serviço do MarksCode…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "O serviço do MarksCode está em execução. Os chats do MarksCode estão disponíveis em Novo chat.",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "O serviço do MarksCode está parado. Inicie-o em Configurações > Módulos.",
+  "Choose a project for a MarksCode chat first": "Escolha primeiro um projeto para um chat do MarksCode",
+  "Enable the MarksCode module in Settings > Modules": "Ative o módulo MarksCode em Configurações > Módulos",
+  "MarksCode is not installed": "O MarksCode não está instalado",
+  "The MarksCode service refused its saved password": "O serviço do MarksCode recusou a senha salva",
+  "This chat has no terminal yet": "Este chat ainda não tem terminal",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "O MarksCode ainda está trabalhando nesta sessão (no terminal). Envie de novo quando terminar."
 }

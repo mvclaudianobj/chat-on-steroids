@@ -2975,5 +2975,17 @@
   "This approval is no longer pending": "Yêu cầu phê duyệt này không còn chờ xử lý",
   "New CLIProxy chat in this project": "Cuộc trò chuyện CLIProxy mới trong dự án này",
   "Chat with {0}": "Trò chuyện với {0}",
-  "New {0} chat in this project": "Cuộc trò chuyện {0} mới trong dự án này"
+  "New {0} chat in this project": "Cuộc trò chuyện {0} mới trong dự án này",
+  "Open in terminal": "Mở trong terminal",
+  "Open this chat's session live in its terminal": "Mở phiên của cuộc trò chuyện này trực tiếp trong terminal",
+  "Start MarksCode service": "Khởi động dịch vụ MarksCode",
+  "Starting the MarksCode service…": "Đang khởi động dịch vụ MarksCode…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "Dịch vụ MarksCode đang chạy. Các cuộc trò chuyện MarksCode có trong Trò chuyện mới.",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "Dịch vụ MarksCode đã dừng. Hãy khởi động nó trong Cài đặt > Mô-đun.",
+  "Choose a project for a MarksCode chat first": "Hãy chọn một dự án cho cuộc trò chuyện MarksCode trước",
+  "Enable the MarksCode module in Settings > Modules": "Hãy bật mô-đun MarksCode trong Cài đặt > Mô-đun",
+  "MarksCode is not installed": "MarksCode chưa được cài đặt",
+  "The MarksCode service refused its saved password": "Dịch vụ MarksCode đã từ chối mật khẩu đã lưu",
+  "This chat has no terminal yet": "Cuộc trò chuyện này chưa có terminal",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode vẫn đang làm việc trong phiên này (trong terminal). Hãy gửi lại khi xong."
 }

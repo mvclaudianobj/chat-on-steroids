@@ -22,6 +22,8 @@ export interface ApiChatUiHooks {
   selectedChat?(): { id: string; conversationId: string | null } | null;
   /** Shows that session in the normal chat view. */
   selectChat?(id: string): void | Promise<void>;
+  /** Shows a module terminal session (an engine chat's live terminal). */
+  openTerminal?(session: import('../main/cli-modules.js').CliSession): void | Promise<void>;
 }
 
 export interface ApiChatUi {
@@ -85,7 +87,16 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     ui(option, 'textContent', text);
     approval.append(option);
   }
-  controls.append(model, effort, approval);
+  // An engine chat (MarksCode) can be opened live in its module terminal: the same session.
+  const terminal = document.createElement('button');
+  terminal.type = 'button';
+  terminal.className = 'btn api-chat-terminal';
+  terminal.id = 'apiChatTerminal';
+  terminal.hidden = true;
+  ui(terminal, 'textContent', () => t('Open in terminal'));
+  ui(terminal, 'title', () => t("Open this chat's session live in its terminal"));
+  terminal.addEventListener('click', () => void openTerminal());
+  controls.append(model, effort, approval, terminal);
 
   // The paused call of the running turn: tool, readable arguments and the three answers.
   const card = document.createElement('section');
@@ -174,6 +185,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     model.value = current;
     effort.value = view?.effort ?? '';
     approval.value = view?.approval ?? 'ask';
+    terminal.hidden = !view || engineOf() === 'cliproxy' || !hooks.openTerminal;
     model.disabled = !view || busy;
     effort.disabled = !view || busy;
     approval.disabled = !view || busy;
@@ -205,6 +217,14 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
       answering = false;
       paint();
     }
+  }
+
+  async function openTerminal(): Promise<void> {
+    const id = shownFor;
+    if (!id) return;
+    const reply = await api.apiChatTerminal(id).catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }));
+    if (!reply.ok) { toast(t(reply.error)); return; }
+    await hooks.openTerminal?.(reply.data);
   }
 
   async function loadView(id: string): Promise<void> {

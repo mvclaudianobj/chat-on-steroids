@@ -67,6 +67,13 @@ export async function storedChatRecord(sessionId: string): Promise<ChatRecord | 
   return (await loaded()).records[sessionId];
 }
 
+/**
+ * Engines whose backend session outlives this process (MarksCode's shared service): their own
+ * `recover()` re-attaches an open turn that is still running, so the engine-neutral startup
+ * recovery leaves their records alone.
+ */
+export const SELF_RECOVERING_ENGINES: ReadonlySet<AgentEngineId> = new Set<AgentEngineId>(['markscode']);
+
 export const engineOf = (record: ChatRecord | undefined): AgentEngineId => record?.engine ?? DEFAULT_AGENT_ENGINE;
 
 /**

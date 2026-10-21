@@ -3,13 +3,17 @@
  * only. Chat actions go through the agent-engine registry: a new chat names its engine
  * (default `cliproxy`), every other chat action is routed by the chat's ledger record.
  */
-import { ipcMain, type BrowserWindow } from 'electron';
+import { app, ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { markspanelAccessBlocked } from '../markspanel-auth.js';
 import { logWarn } from '../logger.js';
 import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS } from '../../shared/api-chat.js';
 import { AGENT_ENGINE_IDS, DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
 import { agentEngine, createAgentChat, engineForChat, listAgentEngines, recoverAgentEngines } from '../agent-engine/registry.js';
+import { storedChatRecord } from '../agent-engine/ledger.js';
+import { shutdownMarksCodeEngine, startMarksCodeService } from '../agent-engine/markscode.js';
+import { getSession } from '../session/store.js';
+import { localProjectPath, projectWorkspace } from '../projects.js';
 import { ApiChatHttpError, streamCompletion } from './client.js';
 import { MAX_API_CHAT_INPUT_CHARS } from './executor.js';
 import {
@@ -41,6 +45,10 @@ const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('createChat'), projectId: z.string().uuid().nullable().optional(), model: modelId.optional(), engine: engine.optional() }).strict(),
   z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
+  // The chat's backend session in its module's durable terminal (MarksCode `-s <session>`).
+  z.object({ action: z.literal('terminal'), sessionId }).strict(),
+  // An explicit user action: start the engine's background service (`markscode service start`).
+  z.object({ action: z.literal('startEngineService'), engine: z.literal('markscode') }).strict(),
   z.object({ action: z.literal('chatSettings'), sessionId }).strict(),
   z.object({
     action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional(),
@@ -95,6 +103,8 @@ export async function chatAction(input: z.infer<typeof request>): Promise<unknow
     case 'send': return { turnId: (await (await engineForChat(input.sessionId)).send(input.sessionId, input.text)).turnId };
     case 'stop': return { stopped: await (await engineForChat(input.sessionId)).stop(input.sessionId) };
     case 'chatSettings': return (await engineForChat(input.sessionId)).view(input.sessionId);
+    case 'terminal': return engineTerminal(input.sessionId);
+    case 'startEngineService': return startMarksCodeService();
     case 'setChatSettings': return (await engineForChat(input.sessionId)).setChatSettings(input.sessionId, {
       ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {}),
       ...(input.approval !== undefined ? { approval: input.approval } : {})
@@ -104,12 +114,33 @@ export async function chatAction(input: z.infer<typeof request>): Promise<unknow
   }
 }
 
+/**
+ * Opens (or reuses) the durable module terminal that shows this chat's backend session live:
+ * the engine names the arguments, cli-modules owns the tmux session in the chat's project.
+ */
+export async function engineTerminal(sessionId: string): Promise<unknown> {
+  const engine = await engineForChat(sessionId);
+  const view = await engine.view(sessionId);
+  const session = await getSession(sessionId);
+  if (!session?.projectId) throw new Error('This chat has no project');
+  const folder = await projectWorkspace(session.projectId);
+  const cwd = localProjectPath(folder);
+  if (!cwd) throw new Error('This chat\'s project is not on this computer');
+  const record = await storedChatRecord(sessionId);
+  const terminal = engine.terminal?.({ sessionId, conversationId: view.conversationId, backendSessionId: record?.backendSessionId ?? null, cwd }) ?? null;
+  if (!terminal || terminal.mode !== 'live' || engine.id !== 'markscode') throw new Error('This chat has no terminal yet');
+  const { cliEngineSession } = await import('../cli-modules.js');
+  return cliEngineSession('markscode', session.projectId, terminal.argv.slice(1), sessionId, `${engine.label} · ${session.title ?? 'chat'}`.slice(0, 120));
+}
+
 /** Validates one renderer request exactly as the IPC handler does. */
 export const parseApiChatRequest = (payload: unknown): z.infer<typeof request> => request.parse(payload);
 
 export function registerApiChatIpc(getWindow: () => BrowserWindow | null): void {
   // Turns the previous run left open are closed as interrupted before any new one starts.
   void recoverAgentEngines().catch(error => logWarn(`API chat recovery failed: ${(error as Error).message}`));
+  // Quit closes MarksCode event streams without ending their turns: the next start re-attaches.
+  app.on('before-quit', shutdownMarksCodeEngine);
   ipcMain.handle('marksApiChat:request', async (event, payload: unknown) => {
     try {
       if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');

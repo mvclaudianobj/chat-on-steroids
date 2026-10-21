@@ -1491,7 +1491,7 @@ later. E0 changes no CLIProxy behavior.
   (an engine added later) is kept verbatim, written back untouched, and its chat refused
   ("created by a newer version") instead of reset. The `cosapi-` id and every fence are unchanged.
   Startup recovery (`recoverApiChats`) is engine-neutral: no backend survives the process, so
-  every open turn closes `interrupted`.
+  every open turn closes `interrupted` (except MarksCode, which recovers itself; see below).
 - Approvals (`approval.ts` `ApprovalGate`): the app mints the approval id and binds it to
   `argsHash` (sha256 of the tool name and canonical action), process memory only, oldest pending
   shown. The engine's own request id (Codex JSON-RPC id, Claude `request_id`, MarksCode permission
@@ -1520,6 +1520,59 @@ later. E0 changes no CLIProxy behavior.
 Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
 `test/api-chat-ui.test.ts` (only available engines are offered).
+
+**MarksCode engine (E: MarksCode).** `agent-engine/markscode.ts` + `markscode-client.ts` (Marks-owned)
+run a chat's turns in a session of the MarksCode 2.0.25 shared background service over its HTTP API
+(opencode v2 fork; shapes from `packages/protocol/src/groups/*`, `packages/schema/src/*`).
+- Endpoint and auth: the service's own registration `<XDG_STATE_HOME|~/.local/state>/markscode/service.json`
+  (`{url,pid,password}`; read through `wsl.exe` on Windows); only a loopback `http:` URL is trusted with
+  the password. HTTP Basic `opencode:<password>` is built per request and never logged or put in an error.
+- `status()` never throws: command capability, module enabled and binary (`cli-modules.ts`
+  `cliModuleState`, same resolution as the terminals), registration present and `GET /api/info`
+  answering with the registered pid. A stopped service is reported (`fix: 'start'`); it is started only
+  by the explicit action `startMarksCodeService()` (`markscode service start`; IPC
+  `startEngineService`, the "Start MarksCode service" button in Settings > Modules > MarksCode).
+  The registry lists `markscode` available only while all of that holds.
+- `create`: only in an approved local project (`projectWorkspace` + `cliChatRuntime`; WSL path on
+  Windows; server projects refused). `POST /api/session {title, location:{directory}, model?, permissions}`
+  with the ruleset `shell * ask`, `edit * ask`, `edit /* deny`, `read /* deny`, `external_directory * deny`
+  (last match wins; a session deny beats saved "always" rules). Approval mode `auto` turns the first
+  two into `allow` (`PATCH /api/session/:id {permissions}`). The ledger stores `backendSessionId`.
+  Models: `GET /api/model` + `/api/model/default` as `provider/model` rows (default first); effort is
+  sent as `Model.Ref.variant` only when the model lists that variant (`POST /api/session/:id/model`).
+- `send`: refused while `/api/session/active` says the session runs (its TUI); the projector opens the
+  turn, `/api/event` connects (until `server.connected`), then `POST /api/session/:id/prompt {text}`.
+  Events (filtered by `data.sessionID`): `session.text.delta/ended` → text (ended = authoritative),
+  `tool.input.started` (name) + `tool.called/success/failed` → rows (`shell`→command with
+  `metadata.exit`, `edit/write/patch`→patch with `metadata.files` diffs, `read`→read, else other; a
+  failure after a rejected permission is "declined"), `session.shell.*` → command rows,
+  `usage.updated` → usage, `execution.succeeded/failed/interrupted` → turn end (reason `user` = stopped).
+- Approvals: `permission.asked` → ApprovalGate card bound to sha256 of
+  `{sessionID, requestID, action, resources}`; the MarksCode request id stays main-side
+  (`gate.engineRequestOf`). `approve` reads the live request back (`GET .../permission/:requestID`),
+  refuses a stale/answered id and an approve/always whose hash changed, then
+  `POST .../permission/:requestID/reply {decision: once|always|reject}`. A `permission.replied` this app
+  did not send (answered in the TUI) dismisses the card. Stop: `POST /api/session/:id/interrupt`, the
+  turn ends on `execution.interrupted` or after a 5 s grace.
+- The stream is volatile: bounded lines (1 MiB) and records (4 MiB), 45 s silence = dead, reconnect
+  with backoff (250 ms … 8 s, then the turn closes interrupted). After every reconnect it reconciles:
+  messages after this turn's question (finished tools, settled texts not yet shown), pending
+  permissions (new cards / vanished cards), and, when no longer running and idle since the prompt,
+  the session `outcome`. App quit aborts streams without ending turns.
+- Recovery: `ledger.SELF_RECOVERING_ENGINES` keeps the engine-neutral `recoverApiChats` away from
+  MarksCode records. `recoverMarksCodeChats` re-attaches a turn whose session still runs (projector
+  continues after the stored steps; stored tool rows are not repeated) and reconciles on connect;
+  otherwise it imports what finished and closes it completed/failed by the session outcome, or
+  interrupted (also when the service is unreachable).
+- Terminal: `terminal(chat)` = `markscode -s <session> .` (live). IPC `terminal` → `cli-modules.ts`
+  `cliEngineSession` keeps one durable tmux session per chat (`CliSession.args`, `engineChat`; tmux
+  runs `sh -c 'exec "$@"' marks-cli <bin> <args…>`, no shell parsing) and the chat's "Open in terminal"
+  button shows it in the module terminal view. Existing terminal menu items are unchanged.
+Proof: `test/agent-engine-markscode.test.ts` (fake HTTP+SSE service: status/start, ruleset and
+location, full turn, approvals once/always/reject/stale/changed, TUI reply, Stop, SSE drop + reconcile,
+restart re-attach vs interrupted, auth header present and never logged, SSE parser bounds),
+`test/cli-modules.test.ts` (engine terminal argv), `test/api-chat-ui.test.ts` (MarksCode item and
+terminal button).
 
 ### CLIProxyAPI module management
 

@@ -2975,5 +2975,17 @@
   "This approval is no longer pending": "この承認はすでに保留中ではありません",
   "New CLIProxy chat in this project": "このプロジェクトで新しい CLIProxy チャット",
   "Chat with {0}": "{0} でチャット",
-  "New {0} chat in this project": "このプロジェクトで新しい {0} チャット"
+  "New {0} chat in this project": "このプロジェクトで新しい {0} チャット",
+  "Open in terminal": "ターミナルで開く",
+  "Open this chat's session live in its terminal": "このチャットのセッションをターミナルでライブ表示",
+  "Start MarksCode service": "MarksCode サービスを開始",
+  "Starting the MarksCode service…": "MarksCode サービスを開始しています…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode サービスが実行中です。新しいチャットで MarksCode チャットを使えます。",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "MarksCode サービスは停止しています。設定 > モジュールで開始してください。",
+  "Choose a project for a MarksCode chat first": "まず MarksCode チャット用のプロジェクトを選択してください",
+  "Enable the MarksCode module in Settings > Modules": "設定 > モジュールで MarksCode モジュールを有効にしてください",
+  "MarksCode is not installed": "MarksCode はインストールされていません",
+  "The MarksCode service refused its saved password": "MarksCode サービスが保存済みのパスワードを拒否しました",
+  "This chat has no terminal yet": "このチャットにはまだターミナルがありません",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode はこのセッション（ターミナル）でまだ作業中です。終わってから再送信してください。"
 }

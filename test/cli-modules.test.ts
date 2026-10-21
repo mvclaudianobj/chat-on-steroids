@@ -6,6 +6,7 @@ const fixture = vi.hoisted(() => ({
   commands: [] as string[][],
   handle: null as null | ((event: any, payload: unknown) => Promise<any>),
   blockHasSession: false,
+  missingSession: false,
   resumeHasSession: null as null | (() => void),
   pty: { onData: vi.fn(), onExit: vi.fn(), write: vi.fn(), resize: vi.fn(), kill: vi.fn(), pause: vi.fn(), resume: vi.fn() },
   durable: ['codex'] as unknown,
@@ -19,6 +20,7 @@ vi.mock('node-pty', () => ({ spawn: vi.fn(() => fixture.pty) }));
 vi.mock('node:child_process', () => {
   const execFile = (file: string, args: string[], _options: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
     fixture.commands.push([file, ...args]);
+    if (fixture.missingSession && args.includes('has-session')) { callback(Object.assign(new Error("can't find session"), { code: 1 }), '', ''); return; }
     if (fixture.blockHasSession && args.includes('has-session')) {
       fixture.blockHasSession = false;
       fixture.resumeHasSession = () => callback(null, '', '');
@@ -55,11 +57,31 @@ vi.mock('../src/main/durable.js', () => ({
 }));
 vi.mock('../src/main/cli-source-install.js', () => ({ installFork: vi.fn() }));
 
-import { cliAction, cliChatRuntime, cliCreateSession, cliOpen, cliSessions, cliStatus, registerCliModuleIpc, registerCliModuleStopHook } from '../src/main/cli-modules.js';
+import { cliAction, cliChatRuntime, cliCreateSession, cliEngineSession, cliModuleState, cliOpen, cliSessions, cliStatus, registerCliModuleIpc, registerCliModuleStopHook } from '../src/main/cli-modules.js';
 
-beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
+beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
 
 describe('Persistent coding CLI terminal', () => {
+  it('gives an agent-engine chat one durable terminal that runs the binary with the engine arguments', async () => {
+    try {
+      expect(await cliModuleState('codex')).toMatchObject({ enabled: true, command: true, binary: process.platform === 'win32' ? expect.any(String) : '/usr/local/bin/codex' });
+      expect(await cliModuleState('markscode')).toEqual({ enabled: false, command: true, binary: null });
+      const first = await cliEngineSession('codex', 'a-workspace', ['-s', 'ses_123', '.'], 'session-chat-1', 'Codex · chat');
+      expect(first).toMatchObject({ module: 'codex', projectId: 'a-workspace', args: ['-s', 'ses_123', '.'], engineChat: 'session-chat-1', title: 'Codex · chat' });
+      // The same chat asks again: the same tmux identity, not a second terminal.
+      expect((await cliEngineSession('codex', 'a-workspace', ['-s', 'ses_123', '.'], 'session-chat-1', 'Codex · chat')).id).toBe(first.id);
+      await expect(cliEngineSession('codex', 'a-workspace', ['bad\u0000arg'], 'session-chat-1', 'x')).rejects.toThrow('Invalid terminal arguments');
+      fixture.missingSession = true;
+      const info = await cliOpen(first.id, 80, 24, 'engine-1');
+      const created = fixture.commands.find(args => args.includes('new-session'));
+      // "$@" passes the binary and each argument as argv: nothing is parsed by a shell.
+      expect(created?.slice(created.indexOf('sh'))).toEqual(['sh', '-c', 'exec "$@"', 'marks-cli', process.platform === 'win32' ? expect.any(String) : '/usr/local/bin/codex', '-s', 'ses_123', '.']);
+      expect(info.session).toBe(first.tmuxSession);
+    } finally {
+      await cliAction('codex', 'stop');
+    }
+  });
+
   it('creates independent durable sessions and reopens each stable tmux identity', async () => {
     try {
       const firstSession = await cliCreateSession('codex', 'a-workspace');

@@ -3110,5 +3110,17 @@
   "This approval is no longer pending": "Это подтверждение больше не ожидается",
   "New CLIProxy chat in this project": "Новый чат CLIProxy в этом проекте",
   "Chat with {0}": "Чат через {0}",
-  "New {0} chat in this project": "Новый чат {0} в этом проекте"
+  "New {0} chat in this project": "Новый чат {0} в этом проекте",
+  "Open in terminal": "Открыть в терминале",
+  "Open this chat's session live in its terminal": "Открыть сеанс этого чата в его терминале в реальном времени",
+  "Start MarksCode service": "Запустить службу MarksCode",
+  "Starting the MarksCode service…": "Запуск службы MarksCode…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "Служба MarksCode запущена. Чаты MarksCode доступны в «Новый чат».",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "Служба MarksCode остановлена. Запустите её в Настройки > Модули.",
+  "Choose a project for a MarksCode chat first": "Сначала выберите проект для чата MarksCode",
+  "Enable the MarksCode module in Settings > Modules": "Включите модуль MarksCode в Настройки > Модули",
+  "MarksCode is not installed": "MarksCode не установлен",
+  "The MarksCode service refused its saved password": "Служба MarksCode отклонила сохранённый пароль",
+  "This chat has no terminal yet": "У этого чата ещё нет терминала",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode всё ещё работает в этом сеансе (в его терминале). Отправьте снова, когда он закончит."
 }

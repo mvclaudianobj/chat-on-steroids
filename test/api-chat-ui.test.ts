@@ -273,3 +273,24 @@ it("names the chat's engine in the header and loads that engine's models", async
   await vi.waitFor(() => expect(api.apiChatModels).toHaveBeenCalledWith('', 0, 200, false, 'codex'));
   await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerModel').options].map(option => option.value)).toEqual(['gpt-6-codex']));
 });
+
+it('offers a MarksCode chat once main reports it available, and opens its live terminal from the chat', async () => {
+  const session = { id: '00000000-0000-4000-8000-0000000000c1', module: 'markscode', projectId: 'menu-project', cwd: '/p', title: 'MarksCode · chat', tmuxSession: 'marks_markscode_0123456789abcdef01', createdAt: 1, updatedAt: 1, args: ['-s', 'ses_1', '.'], engineChat: 'session-api' };
+  const api = apiMock({
+    apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'markscode']) })),
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'anthropic/sonnet-5' }), engine: 'markscode', approval: 'ask', pending: null } })),
+    apiChatTerminal: vi.fn(async () => ({ ok: true as const, data: session }))
+  });
+  const openTerminal = vi.fn();
+  const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => 'project-1', selectChat: vi.fn(), selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }), openTerminal });
+  await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(2));
+  expect(chats.newChatItems().map(item => `${item.action}=${item.label()}`)).toEqual(['new-chat-cliproxy=CLIProxy', 'new-chat-markscode=MarksCode']);
+  expect(chats.projectChatItems('menu-project').map(item => item.label())).toEqual(['New CLIProxy chat in this project', 'New MarksCode chat in this project']);
+  chats.sync();
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('MarksCode · anthropic/sonnet-5'));
+  const button = $<HTMLButtonElement>('apiChatTerminal');
+  await vi.waitFor(() => expect(button.hidden).toBe(false));
+  button.click();
+  await vi.waitFor(() => expect(openTerminal).toHaveBeenCalledWith(session));
+  expect(api.apiChatTerminal).toHaveBeenCalledWith('session-api');
+});

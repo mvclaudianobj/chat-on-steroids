@@ -2975,5 +2975,17 @@
   "This approval is no longer pending": "此核准已不再待處理",
   "New CLIProxy chat in this project": "在此專案中新增 CLIProxy 聊天",
   "Chat with {0}": "使用 {0} 聊天",
-  "New {0} chat in this project": "在此專案中新增 {0} 聊天"
+  "New {0} chat in this project": "在此專案中新增 {0} 聊天",
+  "Open in terminal": "在終端機中開啟",
+  "Open this chat's session live in its terminal": "在終端機中即時開啟此聊天的工作階段",
+  "Start MarksCode service": "啟動 MarksCode 服務",
+  "Starting the MarksCode service…": "正在啟動 MarksCode 服務…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode 服務正在執行。可在「新聊天」中使用 MarksCode 聊天。",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "MarksCode 服務已停止。請在 設定 > 模組 中啟動。",
+  "Choose a project for a MarksCode chat first": "請先為 MarksCode 聊天選擇一個專案",
+  "Enable the MarksCode module in Settings > Modules": "請在 設定 > 模組 中啟用 MarksCode 模組",
+  "MarksCode is not installed": "未安裝 MarksCode",
+  "The MarksCode service refused its saved password": "MarksCode 服務拒絕了已儲存的密碼",
+  "This chat has no terminal yet": "此聊天還沒有終端機",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode 仍在此工作階段（其終端機）中工作。完成後再傳送。"
 }

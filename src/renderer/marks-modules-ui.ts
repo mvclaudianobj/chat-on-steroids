@@ -36,8 +36,10 @@ export interface MarksModulesUiController {
 export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): MarksModulesUiController {
   // CLIProxy API chats: New chat's item after ChatGPT, and their composer in the chat view.
   let repaintNewChat = (): void => undefined;
-  const apiChatChats = createApiChatUi(api, hooks, () => repaintNewChat());
-  const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems });
+  let openCliSession: (session: Parameters<NonNullable<Parameters<typeof createApiChatUi>[1]['openTerminal']>>[0]) => Promise<void> = async () => undefined;
+  const apiChatChats = createApiChatUi(api, { ...hooks, openTerminal: session => openCliSession(session) }, () => repaintNewChat());
+  const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems, onEngineService: () => void apiChatChats.refresh() });
+  openCliSession = cli.openSession;
   repaintNewChat = cli.repaintNewChat;
   const apiChat = createApiChatSettingsUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!);
   // Versions, verified install/update, management password and API keys inside the same card.

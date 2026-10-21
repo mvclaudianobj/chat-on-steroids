@@ -30,6 +30,10 @@ export type CliSession = {
   tmuxSession: string;
   createdAt: number;
   updatedAt: number;
+  /** Arguments after the module binary (an agent engine's live session, e.g. MarksCode `-s <id> .`). */
+  args?: string[];
+  /** The API chat this terminal opens, when an agent engine created it; one terminal per chat. */
+  engineChat?: string;
 };
 type StoredState = { enabled: CliId[]; sessions: CliSession[] };
 type Entry = { cli: CliId; projectId: string | null; nativeCwd: string; cwd: string; pty: IPty; unacked: number; paused: boolean };
@@ -92,7 +96,15 @@ function validSession(value: unknown): value is CliSession {
     && typeof row.cwd === 'string' && typeof row.title === 'string'
     && typeof row.tmuxSession === 'string' && /^marks_(markscode|codex|claude|marksclaw)_[0-9a-f]{18}$/.test(row.tmuxSession)
     && typeof row.createdAt === 'number' && Number.isFinite(row.createdAt)
-    && typeof row.updatedAt === 'number' && Number.isFinite(row.updatedAt);
+    && typeof row.updatedAt === 'number' && Number.isFinite(row.updatedAt)
+    && (row.args === undefined || validArgs(row.args))
+    && (row.engineChat === undefined || (typeof row.engineChat === 'string' && /^[0-9a-z-]{8,64}$/i.test(row.engineChat)));
+}
+
+/** Engine terminal arguments: a few bounded strings, never a NUL (they reach tmux as argv). */
+function validArgs(value: unknown): value is string[] {
+  return Array.isArray(value) && value.length <= 16
+    && value.every(item => typeof item === 'string' && item.length > 0 && item.length <= 512 && !item.includes('\u0000'));
 }
 
 async function saveCliModules(nextEnabled: Set<CliId>, nextSessions: CliSession[]): Promise<void> {
@@ -167,6 +179,18 @@ export async function cliChatRuntime(id: 'markscode' | 'codex' | 'claude', proje
   if (projectId && (await projectWorkspace(projectId)).real !== cwd) throw new Error('Workspace changed');
   if (!effectiveCapabilities(getConfig()).command || !enabled.has(id)) throw new Error('This module has been disabled');
   return { bin: process.platform === 'win32' ? 'wsl.exe' : binary, cwd, argsPrefix };
+}
+
+/**
+ * Whether a module can run here now, without throwing: enabled, the command capability, and
+ * the binary the module terminals use (userData/modules/<id>/bin, its node_modules/.bin, PATH;
+ * inside WSL on Windows). Agent engines read their status from it.
+ */
+export async function cliModuleState(id: CliId): Promise<{ enabled: boolean; command: boolean; binary: string | null }> {
+  await loadCliModules();
+  const command = effectiveCapabilities(getConfig()).command;
+  if (!enabled.has(id) || !command) return { enabled: enabled.has(id), command, binary: null };
+  return { enabled: true, command, binary: await runtimeBinary(id) };
 }
 
 export async function cliStatus(): Promise<Status[]> {
@@ -264,6 +288,25 @@ export async function cliSessions(): Promise<CliSession[]> {
 }
 
 export async function cliCreateSession(id: CliId, projectId: string | null): Promise<CliSession> {
+  return createModuleSession(id, projectId);
+}
+
+/**
+ * The durable terminal of one agent-engine chat (MarksCode `-s <session>`): the same tmux
+ * session every time that chat asks, created on first use with the engine's arguments. A chat
+ * whose project or arguments changed gets a new one.
+ */
+export async function cliEngineSession(id: CliId, projectId: string, args: string[], chatSessionId: string, title: string): Promise<CliSession> {
+  if (!validArgs(args)) throw new Error('Invalid terminal arguments');
+  if (!/^[0-9a-z-]{8,64}$/i.test(chatSessionId)) throw new Error('Invalid chat');
+  await loadCliModules();
+  const existing = sessions.find(session => session.module === id && session.engineChat === chatSessionId && session.projectId === projectId
+    && JSON.stringify(session.args ?? []) === JSON.stringify(args));
+  if (existing) return { ...existing, ...(existing.args ? { args: [...existing.args] } : {}) };
+  return createModuleSession(id, projectId, { args: [...args], engineChat: chatSessionId, title: title.trim().slice(0, 120) || manifest[id].name });
+}
+
+async function createModuleSession(id: CliId, projectId: string | null, engine?: { args: string[]; engineChat: string; title: string }): Promise<CliSession> {
   await loadCliModules();
   return onModule(id, async () => {
     if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
@@ -285,10 +328,11 @@ export async function cliCreateSession(id: CliId, projectId: string | null): Pro
       module: id,
       projectId,
       cwd,
-      title: `${manifest[id].name} ${sequence}`,
+      title: engine?.title ?? `${manifest[id].name} ${sequence}`,
       tmuxSession: sessionName(id, sessionId),
       createdAt: now,
-      updatedAt: now
+      updatedAt: now,
+      ...(engine ? { args: engine.args, engineChat: engine.engineChat } : {})
     };
     const operation = enabledOperations.then(async () => {
       if (!effectiveCapabilities(getConfig()).command || !enabled.has(id)) throw new Error('This module has been disabled');
@@ -357,7 +401,8 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
   try { await tmux(['has-session', '-t', `=${session}`]); }
   catch {
     checkAccess();
-    await tmux(['new-session', '-d', '-s', session, '-c', cwd, 'sh', '-c', 'exec "$1"', 'marks-cli', bin]);
+    // "$@" is the binary and the engine's own arguments, never parsed by a shell.
+    await tmux(['new-session', '-d', '-s', session, '-c', cwd, 'sh', '-c', 'exec "$@"', 'marks-cli', bin, ...(currentSession.args ?? [])]);
     created = true;
   }
   try { checkAccess(); }

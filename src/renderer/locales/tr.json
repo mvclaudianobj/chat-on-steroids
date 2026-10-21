@@ -3020,5 +3020,17 @@
   "This approval is no longer pending": "Bu onay artık beklemede değil",
   "New CLIProxy chat in this project": "Bu projede yeni CLIProxy sohbeti",
   "Chat with {0}": "{0} ile sohbet",
-  "New {0} chat in this project": "Bu projede yeni {0} sohbeti"
+  "New {0} chat in this project": "Bu projede yeni {0} sohbeti",
+  "Open in terminal": "Terminalde aç",
+  "Open this chat's session live in its terminal": "Bu sohbetin oturumunu terminalinde canlı aç",
+  "Start MarksCode service": "MarksCode hizmetini başlat",
+  "Starting the MarksCode service…": "MarksCode hizmeti başlatılıyor…",
+  "MarksCode service running. MarksCode chats are available in New chat.": "MarksCode hizmeti çalışıyor. MarksCode sohbetleri Yeni sohbet altında kullanılabilir.",
+  "The MarksCode service is stopped. Start it from Settings > Modules.": "MarksCode hizmeti durduruldu. Ayarlar > Modüller bölümünden başlatın.",
+  "Choose a project for a MarksCode chat first": "Önce bir MarksCode sohbeti için proje seçin",
+  "Enable the MarksCode module in Settings > Modules": "Ayarlar > Modüller bölümünden MarksCode modülünü etkinleştirin",
+  "MarksCode is not installed": "MarksCode yüklü değil",
+  "The MarksCode service refused its saved password": "MarksCode hizmeti kayıtlı parolasını reddetti",
+  "This chat has no terminal yet": "Bu sohbetin henüz terminali yok",
+  "MarksCode is still working in this session (its terminal). Send again when it finishes.": "MarksCode bu oturumda (terminalinde) hâlâ çalışıyor. Bitince yeniden gönderin."
 }
