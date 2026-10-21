@@ -2957,5 +2957,13 @@
   "Settings cannot be saved": "設定を保存できません",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "サービスは設定を読み込めますが保存できないため、API キーの作成や取り消しができません。",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "CLIProxyAPI に設定の保存を許可しますか？管理者の認証後、systemd のドロップインでサービスが /etc/cli-proxy-api に書き込めるようにし、フォルダーと設定ファイルの所有者をサービスユーザーに変更し、実行中のサービスを再起動します。サービスのユニット自体は変更しません。",
-  "CLIProxyAPI can now save its settings.": "CLIProxyAPI が設定を保存できるようになりました。"
+  "CLIProxyAPI can now save its settings.": "CLIProxyAPI が設定を保存できるようになりました。",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "アプリのチャットで CLIProxy のモデルと会話し、モジュールから CLIProxyAPI を管理できます。",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "新しいチャット → CLIProxy：同じチャット画面でそのモデルを使え、停止とモデルの選択もできます。",
+  "CLIProxyAPI managed here": "CLIProxyAPI をここで管理",
+  "Install or update the official release, save the console password and create API keys.": "公式リリースのインストールや更新、コンソールのパスワードの保存、API キーの作成ができます。",
+  "New chat in every layout": "どのレイアウトでも新しいチャット",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "受信トレイ レイアウトの新しいチャット ボタンでも CLIProxy、MarksCode、Codex、Claude を選べます。",
+  "Console sign-in fixed": "コンソールのサインインを修正",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "状態確認でサインインに失敗し CLIProxyAPI コンソールがロックされることはなくなりました。"
 }

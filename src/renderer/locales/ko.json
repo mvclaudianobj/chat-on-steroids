@@ -2957,5 +2957,13 @@
   "Settings cannot be saved": "설정을 저장할 수 없습니다",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "서비스가 설정을 읽을 수는 있지만 저장할 수 없어 API 키를 만들거나 취소할 수 없습니다.",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "CLIProxyAPI가 설정을 저장하도록 허용할까요? 관리자 인증 후 systemd 드롭인으로 서비스가 /etc/cli-proxy-api에 쓸 수 있게 하고, 폴더와 설정 파일의 소유자를 서비스 사용자로 바꾸며, 실행 중인 서비스는 다시 시작됩니다. 서비스 유닛 자체는 변경하지 않습니다.",
-  "CLIProxyAPI can now save its settings.": "이제 CLIProxyAPI가 설정을 저장할 수 있습니다."
+  "CLIProxyAPI can now save its settings.": "이제 CLIProxyAPI가 설정을 저장할 수 있습니다.",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "앱의 채팅에서 CLIProxy 모델과 대화하고, 모듈에서 CLIProxyAPI를 관리하세요.",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "새 채팅 → CLIProxy: 같은 채팅 화면에서 해당 모델을 사용하며, 중지와 모델 선택도 할 수 있습니다.",
+  "CLIProxyAPI managed here": "여기서 관리하는 CLIProxyAPI",
+  "Install or update the official release, save the console password and create API keys.": "공식 릴리스를 설치하거나 업데이트하고, 콘솔 비밀번호를 저장하고, API 키를 만듭니다.",
+  "New chat in every layout": "모든 레이아웃에서 새 채팅",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "받은편지함 레이아웃의 새 채팅 버튼도 CLIProxy, MarksCode, Codex, Claude를 제공합니다.",
+  "Console sign-in fixed": "콘솔 로그인 수정",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "상태 확인이 더 이상 로그인 실패로 CLIProxyAPI 콘솔을 잠그지 않습니다."
 }

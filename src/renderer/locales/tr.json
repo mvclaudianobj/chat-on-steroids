@@ -3002,5 +3002,13 @@
   "Settings cannot be saved": "Ayarlar kaydedilemiyor",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "Hizmet yapılandırmasını okuyabiliyor ancak kaydedemiyor; bu yüzden API anahtarları oluşturulamıyor veya iptal edilemiyor.",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "CLIProxyAPI'nin ayarlarını kaydetmesine izin verilsin mi? Yönetici yetkilendirmesinden sonra bir systemd drop-in hizmetin /etc/cli-proxy-api'ye yazmasına izin verir, klasör ve yapılandırma dosyası hizmet kullanıcısına verilir ve çalışan hizmet yeniden başlar. Hizmet birimi değiştirilmez.",
-  "CLIProxyAPI can now save its settings.": "CLIProxyAPI artık ayarlarını kaydedebilir."
+  "CLIProxyAPI can now save its settings.": "CLIProxyAPI artık ayarlarını kaydedebilir.",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "Uygulamanın kendi sohbetinde CLIProxy modelleriyle sohbet edin ve CLIProxyAPI'yi Modüller'den yönetin.",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "Yeni sohbet → CLIProxy: modelleri aynı sohbet ekranında, Durdur ve kendi model seçiminizle.",
+  "CLIProxyAPI managed here": "CLIProxyAPI burada yönetiliyor",
+  "Install or update the official release, save the console password and create API keys.": "Resmi sürümü yükleyin veya güncelleyin, konsol parolasını kaydedin ve API anahtarları oluşturun.",
+  "New chat in every layout": "Her düzende yeni sohbet",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "Gelen kutusu düzenindeki yeni sohbet düğmesi de CLIProxy, MarksCode, Codex ve Claude sunar.",
+  "Console sign-in fixed": "Konsol girişi düzeltildi",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Durum denetimleri artık başarısız girişlerle CLIProxyAPI konsolunu kilitlemiyor."
 }
