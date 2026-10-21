@@ -42,7 +42,8 @@ const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
   z.object({ action: z.literal('chatSettings'), sessionId }).strict(),
-  // Agent engines: open the chat's backend session in its module terminal (Claude Code hands over).
+  // Agent engines: open the chat's backend session in its module terminal (Codex attaches live,
+  // Claude Code hands over).
   z.object({ action: z.literal('terminal'), sessionId }).strict(),
   z.object({
     action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional(),

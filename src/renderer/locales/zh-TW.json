@@ -2980,5 +2980,10 @@
   "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "在終端機中繼續此聊天。應用程式會先停止自己的工作階段；你在這裡傳送的下一則訊息會恢復它。",
   "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "此聊天已在 Claude Code 終端機中開啟。請先中斷該終端機檢視，然後再傳送。",
   "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code 仍在此聊天中回答。請先停止或等待，然後再開啟終端機。",
-  "This chat has no terminal": "此聊天沒有終端機"
+  "This chat has no terminal": "此聊天沒有終端機",
+  "Open this chat's {0} session in a terminal": "在終端機中開啟此聊天的 {0} 工作階段",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex 尚未登入。請在終端機中執行 `codex login`，然後再試一次。",
+  "Codex chats need a project folder on this computer": "Codex 聊天需要此電腦上的專案資料夾",
+  "Enable the Codex module in Settings > Modules first": "請先在 設定 > 模組 中啟用 Codex 模組",
+  "This chat has no engine session yet": "此聊天還沒有引擎工作階段"
 }

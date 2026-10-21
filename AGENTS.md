@@ -1491,8 +1491,9 @@ later. E0 changes no CLIProxy behavior.
   engine's own session/thread id. Records are parsed one by one: one this version cannot read
   (an engine added later) is kept verbatim, written back untouched, and its chat refused
   ("created by a newer version") instead of reset. The `cosapi-` id and every fence are unchanged.
-  Startup recovery (`recoverApiChats`) is engine-neutral: no backend survives the process, so
-  every open turn closes `interrupted`.
+  Startup recovery (`recoverApiChats`) closes every open turn `interrupted` (shared helper
+  `recovery.ts` `closeInterruptedTurn`), except records of an engine that claimed its own
+  recovery (`claimTurnRecovery`; Codex does).
 - Approvals (`approval.ts` `ApprovalGate`): the app mints the approval id and binds it to
   `argsHash` (sha256 of the tool name and canonical action), process memory only, oldest pending
   shown. The engine's own request id (Codex JSON-RPC id, Claude `request_id`, MarksCode permission
@@ -1518,6 +1519,59 @@ later. E0 changes no CLIProxy behavior.
   (`reviewUnavailable: 'not-kept'`), credentials redacted. Request-id placement only reads
   `source: 'mcp'` rows, so the row is placed by its turnId. Written once, it needs no revision
   and the session's tool count stays exact.
+- Codex engine (F, `codex.ts`, `codex-protocol.ts`, `jsonrpc.ts`; codex-cli 0.163, experimental
+  app-server protocol). Process model: ONE shared app-server per app instance, started lazily:
+  `codex app-server -c approval_policy="untrusted" -c sandbox_mode="workspace-write"
+  -c approvals_reviewer="user" --listen unix://<userData>/codex/<sha256(userData)[:16]>.sock`
+  (0700 dir, owner/symlink checked; tmp fallback when the path exceeds ~100 bytes; pidfile so a
+  crashed instance's orphan is stopped), and our client `codex app-server proxy --sock <sock>`
+  whose stdio carries JSON-RPC lines (no `jsonrpc` member, as Codex sends; 16 MiB line cap,
+  per-request timeouts, stderr kept as a redacted 4 KB tail, never logged). Both die on
+  `will-quit`, on Codex module Stop/Disable, or when either exits (running turns fail). The `-c`
+  overrides keep a user `config.toml`/profile from turning approvals off; no bypass/`never`/
+  `danger-full-access` flag is ever passed (argv snapshot test). Windows: same argv through
+  `wsl.exe --exec`, socket under the WSL home, folders `wslpath -a` (untested).
+  - `status()`: cli-modules gates (`cliEngineRuntime`: command capability, module enabled, binary
+    from userData/modules, node_modules/.bin, `which`), `codex --version` gate (other major or
+    older minor refused; newer minor available with a warning), `account/read` (no account and
+    `requiresOpenaiAuth` → unavailable "Codex is not signed in…"; login stays the user's). 30 s cache.
+  - `models()`: `model/list` (paged, 5 min cache) → rows with `label`, Codex's own `efforts` and
+    `defaultEffort`; the renderer disables the efforts a model lacks; an unsupported chat effort
+    is omitted from `turn/start`.
+  - `create`: `thread/start {model, cwd, approvalPolicy, approvalsReviewer:"user",
+    sandbox:"workspace-write", ephemeral:false}` first (cwd = canonical local project root, else
+    home; a server project is refused), then the `cosapi-` session and the ledger record
+    (`backendSessionId` = thread id). `send`: thread resumed if this server has not loaded it
+    (a chat that never ran starts a new thread instead), then `turn/start {threadId,
+    input:[text], model, effort?, cwd, approvalPolicy (Ask `untrusted`, Auto `on-request`),
+    approvalsReviewer:"user", sandboxPolicy: workspaceWrite [cwd], network off}`.
+  - Events: `item/agentMessage/delta` → text_delta, `item/completed agentMessage` → text_final;
+    commandExecution → command row (outputDelta chunks, `aggregatedOutput`, exit code);
+    fileChange → patch row (changes, diff counts); mcpToolCall → `mcp:<server>/<tool>`;
+    webSearch/dynamicToolCall → other; `thread/tokenUsage/updated` → usage (turn delta of totals);
+    `error` → chat_error (recoverable when `willRetry`, else fatal); `turn/completed` → turn end
+    (completed/failed; interrupted, or `stopped` after Stop). Only the chat's own thread and turn
+    are projected; turns typed in the TUI are not mirrored.
+  - Approvals: `item/commandExecution|fileChange/requestApproval` bound in the ApprovalGate to
+    the JSON-RPC id, thread, turn, item, Codex approvalId and the command+cwd or the item's
+    changes (sha256 via `argsHash`); approve→`accept`, always→`acceptForSession` (+ chat to Auto),
+    deny→`decline`, Stop→`cancel`, each sent once to that exact id. `serverRequest/resolved`
+    (answered in the TUI) removes the card and sends nothing. Legacy `execCommandApproval`/
+    `applyPatchApproval` → `{decision:{denied:{rejection}}}`; any other server request →
+    JSON-RPC error -32601; an approval for a turn the app did not start is left to the TUI.
+  - Stop: gate stopped (pending → `cancel`), `turn/interrupt {threadId, turnId}`, outcome
+    `stopped` on Codex's confirmation or after 15 s.
+  - `recover()`: per open Codex turn, `thread/resume` (and `turn/interrupt` if Codex still
+    reports it `inProgress`), then closed `interrupted` with a detail saying the thread was resumed.
+  - Terminal (live, through the shared seam below): `openTerminal` starts the server if needed
+    and opens `codex resume <thread> --remote unix://<sock>` in the chat's Codex module terminal;
+    allowed while a turn runs (same server and thread, so the TUI sees the turn and its approvals).
+    Codex's open hook only makes sure the server runs before the pane attaches.
+  Proof: `test/agent-engine-codex.test.ts` (fake app-server
+  `test/fixtures/agent-engine/codex-fake-app-server.cjs`; params and replies validated against
+  the checked-in schema subset `codex-app-server-schema.json` from `generate-json-schema`),
+  `test/cli-modules.test.ts` (engine terminal), `test/api-chat-ui.test.ts` (terminal button).
+  Needs a real run: login state, the proxy/socket transport and TUI `--remote` attach, Windows.
 - **Claude Code (`claude.ts`, G).** Registered as `claude` (label "Claude Code", terminal
   `handover`); New chat and the project menus offer it once `status()` is available: Claude
   module active and Command on (cli-modules `cliChatRuntime`: binary, canonical cwd, `wsl.exe
@@ -1578,6 +1632,21 @@ later. E0 changes no CLIProxy behavior.
   restarts with `--resume`. The TUI and the host never run at once. Still needs a real run: auth
   detection wording, `manual` vs `default`, `initialize`/`interrupt` answers and suggestion shapes
   of the installed CLI.
+- **Terminals (one seam for every engine).** Contract: `terminal(chat)` describes the argv and
+  mode (`live` | `handover`); `openTerminal(sessionId) → {cliSessionId}` is the only entry point.
+  IPC `marksApiChat` `terminal {sessionId}` (preload `apiChatTerminal`) routes by the chat's
+  record to it; a chat without one answers "This chat has no terminal". One composer button
+  ("Open in terminal") shows for engines the registry lists with a terminal mode; its tooltip
+  follows the mode, and it is disabled while a turn runs only for `handover`. The renderer then
+  shows the module terminal by id (`cli-modules-ui` `openSession`: reload, show).
+  cli-modules `cliEngineTerminal(module, {sessionId, projectId, args, title})` keeps one durable
+  session per chat (`engineChat` + `args`, reused with new args); args are validated per module
+  (Claude: `--resume|--session-id <uuid>`; Codex: `resume <thread> --remote unix:///<abs>.sock`;
+  anything else refused, also when a stored session is loaded). tmux starts
+  `sh -c 'exec "$@"' marks-cli <bin> <args>`. Every open (also from the sidebar) first runs that
+  module's hook (`registerCliEngineOpenHook(module, hook)`): required for hand-over modules
+  (Claude: refuses while answering, stops its host), optional for live ones (Codex: starts the
+  server). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
 Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
 `test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,

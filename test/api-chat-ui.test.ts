@@ -274,6 +274,35 @@ it("names the chat's engine in the header and loads that engine's models", async
   await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerModel').options].map(option => option.value)).toEqual(['gpt-6-codex']));
 });
 
+it("opens a Codex chat's live terminal even while it answers, and limits efforts to the model's own", async () => {
+  const api = apiMock({
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'gpt-6-codex' }), engine: 'codex', approval: 'ask', pending: null, running: true } })),
+    apiChatModels: vi.fn(async () => ({ ok: true as const, data: { total: 1, models: [{ id: 'gpt-6-codex', ownedBy: 'openai', modality: 'chat', favorite: false, recent: false, availability: null, efforts: ['low', 'medium'] }] } })),
+    apiChatTerminal: vi.fn(async () => ({ ok: true as const, data: { cliSessionId: 'cli-codex-1' } }))
+  });
+  const openCliSession = vi.fn();
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }), openCliSession });
+  chats.sync();
+  await vi.waitFor(() => expect($('apiChatTerminal').hidden).toBe(false));
+  expect($<HTMLButtonElement>('apiChatTerminal').disabled).toBe(false);
+  expect($('apiChatTerminal').title).toBe("Open this chat's Codex session in a terminal");
+  await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerEffort').options].filter(option => option.disabled).map(option => option.value)).toEqual(['high']));
+  $('apiChatTerminal').click();
+  await vi.waitFor(() => expect(openCliSession).toHaveBeenCalledWith('cli-codex-1'));
+  expect(api.apiChatTerminal).toHaveBeenCalledWith('session-api');
+});
+
+it('waits for a running Claude Code turn before its hand-over terminal', async () => {
+  const api = apiMock({
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'opus' }), engine: 'claude', approval: 'ask', pending: null, running: true } }))
+  });
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }), openCliSession: vi.fn() });
+  chats.sync();
+  await vi.waitFor(() => expect($('apiChatTerminal').hidden).toBe(false));
+  expect($<HTMLButtonElement>('apiChatTerminal').disabled).toBe(true);
+  expect($('apiChatTerminal').title).toBe('Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.');
+});
+
 it('offers Claude Code once main reports it available, and opens a Claude chat in its hand-over terminal', async () => {
   const api = apiMock({
     apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'claude']) })),

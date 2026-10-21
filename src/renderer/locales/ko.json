@@ -2980,5 +2980,10 @@
   "Continue this chat in a terminal. The app stops its own session first; your next message here resumes it.": "이 채팅을 터미널에서 이어 갑니다. 앱이 먼저 자체 세션을 중지하며, 여기서 보내는 다음 메시지가 세션을 재개합니다.",
   "This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.": "이 채팅은 Claude Code 터미널에서 열려 있습니다. 해당 터미널 보기를 연결 해제한 뒤 다시 보내세요.",
   "Claude Code is still answering in this chat. Stop it or wait, then open the terminal.": "Claude Code가 이 채팅에서 아직 응답 중입니다. 중지하거나 기다린 뒤 터미널을 여세요.",
-  "This chat has no terminal": "이 채팅에는 터미널이 없습니다"
+  "This chat has no terminal": "이 채팅에는 터미널이 없습니다",
+  "Open this chat's {0} session in a terminal": "이 채팅의 {0} 세션을 터미널에서 열기",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex에 로그인되어 있지 않습니다. 터미널에서 `codex login`을 실행한 다음 다시 시도하세요.",
+  "Codex chats need a project folder on this computer": "Codex 채팅에는 이 컴퓨터의 프로젝트 폴더가 필요합니다",
+  "Enable the Codex module in Settings > Modules first": "먼저 설정 > 모듈에서 Codex 모듈을 활성화하세요",
+  "This chat has no engine session yet": "이 채팅에는 아직 엔진 세션이 없습니다"
 }

@@ -347,7 +347,7 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     mount.hidden = false;
     manager.show(mount, true);
   }
-  /** Shows a terminal main just created or updated (an engine chat's hand-over), after reloading the list. */
+  /** Shows a terminal main just created or updated (an engine chat's live or hand-over terminal), after reloading the list. */
   async function openSession(sessionId: string): Promise<void> {
     await refresh();
     await showSession(sessionId);

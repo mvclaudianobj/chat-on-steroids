@@ -900,7 +900,7 @@ export function createClaudeEngine(deps: Partial<ClaudeEngineDeps> = {}): Claude
     },
     attachModuleHooks: engine => {
       void cliModules().then(modules => {
-        modules.registerCliEngineOpenHook(async session => { if (session.engineChat) await engine.handOver(session.engineChat); });
+        modules.registerCliEngineOpenHook('claude', async session => { if (session.engineChat) await engine.handOver(session.engineChat); });
         modules.registerCliModuleStopHook(id => { if (id === 'claude') void engine.stopAll(); });
       }).catch(error => logWarn(`Claude Code chats: module hooks not registered: ${(error as Error).message}`));
     },

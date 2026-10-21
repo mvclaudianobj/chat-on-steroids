@@ -67,8 +67,10 @@ export interface AgentEngine {
   /** The terminal that opens this chat's backend session, or null when it has none yet. */
   terminal?(chat: EngineChatRef): EngineTerminal | null;
   /**
-   * Opens the chat's backend session in its module terminal (cli-modules tmux) and answers that
-   * terminal's id. A `handover` engine stops its own process first and refuses while a turn runs.
+   * The one terminal entry point (IPC `terminal`): opens the chat's backend session in its module
+   * terminal (cli-modules tmux, one durable session per chat) and answers that terminal's id.
+   * A `live` engine (Codex) attaches to the session the app keeps running; a `handover` engine
+   * (Claude Code) stops its own process first and refuses while a turn runs.
    */
   openTerminal?(sessionId: string): Promise<{ cliSessionId: string }>;
 }
