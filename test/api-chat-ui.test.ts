@@ -273,3 +273,20 @@ it("names the chat's engine in the header and loads that engine's models", async
   await vi.waitFor(() => expect(api.apiChatModels).toHaveBeenCalledWith('', 0, 200, false, 'codex'));
   await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerModel').options].map(option => option.value)).toEqual(['gpt-6-codex']));
 });
+
+it("opens a Codex chat's live terminal and limits efforts to the model's own", async () => {
+  const session = { id: '0f1e2d3c-aaaa-4bbb-8ccc-0123456789ab', module: 'codex', projectId: null, cwd: '/home/u', title: 'Codex · chat', tmuxSession: 'marks_codex_000000000000000000', createdAt: 1, updatedAt: 1, args: ['resume', 'thread-1', '--remote', 'unix:///s.sock'] };
+  const api = apiMock({
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'gpt-6-codex' }), engine: 'codex', approval: 'ask', pending: null, terminal: 'live' } })),
+    apiChatModels: vi.fn(async () => ({ ok: true as const, data: { total: 1, models: [{ id: 'gpt-6-codex', ownedBy: 'openai', modality: 'chat', favorite: false, recent: false, availability: null, efforts: ['low', 'medium'] }] } })),
+    apiChatTerminal: vi.fn(async () => ({ ok: true as const, data: session }))
+  });
+  const openCliSession = vi.fn();
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }), openCliSession });
+  chats.sync();
+  await vi.waitFor(() => expect($('apiChatTerminal').hidden).toBe(false));
+  await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerEffort').options].filter(option => option.disabled).map(option => option.value)).toEqual(['high']));
+  $('apiChatTerminal').click();
+  await vi.waitFor(() => expect(openCliSession).toHaveBeenCalledWith(session));
+  expect(api.apiChatTerminal).toHaveBeenCalledWith('session-api');
+});

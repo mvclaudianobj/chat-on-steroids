@@ -2975,5 +2975,12 @@
   "This approval is no longer pending": "이 승인은 더 이상 대기 중이 아닙니다",
   "New CLIProxy chat in this project": "이 프로젝트에서 새 CLIProxy 채팅",
   "Chat with {0}": "{0}로 채팅",
-  "New {0} chat in this project": "이 프로젝트에서 새 {0} 채팅"
+  "New {0} chat in this project": "이 프로젝트에서 새 {0} 채팅",
+  "Open in terminal": "터미널에서 열기",
+  "Open this chat's {0} session in a terminal": "이 채팅의 {0} 세션을 터미널에서 열기",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex에 로그인되어 있지 않습니다. 터미널에서 `codex login`을 실행한 다음 다시 시도하세요.",
+  "Codex chats need a project folder on this computer": "Codex 채팅에는 이 컴퓨터의 프로젝트 폴더가 필요합니다",
+  "Enable the Codex module in Settings > Modules first": "먼저 설정 > 모듈에서 Codex 모듈을 활성화하세요",
+  "This chat has no engine session yet": "이 채팅에는 아직 엔진 세션이 없습니다",
+  "This chat has no terminal": "이 채팅에는 터미널이 없습니다"
 }

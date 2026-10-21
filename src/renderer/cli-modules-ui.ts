@@ -348,8 +348,16 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
     manager.show(mount, true);
   }
   void refresh();
+  /** An agent engine chat's terminal session (main created it): listed and shown like any other. */
+  async function openSession(session: CliSession): Promise<void> {
+    if (!current.get(session.module)?.enabled) await refresh();
+    sessions.set(session.id, session);
+    paintSessions();
+    await showSession(session.id);
+  }
   return {
     createSession,
+    openSession,
     cliModules: (): ReadonlyArray<CliModuleSummary> => [...current.values()].map(status => ({
       id: status.id,
       name: status.name,

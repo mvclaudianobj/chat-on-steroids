@@ -6,7 +6,7 @@
  * Their conversation ids are minted by the app in a namespace no ChatGPT conversation uses, so
  * every ChatGPT-only owner (bridge, extension, Compact & Resume, Goal/Loop) can refuse them by id.
  */
-import type { AgentEngineId } from './agent-engine.js';
+import type { AgentEngineId, AgentEngineTerminalMode } from './agent-engine.js';
 
 export const API_CONVERSATION_PREFIX = 'cosapi-';
 export const DEFAULT_API_CHAT_ENDPOINT = 'http://127.0.0.1:18081/v1';
@@ -56,6 +56,11 @@ export interface ApiChatModel {
   favorite: boolean;
   recent: boolean;
   availability: ApiModelAvailability | null;
+  /** A CLI engine's display name for the model, when it has one (Codex `displayName`). */
+  label?: string;
+  /** A CLI engine's own reasoning efforts for this model, as it lists them (Codex `supportedReasoningEfforts`). */
+  efforts?: string[];
+  defaultEffort?: string;
 }
 
 export interface ApiChatSettings {
@@ -91,6 +96,8 @@ export interface ApiChatView {
   approval: ApiChatApprovalMode;
   /** The tool call this chat's running turn waits on, if any. */
   pending: ApiChatPendingApproval | null;
+  /** Whether the chat's engine session can be opened in a terminal now (Codex: `live`). */
+  terminal?: AgentEngineTerminalMode | null;
 }
 
 /** Whether an API chat asks before running a tool that edits files or runs commands. */

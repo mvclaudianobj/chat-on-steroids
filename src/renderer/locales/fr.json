@@ -3065,5 +3065,12 @@
   "This approval is no longer pending": "Cette approbation n'est plus en attente",
   "New CLIProxy chat in this project": "Nouveau chat CLIProxy dans ce projet",
   "Chat with {0}": "Chat avec {0}",
-  "New {0} chat in this project": "Nouveau chat {0} dans ce projet"
+  "New {0} chat in this project": "Nouveau chat {0} dans ce projet",
+  "Open in terminal": "Ouvrir dans le terminal",
+  "Open this chat's {0} session in a terminal": "Ouvrir la session {0} de ce chat dans un terminal",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex n'est pas connecté. Exécutez `codex login` dans un terminal, puis réessayez.",
+  "Codex chats need a project folder on this computer": "Les chats Codex nécessitent un dossier de projet sur cet ordinateur",
+  "Enable the Codex module in Settings > Modules first": "Activez d'abord le module Codex dans Réglages > Modules",
+  "This chat has no engine session yet": "Ce chat n'a pas encore de session de moteur",
+  "This chat has no terminal": "Ce chat n'a pas de terminal"
 }

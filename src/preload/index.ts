@@ -150,6 +150,7 @@ const api = {
   /** Records the question and starts the answer; it streams into the session's history. */
   apiChatSend: (sessionId: string, text: string) => call<{ turnId: string }>('marksApiChat:request', { action: 'send', sessionId, text }),
   apiChatStop: (sessionId: string) => call<{ stopped: boolean }>('marksApiChat:request', { action: 'stop', sessionId }),
+  apiChatTerminal: (sessionId: string) => call<import('../main/cli-modules.js').CliSession>('marksApiChat:request', { action: 'terminal', sessionId }),
   apiChatChatSettings: (sessionId: string) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'chatSettings', sessionId }),
   apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
   apiChatApprove: (sessionId: string, approvalId: string, decision: import('../shared/api-chat.js').ApiChatApprovalDecision) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'approve', sessionId, approvalId, decision }),

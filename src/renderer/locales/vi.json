@@ -2975,5 +2975,12 @@
   "This approval is no longer pending": "Yêu cầu phê duyệt này không còn chờ xử lý",
   "New CLIProxy chat in this project": "Cuộc trò chuyện CLIProxy mới trong dự án này",
   "Chat with {0}": "Trò chuyện với {0}",
-  "New {0} chat in this project": "Cuộc trò chuyện {0} mới trong dự án này"
+  "New {0} chat in this project": "Cuộc trò chuyện {0} mới trong dự án này",
+  "Open in terminal": "Mở trong terminal",
+  "Open this chat's {0} session in a terminal": "Mở phiên {0} của cuộc trò chuyện này trong terminal",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex chưa đăng nhập. Hãy chạy `codex login` trong terminal rồi thử lại.",
+  "Codex chats need a project folder on this computer": "Cuộc trò chuyện Codex cần một thư mục dự án trên máy tính này",
+  "Enable the Codex module in Settings > Modules first": "Hãy bật mô-đun Codex trong Cài đặt > Mô-đun trước",
+  "This chat has no engine session yet": "Cuộc trò chuyện này chưa có phiên của engine",
+  "This chat has no terminal": "Cuộc trò chuyện này không có terminal"
 }

@@ -2975,5 +2975,12 @@
   "This approval is no longer pending": "此审批已不再待处理",
   "New CLIProxy chat in this project": "在此项目中新建 CLIProxy 聊天",
   "Chat with {0}": "使用 {0} 聊天",
-  "New {0} chat in this project": "在此项目中新建 {0} 聊天"
+  "New {0} chat in this project": "在此项目中新建 {0} 聊天",
+  "Open in terminal": "在终端中打开",
+  "Open this chat's {0} session in a terminal": "在终端中打开此聊天的 {0} 会话",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex 尚未登录。请在终端中运行 `codex login`，然后重试。",
+  "Codex chats need a project folder on this computer": "Codex 聊天需要此电脑上的项目文件夹",
+  "Enable the Codex module in Settings > Modules first": "请先在 设置 > 模块 中启用 Codex 模块",
+  "This chat has no engine session yet": "此聊天还没有引擎会话",
+  "This chat has no terminal": "此聊天没有终端"
 }

@@ -32,6 +32,7 @@ import type { SessionEvent, TurnOutcome } from '../../shared/session.js';
 import { ApprovalGate, type ApprovalOutcome } from '../agent-engine/approval.js';
 import { chatRecords, engineOf, resetChatLedgerForTests, storedChatRecord, updateChatRecord, withoutTurn, type ChatRecord } from '../agent-engine/ledger.js';
 import { assistantMessageId, MAX_ASSISTANT_CHARS, storedText, userMessageId } from '../agent-engine/transcript.js';
+import { closeInterruptedTurn, recoversOwnTurns } from '../agent-engine/recovery.js';
 import { ApiChatHttpError, streamCompletion, type ApiChatMessage, type ApiCompletion, type ApiToolCall } from './client.js';
 import { apiChatTools, approvalSummary, argsHash, needsApproval, parseToolCall, runApiChatTool, toolDefinitions } from './tools.js';
 import { apiChatKey, apiChatSettings, noteKeyRequired, noteModelAvailability, noteRecentModel } from './settings.js';
@@ -408,25 +409,12 @@ export function recoverApiChats(): Promise<void> {
     // Engine-neutral: no backend session survives this process, so every engine's open turn closes here.
     for (const [sessionId, record] of Object.entries(await chatRecords())) {
       const open = record.openTurn;
-      if (!open || running.has(sessionId)) continue;
+      // An engine that resumes its own backend (Codex) closes its turns in its own recover().
+      if (!open || running.has(sessionId) || recoversOwnTurns(engineOf(record))) continue;
       try {
-        if (await getSession(sessionId)) {
-          const events = await readEvents(sessionId, { kinds: ['turn_start', 'turn_end', 'assistant_message'] });
-          const ofTurn = events.filter(event => event.turnId === open.turnId);
-          if (ofTurn.some(event => event.kind === 'turn_start') && !ofTurn.some(event => event.kind === 'turn_end')) {
-            // Every step of the turn has its own answer message; settle each one left streaming.
-            for (const answer of ofTurn) {
-              if (answer.kind !== 'assistant_message' || answer.final || !answer.messageId?.startsWith(assistantMessageId(open.turnId))) continue;
-              await upsertMessageEvent(sessionId, { time: answer.time, source: 'app', kind: 'assistant_message', turnId: open.turnId,
-                messageId: answer.messageId, message: answer.message, state: 'final', final: true });
-            }
-            await appendEvent(sessionId, { time: Date.now(), source: 'app', kind: 'turn_end', turnId: open.turnId, outcome: 'interrupted',
-              detail: 'Chat Marks closed before the API answer finished' });
-            logInfo(`API chat ${sessionId}: closed turn ${open.turnId} left open by the previous run as interrupted`);
-          }
+        if (await closeInterruptedTurn(sessionId, open.turnId, 'Chat Marks closed before the API answer finished')) {
+          logInfo(`API chat ${sessionId}: closed turn ${open.turnId} left open by the previous run as interrupted`);
         }
-        await updateChatRecord(sessionId, current => withoutTurn(current));
-        notifyChanged(sessionId);
       } catch (error) {
         logWarn(`API chat ${sessionId}: open turn not recovered: ${(error as Error).message}`);
       }

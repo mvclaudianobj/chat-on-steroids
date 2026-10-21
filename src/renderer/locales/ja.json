@@ -2975,5 +2975,12 @@
   "This approval is no longer pending": "この承認はすでに保留中ではありません",
   "New CLIProxy chat in this project": "このプロジェクトで新しい CLIProxy チャット",
   "Chat with {0}": "{0} でチャット",
-  "New {0} chat in this project": "このプロジェクトで新しい {0} チャット"
+  "New {0} chat in this project": "このプロジェクトで新しい {0} チャット",
+  "Open in terminal": "ターミナルで開く",
+  "Open this chat's {0} session in a terminal": "このチャットの {0} セッションをターミナルで開く",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex にサインインしていません。ターミナルで `codex login` を実行してから、もう一度お試しください。",
+  "Codex chats need a project folder on this computer": "Codex チャットにはこのコンピューター上のプロジェクトフォルダーが必要です",
+  "Enable the Codex module in Settings > Modules first": "先に 設定 > モジュール で Codex モジュールを有効にしてください",
+  "This chat has no engine session yet": "このチャットにはまだエンジンセッションがありません",
+  "This chat has no terminal": "このチャットにはターミナルがありません"
 }

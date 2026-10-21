@@ -3110,5 +3110,12 @@
   "This approval is no longer pending": "Это подтверждение больше не ожидается",
   "New CLIProxy chat in this project": "Новый чат CLIProxy в этом проекте",
   "Chat with {0}": "Чат через {0}",
-  "New {0} chat in this project": "Новый чат {0} в этом проекте"
+  "New {0} chat in this project": "Новый чат {0} в этом проекте",
+  "Open in terminal": "Открыть в терминале",
+  "Open this chat's {0} session in a terminal": "Открыть сеанс {0} этого чата в терминале",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex не выполнил вход. Запустите `codex login` в терминале и повторите попытку.",
+  "Codex chats need a project folder on this computer": "Чатам Codex нужна папка проекта на этом компьютере",
+  "Enable the Codex module in Settings > Modules first": "Сначала включите модуль Codex в Настройки > Модули",
+  "This chat has no engine session yet": "У этого чата ещё нет сеанса движка",
+  "This chat has no terminal": "У этого чата нет терминала"
 }

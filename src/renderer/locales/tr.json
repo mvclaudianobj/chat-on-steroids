@@ -3020,5 +3020,12 @@
   "This approval is no longer pending": "Bu onay artık beklemede değil",
   "New CLIProxy chat in this project": "Bu projede yeni CLIProxy sohbeti",
   "Chat with {0}": "{0} ile sohbet",
-  "New {0} chat in this project": "Bu projede yeni {0} sohbeti"
+  "New {0} chat in this project": "Bu projede yeni {0} sohbeti",
+  "Open in terminal": "Terminalde aç",
+  "Open this chat's {0} session in a terminal": "Bu sohbetin {0} oturumunu bir terminalde aç",
+  "Codex is not signed in. Run `codex login` in a terminal, then try again.": "Codex'te oturum açılmamış. Bir terminalde `codex login` komutunu çalıştırın, sonra yeniden deneyin.",
+  "Codex chats need a project folder on this computer": "Codex sohbetleri bu bilgisayarda bir proje klasörü gerektirir",
+  "Enable the Codex module in Settings > Modules first": "Önce Ayarlar > Modüller bölümünde Codex modülünü etkinleştirin",
+  "This chat has no engine session yet": "Bu sohbetin henüz bir motor oturumu yok",
+  "This chat has no terminal": "Bu sohbetin terminali yok"
 }

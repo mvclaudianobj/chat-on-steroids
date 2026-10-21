@@ -30,6 +30,8 @@ export type CliSession = {
   tmuxSession: string;
   createdAt: number;
   updatedAt: number;
+  /** An agent engine's terminal (Codex `resume <thread> --remote`): the CLI's arguments. */
+  args?: string[];
 };
 type StoredState = { enabled: CliId[]; sessions: CliSession[] };
 type Entry = { cli: CliId; projectId: string | null; nativeCwd: string; cwd: string; pty: IPty; unacked: number; paused: boolean };
@@ -92,8 +94,12 @@ function validSession(value: unknown): value is CliSession {
     && typeof row.cwd === 'string' && typeof row.title === 'string'
     && typeof row.tmuxSession === 'string' && /^marks_(markscode|codex|claude|marksclaw)_[0-9a-f]{18}$/.test(row.tmuxSession)
     && typeof row.createdAt === 'number' && Number.isFinite(row.createdAt)
-    && typeof row.updatedAt === 'number' && Number.isFinite(row.updatedAt);
+    && typeof row.updatedAt === 'number' && Number.isFinite(row.updatedAt)
+    && (row.args === undefined || validArgs(row.args));
 }
+
+const validArgs = (args: unknown): args is string[] => Array.isArray(args) && args.length <= 16
+  && args.every(arg => typeof arg === 'string' && arg.length > 0 && arg.length <= 1024 && !arg.includes('\u0000'));
 
 async function saveCliModules(nextEnabled: Set<CliId>, nextSessions: CliSession[]): Promise<void> {
   await writeDurableNow(STATE, { enabled: [...nextEnabled], sessions: nextSessions } satisfies StoredState);
@@ -167,6 +173,60 @@ export async function cliChatRuntime(id: 'markscode' | 'codex' | 'claude', proje
   if (projectId && (await projectWorkspace(projectId)).real !== cwd) throw new Error('Workspace changed');
   if (!effectiveCapabilities(getConfig()).command || !enabled.has(id)) throw new Error('This module has been disabled');
   return { bin: process.platform === 'win32' ? 'wsl.exe' : binary, cwd, argsPrefix };
+}
+
+/**
+ * Chat Marks agent engines: the CLI an engine runs, behind the same gates as a module terminal
+ * (command execution allowed, the module enabled, the binary resolved the same way). On Windows
+ * the binary is a WSL path and runs through `wsl.exe --exec`.
+ */
+export async function cliEngineRuntime(id: 'markscode' | 'codex' | 'claude'):
+  Promise<{ ok: true; binary: string; windows: boolean } | { ok: false; detail: string }> {
+  await loadCliModules();
+  if (!effectiveCapabilities(getConfig()).command) return { ok: false, detail: 'Command execution is disabled' };
+  if (!enabled.has(id)) return { ok: false, detail: `Enable the ${manifest[id].name} module in Settings > Modules first` };
+  const binary = await runtimeBinary(id);
+  if (!binary) return { ok: false, detail: `${manifest[id].name} is not installed` };
+  return { ok: true, binary, windows: process.platform === 'win32' };
+}
+
+/** A native folder as WSL sees it (Windows only). */
+export const cliWslPath = (native: string): Promise<string> => wslCommand('wslpath', ['-a', native]);
+export const cliWslHome = (): Promise<string> => wslHome();
+
+/**
+ * The smallest entry point for an engine's live terminal: one durable module session per key
+ * (an engine chat), whose tmux pane runs the module's binary with `args` instead of bare. The
+ * same session is returned (with its args refreshed) when the chat opens its terminal again.
+ */
+export async function cliEngineTerminal(id: 'markscode' | 'codex' | 'claude', projectId: string | null, args: string[], key: string, title: string): Promise<CliSession> {
+  await loadCliModules();
+  if (!validArgs(args)) throw new Error('Invalid terminal arguments');
+  return onModule(id, async () => {
+    if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
+    if (!effectiveCapabilities(getConfig()).command) throw new Error('Command execution is disabled');
+    if (!enabled.has(id)) throw new Error('This module has been disabled');
+    if (!(await tmuxAvailable())) throw new Error('Install tmux (in WSL on Windows) first');
+    const nativeCwd = projectId ? (await projectWorkspace(projectId)).real : app.getPath('home');
+    const cwd = process.platform === 'win32' ? await wslCommand('wslpath', ['-a', nativeCwd]) : nativeCwd;
+    if (!cwd || !cwd.startsWith('/')) throw new Error('Workspace could not be mapped to WSL');
+    const hex = createHash('sha256').update(`engine-terminal\n${id}\n${key}`).digest('hex');
+    const sessionId = `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-8${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+    const now = Date.now();
+    const existing = sessions.find(session => session.id === sessionId);
+    const next: CliSession = existing
+      ? { ...existing, projectId, cwd, args: [...args], updatedAt: now }
+      : { id: sessionId, module: id, projectId, cwd, title: title.trim().slice(0, 120) || manifest[id].name, tmuxSession: sessionName(id, sessionId), createdAt: now, updatedAt: now, args: [...args] };
+    const operation = enabledOperations.then(async () => {
+      if (!effectiveCapabilities(getConfig()).command || !enabled.has(id)) throw new Error('This module has been disabled');
+      const nextSessions = [...sessions.filter(session => session.id !== sessionId), next];
+      await saveCliModules(enabled, nextSessions);
+      sessions = nextSessions;
+    });
+    enabledOperations = operation.then(() => undefined, () => undefined);
+    await operation;
+    return { ...next, args: [...args] };
+  });
 }
 
 export async function cliStatus(): Promise<Status[]> {
@@ -357,7 +417,7 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
   try { await tmux(['has-session', '-t', `=${session}`]); }
   catch {
     checkAccess();
-    await tmux(['new-session', '-d', '-s', session, '-c', cwd, 'sh', '-c', 'exec "$1"', 'marks-cli', bin]);
+    await tmux(['new-session', '-d', '-s', session, '-c', cwd, 'sh', '-c', currentSession.args ? 'exec "$@"' : 'exec "$1"', 'marks-cli', bin, ...(currentSession.args ?? [])]);
     created = true;
   }
   try { checkAccess(); }

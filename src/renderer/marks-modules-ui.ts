@@ -1,5 +1,6 @@
 /** Chat Marks CLIProxyAPI renderer integration. Optional UI, separate from the systemd service. */
 import type { AppApi } from '../preload/index.js';
+import type { CliSession } from '../main/cli-modules.js';
 import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 import { $, toast } from './dom.js';
 import { t, onLanguageChange } from './i18n.js';
@@ -36,8 +37,10 @@ export interface MarksModulesUiController {
 export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): MarksModulesUiController {
   // CLIProxy API chats: New chat's item after ChatGPT, and their composer in the chat view.
   let repaintNewChat = (): void => undefined;
-  const apiChatChats = createApiChatUi(api, hooks, () => repaintNewChat());
+  let openCliSession = (_session: CliSession): Promise<void> => Promise.resolve();
+  const apiChatChats = createApiChatUi(api, { ...hooks, openCliSession: session => openCliSession(session) }, () => repaintNewChat());
   const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems });
+  openCliSession = cli.openSession;
   repaintNewChat = cli.repaintNewChat;
   const apiChat = createApiChatSettingsUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!);
   // Versions, verified install/update, management password and API keys inside the same card.

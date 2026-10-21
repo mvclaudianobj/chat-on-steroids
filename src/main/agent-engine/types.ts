@@ -65,7 +65,7 @@ export interface AgentEngine {
   /** Startup: close what the previous process left open. Sends wait for it. */
   recover(): Promise<void>;
   /** The terminal that opens this chat's backend session, or null when it has none yet. */
-  terminal?(chat: EngineChatRef): EngineTerminal | null;
+  terminal?(chat: EngineChatRef): EngineTerminal | null | Promise<EngineTerminal | null>;
 }
 
 // ---------------------------------------------------------------- CLI engine event stream

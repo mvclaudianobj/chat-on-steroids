@@ -9,6 +9,7 @@
  * engines), and the chat's own engine names the header and chooses which model list to load.
  */
 import type { AppApi } from '../preload/index.js';
+import type { CliSession } from '../main/cli-modules.js';
 import { isApiConversationId, type ApiChatApprovalDecision, type ApiChatApprovalMode, type ApiChatEffort, type ApiChatModel, type ApiChatView } from '../shared/api-chat.js';
 import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineInfo } from '../shared/agent-engine.js';
 import { toast } from './dom.js';
@@ -22,6 +23,8 @@ export interface ApiChatUiHooks {
   selectedChat?(): { id: string; conversationId: string | null } | null;
   /** Shows that session in the normal chat view. */
   selectChat?(id: string): void | Promise<void>;
+  /** Shows a module terminal session (a CLI engine chat's live terminal). */
+  openCliSession?(session: CliSession): void | Promise<void>;
 }
 
 export interface ApiChatUi {
@@ -85,7 +88,15 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     ui(option, 'textContent', text);
     approval.append(option);
   }
-  controls.append(model, effort, approval);
+  // A CLI engine chat (Codex) can attach its own TUI to the same session: a durable module terminal.
+  const terminal = document.createElement('button');
+  terminal.type = 'button';
+  terminal.id = 'apiChatTerminal';
+  terminal.className = 'api-chat-terminal';
+  terminal.hidden = true;
+  ui(terminal, 'textContent', () => t('Open in terminal'));
+  terminal.addEventListener('click', () => void openTerminal());
+  controls.append(model, effort, approval, terminal);
 
   // The paused call of the running turn: tool, readable arguments and the three answers.
   const card = document.createElement('section');
@@ -177,6 +188,20 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     model.disabled = !view || busy;
     effort.disabled = !view || busy;
     approval.disabled = !view || busy;
+    // A CLI engine lists each model's own efforts; the ones that model lacks are not offered.
+    const efforts = models.find(item => item.id === current)?.efforts;
+    for (const choice of effort.options) choice.disabled = !!choice.value && !!efforts?.length && !efforts.includes(choice.value);
+    terminal.hidden = !view?.terminal || !hooks.openCliSession;
+    terminal.disabled = !view;
+    terminal.title = t("Open this chat's {0} session in a terminal", [AGENT_ENGINE_LABELS[engineOf()]]);
+  }
+
+  async function openTerminal(): Promise<void> {
+    const id = shownFor;
+    if (!id || !hooks.openCliSession) return;
+    const reply = await api.apiChatTerminal(id).catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }));
+    if (!reply.ok) { toast(t(reply.error)); return; }
+    await hooks.openCliSession(reply.data);
   }
 
   function paintApproval(pending: ApiChatView['pending'] | null): void {
