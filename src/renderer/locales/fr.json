@@ -3062,5 +3062,6 @@
   "Approve this action?": "Autoriser cette action ?",
   "Approve": "Autoriser",
   "Approve and don't ask again in this chat": "Autoriser et ne plus demander dans ce chat",
-  "This approval is no longer pending": "Cette approbation n'est plus en attente"
+  "This approval is no longer pending": "Cette approbation n'est plus en attente",
+  "New CLIProxy chat in this project": "Nouveau chat CLIProxy dans ce projet"
 }

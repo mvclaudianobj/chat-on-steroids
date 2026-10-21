@@ -2875,6 +2875,7 @@ initBrowserPreferences();
 initChat({ save: () => save(), state: () => state ,
   cliModules: marksModulesUi.cliModules,
   createCliSession: marksModulesUi.createSession,
+  projectChatItems: marksModulesUi.projectChatItems,
   repaintCliSessions: () => marksModulesUi.repaintSessions()
 });
 

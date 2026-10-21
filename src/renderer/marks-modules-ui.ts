@@ -6,6 +6,7 @@ import { t, onLanguageChange } from './i18n.js';
 import { createCliModulesUi, type CliModuleSummary } from './cli-modules-ui.js';
 import { createApiChatSettingsUi } from './api-chat-settings-ui.js';
 import { createApiChatUi } from './api-chat-ui.js';
+import type { RowMenuItem } from './row-menu.js';
 import { createCliProxyManageUi } from './cliproxy-manage-ui.js';
 
 export interface MarksModulesUiHooks {
@@ -22,6 +23,8 @@ export interface MarksModulesUiHooks {
 export interface MarksModulesUiController {
   createSession(moduleId: string, projectId: string | null): Promise<void>;
   cliModules(): ReadonlyArray<CliModuleSummary>;
+  /** A project's menu items for a CLIProxy chat in that project. */
+  projectChatItems(projectId: string): RowMenuItem[];
   normalizeTab(name: string): string;
   onTabOpening(name: string): void;
   onTabShown(name: string): void;
@@ -238,6 +241,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
   return {
     createSession: cli.createSession,
     cliModules: cli.cliModules,
+    projectChatItems: apiChatChats.projectChatItems,
     normalizeTab: name => cli.normalizeTab(name === 'module-cli-proxy' && !moduleUiActive ? 'modules' : name),
     onTabOpening: name => {
       if (name === 'modules') { void refreshModules().then(() => manage.refresh()); void apiChat.refresh(); }

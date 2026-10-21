@@ -24,9 +24,11 @@ export interface ApiChatUiHooks {
 export interface ApiChatUi {
   /** New chat's menu items: CLIProxy once its settings answered. */
   newChatItems(): RowMenuItem[];
+  /** A project's menu items: a CLIProxy chat that belongs to that project. */
+  projectChatItems(projectId: string): RowMenuItem[];
   /** Follows the selected chat: called whenever the chat list or selection repaints. */
   sync(): void;
-  create(): Promise<void>;
+  create(projectId?: string | null): Promise<void>;
   refresh(): Promise<void>;
 }
 
@@ -234,12 +236,13 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     document.getElementById('apiChatSettings')?.scrollIntoView?.({ block: 'start' });
   }
 
-  async function create(): Promise<void> {
+  /** `projectId` is the project whose menu was used; New chat uses the selected workspace. */
+  async function create(projectId?: string | null): Promise<void> {
     const status = await api.apiChatStatus().catch(() => null);
     if (!status?.ok) { openSettings(status?.error ?? t('CLIProxy is not set up yet.')); return; }
     if (status.data.keyRequired && !status.data.hasKey) { openSettings(t('CLIProxy needs an API key. Add it in Settings > Modules.')); return; }
     if (!status.data.model) { openSettings(t('Choose a default CLIProxy model in Settings > Modules first.')); return; }
-    const reply = await api.apiChatCreate({ projectId: hooks.workspace() });
+    const reply = await api.apiChatCreate({ projectId: projectId === undefined ? hooks.workspace() : projectId });
     if (!reply.ok) { toast(t(reply.error)); return; }
     created.add(reply.data.sessionId);
     hooks.showTab('chat');
@@ -299,6 +302,10 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     newChatItems: () => available ? [{
       action: 'new-chat-cliproxy', icon: 'i-chat', label: () => 'CLIProxy', title: () => t('Chat with CLIProxy'),
       run: () => void create()
+    }] : [],
+    projectChatItems: projectId => available ? [{
+      action: 'new-chat-cliproxy', icon: 'i-chat', label: () => t('New CLIProxy chat in this project'),
+      run: () => void create(projectId)
     }] : [],
     sync,
     create,

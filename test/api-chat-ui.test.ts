@@ -89,6 +89,22 @@ it('offers CLIProxy after ChatGPT in New chat and opens the created API chat in 
   expect($('apiChatLabel').textContent).toBe('CLIProxy · gpt-5');
 });
 
+it("offers a CLIProxy chat in a project's menu that belongs to that project, not the selected one", async () => {
+  const api = apiMock();
+  const selectChat = vi.fn();
+  const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => 'selected-project', selectChat, selectedChat: () => null });
+  const items = await vi.waitFor(() => {
+    const found = chats.projectChatItems('menu-project');
+    expect(found).toHaveLength(1);
+    return found;
+  });
+  expect(items[0]!.action).toBe('new-chat-cliproxy');
+  expect(items[0]!.label()).toBe('New CLIProxy chat in this project');
+  items[0]!.run!();
+  await vi.waitFor(() => expect(api.apiChatCreate).toHaveBeenCalledWith({ projectId: 'menu-project' }));
+  await vi.waitFor(() => expect(selectChat).toHaveBeenCalledWith('session-api'));
+});
+
 it('opens Modules instead of creating a chat while no default model is set', async () => {
   const api = apiMock({ apiChatStatus: vi.fn(async () => ({ ok: true as const, data: { endpoint: 'http://x/v1', model: null, effort: null, favorites: [], recents: [], hasKey: false, detected: null, keyRequired: false } })) });
   const showTab = vi.fn();
