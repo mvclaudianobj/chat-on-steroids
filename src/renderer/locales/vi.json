@@ -2965,5 +2965,12 @@
   "New chat in every layout": "Trò chuyện mới ở mọi bố cục",
   "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "Nút trò chuyện mới của bố cục Hộp thư đến cũng có CLIProxy, MarksCode, Codex và Claude.",
   "Console sign-in fixed": "Đã sửa đăng nhập bảng điều khiển",
-  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Việc kiểm tra trạng thái không còn khóa bảng điều khiển CLIProxyAPI bằng các lần đăng nhập thất bại."
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Việc kiểm tra trạng thái không còn khóa bảng điều khiển CLIProxyAPI bằng các lần đăng nhập thất bại.",
+  "Edits and commands": "Chỉnh sửa và lệnh",
+  "Ask before edits and commands": "Hỏi trước khi chỉnh sửa và chạy lệnh",
+  "Run edits and commands automatically": "Tự động chạy chỉnh sửa và lệnh",
+  "Approve this action?": "Cho phép thao tác này?",
+  "Approve": "Cho phép",
+  "Approve and don't ask again in this chat": "Cho phép và không hỏi lại trong cuộc trò chuyện này",
+  "This approval is no longer pending": "Yêu cầu phê duyệt này không còn chờ xử lý"
 }

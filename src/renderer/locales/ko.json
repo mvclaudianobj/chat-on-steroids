@@ -2965,5 +2965,12 @@
   "New chat in every layout": "모든 레이아웃에서 새 채팅",
   "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "받은편지함 레이아웃의 새 채팅 버튼도 CLIProxy, MarksCode, Codex, Claude를 제공합니다.",
   "Console sign-in fixed": "콘솔 로그인 수정",
-  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "상태 확인이 더 이상 로그인 실패로 CLIProxyAPI 콘솔을 잠그지 않습니다."
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "상태 확인이 더 이상 로그인 실패로 CLIProxyAPI 콘솔을 잠그지 않습니다.",
+  "Edits and commands": "편집 및 명령",
+  "Ask before edits and commands": "편집 및 명령 전에 묻기",
+  "Run edits and commands automatically": "편집 및 명령 자동 실행",
+  "Approve this action?": "이 작업을 허용할까요?",
+  "Approve": "허용",
+  "Approve and don't ask again in this chat": "허용하고 이 채팅에서 다시 묻지 않기",
+  "This approval is no longer pending": "이 승인은 더 이상 대기 중이 아닙니다"
 }

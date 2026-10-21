@@ -641,7 +641,12 @@ export async function dispatch(
   surface: SurfaceId,
   run: () => Promise<ToolResult>,
   parent?: CallContext,
-  setupProfileId: string | null = null
+  setupProfileId: string | null = null,
+  /**
+   * Chat Marks: `local` is an in-process caller (an API chat, `api-chat/tools.ts`) with its own
+   * exact correlation. It skips only the bookkeeping that means "ChatGPT used this connector".
+   */
+  options: { local?: boolean } = {}
 ): Promise<ToolResult> {
   if (markspanelAccessBlocked()) return {
     isError: true,
@@ -671,7 +676,7 @@ export async function dispatch(
   const confirmUse = !parent && inboundProviderRequest() ? beginPluginToolCall(surface) : null;
   try {
     const result = await trackMcpRequest(() =>
-      trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run, !!parent))
+      trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run, !!parent, options.local === true))
     );
     // In-process callers have no socket; resolving their outer invocation publishes it.
     if (!parent && !inboundPublication()) context.publication!.completedAt = Date.now();
@@ -710,18 +715,23 @@ async function dispatchTracked(
   requestId: string | null,
   surface: SurfaceId,
   run: () => Promise<ToolResult>,
-  nested: boolean
+  nested: boolean,
+  local = false
 ): Promise<ToolResult> {
-  noteTransportIdentity(transportKey);
+  // Chat Marks: a local (API chat) call never reached a connector, so it proves no transport,
+  // connector use or served request; every guard below still applies to it.
+  if (!local) noteTransportIdentity(transportKey);
   const markTiming = beginToolTiming();
   const callStartedAt = Date.now();
   // Recorded here rather than in `guard` because only this layer knows which server
   // answered, and "was this connector ever actually used from ChatGPT" is a per-connector
   // question the setup screen has to answer honestly.
-  surfaceToolCallAt.set(surface, Date.now());
-  noteConnectorUse(surface, 'tool');
-  // Proof for connector identity: this exact request reached this surface's own endpoint.
-  if (!nested) noteServedRequest(requestId, surface);
+  if (!local) {
+    surfaceToolCallAt.set(surface, Date.now());
+    noteConnectorUse(surface, 'tool');
+    // Proof for connector identity: this exact request reached this surface's own endpoint.
+    if (!nested) noteServedRequest(requestId, surface);
+  }
   const isFinish = isFinishCall(name, args);
   const startedAt = context.startedAt;
   const allowUnattributed = context.allowUnattributed === true;

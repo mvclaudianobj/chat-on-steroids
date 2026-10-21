@@ -83,4 +83,26 @@ export interface ApiChatView {
   model: string | null;
   effort: ApiChatEffort | null;
   running: boolean;
+  /** Chat Marks D4: ask before edits and commands, or run them automatically. */
+  approval: ApiChatApprovalMode;
+  /** The tool call this chat's running turn waits on, if any. */
+  pending: ApiChatPendingApproval | null;
+}
+
+/** Whether an API chat asks before running a tool that edits files or runs commands. */
+export const API_CHAT_APPROVAL_MODES = ['ask', 'auto'] as const;
+export type ApiChatApprovalMode = typeof API_CHAT_APPROVAL_MODES[number];
+export type ApiChatApprovalDecision = 'approve' | 'deny' | 'always';
+
+/** One paused tool call waiting for the user, as the renderer may see it (no secrets). */
+export interface ApiChatPendingApproval {
+  approvalId: string;
+  turnId: string;
+  toolCallId: string;
+  tool: string;
+  /** Short readable text: the command, or what a patch touches; bounded. */
+  summary: string;
+  /** Files a patch adds, updates, moves or deletes; bounded. */
+  files: string[];
+  requestedAt: number;
 }

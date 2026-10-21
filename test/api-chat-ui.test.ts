@@ -188,3 +188,30 @@ it('hides the ChatGPT-only composer controls for API chats only', () => {
   expect($('apiChatControls').hidden).toBe(true);
   expect(dom.window.getComputedStyle($('modelMenu')).display).not.toBe('none');
 });
+
+it('shows a pending edit or command, answers exactly that approval and switches the approval mode', async () => {
+  const pending = { approvalId: '0f1e2d3c-aaaa-4bbb-8ccc-0123456789ab', turnId: 'api-1', toolCallId: 'call_1', tool: 'apply_patch',
+    summary: '4 patch lines', files: ['add /work/made.txt'], requestedAt: 1 };
+  let current: any = { ...view({ running: true }), approval: 'ask', pending };
+  const api = apiMock({
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: current })),
+    apiChatApprove: vi.fn(async () => { current = { ...current, pending: null }; return { ok: true as const, data: current }; }),
+    apiChatSetChatSettings: vi.fn(async (_id: string, settings: object) => { current = { ...current, ...settings }; return { ok: true as const, data: current }; })
+  });
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
+  chats.sync();
+  const card = $('apiChatApproval');
+  await vi.waitFor(() => expect(card.hidden).toBe(false));
+  expect(card.textContent).toContain('apply_patch');
+  expect(card.textContent).toContain('add /work/made.txt');
+  expect([...card.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Approve', 'Deny', "Approve and don't ask again in this chat"]);
+  card.querySelector<HTMLButtonElement>('[data-decision="deny"]')!.click();
+  await vi.waitFor(() => expect(api.apiChatApprove).toHaveBeenCalledWith('session-api', pending.approvalId, 'deny'));
+  await vi.waitFor(() => expect(card.hidden).toBe(true));
+  const mode = $<HTMLSelectElement>('apiChatComposerApproval');
+  expect(mode.value).toBe('ask');
+  mode.value = 'auto';
+  mode.dispatchEvent(new dom.window.Event('change'));
+  await vi.waitFor(() => expect(api.apiChatSetChatSettings).toHaveBeenCalledWith('session-api', { approval: 'auto' }));
+  await vi.waitFor(() => expect(mode.value).toBe('auto'));
+});

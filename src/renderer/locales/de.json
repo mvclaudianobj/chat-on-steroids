@@ -3010,5 +3010,12 @@
   "New chat in every layout": "Neuer Chat in jedem Layout",
   "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "Der Neuer-Chat-Knopf im Posteingang-Layout bietet auch CLIProxy, MarksCode, Codex und Claude an.",
   "Console sign-in fixed": "Konsolenanmeldung behoben",
-  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Statusprüfungen sperren die CLIProxyAPI-Konsole nicht mehr durch fehlgeschlagene Anmeldungen aus."
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Statusprüfungen sperren die CLIProxyAPI-Konsole nicht mehr durch fehlgeschlagene Anmeldungen aus.",
+  "Edits and commands": "Bearbeitungen und Befehle",
+  "Ask before edits and commands": "Vor Bearbeitungen und Befehlen fragen",
+  "Run edits and commands automatically": "Bearbeitungen und Befehle automatisch ausführen",
+  "Approve this action?": "Diese Aktion erlauben?",
+  "Approve": "Erlauben",
+  "Approve and don't ask again in this chat": "Erlauben und in diesem Chat nicht mehr fragen",
+  "This approval is no longer pending": "Diese Freigabe steht nicht mehr aus"
 }

@@ -2965,5 +2965,12 @@
   "New chat in every layout": "所有版面都能新增聊天",
   "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "收件匣版面的新增聊天按鈕也提供 CLIProxy、MarksCode、Codex 和 Claude。",
   "Console sign-in fixed": "已修正主控台登入",
-  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "狀態檢查不再因登入失敗而鎖住 CLIProxyAPI 主控台。"
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "狀態檢查不再因登入失敗而鎖住 CLIProxyAPI 主控台。",
+  "Edits and commands": "編輯和命令",
+  "Ask before edits and commands": "編輯和執行命令前先詢問",
+  "Run edits and commands automatically": "自動執行編輯和命令",
+  "Approve this action?": "允許此操作？",
+  "Approve": "允許",
+  "Approve and don't ask again in this chat": "允許，並且在此聊天中不再詢問",
+  "This approval is no longer pending": "此核准已不再待處理"
 }
