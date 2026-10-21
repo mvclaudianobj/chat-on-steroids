@@ -3047,5 +3047,13 @@
   "Settings cannot be saved": "Impossible d'enregistrer les réglages",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "Le service peut lire sa configuration mais pas l'enregistrer : impossible de créer ou de révoquer des clés API.",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "Autoriser CLIProxyAPI à enregistrer ses réglages ? Après autorisation administrateur, un drop-in systemd permet au service d'écrire dans /etc/cli-proxy-api, le dossier et son fichier de configuration sont attribués à l'utilisateur du service, et un service en cours d'exécution redémarre. L'unité du service elle-même n'est pas modifiée.",
-  "CLIProxyAPI can now save its settings.": "CLIProxyAPI peut désormais enregistrer ses réglages."
+  "CLIProxyAPI can now save its settings.": "CLIProxyAPI peut désormais enregistrer ses réglages.",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "Discutez avec les modèles CLIProxy dans le chat de l’app, et gérez CLIProxyAPI depuis Modules.",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "Nouveau chat → CLIProxy : ses modèles dans le même écran de chat, avec Arrêter et votre propre choix de modèle.",
+  "CLIProxyAPI managed here": "CLIProxyAPI géré ici",
+  "Install or update the official release, save the console password and create API keys.": "Installez ou mettez à jour la version officielle, enregistrez le mot de passe de la console et créez des clés d’API.",
+  "New chat in every layout": "Nouveau chat dans chaque disposition",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "Le bouton nouveau chat de la disposition Boîte de réception propose aussi CLIProxy, MarksCode, Codex et Claude.",
+  "Console sign-in fixed": "Connexion à la console corrigée",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Les vérifications d’état ne bloquent plus la console CLIProxyAPI par des connexions échouées."
 }

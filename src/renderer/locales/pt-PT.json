@@ -3047,5 +3047,13 @@
   "Settings cannot be saved": "Não é possível guardar as definições",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "O serviço consegue ler a configuração, mas não guardá-la, por isso não é possível criar nem revogar chaves de API.",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "Permitir que o CLIProxyAPI guarde as definições? Após a autorização de administrador, um drop-in do systemd permite ao serviço escrever em /etc/cli-proxy-api, a pasta e o ficheiro de configuração passam para o utilizador do serviço e um serviço em execução é reiniciado. A unidade do serviço não é alterada.",
-  "CLIProxyAPI can now save its settings.": "O CLIProxyAPI já pode guardar as definições."
+  "CLIProxyAPI can now save its settings.": "O CLIProxyAPI já pode guardar as definições.",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "Converse com modelos do CLIProxy no próprio chat da app e faça a gestão do CLIProxyAPI em Módulos.",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "Novo chat → CLIProxy: os modelos dele no mesmo ecrã de chat, com Parar e a sua escolha de modelo.",
+  "CLIProxyAPI managed here": "CLIProxyAPI gerido aqui",
+  "Install or update the official release, save the console password and create API keys.": "Instale ou atualize a versão oficial, guarde a palavra-passe da consola e crie chaves de API.",
+  "New chat in every layout": "Novo chat em qualquer disposição",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "O botão de novo chat da disposição Caixa de entrada também oferece CLIProxy, MarksCode, Codex e Claude.",
+  "Console sign-in fixed": "Início de sessão na consola corrigido",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "As verificações de estado já não bloqueiam a consola do CLIProxyAPI com inícios de sessão falhados."
 }

@@ -2957,5 +2957,13 @@
   "Settings cannot be saved": "Không thể lưu cài đặt",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "Dịch vụ đọc được cấu hình nhưng không lưu được, nên không thể tạo hoặc thu hồi API key.",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "Cho phép CLIProxyAPI lưu cài đặt? Sau khi quản trị viên xác thực, một drop-in systemd cho phép dịch vụ ghi vào /etc/cli-proxy-api, thư mục và tệp cấu hình được giao cho người dùng của dịch vụ, và dịch vụ đang chạy sẽ khởi động lại. Bản thân unit của dịch vụ không bị thay đổi.",
-  "CLIProxyAPI can now save its settings.": "Giờ CLIProxyAPI đã có thể lưu cài đặt."
+  "CLIProxyAPI can now save its settings.": "Giờ CLIProxyAPI đã có thể lưu cài đặt.",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "Trò chuyện với các mô hình CLIProxy ngay trong khung chat của ứng dụng và quản lý CLIProxyAPI trong Mô-đun.",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "Trò chuyện mới → CLIProxy: các mô hình của nó trong cùng màn hình chat, có Dừng và lựa chọn mô hình của bạn.",
+  "CLIProxyAPI managed here": "Quản lý CLIProxyAPI tại đây",
+  "Install or update the official release, save the console password and create API keys.": "Cài đặt hoặc cập nhật bản phát hành chính thức, lưu mật khẩu bảng điều khiển và tạo khóa API.",
+  "New chat in every layout": "Trò chuyện mới ở mọi bố cục",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "Nút trò chuyện mới của bố cục Hộp thư đến cũng có CLIProxy, MarksCode, Codex và Claude.",
+  "Console sign-in fixed": "Đã sửa đăng nhập bảng điều khiển",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Việc kiểm tra trạng thái không còn khóa bảng điều khiển CLIProxyAPI bằng các lần đăng nhập thất bại."
 }

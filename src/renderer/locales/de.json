@@ -3002,5 +3002,13 @@
   "Settings cannot be saved": "Einstellungen können nicht gespeichert werden",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "Der Dienst kann seine Konfiguration lesen, aber nicht speichern, daher können keine API-Schlüssel erstellt oder widerrufen werden.",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "CLIProxyAPI das Speichern seiner Einstellungen erlauben? Nach Administrator-Autorisierung erlaubt ein systemd-Drop-in dem Dienst, in /etc/cli-proxy-api zu schreiben, der Ordner und seine Konfigurationsdatei gehen an den Dienstbenutzer, und ein laufender Dienst startet neu. Die Dienst-Unit selbst wird nicht geändert.",
-  "CLIProxyAPI can now save its settings.": "CLIProxyAPI kann seine Einstellungen jetzt speichern."
+  "CLIProxyAPI can now save its settings.": "CLIProxyAPI kann seine Einstellungen jetzt speichern.",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "Chatte mit CLIProxy-Modellen im Chat der App und verwalte CLIProxyAPI unter Module.",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "Neuer Chat → CLIProxy: seine Modelle im selben Chatfenster, mit Stopp und deiner eigenen Modellwahl.",
+  "CLIProxyAPI managed here": "CLIProxyAPI hier verwaltet",
+  "Install or update the official release, save the console password and create API keys.": "Installiere oder aktualisiere die offizielle Version, speichere das Konsolenpasswort und erstelle API-Schlüssel.",
+  "New chat in every layout": "Neuer Chat in jedem Layout",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "Der Neuer-Chat-Knopf im Posteingang-Layout bietet auch CLIProxy, MarksCode, Codex und Claude an.",
+  "Console sign-in fixed": "Konsolenanmeldung behoben",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Statusprüfungen sperren die CLIProxyAPI-Konsole nicht mehr durch fehlgeschlagene Anmeldungen aus."
 }

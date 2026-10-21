@@ -3047,5 +3047,13 @@
   "Settings cannot be saved": "Não é possível salvar as configurações",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "O serviço consegue ler a configuração, mas não salvá-la, então não é possível criar nem revogar chaves de API.",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "Permitir que o CLIProxyAPI salve as configurações? Após a autorização de administrador, um drop-in do systemd permite que o serviço grave em /etc/cli-proxy-api, a pasta e o arquivo de configuração passam para o usuário do serviço e um serviço em execução é reiniciado. A unidade do serviço não é alterada.",
-  "CLIProxyAPI can now save its settings.": "O CLIProxyAPI agora pode salvar as configurações."
+  "CLIProxyAPI can now save its settings.": "O CLIProxyAPI agora pode salvar as configurações.",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "Converse com modelos do CLIProxy no próprio chat do app e gerencie o CLIProxyAPI em Módulos.",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "Novo chat → CLIProxy: os modelos dele na mesma tela de chat, com Parar e a sua escolha de modelo.",
+  "CLIProxyAPI managed here": "CLIProxyAPI gerenciado aqui",
+  "Install or update the official release, save the console password and create API keys.": "Instale ou atualize a versão oficial, salve a senha do console e crie chaves de API.",
+  "New chat in every layout": "Novo chat em qualquer layout",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "O botão de novo chat do layout Caixa de entrada também oferece CLIProxy, MarksCode, Codex e Claude.",
+  "Console sign-in fixed": "Login no console corrigido",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "As verificações de status não bloqueiam mais o console do CLIProxyAPI com logins falhos."
 }

@@ -2957,5 +2957,13 @@
   "Settings cannot be saved": "无法保存设置",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "服务可以读取其配置但无法保存，因此无法创建或吊销 API 密钥。",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "要允许 CLIProxyAPI 保存其设置吗？管理员授权后，将通过 systemd drop-in 允许服务写入 /etc/cli-proxy-api，把该文件夹及其配置文件交给服务用户，并重新启动正在运行的服务。服务单元本身不会被修改。",
-  "CLIProxyAPI can now save its settings.": "CLIProxyAPI 现在可以保存其设置了。"
+  "CLIProxyAPI can now save its settings.": "CLIProxyAPI 现在可以保存其设置了。",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "在应用自己的聊天中使用 CLIProxy 模型，并在“模块”中管理 CLIProxyAPI。",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "新建聊天 → CLIProxy：在同一聊天界面使用其模型，可停止并自选模型。",
+  "CLIProxyAPI managed here": "在此管理 CLIProxyAPI",
+  "Install or update the official release, save the console password and create API keys.": "安装或更新官方版本，保存控制台密码并创建 API 密钥。",
+  "New chat in every layout": "所有布局都能新建聊天",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "收件箱布局的新建聊天按钮也提供 CLIProxy、MarksCode、Codex 和 Claude。",
+  "Console sign-in fixed": "已修复控制台登录",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "状态检查不再因登录失败而锁定 CLIProxyAPI 控制台。"
 }

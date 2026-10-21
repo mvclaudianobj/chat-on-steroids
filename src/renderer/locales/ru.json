@@ -3092,5 +3092,13 @@
   "Settings cannot be saved": "Не удаётся сохранить настройки",
   "The service can read its configuration but not save it, so API keys cannot be created or revoked.": "Служба может читать конфигурацию, но не сохранять её, поэтому API-ключи нельзя создавать и отзывать.",
   "Allow CLIProxyAPI to save its settings? After administrator authorization, a systemd drop-in lets the service write /etc/cli-proxy-api, the folder and its config file are given to the service user, and a running service restarts. The service unit itself is not changed.": "Разрешить CLIProxyAPI сохранять настройки? После авторизации администратора drop-in systemd разрешит службе запись в /etc/cli-proxy-api, папка и файл конфигурации перейдут пользователю службы, а работающая служба перезапустится. Сам юнит службы не изменяется.",
-  "CLIProxyAPI can now save its settings.": "Теперь CLIProxyAPI может сохранять настройки."
+  "CLIProxyAPI can now save its settings.": "Теперь CLIProxyAPI может сохранять настройки.",
+  "Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules.": "Общайтесь с моделями CLIProxy в чате самого приложения и управляйте CLIProxyAPI в разделе «Модули».",
+  "New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.": "Новый чат → CLIProxy: его модели в том же окне чата, с остановкой и вашим выбором модели.",
+  "CLIProxyAPI managed here": "CLIProxyAPI управляется здесь",
+  "Install or update the official release, save the console password and create API keys.": "Устанавливайте и обновляйте официальную версию, сохраняйте пароль консоли и создавайте ключи API.",
+  "New chat in every layout": "Новый чат в любом макете",
+  "The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.": "Кнопка нового чата в макете «Входящие» тоже предлагает CLIProxy, MarksCode, Codex и Claude.",
+  "Console sign-in fixed": "Вход в консоль исправлен",
+  "Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.": "Проверки состояния больше не блокируют консоль CLIProxyAPI неудачными входами."
 }

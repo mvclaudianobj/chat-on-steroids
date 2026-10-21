@@ -9,6 +9,13 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.43.2] — Chat with CLIProxy and a complete CLIProxyAPI module
+
+- **Chat with CLIProxy.** New chat → CLIProxy opens a chat whose model runs through the local CLIProxyAPI, in the app's own chat screen: streamed answers, Stop, a model and reasoning choice per chat, history like any chat, and recovery of an answer cut off by a restart. Text only for now; local tools come next.
+- **CLIProxyAPI managed from Modules.** Installed and latest official versions, Install/Update from the official release with checksum verification, a confirmed repair so an existing service can save its settings, the console password stored once (the console opens signed in), and API keys you can create (saved for the CLIProxy chat) and revoke.
+- **Console sign-in fixed.** The module's status check called the management API without a password on every refresh; CLIProxyAPI counted each as a failed sign-in and locked 127.0.0.1 out for 30 minutes, so a correct password looked refused.
+- **New chat in every layout.** The Inbox layout's new chat button offers the same menu as the Projects sidebar.
+
 ## [2.1.43.1] — Chat Marks on community v2.1.43
 
 - Integrated the complete community 2.1.43 release (sub-agent Activity, long turns that keep going, clearer Settings, the Whip pet and its fixes) with every Marks integration preserved: MarksPanel login, Marks modules and CLI sessions, Skills/AI Hero, the Marks pet, icons and branding.

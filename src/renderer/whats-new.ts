@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.43.2': {
+    lead: () => t("Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules."),
+    highlights: [
+      { icon: 'i-chat', title: () => t("Chat with CLIProxy"), text: () => t("New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.") },
+      { icon: 'i-gear', title: () => t("CLIProxyAPI managed here"), text: () => t("Install or update the official release, save the console password and create API keys.") },
+      { icon: 'i-pencil', title: () => t("New chat in every layout"), text: () => t("The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.") },
+      { icon: 'i-retry', title: () => t("Console sign-in fixed"), text: () => t("Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.") }
+    ]
+  },
   '2.1.43.1': {
     lead: () => t("See what sub-agents do, long work that keeps going, and clearer Settings."),
     highlights: [
