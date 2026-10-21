@@ -75,3 +75,25 @@ describe('Chat Marks API chat fences', () => {
     expect(source('api-chat/tools.ts')).toContain('{ local: true }');
   });
 });
+
+describe('Chat Marks bridge instance', () => {
+  // 2026-10-21: `npm run dev` took 8765 before the installed app, and the installed app's
+  // extensions attached to the dev app because discovery took the first port that answered.
+  const read = (...parts: string[]) => readFileSync(path.join(root, ...parts), 'utf8');
+
+  it('keeps the extension discovery checking the app instance it paired with', () => {
+    const background = read('extension', 'background.js');
+    const discover = background.slice(background.indexOf('async function discoverNow('), background.indexOf('/** Forgets that the app was ever confirmed'));
+    expect(discover).toContain('const wanted = await wantedInstance();');
+    expect(discover).toContain('return !wanted || !reported || reported === wanted;');
+    expect(discover).toContain('if (!matches(body)) {');
+    expect(background).toContain("globalThis.__cosBrowserWorker.call('app.bridgeInstance', [])");
+    expect(background).toContain('await chrome.storage.local.set({ port, token, appInstance, disconnected });');
+  });
+
+  it('keeps the bridge naming its instance and the dev profile off the installed app\'s port', () => {
+    expect(read('src', 'main', 'bridge.ts')).toContain('instance: await bridgeInstance()');
+    expect(read('src', 'main', 'cos-browser', 'host.ts')).toContain("if (name === 'app.bridgeInstance') return { ok: true, value: await bridgeInstance() };");
+    expect(read('src', 'main', 'dev-profile.ts')).toContain('preferDevProfileBridgePorts();');
+  });
+});

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { bridgePortSelection } from '../src/main/bridge-ports.js';
+import { DEV_PROFILE_AUTO_PORTS, bridgePortSelection, preferDevProfileBridgePorts } from '../src/main/bridge-ports.js';
 import { readFileSync } from 'node:fs';
 import { BROWSER_BRIDGE_AUTO_PORTS, BROWSER_BRIDGE_FALLBACK_PORTS, BROWSER_BRIDGE_PORTS } from '../src/shared/browser-bridge.js';
 
@@ -22,6 +22,19 @@ describe('bridge port candidates', () => {
     expect(BROWSER_BRIDGE_PORTS).toEqual([8765, 8766, 8767, 8768, 8769]);
     expect(BROWSER_BRIDGE_FALLBACK_PORTS).toEqual([18765, 18766, 18767, 18768, 18769, 38765, 38766, 38767, 38768, 38769]);
     expect(BROWSER_BRIDGE_AUTO_PORTS).toEqual([...BROWSER_BRIDGE_PORTS, ...BROWSER_BRIDGE_FALLBACK_PORTS]);
+  });
+  it('starts a dev profile\'s Auto at 18765, leaving 8765 to the installed app; a fixed port and the override still win', () => {
+    try {
+      preferDevProfileBridgePorts();
+      expect(bridgePortSelection('auto', '')).toEqual({ candidates: DEV_PROFILE_AUTO_PORTS, overridden: false });
+      expect(DEV_PROFILE_AUTO_PORTS).toEqual([18765, 18766, 18767, 18768, 18769, 8765, 8766, 8767, 8768, 8769, 38765, 38766, 38767, 38768, 38769]);
+      expect([...DEV_PROFILE_AUTO_PORTS].sort()).toEqual([...BROWSER_BRIDGE_AUTO_PORTS].sort());
+      expect(bridgePortSelection(8767, '')).toEqual({ candidates: [8767], overridden: false });
+      expect(bridgePortSelection('auto', '0')).toEqual({ candidates: [0], overridden: true });
+    } finally {
+      preferDevProfileBridgePorts(false);
+    }
+    expect(bridgePortSelection('auto', '').candidates).toEqual(BROWSER_BRIDGE_AUTO_PORTS);
   });
   it('lets the extension find every port Auto may choose', () => {
     const source = readFileSync(new URL('../extension/background.js', import.meta.url), 'utf8');

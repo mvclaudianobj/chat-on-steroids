@@ -216,7 +216,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
 | Enter key | Enter sends (`ui.enterSends`, missing means true). | Codex's "Enter key behavior". With `false`, Enter adds a line in the composer and Cmd/Ctrl+Enter sends; Shift+Enter always adds a line and Cmd/Ctrl+Shift+Enter keeps sending the other way (Follow-up behavior). |
 | Keep awake | The computer (`ui.keepAwake` on, missing means on; `ui.keepScreenAwake` off). | Codex's "Prevent sleep while running". One select: Off / The computer / The computer and screen. `keep-awake.ts` holds `powerSaveBlocker` (`prevent-app-suspension`: the system stays awake, the screen may sleep; with `keepScreenAwake`, `prevent-display-sleep`, because Windows Modern Standby laptops go to standby once the screen turns off whatever else is held, and the hold is swapped when the choice changes) while any session is working by `sessionWorkingAt` with the bridge's `sessionActivityExpiresAt` deadline, so a chat that died mid-turn releases it when its deadline passes. Refreshed on session changes, at the nearest deadline, every 60 s and when the setting changes. |
-| Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Auto falls back to 18765–18769, then 38765–38769 (`BROWSER_BRIDGE_AUTO_PORTS`, mirrored by the extension's `PORTS`; #1314: Windows reserved the primary range). Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
+| Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Auto falls back to 18765–18769, then 38765–38769 (`BROWSER_BRIDGE_AUTO_PORTS`, mirrored by the extension's `PORTS`; #1314: Windows reserved the primary range). The `npm run dev` profile (`dev-profile.ts`, userData `chat-marks-dev`) starts Auto at 18765–18769, then 8765–8769, then 38765–38769 (`DEV_PROFILE_AUTO_PORTS`), so the installed app keeps 8765. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
 | Background placement | Window. | `ui.backgroundPlacement` `'window'` / `'group'` (an unknown saved value reads as `'window'`), published in `/status` as `backgroundPlacement`. Group mode puts every background tab in one collapsed "Chat On Steroids" tab group in the last-focused normal window (never the background window, never incognito), then keeps using it; failures fall back to the minimized window. No follow and no compaction tab selection in the user's window (#128). |
 
@@ -3250,6 +3250,15 @@ drains the old listener without holding the config queue. Shutdown fences prepar
 An unavailable saved port keeps the app running, retains the choice, and reports the startup error
 in Setup; there is no fixed-port fallback, retry button or new retry timer. Settings restores a
 rejected focused selection; unchanged queued snapshots retain their base for three-way merging.
+`/hello` and `/pair` report `instance`, a random id per app profile (`bridge-instance.ts`,
+`state/bridge-instance.json`; optional, no protocol bump). The extension keeps the instance it
+paired with in `storage.local.appInstance` next to `port`/`token`; discovery skips a port whose
+`/hello` names another instance and accepts a match or an app that names none. Unpaired, it takes
+the first app and records the instance at `/pair`; a pre-instance token adopts the app it already
+uses. With its instance gone it reports not connected; only the popup's explicit Connect may pair
+elsewhere (the remembered instance still wins when it answers). The CoS copy asks its own app
+(`__cosBrowserWorker.call('app.bridgeInstance')`, answered in `cos-browser/host.ts`) and drops a
+token another instance minted. Found 2026-10-21 with an installed app on 8766 beside dev on 8765.
 Silent `/pair` provisioning replaces the retired six-digit flow. Validate allowed extension
 origin, bearer, payload bounds and operation identity. The wake socket only prompts maintenance.
 Automatic provisioning requests `reuse: true` to join the current credential generation across

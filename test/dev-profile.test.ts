@@ -16,6 +16,9 @@ describe('dev profile', () => {
   it('moves an unpackaged checkout to its own profile on import', async () => {
     const { DEV_PROFILE } = await import('../src/main/dev-profile');
     expect(setPath).toHaveBeenCalledWith('userData', path.join('/home/u/.config', DEV_PROFILE));
+    // Its bridge leaves the installed app's usual 8765 alone when both run.
+    const { bridgePortSelection } = await import('../src/main/bridge-ports');
+    expect(bridgePortSelection('auto', '').candidates[0]).toBe(18765);
   });
 
   it('keeps packaged apps, explicit folders and scripts that chose their own', async () => {
