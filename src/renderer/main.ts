@@ -58,7 +58,7 @@ import {
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
 import { $, ago, disclosureChevron, el, icon, run, shortAgo, toast } from './dom.js';
-import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, selectedChatWorkspaceId } from './chat.js';
+import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, selectedChatWorkspaceId, selectChatSession, selectedChatSession } from './chat.js'; // Chat Marks: API chats select their session
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
@@ -118,7 +118,8 @@ const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.
 publishUiLanguage();
 onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
-const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId });
+// Chat Marks: API chats select their session and follow the selected one.
+const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId, selectedChat: selectedChatSession, selectChat: selectChatSession });
 const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'

@@ -1382,6 +1382,28 @@ turn through the store's `session:changed` notices. Fences by id: `bridge.ts`
 `noteCallAttribution` ignores API ids; `session/input.ts` `enqueueInput`, `goal.ts`
 `setGoalSwitchNow`/`setGoalObjectiveNow` and `ipc.ts` `openSessionChat` refuse them.
 
+The chat view is the same for both providers: `renderer/api-chat-ui.ts` (created by
+`marks-modules-ui.ts`) owns only what differs. New chat's menu (`cli-modules-ui.ts`
+`newChatItems`) shows **CLIProxy** after ChatGPT once `apiChatStatus` answers; without a default
+model or with a required key missing it opens Settings > Modules with a toast instead. Creating
+calls `apiChatCreate({projectId})` and selects the session through `chat.ts`
+`selectChatSession` (reloads the list first, so a stale read cannot drop the new selection). A
+document capture-phase `submit` listener takes the composer for the selected API chat: text goes
+to `apiChatSend` (composer cleared on success, errors as toasts, attachments refused), and the
+Send button showing Stop calls `apiChatStop`; ChatGPT chats keep the outbox path untouched. The
+chat's own model (chat-modality `apiChatModels`, favorites/recents first) and effort selects
+replace ChatGPT's model menu and write `apiChatSetChatSettings`; the header shows
+`CLIProxy · <model>`. `is-api-chat` on the chat panel hides the ChatGPT-only controls
+(attachments, Goal/Loop mode, Plan, model menu, context meter/Compact, delivery options, skill
+and mention menus) in `settings.css`. Hooks in upstream files, each marked `Chat Marks:`:
+`chat.ts` `refreshSessionControls` skips `sessions:controls` for API chats and takes the running
+turn from `apiChatChatSettings` (`running` + the summary's `activeTurnId`), which drives Stop and
+the timeline's working line; `sessionWorking` counts an API chat's open recorded turn (sidebar
+spinner); the row menu drops Open in browser, Copy link, Block and Trust for API chats;
+`selectedChatSession`/`selectChatSession` exports; `main.ts` passes them to
+`initMarksModulesUi`. `control-reads.ts` ignores `api_chat_session` like other expected misses.
+Proof: `test/api-chat-ui.test.ts`, `scripts/verify-api-chat-ui.cjs`.
+
 ### MarksPanel application admission
 
 `main/markspanel-auth.ts` owns the mandatory MarksPanel login boundary. On every startup,

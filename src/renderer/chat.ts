@@ -83,6 +83,7 @@ import {
 } from '../shared/session.js';
 import { chronological, positionOf, residenceOf } from '../shared/chronology.js';
 import { recentChatActivity, sessionWorkingAt, workerReportedFinish } from '../shared/session-activity.js';
+import { isApiConversationId } from '../shared/api-chat.js'; // Chat Marks: API chats (renderer/api-chat-ui.ts)
 import {
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
@@ -806,7 +807,8 @@ const AGENT_BADGE: Record<AgentState, Badge> = {
  */
 /** Keep callback arguments separate from the shared predicate's explicit clock. */
 function sessionWorking(summary: SessionSummary): boolean {
-  return sessionWorkingAt(summary, Date.now());
+  // Chat Marks: an API chat has no bridge activity; its open recorded turn is its work.
+  return sessionWorkingAt(summary, Date.now()) || (isApiConversationId(summary.conversationId) && !!summary.activeTurnId);
 }
 
 /**
@@ -1075,6 +1077,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       });
     }
   }
+  // Chat Marks: an API chat has no ChatGPT page to open or link, and no tool calls to block or trust.
+  if (isApiConversationId(summary.conversationId)) items.splice(0, items.length, ...items.filter(item => !['open', 'copy-link', 'block', 'trust'].includes(item.action)));
   items.push(remove);
   const more = el('button', 'btn row-menu-button sess-menu') as HTMLButtonElement;
   more.type = 'button'; more.dataset.rowMenu = owner; more.append(icon('i-more-vertical'));
@@ -2884,8 +2888,12 @@ async function refreshSessionControls(): Promise<void> {
     for (const action of ['compactSession', 'cancelCompaction']) $(action).hidden = true;
     return; }
   const opening = pendingComposerInputs.find(row => row.opening && row.sessionId === id && ['queued', 'browser'].includes(row.state));
-  if (!sessions.find(row => row.id === id)?.conversationId) {
-    controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = null;
+  // Chat Marks: an API chat has no ChatGPT controls; its executor says whether a turn runs (Send becomes Stop).
+  const apiChat = sessions.find(row => row.id === id);
+  const apiTurn = apiChat && isApiConversationId(apiChat.conversationId) ? await api.apiChatChatSettings(id).then(reply => reply.ok && reply.data.running ? apiChat.activeTurnId ?? `api:${id}` : null, () => null) : undefined;
+  if (generation !== controlsGeneration || id !== selectedId) return;
+  if (!sessions.find(row => row.id === id)?.conversationId || apiTurn !== undefined) {
+    controlledSessionId = id; controlledSelection = selectionGeneration; controlledTurnId = apiTurn ?? null;
     controlledCanInject = false; controlledCanSendDirectly = false; controlledQueueAtFinish = false;
     controlledStopPending = false; controlledFinishWaiting = false;
     menu.hidden = false;
@@ -7887,6 +7895,16 @@ function showView(name: string): void {
     timelineScrollTop = null;
   }
   paintJumpLatest();
+}
+
+/** Chat Marks: the selected chat and selection by id, for Marks modules (renderer/api-chat-ui.ts). */
+export function selectedChatSession(): { id: string; conversationId: string | null } | null {
+  return selectedId ? { id: selectedId, conversationId: sessions.find(row => row.id === selectedId)?.conversationId ?? null } : null;
+}
+export async function selectChatSession(id: string): Promise<void> {
+  // A list read begun before the chat existed would drop the selection; this read supersedes it.
+  await loadSessions('changed');
+  pendingNewInput = null; showView('timeline'); selectSession(id);
 }
 
 function selectSession(id: string): void {

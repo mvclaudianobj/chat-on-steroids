@@ -5,11 +5,16 @@ import { $, toast } from './dom.js';
 import { t, onLanguageChange } from './i18n.js';
 import { createCliModulesUi, type CliModuleSummary } from './cli-modules-ui.js';
 import { createApiChatSettingsUi } from './api-chat-settings-ui.js';
+import { createApiChatUi } from './api-chat-ui.js';
 
 export interface MarksModulesUiHooks {
   showTab(name: string): void;
   openChatView(name: string): void;
   workspace(): string | null;
+  /** The chat the timeline shows; API chats take over its composer. */
+  selectedChat?(): { id: string; conversationId: string | null } | null;
+  /** Shows a session in the normal chat view. */
+  selectChat?(id: string): void | Promise<void>;
 }
 
 /** Only the sidebar hooks are visible to upstream-owned main.ts. */
@@ -25,7 +30,11 @@ export interface MarksModulesUiController {
 }
 
 export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): MarksModulesUiController {
-  const cli = createCliModulesUi(api, hooks);
+  // CLIProxy API chats: New chat's item after ChatGPT, and their composer in the chat view.
+  let repaintNewChat = (): void => undefined;
+  const apiChatChats = createApiChatUi(api, hooks, () => repaintNewChat());
+  const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems });
+  repaintNewChat = cli.repaintNewChat;
   const apiChat = createApiChatSettingsUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!);
   let cliProxyModule: MarksModuleState | null = null;
   let moduleChecked = false;
@@ -199,7 +208,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     }
   }
 
-  $('moduleRefresh').addEventListener('click', () => { void refreshModules(); void apiChat.refresh(); });
+  $('moduleRefresh').addEventListener('click', () => { void refreshModules(); void apiChat.refresh(); void apiChatChats.refresh(); });
   $('moduleCliReopen').addEventListener('click', () => void actOnModule('open'));
   $<HTMLInputElement>('moduleCliActive').addEventListener('change', () =>
     setModuleUiActive($<HTMLInputElement>('moduleCliActive').checked));
@@ -220,7 +229,11 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     createSession: cli.createSession,
     cliModules: cli.cliModules,
     normalizeTab: name => cli.normalizeTab(name === 'module-cli-proxy' && !moduleUiActive ? 'modules' : name),
-    onTabOpening: name => { if (name === 'modules') { void refreshModules(); void apiChat.refresh(); } cli.onTabOpening(name); },
+    onTabOpening: name => {
+      if (name === 'modules') { void refreshModules(); void apiChat.refresh(); }
+      if (name === 'chat') void apiChatChats.refresh();
+      cli.onTabOpening(name);
+    },
     onTabShown: name => { if (name === 'module-cli-proxy') void openSelectedModuleConsole(); cli.onTabShown(name); },
     paintNavigation: name => {
       cli.paintNavigation(name);
@@ -236,6 +249,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
       }
     },
     modulePage: button => cli.modulePage(button) ?? (button?.dataset.modulePage === 'module-cli-proxy' && moduleUiActive ? button.dataset.modulePage : null),
-    repaintSessions: () => cli.repaintSessions()
+    // The chat list repaints on every selection and session change: API chats follow it.
+    repaintSessions: () => { cli.repaintSessions(); apiChatChats.sync(); }
   };
 }
