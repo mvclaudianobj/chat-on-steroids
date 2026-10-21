@@ -5,10 +5,12 @@
  * Process model: ONE app-server per app instance, started lazily and shared by every Codex chat:
  * `codex app-server -c <safe overrides> --listen unix://<userData>/codex/<hash>.sock` (0700 dir;
  * the hash is of userData, so a crashed instance's orphan is found again by its pidfile and
- * stopped). The app talks to it through `codex app-server proxy --sock <sock>`, a child whose
- * stdio carries JSON-RPC lines (jsonrpc.ts). One shared server, not one per chat: threads are
- * multiplexed by id, a chat costs no process, and the chat's live terminal (`codex resume <thread>
- * --remote unix://<sock>`) attaches to the very server and thread the chat runs on, so the TUI
+ * stopped). The app talks to it through `codex app-server proxy --sock <sock>`, a child that
+ * relays its stdio to the socket byte for byte; codex-cli 0.163 serves the socket as WebSocket, so
+ * the upgrade and one JSON-RPC message per text frame run over that stdio (jsonrpc.ts). The same
+ * child works through `wsl.exe` on Windows, where the app cannot reach the WSL socket itself.
+ * One shared server, not one per chat: threads are multiplexed by id, a chat costs no process,
+ * and the chat's live terminal (`codex resume <thread> --remote unix://<sock>`) attaches to the very server and thread the chat runs on, so the TUI
  * and the chat see the same turn and the same approvals. Both children are killed when the app
  * quits, when the Codex module is stopped or disabled, or when either one exits.
  *
@@ -49,7 +51,8 @@ import {
   codexRequestKey, codexServerArgv, codexTerminalArgv, codexThreadResumeParams, codexThreadStartParams, codexTurnOutcome,
   codexTurnStartParams, type CodexApprovalBinding, type CodexApprovalMethod
 } from './codex-protocol.js';
-import { JsonRpcPeer, type JsonRpcId } from './jsonrpc.js';
+import { connectWebSocket, JsonRpcPeer, type JsonRpcId } from './jsonrpc.js';
+import type { WebSocket } from 'ws';
 import { engineOf, chatRecords, storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
 import { TurnProjector, storeProjectorSink, type ProjectorSink } from './projector.js';
 import { claimTurnRecovery, closeInterruptedTurn } from './recovery.js';
@@ -156,7 +159,9 @@ export function defaultCodexHost(): CodexHost {
       if (server.exitCode !== null || server.signalCode !== null) throw new Error(CODEX_SERVER_STOPPED);
       const ready = runtime.windows
         ? await run('wsl.exe', ['--exec', 'test', '-S', socket], { timeout: 4_000 }).then(() => true, () => false)
-        : await fs.stat(socket).then(stat => stat.isSocket(), () => false);
+        // codex-cli 0.163 makes the path a symlink to its own /tmp/codex-daemon-<uid>/ socket:
+        // followed, it must still be a socket of this user.
+        : await fs.stat(socket).then(stat => stat.isSocket() && (!process.getuid || stat.uid === process.getuid()), () => false);
       if (ready) return;
       await delay(100);
     }
@@ -230,7 +235,6 @@ interface Connection {
   warning: string | null;
   /** Threads this server has loaded (started or resumed) since it started. */
   loaded: Set<string>;
-  stderr: string;
 }
 
 interface CodexTurn {
@@ -323,31 +327,44 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
       const version = checkCodexVersion(await host.run(runtime, ['--version']).catch(() => null));
       if (!version.ok) throw new Error(version.detail);
       const processes = await host.open(runtime);
+      let stderr = '';
+      const peerHolder: { peer?: JsonRpcPeer } = {};
       const holder: { connection?: Connection } = {};
+      for (const child of [processes.client, processes.server]) {
+        child?.stderr?.on('data', (chunk: Buffer) => { stderr = (stderr + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS); });
+        child?.on('exit', code => {
+          logInfo(`Codex ${child === processes.server ? 'app-server' : 'client'} exited (${code ?? 'signal'})`);
+          peerHolder.peer?.close(new Error(CODEX_SERVER_STOPPED));
+        });
+        child?.on('error', () => peerHolder.peer?.close(new Error(CODEX_SERVER_STOPPED)));
+      }
+      const failed = (error: unknown): Error => {
+        const tail = redactCredentialText(stderr).trim().split('\n').pop()?.slice(0, 200);
+        peerHolder.peer?.close(new Error(CODEX_SERVER_STOPPED));
+        killProcesses(processes);
+        return new Error(`Codex app-server did not start: ${(error as Error).message}${tail ? ` (${tail})` : ''}`);
+      };
+      let socket: WebSocket;
+      try {
+        // The socket speaks WebSocket (codex-cli 0.163); the proxy carries the upgrade and frames.
+        socket = await connectWebSocket(processes.client.stdout!, processes.client.stdin!, { timeoutMs: 20_000 });
+      } catch (error) {
+        throw failed(error);
+      }
       const peer = new JsonRpcPeer({
-        input: processes.client.stdout!, output: processes.client.stdin!,
+        socket,
         onNotification: (method, params) => onNotification(method, params),
         onRequest: (id, method, params) => onRequest(peer, id, method, params),
         onClose: reason => { if (holder.connection) lost(holder.connection, reason); else killProcesses(processes); }
       });
-      const connection: Connection = { peer, processes, version: version.version, warning: version.warning, loaded: new Set(), stderr: '' };
+      peerHolder.peer = peer;
+      const connection: Connection = { peer, processes, version: version.version, warning: version.warning, loaded: new Set() };
       holder.connection = connection;
-      for (const child of [processes.client, processes.server]) {
-        child?.stderr?.on('data', (chunk: Buffer) => { connection.stderr = (connection.stderr + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS); });
-        child?.on('exit', code => {
-          logInfo(`Codex ${child === processes.server ? 'app-server' : 'client'} exited (${code ?? 'signal'})`);
-          peer.close(new Error(CODEX_SERVER_STOPPED));
-        });
-        child?.on('error', () => peer.close(new Error(CODEX_SERVER_STOPPED)));
-      }
       try {
         await peer.request('initialize', codexInitializeParams(await host.appVersion()), { timeoutMs: 20_000 });
         peer.notify('initialized');
       } catch (error) {
-        const tail = redactCredentialText(connection.stderr).trim().split('\n').pop()?.slice(0, 200);
-        peer.close(new Error(CODEX_SERVER_STOPPED));
-        killProcesses(processes);
-        throw new Error(`Codex app-server did not start: ${(error as Error).message}${tail ? ` (${tail})` : ''}`);
+        throw failed(error);
       }
       current = connection;
       lastSocket = processes.socket;

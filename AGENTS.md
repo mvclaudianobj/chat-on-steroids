@@ -1525,9 +1525,14 @@ later. E0 changes no CLIProxy behavior.
   `codex app-server -c approval_policy="on-request" -c sandbox_mode="workspace-write"
   -c approvals_reviewer="user" --listen unix://<userData>/codex/<sha256(userData)[:16]>.sock`
   (0700 dir, owner/symlink checked; tmp fallback when the path exceeds ~100 bytes; pidfile so a
-  crashed instance's orphan is stopped), and our client `codex app-server proxy --sock <sock>`
-  whose stdio carries JSON-RPC lines (no `jsonrpc` member, as Codex sends; 16 MiB line cap,
-  per-request timeouts, stderr kept as a redacted 4 KB tail, never logged). Both die on
+  crashed instance's orphan is stopped; 0.163 makes the path a symlink to its own
+  `/tmp/codex-daemon-<uid>/` socket, accepted when the followed socket is the user's), and our
+  client `codex app-server proxy --sock <sock>`, which only relays bytes. 0.163 serves the socket
+  as WebSocket (HTTP 101, `x-codex-websocket-max-unfragmented-message-bytes: 16777216`), so
+  `jsonrpc.ts` runs a `ws` client over the proxy's stdio (`createConnection` returns the
+  stdout/stdin duplex; one path for Linux and `wsl.exe`): one JSON-RPC message per text frame (no
+  `jsonrpc` member, as Codex sends; 16 MiB `maxPayload`, 20 s handshake, per-request timeouts,
+  proxy exit or socket close closes the peer; stderr kept as a redacted 4 KB tail, never logged). Both die on
   `will-quit`, on Codex module Stop/Disable, or when either exits (running turns fail). The `-c`
   overrides keep a user `config.toml`/profile from turning approvals off; no bypass/`never`/
   `danger-full-access` flag is ever passed (argv snapshot test). Windows: same argv through
@@ -1568,11 +1573,14 @@ later. E0 changes no CLIProxy behavior.
     and opens `codex resume <thread> --remote unix://<sock>` in the chat's Codex module terminal;
     allowed while a turn runs (same server and thread, so the TUI sees the turn and its approvals).
     Codex's open hook only makes sure the server runs before the pane attaches.
-  Proof: `test/agent-engine-codex.test.ts` (fake app-server
-  `test/fixtures/agent-engine/codex-fake-app-server.cjs`; params and replies validated against
-  the checked-in schema subset `codex-app-server-schema.json` from `generate-json-schema`),
+  Proof: `test/agent-engine-codex.test.ts` (fake proxy and app-server speaking WebSocket on
+  stdio, `test/fixtures/agent-engine/codex-fake-app-server.cjs` with `websocket-stdio.cjs`;
+  params and replies validated against the checked-in schema subset `codex-app-server-schema.json`
+  from `generate-json-schema`),
   `test/cli-modules.test.ts` (engine terminal), `test/api-chat-ui.test.ts` (terminal button).
-  Needs a real run: login state, the proxy/socket transport and TUI `--remote` attach, Windows.
+  The transport was run against the installed codex-cli 0.163.0 on Linux (initialize,
+  account/read, model/list, an ephemeral `thread/start`; no model turn). Needs a real run: a
+  model turn and its approvals, TUI `--remote` attach, Windows.
 - **Claude Code (`claude.ts`, G).** Registered as `claude` (label "Claude Code", terminal
   `handover`); New chat and the project menus offer it once `status()` is available: Claude
   module active and Command on (cli-modules `cliChatRuntime`: binary, canonical cwd, `wsl.exe

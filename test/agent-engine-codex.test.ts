@@ -2,7 +2,8 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import { execFile, spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import path from 'node:path';
-import { PassThrough } from 'node:stream';
+import { duplexPair } from 'node:stream';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { makeTempDir, removeTempDir } from './helpers.js';
@@ -19,7 +20,8 @@ const executor = await import('../src/main/api-chat/executor.js');
 const ledger = await import('../src/main/agent-engine/ledger.js');
 const protocol = await import('../src/main/agent-engine/codex-protocol.js');
 const { createCodexEngine, CODEX_NOT_SIGNED_IN } = await import('../src/main/agent-engine/codex.js');
-const { JsonRpcPeer } = await import('../src/main/agent-engine/jsonrpc.js');
+const { JsonRpcPeer, connectWebSocket } = await import('../src/main/agent-engine/jsonrpc.js');
+const { acceptWebSocket } = createRequire(import.meta.url)('./fixtures/agent-engine/websocket-stdio.cjs') as { acceptWebSocket(stream: unknown, options?: { maxPayload?: number }): Promise<import('ws').WebSocket> };
 const { recoversOwnTurns } = await import('../src/main/agent-engine/recovery.js');
 import type { CodexEngine, CodexHost } from '../src/main/agent-engine/codex.js';
 
@@ -102,7 +104,7 @@ function fakeHost(options: { script?: Record<string, unknown>; version?: string;
     open: async () => {
       const argv = protocol.codexServerArgv(SOCKET);
       opened.push(argv);
-      // The fake is server and client at once: our JSON-RPC lines go straight to its stdio.
+      // The fake is server and proxy at once: its stdio is the socket's WebSocket, as with 0.163.
       const client = spawn(process.execPath, [FAKE, ...argv], { env, stdio: ['pipe', 'pipe', 'pipe'] });
       return { client, server: null, socket: SOCKET };
     },
@@ -225,27 +227,50 @@ describe('Codex protocol (pure)', () => {
 });
 
 describe('JSON-RPC peer', () => {
-  it('frames lines across chunks, answers requests, and closes on an oversized line', async () => {
-    const input = new PassThrough();
-    const output = new PassThrough();
+  /** Our client and a Codex-like server on the two ends of an in-memory byte pipe. */
+  async function pair(maxMessageBytes?: number) {
+    const [near, far] = duplexPair();
+    const accepted = acceptWebSocket(far, maxMessageBytes ? { maxPayload: 1 << 20 } : {});
+    const socket = await connectWebSocket(near, near, maxMessageBytes ? { maxMessageBytes } : {});
+    return { socket, server: await accepted, far };
+  }
+
+  it('speaks one JSON message per WebSocket frame, answers requests, and closes on an oversized frame', async () => {
+    const { socket, server } = await pair(64);
+    const frames: unknown[] = [];
+    server.on('message', data => frames.push(JSON.parse(String(data))));
     const notes: string[] = [];
     let closed: Error | null = null;
-    const peer = new JsonRpcPeer({ input, output, maxLineBytes: 64, onNotification: method => notes.push(method), onClose: reason => { closed = reason; } });
+    const peer = new JsonRpcPeer({ socket, onNotification: method => notes.push(method), onClose: reason => { closed = reason; } });
     const answer = peer.request('model/list', {});
-    expect(JSON.parse(String(output.read()))).toEqual({ id: 1, method: 'model/list', params: {} });
-    input.write('{"method":"a"}\n{"id":1,"res');
-    input.write('ult":{"ok":true}}\nnot json\n\n');
+    await until(() => frames.length === 1, 'request frame');
+    expect(frames).toEqual([{ id: 1, method: 'model/list', params: {} }]);
+    server.send('{"method":"a"}');
+    server.send('not json');
+    server.send(Buffer.from('{"method":"binary"}'), { binary: true });
+    server.send('{"id":1,"result":{"ok":true}}');
     await expect(answer).resolves.toEqual({ ok: true });
     expect(notes).toEqual(['a']);
     const pending = peer.request('x');
-    input.write(`${'x'.repeat(80)}`);
+    server.send(JSON.stringify({ method: 'big', params: 'x'.repeat(80) }));
     await expect(pending).rejects.toThrow('too large');
     expect(closed).not.toBeNull();
   });
 
-  it('times a request out', async () => {
-    const peer = new JsonRpcPeer({ input: new PassThrough(), output: new PassThrough() });
+  it('times a request out and closes when the other side does', async () => {
+    const { socket, far } = await pair();
+    let closed: Error | null = null;
+    const peer = new JsonRpcPeer({ socket, onClose: reason => { closed = reason; } });
     await expect(peer.request('slow', undefined, { timeoutMs: 20 })).rejects.toThrow('slow timed out');
+    const pending = peer.request('never');
+    far.end(); // the proxy's stdout ended (it exited)
+    await expect(pending).rejects.toThrow('The connection closed');
+    expect(closed).not.toBeNull();
+  });
+
+  it('gives up on a server that never answers the upgrade', async () => {
+    const [near] = duplexPair();
+    await expect(connectWebSocket(near, near, { timeoutMs: 50 })).rejects.toThrow('handshake timed out');
   });
 });
 

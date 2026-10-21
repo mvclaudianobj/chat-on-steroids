@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
- * A fake `codex app-server` (codex-cli 0.163 shapes) for the Codex engine tests: JSON-RPC lines
- * over stdio, no model, no network. Every message it receives is appended to CODEX_FAKE_LOG as
+ * A fake `codex app-server proxy` and the server behind it at once (codex-cli 0.163 shapes) for
+ * the Codex engine tests: like the real socket, its stdio is a WebSocket (HTTP upgrade, then one
+ * JSON-RPC message per text frame), no model, no network. Every message it receives is appended to CODEX_FAKE_LOG as
  * one JSON line (plus `{"argv": [...]}` first), so a test asserts the exact params and replies.
  *
  * CODEX_FAKE_SCRIPT (JSON file) drives it:
@@ -13,6 +14,8 @@
  */
 'use strict';
 const fs = require('node:fs');
+const { Duplex } = require('node:stream');
+const { acceptWebSocket } = require('./websocket-stdio.cjs');
 
 if (process.argv.includes('--version')) {
   process.stdout.write(`codex-cli ${process.env.CODEX_FAKE_VERSION || '0.163.0'}\n`);
@@ -24,7 +27,8 @@ const script = process.env.CODEX_FAKE_SCRIPT ? JSON.parse(fs.readFileSync(proces
 const record = value => { if (log) fs.appendFileSync(log, `${JSON.stringify(value)}\n`); };
 record({ argv: process.argv.slice(2) });
 
-const send = message => process.stdout.write(`${JSON.stringify(message)}\n`);
+let socket = null;
+const send = message => socket.send(JSON.stringify(message));
 let threadCount = 0;
 let turnCount = 0;
 let thread = null;
@@ -87,25 +91,23 @@ function result(method, params) {
   }
 }
 
-let buffer = '';
-process.stdin.setEncoding('utf8');
-process.stdin.on('data', chunk => {
-  buffer += chunk;
-  for (let index = buffer.indexOf('\n'); index >= 0; index = buffer.indexOf('\n')) {
-    const line = buffer.slice(0, index);
-    buffer = buffer.slice(index + 1);
-    if (!line.trim()) continue;
-    const message = JSON.parse(line);
-    record(message);
-    if (message.method && message.id !== undefined) {
-      try { send({ id: message.id, result: result(message.method, message.params ?? {}) }); }
-      catch (error) { send({ id: message.id, error: { code: -32600, message: error.message } }); }
-    } else if (message.id !== undefined) {
-      const key = JSON.stringify(message.id);
-      answered.set(key, message);
-      waiters.get(key)?.();
-      waiters.delete(key);
-    }
+function receive(text) {
+  const message = JSON.parse(text);
+  record(message);
+  if (message.method && message.id !== undefined) {
+    try { send({ id: message.id, result: result(message.method, message.params ?? {}) }); }
+    catch (error) { send({ id: message.id, error: { code: -32600, message: error.message } }); }
+  } else if (message.id !== undefined) {
+    const key = JSON.stringify(message.id);
+    answered.set(key, message);
+    waiters.get(key)?.();
+    waiters.delete(key);
   }
-});
+}
+
+acceptWebSocket(Duplex.from({ readable: process.stdin, writable: process.stdout })).then(accepted => {
+  socket = accepted;
+  socket.on('message', (data, isBinary) => { if (!isBinary) receive(data.toString('utf8')); });
+  socket.on('close', () => process.exit(0));
+}, () => process.exit(0));
 process.stdin.on('end', () => process.exit(0));
