@@ -137,6 +137,8 @@ interface Deps {
   state: () => AppState | null;
   cliModules?: () => ReadonlyArray<{ id: string; name: string; enabled: boolean }>;
   createCliSession?: (moduleId: string, projectId: string) => void | Promise<void>;
+  /** Chat Marks: provider chats a project's menu offers after its own New chat (CLIProxy). */
+  projectChatItems?: (projectId: string) => RowMenuItem[];
   repaintCliSessions?: () => void;
 }
 
@@ -203,6 +205,8 @@ function projectMenuItems(id: string): RowMenuItem[] {
       action: 'new-chat', icon: 'i-pencil', label: () => t('New chat in this project'), data: { newProject: id },
       run: () => selectNewChat(id)
     } satisfies RowMenuItem,
+    // Chat Marks: a CLIProxy chat that belongs to this project.
+    ...(project ? deps.projectChatItems?.(project.id) ?? [] : []),
     ...(newTerminal ? [newTerminal] : []),
     // Only when its native ChatGPT Project could not be created; otherwise nothing about it shows.
     ...(link?.state === 'failed' || link?.state === 'uncertain' ? [{

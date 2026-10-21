@@ -2972,5 +2972,6 @@
   "Approve this action?": "Cho phép thao tác này?",
   "Approve": "Cho phép",
   "Approve and don't ask again in this chat": "Cho phép và không hỏi lại trong cuộc trò chuyện này",
-  "This approval is no longer pending": "Yêu cầu phê duyệt này không còn chờ xử lý"
+  "This approval is no longer pending": "Yêu cầu phê duyệt này không còn chờ xử lý",
+  "New CLIProxy chat in this project": "Cuộc trò chuyện CLIProxy mới trong dự án này"
 }

@@ -2972,5 +2972,6 @@
   "Approve this action?": "この操作を許可しますか？",
   "Approve": "許可",
   "Approve and don't ask again in this chat": "許可して、このチャットでは今後確認しない",
-  "This approval is no longer pending": "この承認はすでに保留中ではありません"
+  "This approval is no longer pending": "この承認はすでに保留中ではありません",
+  "New CLIProxy chat in this project": "このプロジェクトで新しい CLIProxy チャット"
 }

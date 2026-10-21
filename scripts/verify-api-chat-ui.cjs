@@ -13,6 +13,7 @@ fs.rmSync(path.join(output, 'profile'), { recursive: true, force: true });
 app.setPath('userData', path.join(output, 'profile')); app.disableHardwareAcceleration();
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 let server, win;
+const PROJECT_ID = '7b1d2c3e-4f50-4a61-8b72-9c83d4e5f601';
 const fixture = `(() => {
  // The same language on every runner, whatever the system language is.
  try{localStorage.setItem('cos.ui.language','en');}catch{}
@@ -42,6 +43,7 @@ const fixture = `(() => {
    files:['update /work/notes.md','add /work/reading-list.md'],requestedAt:now+3};
  };
  const methods={
+  listProjects:()=>ok([{id:'${PROJECT_ID}',name:'dom_agent',path:'/work/dom_agent',createdAt:1}]),
   getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'en',theme:'dark'};return r;},
   apiChatStatus:()=>ok(status),
   apiChatModels:()=>ok({models:[row('claude-opus-5-5','anthropic'),row('claude-sonnet-5-5','anthropic'),row('gpt-6-sol','openai'),row('gpt-image-2','openai','image')],total:4}),
@@ -141,7 +143,14 @@ app.whenReady().then(async () => {
   await js(`document.querySelector('.sess[data-id="composer-preview"] .sess-top, .sess[data-id="composer-preview"]')?.click()`);
   await until(`!document.querySelector('[data-panel="chat"]').classList.contains('is-api-chat')`);
   assert.equal(await js(shown('modelMenu')),true,'The ChatGPT model menu returns for a ChatGPT chat');
+  // A project's own menu offers a CLIProxy chat that belongs to that project.
+  await js(`document.querySelector('[data-row-menu="project:${PROJECT_ID}"]').click()`);
+  await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-cliproxy"]')`);
+  assert.equal(await js(`document.querySelector('.row-menu [data-row-action="new-chat-cliproxy"]').textContent.trim()`),'New CLIProxy chat in this project');
+  await capture('api-chat-project-menu.png');
+  await js(`document.querySelector('.row-menu [data-row-action="new-chat-cliproxy"]').click()`);
+  await until(`window.apiChatFixture.createdWith?.projectId==='${PROJECT_ID}'`);
   assert.deepEqual(errors,[]);
-  console.log('PASS: New chat creates a CLIProxy chat that sends through apiChatSend, shows its answer and tool row in the normal timeline, and answers an edit approval');
+  console.log('PASS: New chat creates a CLIProxy chat that sends through apiChatSend, shows its answer and tool row in the normal timeline, answers an edit approval, and a project menu creates one in that project');
   win.destroy();await server.close();app.exit(0);
 }).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await server?.close();app.exit(1);});

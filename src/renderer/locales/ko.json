@@ -2972,5 +2972,6 @@
   "Approve this action?": "이 작업을 허용할까요?",
   "Approve": "허용",
   "Approve and don't ask again in this chat": "허용하고 이 채팅에서 다시 묻지 않기",
-  "This approval is no longer pending": "이 승인은 더 이상 대기 중이 아닙니다"
+  "This approval is no longer pending": "이 승인은 더 이상 대기 중이 아닙니다",
+  "New CLIProxy chat in this project": "이 프로젝트에서 새 CLIProxy 채팅"
 }

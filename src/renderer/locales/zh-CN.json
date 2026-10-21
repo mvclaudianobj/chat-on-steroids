@@ -2972,5 +2972,6 @@
   "Approve this action?": "允许此操作？",
   "Approve": "允许",
   "Approve and don't ask again in this chat": "允许，并且在此聊天中不再询问",
-  "This approval is no longer pending": "此审批已不再待处理"
+  "This approval is no longer pending": "此审批已不再待处理",
+  "New CLIProxy chat in this project": "在此项目中新建 CLIProxy 聊天"
 }
