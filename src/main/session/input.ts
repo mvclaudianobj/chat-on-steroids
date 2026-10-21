@@ -6,6 +6,7 @@ import { REASONING_EFFORTS, workSequence } from '../../shared/session.js';
 import { z } from 'zod';
 import { authoredTextOf, browserInputModel, manualInput, queuedFollowup, MAX_INPUT_IMAGES, type InputImage } from '../../shared/input.js';
 import type { SessionSummary } from '../../shared/session.js';
+import { isApiConversationId } from '../../shared/api-chat.js';
 import { getConfig } from '../config.js';
 import { randomUUID } from 'node:crypto';
 import { userTitle } from './title.js';
@@ -877,6 +878,8 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
       return { ...prior };
     }
     const requestedSession = input.sessionId ? await getSession(input.sessionId) : null;
+    // Chat Marks: an API chat sends through its own executor, never the browser outbox.
+    if (isApiConversationId(requestedSession?.conversationId)) throw new Error('API chats send through their own composer');
     // Explicit injection has its own recipient and can never spend a browser completion.
     const activity = requestedSession && input.delivery !== 'tool' && input.attachmentDelivery !== 'tool'
       ? deliveryHooks?.activity?.(requestedSession) : null;

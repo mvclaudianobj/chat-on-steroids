@@ -1362,6 +1362,26 @@ answers `hasKey`/`keyRequired`, never the key. Detection is learned from the end
 model list, and a 401 without a stored key asks for the key. The settings live in
 `renderer/api-chat-settings-ui.ts` inside Modules > CLIProxyAPI.
 
+`main/api-chat/executor.ts` runs the text turns (no tools yet). An API chat is an ordinary
+`createSession` session (no origin, optional project) with a `cosapi-<uuid>` id that never
+changes. The session store owns its history: the question is an app `user_message`
+(`api-user:<turn>`), the answer an `assistant_message` (`api-assistant:<turn>`) written
+`streaming` at most once a second and then `final`, between `turn_start`/`turn_end`
+(`completed|stopped|failed|interrupted`); a failure adds a `chat_error`, and a stopped or
+failed answer keeps its partial text as final. Context is the session's own questions and
+settled answers, newest kept (60 messages / 120k chars), after one short system line. The
+Marks durable `marks-api-chat-sessions` holds only each chat's model, effort and `openTurn`;
+the turn is opened there before its `turn_start`. Whether a turn runs is process memory
+(one per chat; Stop aborts that request). At IPC registration `recoverApiChats` closes every
+ledger `openTurn` as `interrupted`, settling a streaming answer; sends wait for it. Every
+completed or failed request updates the model's availability, a success its recents. IPC
+`marksApiChat:request` adds `createChat`, `send`, `stop`, `chatSettings`, `setChatSettings`
+(preload `apiChatCreate/Send/Stop/ChatSettings/SetChatSettings`); the renderer follows a
+turn through the store's `session:changed` notices. Fences by id: `bridge.ts`
+`controlledConversation` (controls, Stop, Goal/Loop, Compact) throws `api_chat_session` and
+`noteCallAttribution` ignores API ids; `session/input.ts` `enqueueInput`, `goal.ts`
+`setGoalSwitchNow`/`setGoalObjectiveNow` and `ipc.ts` `openSessionChat` refuse them.
+
 ### MarksPanel application admission
 
 `main/markspanel-auth.ts` owns the mandatory MarksPanel login boundary. On every startup,

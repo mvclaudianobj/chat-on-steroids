@@ -44,3 +44,27 @@ describe('Chat Marks brand', () => {
     expect([...baseline].filter(key => !found.has(key)), 'rebranded: remove these from the baseline file').toEqual([]);
   });
 });
+
+describe('Chat Marks API chat fences', () => {
+  // An API chat is a real session whose `cosapi-` id has no ChatGPT tab. A merge that rewrites these
+  // upstream owners must keep refusing that id, or Stop/Goal/Compact would drive a page that does
+  // not exist. The outbox and Goal setters are covered by test/api-chat-executor.test.ts.
+  const source = (file: string) => readFileSync(path.join(root, 'src', 'main', file), 'utf8');
+  const body = (text: string, start: string) => text.slice(text.indexOf(start), text.indexOf('\n}', text.indexOf(start)));
+
+  it('keeps the bridge controls and tool-call attribution off API chats', () => {
+    const bridge = source('bridge.ts');
+    expect(body(bridge, 'async function controlledConversation(')).toContain("if (isApiConversationId(id)) throw new Error('api_chat_session');");
+    expect(body(bridge, 'function noteCallAttribution(')).toContain('if (isApiConversationId(conversationId)) return;');
+  });
+
+  it('never opens an API chat as a ChatGPT page', () => {
+    expect(body(source('ipc.ts'), 'export async function openSessionChat(')).toContain('isApiConversationId(conversationId)');
+  });
+
+  it('never lets browser observations or request proof reach an API chat', () => {
+    const recorder = source('session/recorder.ts');
+    expect(body(recorder, 'export async function sessionForConversation(')).toContain('if (isApiConversationId(conversationId)) return null;');
+    expect(body(recorder, 'export async function recordRequestEvidence(')).toContain('if (isApiConversationId(conversationId)) return null;');
+  });
+});

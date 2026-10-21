@@ -32,6 +32,7 @@ import type {
 } from '../../shared/session.js';
 import { estimateTokens, originTitle, UNATTRIBUTED_SESSION_TITLE } from '../../shared/session.js';
 import { chatErrorMessageKey } from '../../shared/chat-error.js';
+import { isApiConversationId } from '../../shared/api-chat.js';
 import { continuedRequestTurn, overlappingRequestTurns, recordedRequestTurn, responseTurnId, turnOpenAt } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
@@ -209,6 +210,9 @@ export async function sessionForConversation(
   /** An observed authored user message, not a guessed route or page label. */
   openingUserMessage?: string
 ): Promise<string | null> {
+  // Chat Marks: an API chat has no ChatGPT page, so nothing a browser page reports (messages,
+  // turns, request correlations that later identify MCP callers) may attach to one.
+  if (isApiConversationId(conversationId)) return null;
   if (!conversationId) return initializeSessionForConversation(conversationId, title, openingUserMessage);
 
   const pending = sessionInitializations.get(conversationId);
@@ -2019,6 +2023,9 @@ export async function recordRequestEvidence(
   observations: readonly ChatObservation[]
 ): Promise<string | null> {
   if (!recordingEnabled()) return null;
+  // Chat Marks: no page may prove a request for an API chat, so MCP callers can never be
+  // identified as one from browser evidence (see sessionForConversation).
+  if (isApiConversationId(conversationId)) return null;
   const lineage = !conversations.has(conversationId) ? await supersededLineage(conversationId) : null;
   const firstUser = observations.find((item) => item.kind === 'user_message' && item.messageId && item.text);
   const sessionId = lineage ?? await sessionForConversation(conversationId, observationTitle(observations), firstUser?.text);

@@ -75,3 +75,12 @@ export interface ApiChatStatus extends ApiChatSettings {
   /** True once the endpoint refused a request for lacking a key. */
   keyRequired: boolean;
 }
+
+/** One API chat as the renderer sees it: its own model and effort, and whether a turn runs now. */
+export interface ApiChatView {
+  sessionId: string;
+  conversationId: string;
+  model: string | null;
+  effort: ApiChatEffort | null;
+  running: boolean;
+}

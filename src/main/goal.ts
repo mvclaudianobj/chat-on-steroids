@@ -49,6 +49,7 @@ import { planProgressText, type TaskProgressUpdate } from '../shared/task-progre
 import { TaskRequestError } from './task-request.js';
 import { GOAL_MARKER_INSTRUCTION, templateGoalDecision } from '../shared/goal-templates.js';
 import type { GoalBackend } from '../shared/types.js';
+import { isApiConversationId } from '../shared/api-chat.js';
 import { defaultConfig, getConfig } from './config.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
 import { DEFAULT_HELPER_CHAT_MODEL, resolveChatModel } from '../shared/chat-models.js';
@@ -917,6 +918,8 @@ export function setGoalObjective(conversationId: string, text: string): string {
  */
 export async function setGoalObjectiveNow(conversationId: string, text: string): Promise<string> {
   const goal = text.trim();
+  // Chat Marks: Goal/Loop drive a ChatGPT tab; an API chat has none.
+  if (goal && isApiConversationId(conversationId)) throw new Error('api_chat_session');
   return saveGoalControl(pendingGoalObjectives, conversationId, GOAL_OBJECTIVES_STATE, snapshotGoalObjectives, (targetConversationId) => {
     const next = new Map(goalObjectives);
     next.delete(targetConversationId);
@@ -1139,6 +1142,8 @@ export async function setGoalSwitchNow(
   on: boolean,
   afterTurn?: boolean
 ): Promise<{ enabled: boolean; mode: GoalMode }> {
+  // Chat Marks: Goal/Loop drive a ChatGPT tab; an API chat has none.
+  if (on && isApiConversationId(conversationId)) throw new Error('api_chat_session');
   if (!on && goalSwitchFor(conversationId).mode === which) {
     invalidateGoalControlWrites(pendingGoalSwitches, [conversationId]);
   }

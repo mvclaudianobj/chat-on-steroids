@@ -6,6 +6,7 @@ import { registerCliChatIpc } from './cli-chat.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
+import { isApiConversationId } from '../shared/api-chat.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
@@ -626,7 +627,8 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 export async function openSessionChat(id: string): Promise<void> {
   const summary = await getSession(id);
   const conversationId = summary?.conversationId;
-  if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
+  // Chat Marks: an API chat id is shaped like a ChatGPT id but has no ChatGPT page.
+  if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId) || isApiConversationId(conversationId)) {
     throw new Error('This session has no valid ChatGPT conversation');
   }
   // The selected browser owns this explicit action. In particular, a connected companion in
