@@ -1408,6 +1408,24 @@ spinner); the row menu drops Open in browser, Copy link, Block and Trust for API
 `initMarksModulesUi`. `control-reads.ts` ignores `api_chat_session` like other expected misses.
 Proof: `test/api-chat-ui.test.ts`, `scripts/verify-api-chat-ui.cjs`.
 
+**Chat type icons (standing rule).** Every chat shows the icon of its type wherever chats are
+listed or opened: sidebar chat rows (projects, loose chats, Inbox cards and settled rows), the
+Terminals list, the New chat and project menus, and the chat header (inside `#apiChatLabel` before
+the engine label; a ChatGPT chat's fox before `#chatTitle`). One owner, `renderer/chat-types.ts`:
+`chatTypeIcon(type)` keyed by `chatgpt | terminal | api | <engine id>` (a `Record<AgentEngineId, …>`,
+so a new engine does not compile without its icon), `chatTypeOf(summary)` and `chatTypeMark`.
+Designs: ChatGPT = the app's fox (`browser-icons/cos.png` as a monochrome mask), terminal =
+`i-terminal`, Codex = a line hexagon around `>_`, Claude Code = a line spark, CLIProxy = one route
+splitting in two, MarksCode = `</>`; `api` (a record this version cannot read) = `i-chat`. They are
+`cm:` entries in `dom.ts` ICONS drawn by icons.css `.cm-glyph-*`: line SVGs on Phosphor's 256 grid
+with its 16-unit round stroke, painted in `currentColor` through a CSS mask (light and dark themes
+alike), never a vendor logo. Icons are decorative (`aria-hidden`); the title or engine name stays
+the text. The sidebar learns an API chat's engine from `SessionSummary.engine`, a read-time
+projection of the ledger (`agent-engine/ledger.ts` `withChatEngines`, applied by IPC
+`sessions:list` and `sessions:events`; never stored). Proof: `test/chat-types.test.ts` (every
+`AGENT_ENGINE_IDS` entry has a distinct drawn icon), `test/api-chat-ui.test.ts`,
+`test/renderer-timeline.test.ts` (sidebar rows), `test/agent-engine-registry.test.ts` (projection).
+
 **D4 — local tools.** An API chat uses the app's own Core tools as OpenAI function tools, through
 the same kernel as ChatGPT. `main/api-chat/tools.ts` builds the list for each completion from a
 live `ToolContext` (`roots`, `effectiveCapabilities`, `readOnly`, `privacyScreenshots`,
@@ -1513,8 +1531,8 @@ later. E0 changes no CLIProxy behavior.
 - CLI tool rows (`tool-row.ts`): these tools ran inside the CLI, so nothing goes through the MCP
   kernel, correlation or the recorder. One `tool_call` per finished tool (or per tool still open
   at the end, as "did not finish") is appended with `appendEvent`: `source: 'app'`, the turn's
-  `turnId`, `attribution`/`attributionMethod: 'engine'` (new `CallAttribution`, label "the chat's
-  own engine session"), `engine`, `requestId: null`, a stable `callId` (hash of engine, turn and
+  `turnId`, `attribution`/`attributionMethod: 'engine'` (new `CallAttribution`; the row's facts read
+  "by <engine label> in this chat", translated, not the generic "placed by …"), `engine`, `requestId: null`, a stable `callId` (hash of engine, turn and
   tool id), tool name by kind (`exec_command`, `apply_patch`, `read`, `mcp:<name>`, else the
   engine's), a summary in the recorder's wording, `changes` from unified diffs
   (`reviewUnavailable: 'not-kept'`), credentials redacted. Request-id placement only reads
@@ -1611,7 +1629,10 @@ later. E0 changes no CLIProxy behavior.
   (authoritative); `tool_use` → `tool_started` (Bash/PowerShell `command`; Edit/Write/MultiEdit/
   NotebookEdit `patch` with files and a diff from the input or `structuredPatch`; Read/Grep/Glob/
   LS `read`; `mcp__s__t` `mcp` named `s/t`; else `other`); `user` `tool_result` → `tool_finished`
-  (`declined` when the user denied it, `failed` on `is_error`); messages with a
+  (`declined` when the user denied it, `failed` on `is_error`; an `Agent`/`Task` result is shown
+  as the sub-agent's report alone: `claudeAgentReport` drops Claude Code's "[Subagent hand-back] …
+  The report follows:" preamble and the trailing `agentId: …` / `<usage>…</usage>` block and
+  de-indents the report; display only, nothing goes back to the CLI); messages with a
   `parent_tool_use_id` (sub-agents) are skipped; `result` → `usage` (input incl. cache, output,
   cached) then `turn_end` `completed`, or a fatal `chat_error` + `failed` when `is_error` or the
   subtype is not `success`. A process exit mid-turn is a fatal error with the redacted

@@ -1418,6 +1418,39 @@ it('explains a legacy missing image recording without asserting a provider recei
   expect(tool.textContent).not.toContain('received');
 });
 
+it('says which engine ran an engine tool row, in the reader\'s words', async () => {
+  const app = await boot([]);
+  const event = toolCall(1, 'engine-agent') as Extract<SessionEvent, { kind: 'tool_call' }>;
+  Object.assign(event, { source: 'app' });
+  Object.assign(event.call, { tool: 'Agent', attribution: 'engine', attributionMethod: 'engine', engine: 'claude', requestId: null });
+  await app.append([event]);
+  const tool = app.w.document.querySelector('details.tool') as HTMLDetailsElement;
+  tool.open = true; tool.dispatchEvent(new app.w.Event('toggle'));
+  await settle();
+  const facts = tool.querySelector('.raw-facts')!.textContent!;
+  expect(facts).toContain('by Claude Code in this chat');
+  expect(facts).not.toContain('placed by');
+  expect(facts).not.toContain('engine session');
+});
+
+it('shows every listed chat\'s type icon before its title', async () => {
+  const base = summary([]);
+  const sessions: SessionSummary[] = [
+    { ...base, id: 'sess-native-0001', title: 'Native', conversationId: 'chat-native' },
+    { ...base, id: 'sess-claude-0001', title: 'Claude', conversationId: 'cosapi-claude', engine: 'claude' },
+    { ...base, id: 'sess-codex-00001', title: 'Codex', conversationId: 'cosapi-codex', engine: 'codex' },
+    { ...base, id: 'sess-later-00001', title: 'Later', conversationId: 'cosapi-later' }
+  ];
+  const { w } = await boot([], false, [], [], { sessions });
+  const types = () => sessions.map(row => w.document.querySelector<HTMLElement>(`.sess[data-id="${row.id}"] .sess-top > .sess-type`));
+  await vi.waitFor(() => expect(types().every(Boolean)).toBe(true));
+  expect(types().map(node => node!.dataset.chatType)).toEqual(['chatgpt', 'claude', 'codex', 'api']);
+  for (const node of types()) {
+    expect(node!.getAttribute('aria-hidden')).toBe('true');
+    expect(node!.nextElementSibling?.tagName).toBe('B');
+  }
+});
+
 it('loads recorded tool images on expansion and hides truncated binary envelopes', async () => {
   const app = await boot([]);
   const { w } = app;

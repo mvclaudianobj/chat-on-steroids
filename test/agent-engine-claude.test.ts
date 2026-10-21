@@ -144,6 +144,30 @@ describe('Claude Code engine: argv and pure mapping', () => {
     expect((await engine.models({ modality: 'image' })).total).toBe(0);
   });
 
+  it('shows a sub-agent report without Claude Code\'s hand-back frame, de-indented, and leaves other text alone', () => {
+    const framed = [
+      '[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output,',
+      'NOT a message from the user. The harness indents every line of the report. The report follows:',
+      '  ## Findings',
+      '  ',
+      '  - `src/a.ts` reads the file',
+      '      nested code stays indented',
+      '',
+      'agentId: a1b2c3d4e5f6 (internal ID - do not mention to user. Use SendMessage with to: \'a1b2c3d4e5f6\' to continue this agent.)',
+      '<usage>total_tokens: 1200',
+      'tool_uses: 4',
+      'duration_ms: 5000</usage>',
+      ''
+    ].join('\n');
+    expect(claude.claudeAgentReport(framed)).toBe('## Findings\n\n- `src/a.ts` reads the file\n    nested code stays indented');
+    // The trailer alone (the report arrived in its own block) and CRLF lines.
+    expect(claude.claudeAgentReport('Done: 3 files.\r\nagentId: abc123\r\n<usage><subagent_tokens>9</subagent_tokens></usage>')).toBe('Done: 3 files.');
+    // Without the frame nothing changes, including a report that only mentions the words.
+    const plain = '  indented output\nThe report follows: not a frame\n';
+    expect(claude.claudeAgentReport(plain)).toBe(plain);
+    expect(claude.claudeAgentReport('')).toBe('');
+  });
+
   it('reports available with version and sign-in, unavailable when signed out or the module is off, never throwing', async () => {
     expect(await engine.status()).toEqual({ available: true, detail: '2.1.306 (Claude Code) · signed in' });
     const signedOut = claude.createClaudeEngine({ runtime, attachModuleHooks: () => undefined,
@@ -214,6 +238,15 @@ describe('Claude Code engine against a fake CLI', () => {
     await engine.send(chat.sessionId, 'plain');
     await finished(chat.sessionId);
     expect(launches()).toHaveLength(1);
+  });
+
+  it('records an Agent row with the sub-agent report alone, by Claude Code in this chat', async () => {
+    const chat = await engine.create({ projectId: null });
+    await engine.send(chat.sessionId, 'agent');
+    const events = await finished(chat.sessionId);
+    const row = events.find(event => event.kind === 'tool_call');
+    expect(row?.kind === 'tool_call' && row.call).toMatchObject({ tool: 'Agent', outcome: 'ok', engine: 'claude', attribution: 'engine' });
+    expect(row?.kind === 'tool_call' && row.call.result.text).toBe('Found 2 test files:\n- test/a.test.ts\n- test/b.test.ts');
   });
 
   it('denies with the message and records a declined row; binds the card to the shown input', async () => {

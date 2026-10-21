@@ -57,6 +57,17 @@ async function play(text) {
     result();
     return;
   }
+  if (text === 'agent') {
+    // Claude Code's Agent result: the hand-back frame, the indented report, then the id and usage trailer.
+    assistant([{ type: 'tool_use', id: 'toolu_agent', name: 'Agent', input: { description: 'Map the tests', prompt: 'List the test files.', subagent_type: 'Explore' } }]);
+    toolResult('toolu_agent', [
+      { type: 'text', text: '[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:\n  Found 2 test files:\n  - test/a.test.ts\n  - test/b.test.ts' },
+      { type: 'text', text: 'agentId: a0b1c2d3e4f5 (internal ID - do not mention to user.)\n<usage>total_tokens: 900\ntool_uses: 3\nduration_ms: 4200</usage>' }
+    ]);
+    assistant([{ type: 'text', text: 'There are two test files.' }]);
+    result();
+    return;
+  }
   if (text === 'cancel') {
     assistant([{ type: 'tool_use', id: 'toolu_c', name: 'Bash', input: { command: 'ls' } }]);
     out({ type: 'control_request', request_id: 'req-c', request: { subtype: 'can_use_tool', tool_name: 'Bash', input: { command: 'ls' }, tool_use_id: 'toolu_c' } });

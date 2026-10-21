@@ -204,6 +204,49 @@ function toolResultText(content: unknown): string {
   return content.map(record).map(block => block?.type === 'text' ? text(block.text) ?? '' : block?.type === 'image' ? '[image]' : '').filter(Boolean).join('\n');
 }
 
+/** Claude Code's sub-agent tool: `Agent`, named `Task` by earlier releases. */
+const isClaudeAgentTool = (name: string | undefined): boolean => name === 'Agent' || name === 'Task';
+
+/**
+ * The report a sub-agent handed back, as its Agent tool row shows it. Claude Code frames the
+ * report for its own model: a "[Subagent hand-back] ... The report follows:" preamble, every report
+ * line indented, then the sub-agent's `agentId: ...` line and a `<usage>...</usage>` block. The
+ * row shows the report alone, de-indented. Display only: the CLI already holds its own tool result,
+ * and nothing here is sent back to it. Text without that frame is returned as it is.
+ */
+export function claudeAgentReport(output: string): string {
+  const lines = output.replace(/\r\n?/g, '\n').split('\n');
+  let changed = false;
+  // The trailer, from the end: blank lines, the usage block and the sub-agent's id line.
+  for (;;) {
+    while (lines.length && !lines.at(-1)!.trim()) lines.pop();
+    const last = lines.at(-1)?.trim() ?? '';
+    if (last.endsWith('</usage>')) {
+      const start = lines.findLastIndex(line => line.trimStart().startsWith('<usage>'));
+      if (start < 0) break;
+      lines.splice(start);
+    } else if (/^agentId: \S+/.test(last)) lines.pop();
+    else break;
+    changed = true;
+  }
+  // The preamble: its first line opens the text, and it ends at "The report follows:".
+  const first = lines.findIndex(line => line.trim());
+  if (first >= 0 && lines[first]!.trimStart().startsWith('[Subagent hand-back]')) {
+    const end = lines.findIndex((line, index) => index >= first && line.includes('The report follows:'));
+    if (end >= 0 && end - first < 20) {
+      const rest = lines[end]!.slice(lines[end]!.indexOf('The report follows:') + 'The report follows:'.length).trim();
+      lines.splice(0, end + 1, ...(rest ? [rest] : []));
+      // The frame indents every report line; the report's own indentation stays.
+      const indent = Math.min(...lines.filter(line => line.trim()).map(line => /^[ \t]*/.exec(line)![0].length));
+      if (Number.isFinite(indent) && indent > 0) for (let i = 0; i < lines.length; i++) lines[i] = lines[i]!.slice(Math.min(indent, /^[ \t]*/.exec(lines[i]!)![0].length));
+      changed = true;
+    }
+  }
+  if (!changed) return output;
+  while (lines.length && !lines[0]!.trim()) lines.shift();
+  return lines.join('\n');
+}
+
 /** Session-scoped permission updates from the CLI's own suggestions; never a mode change. */
 export function sessionPermissionUpdates(suggestions: unknown): Record<string, unknown>[] {
   if (!Array.isArray(suggestions)) return [];
@@ -780,10 +823,12 @@ export class ClaudeEngine implements AgentEngine {
         const block = record(raw);
         if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
         const toolId = block.tool_use_id;
-        const output = toolResultText(block.content);
+        const tool = turn.tools.get(toolId);
+        const shown = toolResultText(block.content);
+        // The row shows a sub-agent's report without Claude Code's framing (display only).
+        const output = isClaudeAgentTool(tool?.name) ? claudeAgentReport(shown) : shown;
         const declined = turn.declined.has(toolId);
         const status = declined ? 'declined' : block.is_error === true ? 'failed' : 'ok';
-        const tool = turn.tools.get(toolId);
         const files = tool && claudeToolKind(tool.name) === 'patch' ? claudeToolFiles(tool.name, tool.input, result) : undefined;
         events.push({
           type: 'tool_finished', toolId, status, output: declined ? '' : output,

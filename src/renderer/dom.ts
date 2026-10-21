@@ -10,7 +10,9 @@ import { currentLanguage, t, ui } from './i18n.js';
  * The app's icon vocabulary, drawn with the bundled Phosphor font (icons.css).
  *
  * Call sites name what an icon means (`i-retry`); this map alone decides which glyph draws it.
- * `fill:` selects Phosphor's filled family. The dock toggles use the filled half-square that
+ * `fill:` selects Phosphor's filled family. `cm:` selects a Chat Marks drawing (icons.css
+ * `.cm-glyph-*`: a line SVG or the app's fox, painted in currentColor through a CSS mask) for the
+ * chat type icons Phosphor has no glyph for (renderer/chat-types.ts). The dock toggles use the filled half-square that
  * shows the edge they open: drawn upright (no rotation), it stays crisp at fractional scales.
  */
 const ICONS: Readonly<Record<string, string>> = {
@@ -25,11 +27,16 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-browser': 'browser',
   'i-chart': 'chart-line',
   'i-chat': 'chat-circle',
+  'i-chat-chatgpt': 'cm:fox',
   'i-check': 'check',
   'i-check-circle': 'check-circle',
   'i-clock': 'clock',
   'i-copy': 'copy',
   'i-dock-expand': 'corners-out',
+  'i-engine-claude': 'cm:spark',
+  'i-engine-cliproxy': 'cm:route',
+  'i-engine-codex': 'cm:codex',
+  'i-engine-markscode': 'cm:code',
   'i-dock-restore': 'corners-in',
   'i-export': 'download-simple',
   'i-eye': 'eye',
@@ -83,6 +90,7 @@ const ICONS: Readonly<Record<string, string>> = {
 function iconClasses(name: string): string {
   const glyph = ICONS[name];
   if (!glyph) throw new Error(`unknown icon ${name}`);
+  if (glyph.startsWith('cm:')) return `cm-glyph cm-glyph-${glyph.slice(3)}`;
   return glyph.startsWith('fill:') ? `ph-fill ph-${glyph.slice(5)}` : `ph ph-${glyph}`;
 }
 

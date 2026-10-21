@@ -3,6 +3,7 @@ import type { CliSession } from '../main/cli-modules.js';
 import { createWorkspaceTerminal, type TerminalTransport } from './workspace-terminal.js';
 import { openRowMenu, type RowMenuItem } from './row-menu.js';
 import { t } from './i18n.js';
+import { chatTypeIcon, chatTypeMark } from './chat-types.js';
 
 const IDS = ['markscode', 'codex', 'claude', 'marksclaw'] as const;
 type Id = typeof IDS[number];
@@ -118,7 +119,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
       label: () => t('New chat'),
       items: () => [
         {
-          action: 'new-chat-chatgpt', icon: 'i-pencil', label: () => 'ChatGPT',
+          action: 'new-chat-chatgpt', icon: chatTypeIcon('chatgpt'), label: () => 'ChatGPT',
           run: () => {
             const target = button();
             if (!target) return;
@@ -128,7 +129,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
         },
         ...providerItems(),
         ...enabledModules().map((id, index) => ({
-          action: `new-chat-${id}`, icon: 'i-terminal', label: () => current.get(id)?.name ?? id, separated: index === 0,
+          action: `new-chat-${id}`, icon: chatTypeIcon('terminal'), label: () => current.get(id)?.name ?? id, separated: index === 0,
           run: () => void createSession(id, hooks.workspace())
         }))
       ]
@@ -244,7 +245,11 @@ export function createCliModulesUi(api: AppApi, hooks: {
       const button = document.createElement('button');
       button.type = 'button';
       button.className = 'btn sidebar-primary-link cli-module-chat';
-      button.textContent = session.title;
+      // Chat Marks: a terminal session shows the terminal type icon, like every chat shows its type.
+      const title = document.createElement('span');
+      title.className = 'cli-module-chat-title';
+      title.textContent = session.title;
+      button.replaceChildren(chatTypeMark('terminal', 'sess-type'), title);
       button.hidden = !current.get(session.module)?.enabled;
       button.classList.toggle('is-sel', session.id === selectedSessionId);
       button.addEventListener('click', () => void showSession(session.id));

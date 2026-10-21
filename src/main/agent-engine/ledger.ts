@@ -10,7 +10,7 @@
  */
 import { z } from 'zod';
 import { readDurable, writeDurableNow } from '../durable.js';
-import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS } from '../../shared/api-chat.js';
+import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS, isApiConversationId } from '../../shared/api-chat.js';
 import { AGENT_ENGINE_IDS, DEFAULT_AGENT_ENGINE, type AgentEngineId } from '../../shared/agent-engine.js';
 
 export const API_CHAT_SESSIONS_STATE = 'marks-api-chat-sessions';
@@ -77,6 +77,18 @@ export async function chatEngine(sessionId: string): Promise<AgentEngineId | nul
   const current = await loaded();
   if (Object.hasOwn(current.foreign, sessionId)) return null;
   return engineOf(current.records[sessionId]);
+}
+
+/**
+ * The session list's API chats with the engine each runs on, so the sidebar can show the chat's
+ * type icon. A read-time projection for the renderer: nothing writes it back, and this ledger
+ * stays the engine's only owner. A record this version cannot read names no engine.
+ */
+export async function withChatEngines<T extends { id: string; conversationId: string | null }>(summaries: readonly T[]): Promise<Array<T & { engine?: AgentEngineId }>> {
+  if (!summaries.some(summary => isApiConversationId(summary.conversationId))) return [...summaries];
+  const current = await loaded();
+  return summaries.map(summary => !isApiConversationId(summary.conversationId) || Object.hasOwn(current.foreign, summary.id)
+    ? summary : { ...summary, engine: engineOf(current.records[summary.id]) });
 }
 
 /** Serialized durable change of one chat's record; memory follows the write. */

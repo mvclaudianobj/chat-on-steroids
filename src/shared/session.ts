@@ -676,6 +676,11 @@ export interface SessionSummary {
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */
   projectId?: string;
+  /**
+   * Chat Marks: the agent engine of an API chat, projected from its ledger record when the
+   * renderer reads the list (`agent-engine/ledger.ts` `withChatEngines`). Never stored here.
+   */
+  engine?: AgentEngineId;
   id: string;
   title: string;
   /**

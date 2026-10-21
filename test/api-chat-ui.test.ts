@@ -352,3 +352,52 @@ it('keeps the terminal button hidden for a CLIProxy chat', async () => {
   await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('CLIProxy · gpt-5'));
   expect($('apiChatTerminal').hidden).toBe(true);
 });
+
+it('shows each chat type icon in New chat, the project menu, the Terminals list and the chat header', async () => {
+  const api = { ...apiMock({
+    apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'markscode', 'codex', 'claude']) })),
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'opus' }), engine: 'claude', approval: 'ask', pending: null } }))
+  }),
+  cliStatus: async () => ({ ok: true as const, data: [{ id: 'claude', name: 'Claude', enabled: true, detail: '', version: '1', running: false }] }),
+  cliSessions: async () => ({ ok: true as const, data: [{ id: 'cli-1', module: 'claude', title: 'Build shell', projectId: null, updatedAt: 2 }] }),
+  listProjects: async () => ({ ok: true as const, data: [] }) } as any;
+  let selected: { id: string; conversationId: string | null; engine?: 'claude' } | null = { id: 'session-api', conversationId: 'cosapi-1', engine: 'claude' };
+  let repaint = (): void => undefined;
+  const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => null, selectedChat: () => selected }, () => repaint());
+  const cli = createCliModulesUi(api, { showTab: vi.fn(), openChatView: () => undefined, workspace: () => null, newChatItems: chats.newChatItems });
+  repaint = cli.repaintNewChat;
+  await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(4));
+  expect(chats.newChatItems().map(item => item.icon)).toEqual(['i-engine-cliproxy', 'i-engine-markscode', 'i-engine-codex', 'i-engine-claude']);
+  expect(chats.projectChatItems('p').map(item => item.icon)).toEqual(['i-engine-cliproxy', 'i-engine-markscode', 'i-engine-codex', 'i-engine-claude']);
+  $('newChat').click();
+  const chatgpt = await vi.waitFor(() => {
+    const item = dom.window.document.querySelector<HTMLElement>('[data-row-action="new-chat-chatgpt"]');
+    expect(item).not.toBeNull();
+    return item!;
+  });
+  expect(chatgpt.querySelector('.cm-glyph-fox[aria-hidden="true"]')).not.toBeNull();
+  expect(dom.window.document.querySelector('[data-row-action="new-chat-claude"] .cm-glyph-spark')).not.toBeNull();
+  // A terminal session in the sidebar: the terminal glyph before its title.
+  const terminal = await vi.waitFor(() => {
+    const row = dom.window.document.querySelector<HTMLElement>('.cli-module-chat');
+    expect(row).not.toBeNull();
+    return row!;
+  });
+  expect(terminal.querySelector('.ph-terminal-window[aria-hidden="true"]')).not.toBeNull();
+  expect(terminal.textContent).toBe('Build shell');
+  // The opened chat's header: its engine's icon beside the engine label, which stays the text.
+  chats.sync();
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Claude Code · opus'));
+  expect($('apiChatLabel').querySelector('.chat-type-icon')?.getAttribute('data-chat-type')).toBe('claude');
+  expect(dom.window.document.querySelector<HTMLElement>('.chat-head-type')!.hidden).toBe(true);
+  // A ChatGPT chat shows the fox before its title; a new chat shows none.
+  selected = { id: 'session-native', conversationId: '6a1f0c2e-0000-4000-8000-000000000001' };
+  chats.sync();
+  const fox = dom.window.document.querySelector<HTMLElement>('.chat-head-type')!;
+  expect(fox.hidden).toBe(false);
+  expect(fox.classList.contains('cm-glyph-fox')).toBe(true);
+  expect(fox.nextElementSibling?.id).toBe('chatTitle');
+  selected = null;
+  chats.sync();
+  expect(fox.hidden).toBe(true);
+});

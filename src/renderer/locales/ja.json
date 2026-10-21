@@ -568,6 +568,7 @@
   "Link": "リンク",
   "Table": "表",
   "placed by {0}": "{0}が配置",
+  "by {0} in this chat": "このチャットの {0} が実行",
   " (approx.)": "（概算）",
   "Arguments": "引数",
   "Result": "結果",

@@ -11,7 +11,8 @@
 import type { AppApi } from '../preload/index.js';
 import { isApiConversationId, type ApiChatApprovalDecision, type ApiChatApprovalMode, type ApiChatEffort, type ApiChatModel, type ApiChatView } from '../shared/api-chat.js';
 import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineInfo, type AgentEngineTerminalMode } from '../shared/agent-engine.js';
-import { toast } from './dom.js';
+import { setIcon, toast } from './dom.js';
+import { chatTypeIcon, chatTypeMark, chatTypeOf } from './chat-types.js';
 import { t, ui } from './i18n.js';
 import type { RowMenuItem } from './row-menu.js';
 
@@ -19,7 +20,7 @@ export interface ApiChatUiHooks {
   showTab(name: string): void;
   workspace(): string | null;
   /** The chat the timeline shows, or null for a new chat. */
-  selectedChat?(): { id: string; conversationId: string | null } | null;
+  selectedChat?(): { id: string; conversationId: string | null; engine?: AgentEngineId } | null;
   /** Shows that session in the normal chat view. */
   selectChat?(id: string): void | Promise<void>;
   /** Shows that module terminal (an engine chat's live or hand-over terminal), by its id. */
@@ -143,10 +144,18 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   label.id = 'apiChatLabel';
   label.hidden = true;
   label.setAttribute('translate', 'no');
+  // The engine's type icon, then its name and the model; the name stays the label's text.
+  const labelIcon = chatTypeMark(DEFAULT_AGENT_ENGINE, 'api-chat-label-icon');
+  const labelText = document.createElement('span');
+  label.append(labelIcon, labelText);
   // The chat's header names its provider and model, where a ChatGPT chat shows its project.
   const chatHead = document.querySelector('.is-session .chat-head');
   const anchor = chatHead?.querySelector('#chatProjectContext') ?? chatHead?.querySelector('#chatTitle');
   if (anchor) anchor.after(label); else chatHead?.prepend(label);
+  // An opened ChatGPT chat shows its own type icon before its title (an API chat's is in the label).
+  const nativeMark = chatTypeMark('chatgpt', 'chat-head-type');
+  nativeMark.hidden = true;
+  chatHead?.querySelector('#chatTitle')?.before(nativeMark);
 
   /** Sessions this window created before the chat list carried their summary. */
   const created = new Set<string>();
@@ -158,7 +167,8 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   /** Each engine's chat models, loaded once per engine. */
   const modelsBy = new Map<AgentEngineId, ApiChatModel[]>();
   const modelsLoading = new Set<AgentEngineId>();
-  const engineOf = (): AgentEngineId => view?.engine ?? DEFAULT_AGENT_ENGINE;
+  // Before the chat's view answers, the engine the chat list projected for it.
+  const engineOf = (): AgentEngineId => view?.engine ?? (shownFor ? hooks.selectedChat?.()?.engine : undefined) ?? DEFAULT_AGENT_ENGINE;
   let busy = false;
   let answering = false;
 
@@ -172,9 +182,13 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     host.classList.toggle('is-api-chat', !!id);
     controls.hidden = !id;
     label.hidden = !id;
+    const selected = id ? null : hooks.selectedChat?.() ?? null;
+    nativeMark.hidden = !!id || !selected || chatTypeOf(selected) !== 'chatgpt';
     paintApproval(id ? view?.pending ?? null : null);
     if (!id) return;
-    label.textContent = `${AGENT_ENGINE_LABELS[engineOf()] ?? AGENT_ENGINE_LABELS.cliproxy} · ${view?.model ?? '—'}`;
+    setIcon(labelIcon, chatTypeIcon(engineOf()), 'ico chat-type-icon api-chat-label-icon');
+    labelIcon.dataset.chatType = engineOf();
+    labelText.textContent = `${AGENT_ENGINE_LABELS[engineOf()] ?? AGENT_ENGINE_LABELS.cliproxy} · ${view?.model ?? '—'}`;
     const models = modelsBy.get(engineOf()) ?? [];
     const current = view?.model ?? '';
     const options: HTMLOptionElement[] = [];
@@ -368,11 +382,11 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
 
   return {
     newChatItems: () => engines.map((engine): RowMenuItem => ({
-      action: `new-chat-${engine}`, icon: 'i-chat', label: () => AGENT_ENGINE_LABELS[engine], title: ENGINE_MENU[engine].title,
+      action: `new-chat-${engine}`, icon: chatTypeIcon(engine), label: () => AGENT_ENGINE_LABELS[engine], title: ENGINE_MENU[engine].title,
       run: () => void create(undefined, engine)
     })),
     projectChatItems: projectId => engines.map((engine): RowMenuItem => ({
-      action: `new-chat-${engine}`, icon: 'i-chat', label: ENGINE_MENU[engine].project,
+      action: `new-chat-${engine}`, icon: chatTypeIcon(engine), label: ENGINE_MENU[engine].project,
       run: () => void create(projectId, engine)
     })),
     sync,

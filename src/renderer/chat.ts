@@ -84,6 +84,8 @@ import {
 import { chronological, positionOf, residenceOf } from '../shared/chronology.js';
 import { recentChatActivity, sessionWorkingAt, workerReportedFinish } from '../shared/session-activity.js';
 import { isApiConversationId } from '../shared/api-chat.js'; // Chat Marks: API chats (renderer/api-chat-ui.ts)
+import { AGENT_ENGINE_LABELS, type AgentEngineId } from '../shared/agent-engine.js'; // Chat Marks: engine tool rows name their engine
+import { chatTypeIcon, chatTypeMark, chatTypeOf } from './chat-types.js'; // Chat Marks: chat type icons
 import {
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
@@ -202,7 +204,8 @@ function projectMenuItems(id: string): RowMenuItem[] {
   } satisfies RowMenuItem : null;
   return [
     {
-      action: 'new-chat', icon: 'i-pencil', label: () => t('New chat in this project'), data: { newProject: id },
+      // Chat Marks: a ChatGPT chat, so the ChatGPT chat type icon beside the engines' own.
+      action: 'new-chat', icon: chatTypeIcon('chatgpt'), label: () => t('New chat in this project'), data: { newProject: id },
       run: () => selectNewChat(id)
     } satisfies RowMenuItem,
     // Chat Marks: a CLIProxy chat that belongs to this project.
@@ -928,6 +931,9 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   top.tabIndex = 0;
   top.dataset.sessionSelect = '';
   top.dataset.sortHandle = '';
+  // Chat Marks: the chat's type (ChatGPT or its engine) before its title, in every layout.
+  const type = chatTypeOf(summary);
+  if (type) top.append(chatTypeMark(type, 'sess-type'));
   if (renaming?.id === summary.id) top.append(renameField(summary));
   else {
     const title = el('b', '', () => shownSessionTitle(summary)); title.dir = 'auto';
@@ -4294,7 +4300,10 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
   };
   const facts = el('p', 'raw-facts');
   ui(facts, 'textContent', () => `${call.tool} · ${call.outcome} · ${Math.round(call.durationMs)} ms · ` +
-    t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
+    // Chat Marks: a CLI engine's own tool says which engine ran it, in the user's words.
+    (call.attribution === 'engine' && call.engine && AGENT_ENGINE_LABELS[call.engine]
+      ? t("by {0} in this chat", [AGENT_ENGINE_LABELS[call.engine]])
+      : t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution])));
   raw.append(facts);
 
   const ownerId = context?.id ?? selectedId, generation = selectionGeneration;
@@ -7902,8 +7911,10 @@ function showView(name: string): void {
 }
 
 /** Chat Marks: the selected chat and selection by id, for Marks modules (renderer/api-chat-ui.ts). */
-export function selectedChatSession(): { id: string; conversationId: string | null } | null {
-  return selectedId ? { id: selectedId, conversationId: sessions.find(row => row.id === selectedId)?.conversationId ?? null } : null;
+export function selectedChatSession(): { id: string; conversationId: string | null; engine?: AgentEngineId } | null {
+  if (!selectedId) return null;
+  const row = sessions.find(entry => entry.id === selectedId);
+  return { id: selectedId, conversationId: row?.conversationId ?? null, ...(row?.engine ? { engine: row.engine } : {}) };
 }
 export async function selectChatSession(id: string): Promise<void> {
   // A list read begun before the chat existed would drop the selection; this read supersedes it.

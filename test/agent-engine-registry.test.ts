@@ -134,4 +134,22 @@ describe('API chat ledger migration', () => {
     expect(await ledger.chatEngine(SESSION)).toBe('claude');
     expect((await ledger.storedChatRecord(SESSION))?.backendSessionId).toBe('7b1d2c3e-4f50-4a61-8b72-9c83d4e5f601');
   });
+
+  it('names each listed API chat\'s engine for the sidebar, without writing anything', async () => {
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, {
+      'session-codex': { engine: 'codex', model: null, effort: null },
+      'session-old': { model: 'gpt-5', effort: null },
+      'session-later': { engine: 'engine-from-a-later-version', model: null, effort: null }
+    });
+    const before = structuredClone(durable.get(ledger.API_CHAT_SESSIONS_STATE));
+    const rows = await ledger.withChatEngines([
+      { id: 'session-codex', conversationId: 'cosapi-1' },
+      { id: 'session-old', conversationId: 'cosapi-2' },
+      { id: 'session-later', conversationId: 'cosapi-3' },
+      { id: 'session-native', conversationId: '6a1f0c2e-0000-4000-8000-000000000001' },
+      { id: 'session-unattributed', conversationId: null }
+    ]);
+    expect(rows.map(row => row.engine)).toEqual(['codex', 'cliproxy', undefined, undefined, undefined]);
+    expect(durable.get(ledger.API_CHAT_SESSIONS_STATE)).toEqual(before);
+  });
 });

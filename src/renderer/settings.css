@@ -67,7 +67,17 @@
 .api-chat-controls #apiChatComposerEffort { color: var(--soft); }
 .api-chat-controls select::picker(select) { width: max-content; min-width: anchor-size(width); max-width: min(320px, calc(100vw - 24px)); }
 .api-chat-label[hidden] { display: none; }
-.api-chat-label { flex: 0 1 auto; min-width: 0; max-width: 32%; overflow: hidden; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); white-space: nowrap; text-overflow: ellipsis; }
+.api-chat-label { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; max-width: 32%; overflow: hidden; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); white-space: nowrap; }
+.api-chat-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Chat type icons (renderer/chat-types.ts): beside a chat's title in the sidebar, its Terminals and
+   its header, at the size of the row's other marks and in their quiet colour. */
+.api-chat-label > .chat-type-icon { --ico: 14px; --glyph: 14px; }
+.chat-head > .chat-head-type { --ico: 15px; --glyph: 15px; flex: none; color: var(--soft); }
+.sess-top > .sess-type { --ico: 15px; --glyph: 15px; color: var(--faint); }
+.sess:is(:hover, .is-pointed, .is-sel) .sess-top > .sess-type { color: var(--soft); }
+.sess-card .sess-top > .sess-type + b { flex-basis: 0; }
+.cli-module-chat > .sess-type { --ico: 15px; --glyph: 15px; }
+.cli-module-chat > .cli-module-chat-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .is-api-chat :is(#attachmentMenu, #composerSettings, #createPlan, #modelMenu, #contextMeter, #generateFinishGoal, #sendOptions,
   #activeGoalRow, #agentPlan, #taskPlanPreview, #finishQueue, #recoveryStatus, #branchDraft, #skillPicker, #composerSelectedSkills) { display: none !important; }
 .composer:has(.composer-selected-skills:not([hidden]), #composerImages:not([hidden])) .api-chat-controls { grid-row: 3; }

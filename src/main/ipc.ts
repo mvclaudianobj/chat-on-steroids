@@ -144,6 +144,7 @@ import {
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
+import { withChatEngines } from './agent-engine/ledger.js'; // Chat Marks: chat type icons
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
@@ -1430,7 +1431,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         projectId: z.string().regex(/^[a-f0-9-]{36}$/i).optional()
       })
       .parse(payload ?? {});
-    return readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
+    const list = await readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
+    // Chat Marks: each API chat names its engine, for the sidebar's chat type icon.
+    return { ...list, sessions: await withChatEngines(list.sessions) };
   });
 
   handle('sessions:image', async (payload) => {
@@ -1460,7 +1463,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { actions, ...paging } = options;
     const page = await readSessionEvents(id, actions ? { ...paging, kinds: ['session_start', 'tool_call'] } : paging);
     if (!page) throw new Error('Session not found');
-    return page;
+    // Chat Marks: the same engine projection as the list, so a merged row keeps its type icon.
+    return page.summary ? { ...page, summary: (await withChatEngines([page.summary]))[0]! } : page;
   });
 
   const stageFiles = async (sources: AttachmentSource[]) => {
