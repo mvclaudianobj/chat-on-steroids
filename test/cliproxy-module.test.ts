@@ -113,7 +113,8 @@ describe('CLIProxyAPI versions', () => {
     expect(release.isUpdateAvailable('8.0.1', null)).toBe(false);
   });
 
-  it('reads the installed version by running the binary with -h and an absent config, once per binary change', async () => {
+  // The installed binary, its staging paths and pkexec exist only on Linux (ipc.ts gates them).
+  it.skipIf(process.platform !== 'linux')('reads the installed version by running the binary with -h and an absent config, once per binary change', async () => {
     const binary = join(mkdtempSync(join(tmpdir(), 'cliproxy-version-test-')), 'cli-proxy-api');
     writeFileSync(binary, 'old build');
     expect(await release.installedVersion(binary)).toBe('8.0.13-14-g8ef43e4d-dirty');
@@ -191,7 +192,7 @@ describe('CLIProxyAPI downloads', () => {
   });
 });
 
-describe('CLIProxyAPI installer', () => {
+describe.skipIf(process.platform !== 'linux')('CLIProxyAPI installer', () => {
   it('updates with one fixed pkexec command whose only argument is the verified staged binary', async () => {
     const privileged: Array<[string, string[]]> = [];
     const phases: string[] = [];
