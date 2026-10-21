@@ -1404,6 +1404,50 @@ spinner); the row menu drops Open in browser, Copy link, Block and Trust for API
 `initMarksModulesUi`. `control-reads.ts` ignores `api_chat_session` like other expected misses.
 Proof: `test/api-chat-ui.test.ts`, `scripts/verify-api-chat-ui.cjs`.
 
+### CLIProxyAPI module management
+
+`main/modules.ts` adapts the systemd service (`cli-proxy-api.service`, `/usr/local/bin/cli-proxy-api`,
+start/stop/restart/enable/disable through `pkexec systemctl`). It identifies the service by the root
+banner (`GET /` → `CLI Proxy API Server`) and the console page title, never by an unauthenticated
+management request: CLIProxyAPI counts each one as a failed login and bans the loopback client for
+30 minutes after five. `main/cliproxy/` (Marks-owned, IPC `marksCliProxy:request`, sender/frame
+checked; preload `cliProxy*`, progress `marksCliProxy:progress`) adds:
+- versions (`release.ts`): installed = the binary's own `CLIProxyAPI Version:` line (`-config
+  <absent> -h`, 5 s); latest = GitHub `releases/latest` of `router-for-me/CLIProxyAPI` (official
+  community releases only, x.y.z, cached 1 h, bounded). A version that is not exactly x.y.z
+  (e.g. `-dirty`) is a local build and the UI warns that updating replaces it;
+- install/update (`installer.ts`, Linux x64/arm64; other platforms keep the guide/releases page):
+  the default `CLIProxyAPI_<v>_linux_<amd64|aarch64>.tar.gz` (never `_no-plugin`) and
+  `checksums.txt`, redirects only to GitHub release hosts, SHA-256 checked before extraction,
+  `/usr/bin/tar … -- cli-proxy-api` into a private 0700 staging dir, ELF check, then ONE
+  `pkexec /bin/sh -c <constant script> <name> <staged paths>`: update = install as
+  `.marks-new` + `mv` + restart if active; fresh install = system user, state dir, config only
+  when absent (from the release's `config.example.yaml`: 127.0.0.1:18081, generated management
+  password and `sk-marks-` key, saved as secrets only when the script printed `config-written`),
+  fixed unit (upstream unit + `ReadWritePaths=/etc/cli-proxy-api`), `enable --now`. The renderer
+  sends the version the user confirmed; a different latest release is refused;
+- management (`management.ts`): password = encrypted secret `marks:cliproxyManagementKey`, saved
+  only after `GET /v0/management/config` answers 200 (401 = wrong), never returned; a rejected
+  password is not retried until replaced. API keys: `GET /v0/management/api-keys` (renderer sees
+  sha256-prefix id + last 4), Create = `PATCH {old:new,new:new}` (appends) then `setApiChatKey`,
+  Revoke = `DELETE ?index=n` after re-reading the list by id (clears the chat key if it was it).
+  Writes fail with `management_save_failed` when the service cannot write its config (the
+  upstream unit mounts `/etc` read-only);
+- save repair for existing installs (`installer.ts` `repairConfigWrites`): offered when a key write
+  answered `management_save_failed`, or proactively when `systemctl show -p ProtectSystem -p
+  ReadWritePaths` reports strict/full without `/etc/cli-proxy-api` covered, or root still owns
+  that directory. After confirmation, ONE `pkexec /bin/sh -c <constant script>` (no arguments)
+  writes the drop-in `cli-proxy-api.service.d/marks-writable-config.conf`
+  (`ReadWritePaths=/etc/cli-proxy-api`), `chown cli-proxy-api:` the directory and `config.yaml`
+  (modes unchanged), `daemon-reload`, and restarts only an active service; the unit is not edited.
+The installed version probe is cached by the binary's path, mtime and size.
+The console opens signed in: with a stored password, `seedConsoleLogin` loads `/healthz` in the
+ephemeral partition, checks the origin, writes the page's own `managementKey`/`apiBase`/
+`isLoggedIn` localStorage entries, then loads `management.html` (same request fence).
+UI: `renderer/cliproxy-manage-ui.ts` inside the CLIProxyAPI card (confirmations via
+`window.confirm`). Proof: `test/cliproxy-module.test.ts`, `test/modules.test.ts`,
+`scripts/verify-cliproxy-module.cjs`.
+
 ### MarksPanel application admission
 
 `main/markspanel-auth.ts` owns the mandatory MarksPanel login boundary. On every startup,

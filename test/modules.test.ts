@@ -4,8 +4,9 @@ const fixture = vi.hoisted(() => ({
   active: true, enabled: true, installed: true, configReadable: false,
   configPort: 18081, signaturePorts: new Set([18081]), spoofPort: null as number | null,
   opened: [] as string[], windows: [] as any[], elevated: [] as string[][],
-  instructions: [] as string[]
+  instructions: [] as string[], managementKey: null as string | null, unauthenticatedManagement: 0
 }));
+vi.mock('../src/main/cliproxy/management.js', () => ({ managementKey: async () => fixture.managementKey }));
 
 vi.mock('node:child_process', () => ({
   execFile: (file: string, args: string[], _options: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
@@ -38,7 +39,11 @@ vi.mock('electron', () => ({
     handlers: Record<string, (event: any) => void> = {};
     requestFilter?: (request: { url: string }, callback: (reply: { cancel: boolean }) => void) => void;
     destroyed = false;
+    url = '';
+    scripts: string[] = [];
     webContents = {
+      getURL: () => this.url,
+      executeJavaScript: async (code: string) => { this.scripts.push(code); },
       handlers: {} as Record<string, (event: any) => void>,
       on: (name: string, handler: (event: any) => void) => { this.webContents.handlers[name] = handler; },
       setWindowOpenHandler: (_handler: () => unknown) => undefined,
@@ -48,24 +53,27 @@ vi.mock('electron', () => ({
     constructor(options: Record<string, any>) { this.options = options; fixture.windows.push(this); }
     isDestroyed() { return this.destroyed; }
     focus() { }
-    loadURL(url: string) { fixture.opened.push(url); return Promise.resolve(); }
+    loadURL(url: string) { fixture.opened.push(url); this.url = url; return Promise.resolve(); }
     close() { this.destroyed = true; this.handlers.closed?.({}); }
     on(name: string, callback: (event: any) => void) { this.handlers[name] = callback; }
   }
 }));
 
-const { safeManagementUrl, configuredManagementPort, moduleAction, modulesStatus } = await import('../src/main/modules.js');
+const { safeManagementUrl, configuredManagementPort, moduleAction, modulesStatus, seedConsoleLogin } = await import('../src/main/modules.js');
+const banner = () => new Response(JSON.stringify({ message: 'CLI Proxy API Server', endpoints: [] }), { status: 200, headers: { 'content-type': 'application/json' } });
 function fakeHttp(url: string) {
   const parsed = new URL(url), port = Number(parsed.port);
-  const api = parsed.pathname === '/v8/management/config';
+  // Every unauthenticated management request is a failed login for CLIProxyAPI's ban counter.
+  if (parsed.pathname.includes('/management/')) {
+    fixture.unauthenticatedManagement++;
+    return new Response(JSON.stringify({ error: 'missing management key' }), { status: 401, headers: { 'content-type': 'application/json' } });
+  }
   if (fixture.signaturePorts.has(port)) {
-    return api
-      ? new Response(JSON.stringify({ error: 'access forbidden' }), { status: 403, headers: { 'content-type': 'application/json', 'x-cpa-version': 'v8.0.13' } })
+    return parsed.pathname === '/' ? banner()
       : new Response('<html><title>CLI Proxy API Management Center</title></html>', { status: 200, headers: { 'content-type': 'text/html' } });
   }
   if (port === fixture.spoofPort) {
-    return api
-      ? new Response(JSON.stringify({ error: 'forbidden' }), { status: 403, headers: { 'content-type': 'application/json', 'x-cpa-version': 'spoofed' } })
+    return parsed.pathname === '/' ? banner()
       : new Response('<html><title>unrelated local service</title></html>', { status: 200, headers: { 'content-type': 'text/html' } });
   }
   throw Error('connection refused');
@@ -78,6 +86,8 @@ beforeEach(() => {
   fixture.configPort = 18081;
   fixture.signaturePorts = new Set([18081]);
   fixture.spoofPort = null;
+  fixture.managementKey = null;
+  fixture.unauthenticatedManagement = 0;
   fixture.opened.length = fixture.windows.length = fixture.elevated.length = fixture.instructions.length = 0;
   vi.stubGlobal('fetch', vi.fn(async (url: string) => fakeHttp(url)));
 });
@@ -173,6 +183,40 @@ describe('Marks modules security boundary', () => {
     window.webContents.handlers['will-navigate']({ url: 'http://127.0.0.1:18081/another.html', isMainFrame: true, preventDefault() { denied = true; } });
     expect(denied).toBe(true);
     window.requestFilter!({ url: 'http://127.0.0.1:18081/v8/management/config' }, (reply: { cancel: boolean }) => expect(reply.cancel).toBe(false));
+  });
+
+  it('identifies the service without unauthenticated management requests (they count toward its login ban)', async () => {
+    for (let index = 0; index < 6; index++) expect((await modulesStatus())[0]!.consoleAvailable).toBe(true);
+    expect(fixture.unauthenticatedManagement).toBe(0);
+  });
+
+  it('opens the console without seeding when no management password is stored', async () => {
+    await moduleAction('open', 'http://127.0.0.1:18081/management.html');
+    const [window] = fixture.windows;
+    expect(fixture.opened).toEqual(['http://127.0.0.1:18081/management.html']);
+    expect(window.scripts).toEqual([]);
+  });
+
+  it('pre-signs the console in its own origin before the page loads when a password is stored', async () => {
+    fixture.managementKey = 'management-secret';
+    await moduleAction('open', 'http://127.0.0.1:18081/management.html');
+    const [window] = fixture.windows;
+    expect(fixture.opened).toEqual(['http://127.0.0.1:18081/healthz', 'http://127.0.0.1:18081/management.html']);
+    expect(window.scripts).toHaveLength(1);
+    const values = JSON.parse(/\}\)\((.*)\)$/.exec(window.scripts[0])![1]!);
+    expect(values).toEqual({ apiBase: '"http://127.0.0.1:18081"', managementKey: '"management-secret"', isLoggedIn: 'true' });
+    window.requestFilter!({ url: 'http://127.0.0.1:18081/healthz' }, (reply: { cancel: boolean }) => expect(reply.cancel).toBe(false));
+  });
+
+  it('never seeds a document that is not on the console origin', async () => {
+    fixture.managementKey = 'management-secret';
+    const scripts: string[] = [];
+    const window = {
+      loadURL: async () => undefined,
+      webContents: { getURL: () => 'https://evil.example/healthz', executeJavaScript: async (code: string) => { scripts.push(code); } }
+    };
+    expect(await seedConsoleLogin(window as never, 'http://127.0.0.1:18081')).toBe(false);
+    expect(scripts).toEqual([]);
   });
 
   it('rejects browsing a custom unverified port, even when the service is active', async () => {

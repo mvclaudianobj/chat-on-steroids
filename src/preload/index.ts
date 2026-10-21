@@ -313,6 +313,20 @@ const api = {
   // there is nothing here to choose - the main process knows what is staged.
   modulesStatus: () => call<MarksModuleState[]>('modules:status'),
   moduleAction: (id: 'cli-proxy-api', action: MarksModuleAction, managementUrl?: string) => call<MarksModuleState[]>('modules:action', { id, action, managementUrl }),
+  // Chat Marks: CLIProxyAPI management. The password only travels in; API keys come back masked.
+  cliProxyStatus: (refresh = false) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'status', refresh }),
+  cliProxySetManagementKey: (key: string) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'setManagementKey', key }),
+  cliProxyCreateKey: () => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'createKey' }),
+  cliProxyRevokeKey: (id: string) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'revokeKey', id }),
+  /** Lets an existing service save its config (systemd drop-in + ownership), after confirmation. */
+  cliProxyRepairConfig: () => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'repairConfig' }),
+  /** Installs or updates to `version`, the release the user confirmed. */
+  cliProxyInstall: (mode: 'install' | 'update', version: string) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'install', mode, version }),
+  onCliProxyProgress: (listener: (progress: import('../shared/cliproxy.js').CliProxyInstallProgress) => void): (() => void) => {
+    const wrapped = (_event: unknown, progress: import('../shared/cliproxy.js').CliProxyInstallProgress): void => listener(progress);
+    ipcRenderer.on('marksCliProxy:progress', wrapped);
+    return () => ipcRenderer.removeListener('marksCliProxy:progress', wrapped);
+  },
   installUpdate: () => call<boolean>('update:install'),
   /** Check/stage/apply supported updates and request one connector refresh round. May restart. */
   updateAll: (restartVersion?: string) => call<import('../shared/types.js').UpdateAllResult>('update:all', restartVersion),
