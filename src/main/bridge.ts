@@ -5,6 +5,7 @@ import { cosSignInTransfer, SignInTransferError } from './cos-browser/sign-in-tr
 import { externalBrowserProof, noteExternalInstalled, noteExternalSignedIn, resetBrowserProofForTests } from './browser-proof.js';
 import { notePluginInstalled, notePluginMissing } from './connector-proof.js';
 import { connectorNames } from '../shared/connector-names.js';
+import { isApiConversationId } from '../shared/api-chat.js';
 import { connectorApps, conversationCreatedAt, noteAppSightings, type AppSighting } from './connector-identity.js';
 import { messageReaction } from '../shared/message-reaction.js';
 import { browserControl } from './browser-control.js';
@@ -2028,6 +2029,8 @@ async function controlledConversation(sessionId: string): Promise<string> {
   const session = await getSession(sessionId);
   const id = session?.conversationId;
   if (!id) throw new Error('session_not_recorded');
+  // Chat Marks: an API chat has no ChatGPT tab; Stop, Goal/Loop and Compact belong to its executor.
+  if (isApiConversationId(id)) throw new Error('api_chat_session');
   if (await conversationWasSuperseded(id)) throw new Error('conversation_superseded');
   if ((await getSession(sessionId))?.conversationId !== id) throw new Error('conversation_changed');
   return id;
@@ -9676,6 +9679,8 @@ function noteCallAttribution(
   filedSession: SessionSummary | null = null,
   tool: string | null = null
 ): void {
+  // Chat Marks: an API chat's turn is owned by its executor, never by browser activity clocks.
+  if (isApiConversationId(conversationId)) return;
   if (conversationId) {
     // MCP truth can grow while a Pro page emits no new observation. The just-filed
     // canonical summary, not a later browser poll, owns the worker's context meter.

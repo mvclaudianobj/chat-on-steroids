@@ -2,8 +2,11 @@
 import { ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { markspanelAccessBlocked } from '../markspanel-auth.js';
+import { logWarn } from '../logger.js';
+import { API_CHAT_EFFORTS } from '../../shared/api-chat.js';
 import { listApiChatModels } from './catalog.js';
 import { ApiChatHttpError, streamCompletion } from './client.js';
+import { apiChatView, createApiChat, MAX_API_CHAT_INPUT_CHARS, recoverApiChats, sendApiChat, setApiChatSettings, stopApiChat } from './executor.js';
 import {
   apiChatKey, apiChatSettings, apiChatStatus, noteKeyRequired, noteModelAvailability, setApiChatKey,
   toggleFavoriteModel, updateApiChatSettings
@@ -11,6 +14,7 @@ import {
 
 const TEST_TIMEOUT_MS = 30_000;
 const modelId = z.string().min(1).max(200);
+const sessionId = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
 
 const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }).strict(),
@@ -25,7 +29,12 @@ const request = z.discriminatedUnion('action', [
     modality: z.enum(['chat', 'image', 'audio', 'embedding', 'moderation']).optional(),
     refresh: z.boolean().optional()
   }).strict(),
-  z.object({ action: z.literal('test'), model: modelId.optional() }).strict()
+  z.object({ action: z.literal('test'), model: modelId.optional() }).strict(),
+  z.object({ action: z.literal('createChat'), projectId: z.string().uuid().nullable().optional(), model: modelId.optional() }).strict(),
+  z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
+  z.object({ action: z.literal('stop'), sessionId }).strict(),
+  z.object({ action: z.literal('chatSettings'), sessionId }).strict(),
+  z.object({ action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional() }).strict()
 ]);
 
 /**
@@ -60,7 +69,23 @@ export async function testApiChat(model?: string, fetchImpl?: typeof fetch): Pro
   }
 }
 
+async function chatAction(input: z.infer<typeof request>): Promise<unknown> {
+  switch (input.action) {
+    case 'createChat': return createApiChat({ projectId: input.projectId ?? null, ...(input.model ? { model: input.model } : {}) });
+    // The turn streams on in main; the renderer follows it through session change notices.
+    case 'send': return { turnId: (await sendApiChat(input.sessionId, input.text)).turnId };
+    case 'stop': await apiChatView(input.sessionId); return { stopped: stopApiChat(input.sessionId) };
+    case 'chatSettings': return apiChatView(input.sessionId);
+    case 'setChatSettings': return setApiChatSettings(input.sessionId, {
+      ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {})
+    });
+    default: throw new Error('Unknown API chat action');
+  }
+}
+
 export function registerApiChatIpc(getWindow: () => BrowserWindow | null): void {
+  // Turns the previous run left open are closed as interrupted before any new one starts.
+  void recoverApiChats().catch(error => logWarn(`API chat recovery failed: ${(error as Error).message}`));
   ipcMain.handle('marksApiChat:request', async (event, payload: unknown) => {
     try {
       if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
@@ -72,7 +97,8 @@ export function registerApiChatIpc(getWindow: () => BrowserWindow | null): void 
           : input.action === 'setSettings' ? (await updateApiChatSettings(input.settings), await apiChatStatus())
             : input.action === 'toggleFavorite' ? (await toggleFavoriteModel(input.model), await apiChatStatus())
               : input.action === 'models' ? await listApiChatModels(input)
-                : await testApiChat(input.model);
+                : input.action === 'test' ? await testApiChat(input.model)
+                  : await chatAction(input);
       return { ok: true, data };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };

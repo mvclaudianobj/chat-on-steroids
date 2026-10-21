@@ -142,6 +142,13 @@ const api = {
   apiChatToggleFavorite: (model: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'toggleFavorite', model }),
   /** A minimal real request with the model (the default one when omitted); records its availability. */
   apiChatTest: (model?: string) => call<{ model: string }>('marksApiChat:request', { action: 'test', ...(model ? { model } : {}) }),
+  /** A new API chat: a local session in the `cosapi-` namespace, optionally in a project. */
+  apiChatCreate: (options: { projectId?: string | null; model?: string } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
+  /** Records the question and starts the answer; it streams into the session's history. */
+  apiChatSend: (sessionId: string, text: string) => call<{ turnId: string }>('marksApiChat:request', { action: 'send', sessionId, text }),
+  apiChatStop: (sessionId: string) => call<{ stopped: boolean }>('marksApiChat:request', { action: 'stop', sessionId }),
+  apiChatChatSettings: (sessionId: string) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'chatSettings', sessionId }),
+  apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
   cliAction: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', action: 'enable' | 'disable' | 'install' | 'update' | 'stop') => call<unknown>('marksCli:request', { action, module }),
   cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),
   cliCreateSession: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', projectId: string | null) => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId }),
