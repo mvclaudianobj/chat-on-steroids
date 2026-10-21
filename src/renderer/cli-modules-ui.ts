@@ -79,28 +79,37 @@ export function createCliModulesUi(api: AppApi, hooks: { showTab(name: string): 
   }
 
   // One "New chat" for every kind of chat: with a CLI module enabled it opens a menu whose first
-  // item is the app's own ChatGPT chat; without one it stays the plain ChatGPT button. The
-  // upstream button and its handlers are untouched: this listens before them, on the parent.
+  // item is the app's own ChatGPT chat; without one it stays the plain ChatGPT button. Both
+  // upstream buttons keep their handlers: the Projects sidebar's #newChat and the Inbox
+  // layout's compose button, which the Inbox repaints. This listens before them, on the document.
+  const NEW_CHAT_BUTTONS = '#newChat, [data-inbox-control="compose"]';
   const enabledModules = (): Id[] => IDS.filter(id => current.get(id)?.enabled);
-  let chatgptPassThrough = false;
   const paintNewChat = (): void => {
     if (enabledModules().length) newChatBtn.setAttribute('aria-haspopup', 'menu');
     else newChatBtn.removeAttribute('aria-haspopup');
   };
-  sidebarPrimary.addEventListener('click', event => {
-    if (chatgptPassThrough || !(event.target as Element | null)?.closest?.('#newChat') || !enabledModules().length) return;
+  document.addEventListener('click', event => {
+    const source = (event.target as Element | null)?.closest?.<HTMLElement>(NEW_CHAT_BUTTONS);
+    // A ChatGPT pick replays the click on its button, marked so it reaches the upstream handler.
+    // A sidebar that is no longer on screen belongs to a replaced view and answers nothing.
+    if (!source || source.dataset.newChatPassThrough === 'true' || !sidebarPrimary.isConnected || !enabledModules().length) return;
     event.stopPropagation();
     event.preventDefault();
+    const inbox = source !== newChatBtn;
+    // The Inbox repaints its compose button; find the one on screen now, not the one clicked.
+    const button = (): HTMLElement | null => inbox ? document.querySelector<HTMLElement>('[data-inbox-control="compose"]') : newChatBtn;
     openRowMenu({
       owner: 'new-chat',
-      anchor: () => newChatBtn,
+      anchor: button,
       label: () => t('New chat'),
       items: () => [
         {
           action: 'new-chat-chatgpt', icon: 'i-pencil', label: () => 'ChatGPT',
           run: () => {
-            chatgptPassThrough = true;
-            try { newChatBtn.click(); } finally { chatgptPassThrough = false; }
+            const target = button();
+            if (!target) return;
+            target.dataset.newChatPassThrough = 'true';
+            try { target.click(); } finally { delete target.dataset.newChatPassThrough; }
           }
         },
         ...enabledModules().map((id, index) => ({
