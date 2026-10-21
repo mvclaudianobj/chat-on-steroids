@@ -131,3 +131,25 @@ it('keeps New chat a plain ChatGPT button while no CLI module is enabled', async
   expect(chatgpt).toHaveBeenCalledTimes(1);
   expect(dom.window.document.querySelector('[data-row-action^="new-chat-"]')).toBeNull();
 });
+
+it('opens the same New chat menu from the Inbox layout\'s compose button', async () => {
+  // The Inbox layout draws its own compose button inside the chat list and repaints it.
+  const list = dom.window.document.createElement('div');
+  list.innerHTML = '<button type="button" data-inbox-control="compose">New chat</button>';
+  dom.window.document.querySelector('.app')!.append(list);
+  const compose = vi.fn();
+  list.querySelector('button')!.addEventListener('click', compose);
+  createCliModulesUi(statusOf(true), { showTab: () => undefined, openChatView: () => undefined, workspace: () => null });
+  await vi.waitFor(() => expect(dom.window.document.getElementById('newChat')?.getAttribute('aria-haspopup')).toBe('menu'));
+  list.querySelector('button')!.click();
+  expect(compose).not.toHaveBeenCalled();
+  const item = await vi.waitFor(() => {
+    const found = dom.window.document.querySelector<HTMLElement>('[data-row-action="new-chat-chatgpt"]');
+    expect(found).toBeTruthy();
+    return found!;
+  });
+  expect(dom.window.document.querySelector('[data-row-action="new-chat-claude"]')).toBeTruthy();
+  // ChatGPT keeps the Inbox's own new chat (it starts in the project the Inbox shows).
+  item.click();
+  await vi.waitFor(() => expect(compose).toHaveBeenCalledTimes(1));
+});
