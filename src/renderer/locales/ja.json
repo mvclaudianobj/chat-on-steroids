@@ -3516,5 +3516,8 @@
   "VISUAL PROTOTYPE": "VISUAL PROTOTYPE",
   "Waiting for CEO": "Waiting for CEO",
   "Your company starts here": "Your company starts here",
-  "employee seats": "employee seats"
+  "employee seats": "employee seats",
+  "Update the existing installation of {0} in place? This changes the CLI outside Chat Marks.": "既存の {0} のインストールをその場で更新しますか？Chat Marks の外にある CLI が変更されます。",
+  "Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.": "{0} {1} をインストールしますか？実行中の応答は続行され、新しい CLI はターン終了後に使われます。",
+  "Using installed": "インストール済みを使用中"
 }

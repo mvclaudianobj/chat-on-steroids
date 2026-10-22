@@ -3516,5 +3516,8 @@
   "VISUAL PROTOTYPE": "VISUAL PROTOTYPE",
   "Waiting for CEO": "Waiting for CEO",
   "Your company starts here": "Your company starts here",
-  "employee seats": "employee seats"
+  "employee seats": "employee seats",
+  "Update the existing installation of {0} in place? This changes the CLI outside Chat Marks.": "就地更新現有的 {0} 安裝？這會變更 Chat Marks 之外的 CLI。",
+  "Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.": "安裝 {0} {1}？進行中的回答會繼續；新的 CLI 會在本輪結束後使用。",
+  "Using installed": "正在使用已安裝版本"
 }

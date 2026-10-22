@@ -3608,5 +3608,8 @@
   "VISUAL PROTOTYPE": "VISUAL PROTOTYPE",
   "Waiting for CEO": "Waiting for CEO",
   "Your company starts here": "Your company starts here",
-  "employee seats": "employee seats"
+  "employee seats": "employee seats",
+  "Update the existing installation of {0} in place? This changes the CLI outside Chat Marks.": "Mettre à jour sur place l’installation existante de {0} ? Cela modifie la CLI en dehors de Chat Marks.",
+  "Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.": "Installer {0} {1} ? Les réponses en cours continuent ; la nouvelle CLI sera utilisée après la fin du tour.",
+  "Using installed": "Utilise l’installation existante"
 }

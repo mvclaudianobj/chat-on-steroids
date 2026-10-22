@@ -3504,7 +3504,7 @@
   "Cancel operation": "Vorgang abbrechen",
   "Exit code": "Exit-Code",
   "VM logs": "VM-Protokolle",
-  "Type the exact VM name to destroy: {0}": "Geben Sie zum Löschen den exakten VM-Namen ein: {0}",
+  "Type the exact VM name to destroy: {0}": "Gib zum Löschen den exakten VM-Namen ein: {0}",
   "Dry run (simulation only)": "Testlauf (nur Simulation)",
   "Acceptance criteria": "Acceptance criteria",
   "Across all projects": "Across all projects",
@@ -3562,5 +3562,8 @@
   "VISUAL PROTOTYPE": "VISUAL PROTOTYPE",
   "Waiting for CEO": "Waiting for CEO",
   "Your company starts here": "Your company starts here",
-  "employee seats": "employee seats"
+  "employee seats": "employee seats",
+  "Update the existing installation of {0} in place? This changes the CLI outside Chat Marks.": "Die vorhandene Installation von {0} direkt aktualisieren? Das ändert die CLI außerhalb von Chat Marks.",
+  "Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.": "{0} {1} installieren? Laufende Antworten gehen weiter; die neue CLI wird nach Ende des Zugs verwendet.",
+  "Using installed": "Installierte wird verwendet"
 }

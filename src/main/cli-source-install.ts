@@ -11,6 +11,11 @@ import { npmInstallArgv } from './ccr/release.js';
 import { localRunner, probeEnvironment, wslRunner } from './upstream/install.js';
 import { isNewerVersion } from './github-release.js';
 
+/** A third-party CLI's x.y.z (not the app's own four-part release version). */
+const CLI_VERSION = String.raw`\d+(?:\.\d+){2}`;
+const CODEX_VERSION_LINE = new RegExp(String.raw`^codex(?:-cli)?\s+v?(${CLI_VERSION})(?:[-+][0-9A-Za-z.-]+)?$`, 'i');
+const CLAUDE_VERSION_LINE = new RegExp(String.raw`^(?:claude(?: code)?\s+v?(${CLI_VERSION})|(?:(${CLI_VERSION})\s+\(Claude Code\)))(?:[-+][0-9A-Za-z.-]+)?$`, 'i');
+
 export type PublishedId = 'codex' | 'claude';
 const PACKAGES: Readonly<Record<PublishedId, string>> = { codex: '@openai/codex', claude: '@anthropic-ai/claude-code' };
 const LIMIT = 100 * 1024 * 1024;
@@ -138,8 +143,7 @@ export async function verifiedVersion(id: PublishedId, binary: string, probeHome
     ], 15_000);
     for (const line of `${stdout}\n${stderr}`.split(/\r?\n/)) {
       const trimmed = line.trim();
-      const match = id === 'codex' ? /^codex(?:-cli)?\s+v?(\d+\.\d+\.\d+)(?:[-+][0-9A-Za-z.-]+)?$/i.exec(trimmed)
-        : /^(?:claude(?: code)?\s+v?(\d+\.\d+\.\d+)|(?:(\d+\.\d+\.\d+)\s+\(Claude Code\)))(?:[-+][0-9A-Za-z.-]+)?$/i.exec(trimmed);
+      const match = (id === 'codex' ? CODEX_VERSION_LINE : CLAUDE_VERSION_LINE).exec(trimmed);
       if (match) return match[1] ?? match[2] ?? null;
     }
   } catch { /* unavailable or unrecognized binary */ }

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { UPSTREAM_VERSION } from '../shared/upstream-module.js';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -468,7 +469,7 @@ export async function cliAction(id: CliId, action: 'enable' | 'disable' | 'insta
     installations.add(id);
     try {
       if (id !== 'codex' && id !== 'claude') throw new Error('unsupported_module');
-      if (!expected || !/^\d+\.\d+\.\d+$/.test(expected)) throw new Error('version_required');
+      if (!expected || !UPSTREAM_VERSION.test(expected)) throw new Error('version_required');
       const binary = await runtimeBinary(id);
       const external = binary && !await isManaged(id, binary);
       const home = process.platform === 'win32' ? await wslHome() : app.getPath('home');
@@ -748,7 +749,7 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
     z.object({ action: z.literal('status') }).strict(),
     z.object({ action: z.literal('sessions') }).strict(),
     z.object({ action: z.literal('create'), module: id, projectId: z.string().uuid().nullable(), kind: z.literal('quickstart').optional() }).strict(),
-    z.object({ action: z.enum(['enable', 'disable', 'install', 'update', 'update-external', 'stop']), module: id, version: z.string().regex(/^\d+\.\d+\.\d+$/).optional() }).strict(),
+    z.object({ action: z.enum(['enable', 'disable', 'install', 'update', 'update-external', 'stop']), module: id, version: z.string().regex(UPSTREAM_VERSION).optional() }).strict(),
     z.object({ action: z.literal('open'), sessionId: z.string().uuid(), attachmentId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(2).max(200) }).strict(),
     z.object({ action: z.literal('write'), attachmentId: z.string().uuid(), data: z.string().max(16_384) }).strict(),
     z.object({ action: z.literal('resize'), attachmentId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(2).max(200) }).strict(),

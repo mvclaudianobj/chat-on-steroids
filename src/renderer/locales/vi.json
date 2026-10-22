@@ -3516,5 +3516,8 @@
   "VISUAL PROTOTYPE": "VISUAL PROTOTYPE",
   "Waiting for CEO": "Waiting for CEO",
   "Your company starts here": "Your company starts here",
-  "employee seats": "employee seats"
+  "employee seats": "employee seats",
+  "Update the existing installation of {0} in place? This changes the CLI outside Chat Marks.": "Cập nhật tại chỗ bản cài đặt hiện có của {0}? Việc này thay đổi CLI bên ngoài Chat Marks.",
+  "Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.": "Cài đặt {0} {1}? Các câu trả lời đang chạy vẫn tiếp tục; CLI mới được dùng sau khi lượt kết thúc.",
+  "Using installed": "Đang dùng bản đã cài"
 }

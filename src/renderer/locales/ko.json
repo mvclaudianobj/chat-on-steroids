@@ -3516,5 +3516,8 @@
   "VISUAL PROTOTYPE": "VISUAL PROTOTYPE",
   "Waiting for CEO": "Waiting for CEO",
   "Your company starts here": "Your company starts here",
-  "employee seats": "employee seats"
+  "employee seats": "employee seats",
+  "Update the existing installation of {0} in place? This changes the CLI outside Chat Marks.": "기존 {0} 설치를 그 자리에서 업데이트할까요? Chat Marks 밖의 CLI가 변경됩니다.",
+  "Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.": "{0} {1}을(를) 설치할까요? 진행 중인 답변은 계속되며, 새 CLI는 턴이 끝난 뒤 사용됩니다.",
+  "Using installed": "설치된 버전 사용 중"
 }
