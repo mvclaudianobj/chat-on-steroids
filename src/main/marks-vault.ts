@@ -9,6 +9,7 @@ import { constants } from 'node:fs';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { getSecret, setSecret } from './secrets.js';
+import { replaceVaultRedactionEntries } from './marks-vault-redaction.js';
 
 const SLOT = 'marks:vaultKey';
 const MAX_FILE = 3 * 1024 * 1024;
@@ -85,6 +86,7 @@ function catalogFrom(value: Buffer): VaultCatalog {
   if (entries.length > MAX_ENTRIES) throw new Error('Vault capacity exceeded');
   const validated = entries.map(validateEntry);
   if (new Set(validated.map(entry => entry.name)).size !== validated.length) throw new Error('Duplicate vault names');
+  replaceVaultRedactionEntries(validated);
   return { entries: validated };
 }
 function validateFile(value: unknown): VaultFile {
@@ -152,6 +154,11 @@ async function withCatalog<T>(password: string | undefined, operation: (file: Va
 async function update(file: VaultFile, key: Buffer, data: VaultCatalog): Promise<void> {
   file.records = seal(key, Buffer.from(JSON.stringify(data)), `${PREFIX}${file.id}:records`);
   await persist(file);
+  replaceVaultRedactionEntries(data.entries);
+}
+export async function warmVaultRedaction(): Promise<void> {
+  try { const file = await readVault(); if (!file) return; const key = await openKey(file); try { await readCatalog(file, key); } finally { key.fill(0); } }
+  catch { replaceVaultRedactionEntries([]); }
 }
 export async function vaultStatus(): Promise<{ created: boolean; count: number | null; ready: boolean }> {
   const file = await readVault();

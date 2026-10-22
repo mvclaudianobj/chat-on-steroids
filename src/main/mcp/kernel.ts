@@ -52,6 +52,7 @@ import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js'
 import { ExecError } from '../exec.js';
 import { ComputerError } from '../computer/index.js';
 import { getConfig } from '../config.js';
+import { redactVaultValues } from '../marks-vault-redaction.js';
 import { noteToolCall, toolOutcome } from '../diagnostics-facts.js';
 import {
   AgentError,
@@ -372,7 +373,7 @@ export async function guard(name: string, fn: () => Promise<ToolResult>): Promis
   // the question this answers is whether the model may call us at all.
   toolCallSeenAt = started;
   try {
-    const result = await fn();
+    const result = redactVaultValues(await fn());
     const elapsed = Date.now() - started;
     if (result.isError) {
       const summary = result.content

@@ -25,6 +25,16 @@ export function decideVaultApproval(id: string, choice: 'once' | 'session' | 'de
   entry.resolve(choice !== 'deny');
   return true;
 }
+/** A deleted or retired chat cannot retain its approval in this running process. */
+export function revokeVaultChat(chat: string): void {
+  for (const grant of sessionGrants) if (grant.startsWith(`${chat}\u0000`)) sessionGrants.delete(grant);
+  for (const request of [...waiting.values()]) {
+    if (request.chat !== chat) continue;
+    waiting.delete(request.id);
+    clearTimeout(request.timeout);
+    request.resolve(false);
+  }
+}
 export function resetVaultApprovals(): void {
   for (const request of waiting.values()) { clearTimeout(request.timeout); request.resolve(false); }
   waiting.clear(); sessionGrants.clear();

@@ -7,7 +7,9 @@ import {
   removeVault, recoverVault, changeVaultPassword, exportVault, importVault, importEntries
 } from '../src/main/marks-vault.js';
 import { parseGpgVault } from '../src/main/marks-vault-gpg.js';
-import { decideVaultApproval, requestVaultApproval, resetVaultApprovals, vaultApprovals } from '../src/main/marks-vault-approval.js';
+import { redactVaultText, replaceVaultRedactionEntries, redactVaultValues } from '../src/main/marks-vault-redaction.js';
+import { redactCredentialText } from '../src/main/redaction.js';
+import { decideVaultApproval, requestVaultApproval, resetVaultApprovals, revokeVaultChat, vaultApprovals } from '../src/main/marks-vault-approval.js';
 let directory: string, stored: string | null, file: string;
 const master = 'an example strong master passphrase';
 const example = { name: 'service/token', value: 'secret-value-is-never-public', origin: 'https://service.example', header: 'Authorization' };
@@ -16,7 +18,7 @@ beforeEach(async () => {
   stored = null; file = path.join(directory, 'vault.json');
   configureVaultForTests(file, { getKey: async () => stored, setKey: async value => { stored = value; } });
 });
-afterEach(async () => { resetVaultApprovals(); await rm(directory, { recursive: true, force: true }); });
+afterEach(async () => { replaceVaultRedactionEntries([]); resetVaultApprovals(); await rm(directory, { recursive: true, force: true }); });
 it('seals portable ciphertext, requires the master for admin, and uses the OS key daily', async () => {
   expect(await vaultStatus()).toEqual({ created: false, count: 0, ready: false });
   await createVault(master);
@@ -29,6 +31,9 @@ it('seals portable ciphertext, requires the master for admin, and uses the OS ke
   expect(ciphertext).not.toContain(example.name);
   expect(ciphertext).not.toContain(master);
   expect(await listVault()).toEqual([{ name: example.name, origin: example.origin, header: example.header }]);
+  expect(redactVaultText(`print:${example.value}`)).toBe('print:[secret:service/token]');
+  expect(redactCredentialText(`output: ${example.value}`)).toBe('output: [secret:service/token]');
+  expect(redactVaultValues({ content: [{ type: 'text', text: example.value }] })).toEqual({ content: [{ type: 'text', text: '[secret:service/token]' }] });
   expect(await useVault(example.name, async entry => entry.value)).toBe(example.value);
   await expect(revealVault(example.name, 'invalid master password')).rejects.toThrow();
   expect(await revealVault(example.name, master)).toBe(example.value);
@@ -73,7 +78,11 @@ it('requires a live human decision and scopes session grants to the chat plus na
   expect(vaultApprovals()).toHaveLength(1);
   expect(decideVaultApproval(vaultApprovals()[0]!.id, 'deny')).toBe(true);
   expect(await different).toBe(false);
+  revokeVaultChat('chat-1');
+  const afterDeletion = requestVaultApproval('chat-1', 'token', 'GET /');
+  expect(vaultApprovals()).toHaveLength(1);
   resetVaultApprovals();
+  expect(await afterDeletion).toBe(false);
   const again = requestVaultApproval('chat-1', 'token', 'GET /');
   expect(vaultApprovals()).toHaveLength(1);
   resetVaultApprovals(); expect(await again).toBe(false);

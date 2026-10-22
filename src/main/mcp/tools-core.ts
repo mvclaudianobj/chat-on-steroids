@@ -289,6 +289,11 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
     if (!caller.conversationId || !caller.sessionId) return failIdentity('Verified chat identity is required for vault authorization');
     if (!/^\/[a-zA-Z0-9/_~.-]{0,299}$/.test(requestPath) || requestPath.includes('..')) return fail('Invalid safe endpoint path');
     if (!await requestVaultApproval(caller.conversationId, name, `${method} on saved origin${requestPath}`)) return fail('Vault request not approved or timed out');
+    // Human approval may take two minutes. Neither permission nor ownership survives
+    // automatically while the card is open: deletion/rebind and revocation must win.
+    if (!caps.command) return fail('Vault use was revoked before approval completed');
+    const currentSession = await findSessionByConversation(caller.conversationId);
+    if (!currentSession || currentSession.id !== caller.sessionId) return failIdentity('This chat no longer owns the approved vault operation');
     try {
       const status = await useVault(name, async entry => {
         if (!entry.origin) throw new Error('Secret has no approved HTTPS origin');
