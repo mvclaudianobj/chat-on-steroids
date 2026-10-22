@@ -2084,7 +2084,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // checkpoints and automatic continuations already have their instructions.
       // An edit of a chat's first question (#365) replaces the message that carried its setup.
       return ((entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish') || entry.editFramed
-        ? prepareSessionPrompt(text, entry, limits, authored)
+        ? prepareSessionPrompt(text, { ...entry, brainContext: true }, limits, authored)
         : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits, entry) : text;
     },
     applyAutomation: async (conversationId, automation, phase, objective, loopAfterTurn) => {

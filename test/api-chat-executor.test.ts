@@ -119,6 +119,26 @@ describe('API chat executor', () => {
     expect(await readDurable(executor.API_CHAT_SESSIONS_STATE)).toEqual({ [chat.sessionId]: { model: 'claude-opus-5-5', effort: 'medium' } });
   });
 
+  it('adds Brain context to the system message each turn only while auto-inject is on (H1c)', async () => {
+    const brain = await import('../src/main/brain/store.js');
+    const brainSettings = await import('../src/main/brain/settings.js');
+    const { default: nodePath } = await import('node:path');
+    brain.configureBrainForTests(nodePath.join(directory, `brain-${randomUUID()}.sqlite`));
+    await brain.brainSave({ content: 'The billing service is written in Go', title: 'billing' });
+    const chat = await executor.createApiChat();
+    const fetchImpl = vi.fn(async () => sse([delta('ok')]));
+    try {
+      await (await executor.sendApiChat(chat.sessionId, 'tell me about billing', fetchImpl as unknown as typeof fetch)).done;
+      expect(bodyOf(fetchImpl, 0).messages[0]!.content).not.toContain('<memory-context>');
+      await brainSettings.setBrainSettings({ autoInject: true });
+      await (await executor.sendApiChat(chat.sessionId, 'and billing again', fetchImpl as unknown as typeof fetch)).done;
+      const system = bodyOf(fetchImpl, 1).messages[0]!;
+      expect(system.role).toBe('system');
+      expect(system.content).toContain('<memory-context>');
+      expect(system.content).toContain('billing: The billing service is written in Go');
+    } finally { await brainSettings.setBrainSettings({ autoInject: false }); }
+  });
+
   it('sends prior turns as context and uses a model switched for this chat', async () => {
     const chat = await executor.createApiChat();
     const fetchImpl = vi.fn(async () => sse([delta('first answer')]));

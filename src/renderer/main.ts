@@ -68,6 +68,7 @@ import { paintSharedTunnel } from './tunnel-warning.js';
 import { initMarksModulesUi } from './marks-modules-ui.js';
 import { initMarksVaultUi } from './marks-vault.js';
 import { initBrainUi } from './brain-ui.js';
+import { mountBrainImport } from './brain-import-ui.js';
 
 declare global {
   interface Window {
@@ -91,6 +92,8 @@ initLayoutPreviews();
 initMarksVaultUi(api);
 // Chat Marks: the local Brain page shares the Settings navigation and app IPC.
 const brainUi = initBrainUi(api);
+// Chat Marks H2: old-history search and confirmed imports on the Brain page.
+const brainImportUi = mountBrainImport(api, { showTab: name => showTab(name), selectChat: selectChatSession });
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
 ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
 ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));
@@ -253,7 +256,7 @@ function placePermissions(tab: string): void {
 
 function showTab(name: string): void {
   name = marksModulesUi.normalizeTab(name);
-  if (name === 'brain') void brainUi.refresh();
+  if (name === 'brain') { void brainUi.refresh(); void brainImportUi.refresh(); }
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   // Chat Marks: ZeroClaw's page is a main view beside them, opened from the sidebar.

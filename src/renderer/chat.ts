@@ -1210,6 +1210,11 @@ async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'aft
     openBrainRecall(api, input, rest.trim());
     return;
   }
+  if (name === 'remember' && rest.trim()) {
+    // Chat Marks: a typed `/remember <text>` saves that text and clears it, so it is not sent too.
+    void rememberBrainSelection(api, input, { clearOnSave: true });
+    return;
+  }
   // The menu's Plan is a toggle; a typed /plan only arms, so an armed Plan stays armed.
   if (name === 'image') {
     // The rest is the picture request; a bare /image waits for one.

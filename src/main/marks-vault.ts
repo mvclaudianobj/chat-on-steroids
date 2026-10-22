@@ -19,7 +19,11 @@ const VERSION = 1;
 const KDF = { N: 32768, r: 8, p: 1, maxmem: 64 * 1024 * 1024 };
 const PREFIX = 'Chat Marks vault v1:';
 
-export interface VaultEntry { name: string; value: string; origin: string; header: string }
+/**
+ * `insecureHttp` (Chat Marks H1b) is the only way an entry may name a plain `http:` origin. It is an
+ * explicit administrator acknowledgement; model-facing `vault_use` still refuses such entries.
+ */
+export interface VaultEntry { name: string; value: string; origin: string; header: string; insecureHttp?: boolean }
 export type VaultItem = Omit<VaultEntry, 'value'>;
 interface Sealed { iv: string; tag: string; data: string }
 interface VaultFile { format: 'chat-marks-vault'; version: 1; id: string; salt: string; wrapped: Sealed; records: Sealed }
@@ -73,11 +77,14 @@ function validateEntry(candidate: unknown): VaultEntry {
   if (entry.origin) {
     let url: URL;
     try { url = new URL(entry.origin); } catch { throw new Error('Invalid secret origin'); }
-    if (url.protocol !== 'https:' || url.username || url.password || url.pathname !== '/' || url.search || url.hash || url.origin !== entry.origin) {
-      throw new Error('Secret origin must be exact HTTPS');
+    const plainAllowed = url.protocol === 'http:' && entry.insecureHttp === true;
+    if (entry.insecureHttp !== undefined && typeof entry.insecureHttp !== 'boolean') throw new Error('Invalid vault entry');
+    if ((url.protocol !== 'https:' && !plainAllowed) || url.username || url.password || url.pathname !== '/' || url.search || url.hash || url.origin !== entry.origin) {
+      throw new Error('Secret origin must be exact HTTPS (or HTTP with an explicit insecure acknowledgement)');
     }
   }
-  return { name: entry.name, value: entry.value, origin: entry.origin, header: entry.header };
+  const insecure = entry.insecureHttp === true && entry.origin.startsWith('http:');
+  return { name: entry.name, value: entry.value, origin: entry.origin, header: entry.header, ...(insecure ? { insecureHttp: true } : {}) };
 }
 function catalogFrom(value: Buffer): VaultCatalog {
   const parsed: unknown = JSON.parse(value.toString('utf8'));
@@ -185,7 +192,7 @@ export async function recoverVault(password: string): Promise<void> { return ser
   await withCatalog(password, async (file, key) => deps.setKey(JSON.stringify({ id: file.id, key: key.toString('hex') })));
 }); }
 export async function listVault(): Promise<VaultItem[]> { return serialize(() =>
-  withCatalog(undefined, async (_file, _key, data) => data.entries.map(({ name, origin, header }) => ({ name, origin, header })))); }
+  withCatalog(undefined, async (_file, _key, data) => data.entries.map(({ name, origin, header, insecureHttp }) => ({ name, origin, header, ...(insecureHttp ? { insecureHttp } : {}) })))); }
 export async function putVault(entry: VaultEntry, password: string): Promise<void> { return serialize(async () => {
   const valid = validateEntry(entry);
   await withCatalog(password, async (file, key, data) => {

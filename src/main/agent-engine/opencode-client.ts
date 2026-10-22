@@ -118,7 +118,7 @@ export class OpenCodeClient {
   }
 
   /** One JSON request; an error names the method, path and status, never the credentials. */
-  async request<T>(method: 'GET' | 'POST' | 'PATCH', path: string, options: { body?: unknown; query?: Record<string, string | undefined>; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<T> {
+  async request<T>(method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE', path: string, options: { body?: unknown; query?: Record<string, string | undefined>; timeoutMs?: number; signal?: AbortSignal } = {}): Promise<T> {
     const timeout = AbortSignal.timeout(options.timeoutMs ?? this.timeoutMs);
     const signal = options.signal ? AbortSignal.any([options.signal, timeout]) : timeout;
     let response: Response;
@@ -212,6 +212,19 @@ export class OpenCodeClient {
   async reply(sessionId: string, requestId: string, decision: 'once' | 'reject', message?: string): Promise<void> {
     await this.request('POST', `/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(requestId)}/reply`,
       { body: { decision, ...(message ? { message } : {}) } });
+  }
+
+  /**
+   * Chat Marks (Brain H1c): `PUT /api/experimental/mcp/:server` `{ config }` (`mcp.add`). Live on
+   * 2.1.2 it adds the server at runtime for that location only and writes no config file.
+   */
+  async addMcp(name: string, directory: string, config: Record<string, unknown>): Promise<void> {
+    await this.request('PUT', `/api/experimental/mcp/${encodeURIComponent(name)}`, { query: { 'location[directory]': directory }, body: { config }, timeoutMs: 5_000 });
+  }
+
+  /** Chat Marks: `DELETE /api/experimental/mcp/:server` (`mcp.remove`). */
+  async removeMcp(name: string, directory: string): Promise<void> {
+    await this.request('DELETE', `/api/experimental/mcp/${encodeURIComponent(name)}`, { query: { 'location[directory]': directory }, timeoutMs: 3_000 });
   }
 
   /** `POST /api/session/:id/prompt` `{ text }` (`session.prompt`): `{ data: Session.Inbox.User }` whose `id` is the user message. */

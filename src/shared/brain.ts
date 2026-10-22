@@ -29,6 +29,68 @@ export const brainMemorySchema = brainSaveSchema.extend({
 });
 export type BrainMemory = z.infer<typeof brainMemorySchema>;
 
+/** Chat Marks H1b: optional remote recall providers, all off by default. */
+export const BRAIN_PROVIDER_IDS = ['aiMemory', 'openviking', 'marksApi'] as const;
+export type BrainProviderId = typeof BRAIN_PROVIDER_IDS[number];
+const timeoutMs = z.number().int().min(1000).max(30000).default(8000);
+export const brainAiMemorySchema = z.object({
+  enabled: z.boolean().default(false),
+  url: z.string().url().max(300).default('https://memory.marks.ia.br/mcp'),
+  secret: z.string().max(80).default('brain.ai-memory'),
+  project: z.string().max(200).default(''),
+  timeoutMs
+}).strict();
+export const brainOpenVikingSchema = z.object({
+  enabled: z.boolean().default(false),
+  url: z.string().url().max(300).default('http://127.0.0.1:1933'),
+  secret: z.string().max(80).default('brain.openviking'),
+  targetUri: z.string().max(300).default('viking://~/memories'),
+  timeoutMs
+}).strict();
+export const brainMarksApiSchema = z.object({
+  enabled: z.boolean().default(false),
+  url: z.string().url().max(300).default('http://api.marks.ia.br:8689'),
+  /** The Marks memory API is plain HTTP today; credentials cross the network only after this acknowledgement. */
+  insecureHttp: z.boolean().default(false),
+  auth: z.enum(['apiKey', 'markspanel', 'both']).default('apiKey'),
+  secret: z.string().max(80).default('brain.marks-memories'),
+  userId: z.string().max(200).default(''),
+  orgId: z.string().max(200).default(''),
+  customerId: z.string().max(200).default(''),
+  timeoutMs
+}).strict();
+export const brainProvidersSchema = z.object({
+  aiMemory: brainAiMemorySchema.prefault({}),
+  openviking: brainOpenVikingSchema.prefault({}),
+  marksApi: brainMarksApiSchema.prefault({})
+}).strict();
+export type BrainProviders = z.infer<typeof brainProvidersSchema>;
+export interface BrainProviderStatus {
+  id: BrainProviderId | 'local';
+  label: string;
+  enabled: boolean;
+  /** ok | disabled | stopped | needs-key | insecure | unauthorized | error */
+  state: 'ok' | 'disabled' | 'stopped' | 'needs-key' | 'insecure' | 'unauthorized' | 'error';
+  detail?: string;
+  count?: number;
+  hasKey?: boolean;
+  url?: string;
+}
+/** One recalled memory, labelled with the source that returned it. */
+export interface BrainRecallItem {
+  source: BrainProviderId | 'local';
+  id: string;
+  content: string;
+  title?: string;
+  score?: number;
+  contentHash: string;
+}
+export interface BrainRecallResult {
+  items: BrainRecallItem[];
+  errors: Array<{ source: BrainProviderId; error: string }>;
+  remote: boolean;
+}
+
 export const brainSettingsSchema = z.object({
   chatgptTools: z.boolean().default(false),
   apiChatTools: z.boolean().default(false),
@@ -37,6 +99,7 @@ export const brainSettingsSchema = z.object({
   remoteRecall: z.boolean().default(false),
   remoteSync: z.boolean().default(false),
   enginesEnabled: z.boolean().default(false),
-  historySearch: z.boolean().default(false)
+  historySearch: z.boolean().default(false),
+  providers: brainProvidersSchema.prefault({})
 }).strict();
 export type BrainSettings = z.infer<typeof brainSettingsSchema>;

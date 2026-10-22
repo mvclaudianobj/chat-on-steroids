@@ -300,6 +300,8 @@ export function registerCoreTools(reg: SurfaceRegistrar, brainAudience: 'core' |
     try {
       const status = await useVault(name, async entry => {
         if (!entry.origin) throw new Error('Secret has no approved HTTPS origin');
+        // Chat Marks H1b: an insecure-HTTP entry exists for Brain providers only, never for models.
+        if (entry.insecureHttp || !entry.origin.startsWith('https:')) throw new Error('Secret is not bound to an HTTPS origin');
         const target = new URL(requestPath, entry.origin);
         if (target.origin !== entry.origin) throw new Error('Origin mismatch');
         const controller = new AbortController();

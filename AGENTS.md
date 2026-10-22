@@ -2846,7 +2846,8 @@ Continuous recording serves the local transcript, exact identity and continuatio
 There is no model-facing session lookup tool. `update_plan` remains recording-backed; historical
 lookup tool calls remain displayable in existing transcripts. Chat Marks Brain (H1a) is a
 separate, user-curated local memory store: it does not read the session archive or expose a
-general session-history lookup.
+general session-history lookup. H2 searches staged copies of old MarksCode/OpenCode/MarksClaw
+history for the user only; no model tool reads it.
 
 ### Chat Marks Brain (H1a)
 
@@ -2869,8 +2870,107 @@ explicit `/remember` command are user-authored saves; `/recall` inserts a bounde
 Zod-validated action list guarded to the main window/frame. Its preload is not a generic
 filesystem bridge. Keep the few Core/API registration hooks marked `Chat Marks:`.
 
-H1a has no remote Marks API, OpenViking, engine MCP, automatic prompt injection or
-MarksCode/MarksClaw archive import. Those are later separately approved H phases.
+### Chat Marks Brain (H1b sources)
+
+`src/main/brain/recall.ts` owns combined recall and remote sync; `providers/` holds one module
+per optional source: `ai-memory.ts` (remote MCP, minimal streamable-HTTP JSON-RPC client:
+initialize, tools/list, then `memory_query` / `memory_write_page`), `openviking.ts`
+(`/api/v1/system/status`, `/api/v1/search/find`) and `marks-remote.ts` (`/health`,
+`/memories/human/recall`, `/memories/human`, `/memories/{id}/delete`). Every provider is Off by
+default in `settings.providers`, has its own timeout and error, and is reported in Doctor/Sources.
+Nothing leaves the machine unless a provider is enabled *and* `remoteRecall` (query text) or
+`remoteSync` (saved memories) is on; queries and synced content are redacted first and imported
+memories never sync. Results are merged round-robin, de-duplicated by remote id/content hash,
+budgeted and labelled with their source in `/recall` and `memory_search`.
+
+Credentials come only from K vault entries bound to the provider's exact origin
+(`brain.ai-memory`, `brain.openviking`, `brain.marks-memories`); a missing key sends nothing.
+"Import from MarksCode" copies the one needed value (ai-memory Authorization header, Marks
+`memories_api_key`) into the vault after the user clicks and enters the master password; no value
+reaches the renderer or logs. Plain HTTP is allowed only on loopback or, for the Marks API, behind
+its explicit `insecureHttp` acknowledgement; the vault accepts an `http:` origin only with an
+entry-level `insecureHttp` flag, and model-facing `vault_use` refuses such entries. Markspanel
+bearer auth uses the main-only `markspanelBrainSession()`. Brain logs one `brain: …` line per save,
+recall, held approval and provider error, never content. Settings patches merge only sent keys
+(Zod 4 `partial()` fills defaults). ai-memory is a Brain provider, not a Plugins catalog entry:
+the curated catalog requires OAuth remotes and reviewed license inventory.
+
+H1b has no engine MCP, automatic prompt injection or MarksCode/MarksClaw archive import. Those
+are separate H phases.
+H1a has no remote Marks API, OpenViking or MarksCode/MarksClaw archive import. Those are
+later separately approved H phases.
+
+### Chat Marks Brain for agent engines (H1c)
+
+`src/main/brain/engine-mcp.ts` owns a local-only MCP route `http://127.0.0.1:<port>/mcp/brain/<secret>`
+exposing only `memory_search` and `memory_save`, Off unless `enginesEnabled`. It is its own lazily
+started loopback listener, not a path on the connector listener: that one runs only while
+ChatGPT is connected, moves port on reconnect and its origin may be published by a user's tunnel.
+Nothing hands this URL to a tunnel; the route answers 404 off its secret path, refuses a non-loopback
+Host, any Origin and forwarding headers, and needs `Authorization: Bearer <token>` (401 otherwise).
+Claude Code (one process per chat) gets a per-chat token in a 0600 `--mcp-config` file under
+`userData/brain/engine-mcp/` (0700, emptied at startup and quit) plus `--allowedTools` for the two
+tools; never `--strict-mcp-config`, so the user's own MCP servers keep loading. A changed switch
+restarts an idle host. Codex (one shared app-server) gets `-c mcp_servers.chat_marks_brain.url=…`,
+`.bearer_token_env_var="CHAT_MARKS_BRAIN_TOKEN"` and `.default_tools_approval_mode="approve"` after
+the safe overrides, the token only in the server's environment, rotated per app-server launch; a
+switch change applies at the next app-server start. OpenCode 2.1.x gets the server at runtime per
+chat location through `PUT /api/experimental/mcp/chat-marks-brain` (live on 2.1.2: no config file
+is written, a service restart forgets it), removed on quit or when the switch is off; TUI sessions
+in that location see it too. Codex and OpenCode tokens name only the engine: a save is attributed
+to the one chat whose own turn reported the same Brain call with the same arguments (`mcpToolCall`
+item, `session.tool.called`); unmatched or ambiguous saves are refused. Saves take the H1a approval,
+then re-check the chat and switch before writing with `{source:'chat', sessionId, engine}`.
+Windows/WSL engines are not wired (another loopback). Engine rows show `mcp:chat-marks-brain/<tool>`
+whichever engine spelled it (`brain/engine-names.ts`, `tool-row.ts`).
+
+`src/main/brain/context.ts` is optional automatic context (`autoInject`, Off): a `<memory-context>`
+block framed as data, at most 3,000 characters, local memories only. API chats add it to the system
+message each turn; ChatGPT gets it only in the opening message's COS_CONTEXT (`brainContext` scope
+in `prepareSessionPrompt`), so it counts against the 96k ceiling, is frozen in `deliveryText` and is
+dropped rather than failing when it does not fit. Follow-ups, workers and engines get none.
+H1a has no remote Marks API, OpenViking, engine MCP or automatic prompt injection.
+Those are later separately approved H phases.
+
+### Chat Marks Brain H2: old-history search and selective import
+
+`src/main/brain/import/` (actions `import.*`, `history.*`, `archive.*` of `marksBrain:request`,
+list in `shared/brain-import-actions.ts`; push `marksBrain:progress`, preload `onBrainProgress`;
+UI `renderer/brain-import-ui.ts`, mounted once from `main.ts` into `#brainImport`) imports
+MarksCode/OpenCode/MarksClaw history SELECTIVELY. Nothing is imported in bulk; every write
+carries `confirmed: true` from the user's click and is refused without it.
+- Originals are never opened by the app. All reads go through staged copies in
+  `~/.local/state/chat-marks/brain-import/staging/<uuid>/` (0700, `manifest.json` with each
+  source's sha256/size/mtime before and after; `unchanged` false = it moved during the copy).
+- Root sources (`sources.ts` `ADMIN_SOURCES`: root `markscode.db`, `opencode.db`,
+  `markscode-11510/-143/-1227_7.db`, `memory/*.jsonl`, legacy `storage/{session,message,part,project}`)
+  are copied by ONE `pkexec /bin/sh -c ADMIN_EXPORT_SCRIPT chat-marks-brain-export <uuid>`
+  (`admin-export.ts`, CLIProxy precedent). The constant script has no single quote (the same
+  text is offered for `sudo /bin/sh -c '…'`), takes the owner from `PKEXEC_UID`/`SUDO_UID`
+  (never 0), checks free space (2x the source sizes), opens originals only with
+  `sqlite3 -readonly` / `mode=ro&immutable=1` (a non-empty WAL: db+wal+shm are copied first and
+  only the copy is opened), creates only `session_v2`, `session_message`, `project` and v1
+  `session/message/part` for ids missing from v2 (`filteredCopyStatements` is the Node twin),
+  never `credential`/`account`/`kv`/`auth.json`, then `chown -R` to the requester.
+  `user-export.ts` does the same in-process for sources the user can read (`opencode.db` of the
+  running 2.0.25 service, MarksClaw `sessions.db` whose data is only in the WAL): db+wal+shm copied
+  together (3 tries while hashes move), only the private copy opened.
+- `indexer.ts` `buildIndex` builds `<staging>/index.sqlite` (FTS5) in a `worker_threads` worker
+  (`worker.ts` runs its source text; keep it self-contained). Cursor `(time,id)` per source/pass
+  committed with each batch: cancel/quit resumes. Dedupe by `opencode:<ses_id>` across databases
+  (v2 > v1 > legacy JSON, then more messages, then newer); sub-agent sessions fold under the parent
+  in search and are listed as children in the viewer.
+- `search.ts`/`reader.ts`: AND-of-quoted-terms FTS over every staged index and the archive;
+  reading is bounded (64k chars/message, 2k/tool output, 5 MB and 5,000 messages/conversation) and
+  redacted (`redactSecretText` + vault values).
+- Imports: "Save as memory" = text the user wrote/selected, `brainSave` with provenance
+  `import`; "Keep in archive" = `<userData>/brain/archive.sqlite` (0600, FTS, separate from
+  `brain.sqlite`, 4 GB limit, idempotent by key); "Open as read-only chat" (`materialize.ts`) =
+  a `cosapi-` session with ledger engine `markscode` (retired, view-only), reusing an existing
+  chat with the same `backendSessionId`; hybrid memories: preview with checkboxes, only selected
+  items saved, dedupe by content hash and (file, source_id). "Delete copy" removes only a staged
+  folder. Proof: `test/brain-import.test.ts` (synthetic v1/v2/mixed, credential tables, WAL-only
+  MarksClaw, legacy JSON, hybrid JSONL; originals hashed before/after).
 
 Desktop session lists use stable `(updatedAt,id)` pagination. Each session selection loads a
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;

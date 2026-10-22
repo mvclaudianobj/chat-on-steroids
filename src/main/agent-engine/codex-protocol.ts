@@ -39,12 +39,13 @@ export const CODEX_SAFE_OVERRIDES = [
 /**
  * `routeOverrides` (router.ts `codexRouteOverrides`): the direct route's `-c` values when a Claude
  * Code Router is detected (`model_provider="openai"`, Codex's own model catalog), else none.
+ * `extra`: Chat Marks' own `-c` pairs (the Brain MCP server, H1c), after the safe overrides.
  */
-export function codexServerArgv(socket: string, routeOverrides: readonly string[] = []): string[] {
+export function codexServerArgv(socket: string, routeOverrides: readonly string[] = [], extra: readonly string[] = []): string[] {
   for (const value of routeOverrides) {
     if (!/^(model_provider="openai"|model_catalog_json="[^"\u0000-\u001f]{1,1000}")$/.test(value)) throw new Error('Invalid Codex route override');
   }
-  return ['app-server', ...[...CODEX_SAFE_OVERRIDES, ...routeOverrides].flatMap(value => ['-c', value]), '--listen', `unix://${socket}`];
+  return ['app-server', ...[...CODEX_SAFE_OVERRIDES, ...routeOverrides].flatMap(value => ['-c', value]), ...extra, '--listen', `unix://${socket}`];
 }
 
 /** Our own JSON-RPC client: `proxy` carries stdio lines to the server's control socket. */

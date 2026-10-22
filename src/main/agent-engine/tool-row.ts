@@ -17,6 +17,7 @@ import type { AgentEngineId } from '../../shared/agent-engine.js';
 import type { ActivitySummary, FileChange, NewSessionEvent, StoredText, ToolCallRecord, ToolOutcome } from '../../shared/session.js';
 import { canonicalJson } from './approval.js';
 import type { EngineFileChange, EngineToolKind } from './types.js';
+import { BRAIN_MCP_SERVER, brainToolOf } from '../brain/engine-names.js';
 
 export const MAX_ENGINE_TOOL_ARGS_CHARS = 8_000;
 export const MAX_ENGINE_TOOL_RESULT_CHARS = 8_000;
@@ -43,6 +44,9 @@ export interface EngineToolActivity {
 
 /** The tool names the renderer already knows for each kind; MCP and other tools keep the engine's name. */
 export function engineToolName(kind: EngineToolKind, name: string): string {
+  // Chat Marks: the Brain's tools under one name whichever engine spelled them (H1c).
+  const brain = brainToolOf(name);
+  if (brain) return `mcp:${BRAIN_MCP_SERVER}/${brain}`;
   if (kind === 'command') return 'exec_command';
   if (kind === 'patch') return 'apply_patch';
   if (kind === 'read') return 'read';
@@ -106,6 +110,12 @@ export function engineToolSummary(activity: EngineToolActivity): ActivitySummary
     summary = { kind, title: `${verb} ${clip(named, 120)}`, tone: 'neutral', ...(files.some(file => file.diff) ? { metric: `+${counts.added} −${counts.removed}` } : {}) };
   } else if (activity.kind === 'read') {
     summary = { kind: 'read', title: `Read ${clip(baseName(activity.path ?? activity.name), 120)}`, tone: 'neutral' };
+  } else if (brainToolOf(activity.name)) {
+    // Chat Marks: "Searched memories for …" / "Saved a memory" instead of a raw MCP name.
+    const input = activity.input && typeof activity.input === 'object' ? activity.input as Record<string, unknown> : {};
+    summary = brainToolOf(activity.name) === 'memory_search'
+      ? { kind: 'search', title: `Searched memories${typeof input.query === 'string' ? ` for “${clip(input.query.replace(/\s+/g, ' ').trim(), 80)}”` : ''}`, tone: 'neutral' }
+      : { kind: 'other', title: `Saved a memory${typeof input.title === 'string' && input.title.trim() ? `: ${clip(input.title.trim(), 80)}` : ''}`, tone: 'neutral' };
   } else if (activity.kind === 'mcp') {
     summary = { kind: 'other', title: `Called ${clip(activity.name, 120)}`, tone: 'neutral' };
   } else {

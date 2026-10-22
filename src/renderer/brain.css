@@ -48,3 +48,42 @@
 .brain-recall-results label > span { min-width: 0; white-space: pre-wrap; }
 .brain-recall-actions { display: flex; justify-content: end; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 640px) { .brain-fields { grid-template-columns: 1fr; } .brain-panel .settings-section-head { align-items: flex-start; flex-wrap: wrap; } }
+/* Chat Marks H1b: approvals first, refresh warning, providers. */
+.brain-warning { margin: 0 0 14px; padding: 10px 14px; border-radius: 8px; border: 1px solid var(--warn, #c98a2b); color: var(--fg, inherit); background: color-mix(in srgb, var(--warn, #c98a2b) 12%, transparent); }
+.brain-approvals.has-pending .settings-surface { border: 1px solid var(--accent); }
+.brain-approvals.has-pending h2::after { content: ' •'; color: var(--accent); }
+.brain-providers { display: grid; gap: 14px; padding: 16px 20px; }
+.brain-provider { display: grid; gap: 8px; padding-bottom: 14px; border-bottom: 1px solid var(--line, rgba(127,127,127,.2)); }
+.brain-provider:last-child { border-bottom: 0; padding-bottom: 0; }
+.brain-provider-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.brain-provider-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.brain-provider-row input[type="text"], .brain-provider-row input[type="url"], .brain-provider-row input[type="password"] { flex: 1 1 220px; min-width: 0; }
+.brain-provider-state { color: var(--soft); font-size: .92em; }
+.brain-provider-state[data-state="ok"] { color: var(--ok, #3c9a5f); }
+.brain-provider-state[data-state="error"], .brain-provider-state[data-state="unauthorized"], .brain-provider-state[data-state="insecure"] { color: var(--danger, #c94b4b); }
+.brain-recall-source { display: inline-block; margin-right: 6px; padding: 0 6px; border-radius: 6px; font-size: .85em; background: color-mix(in srgb, var(--accent) 16%, transparent); }
+.brain-recall-hint { color: var(--soft); margin: 4px 0 0; }
+/* Chat Marks H2: old-history copies, search and read-only viewer. */
+.brain-import { display: grid; gap: 0; }
+.brain-import-copy { padding: 16px 18px; margin: 0; border-bottom: 1px solid var(--line); }
+.brain-import-copies { display: grid; }
+.brain-import-copies > p { padding: 12px 18px; margin: 0; color: var(--soft); }
+.brain-import-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.brain-import-row > span { display: grid; gap: 4px; flex: 1 1 260px; min-width: 0; }
+.brain-import-row small { color: var(--soft); font-size: 12px; overflow-wrap: anywhere; }
+.brain-import-row .brain-actions { margin: 0; }
+.brain-import-warning { color: var(--red); }
+.brain-import-progress:empty, .brain-import-summary:empty { display: none; }
+.brain-import-progress, .brain-import-summary { margin: 0; padding: 10px 18px; color: var(--soft); }
+.brain-history-results { max-height: 460px; }
+.brain-history-results mark { background: var(--accent-wash); color: inherit; border-radius: 3px; }
+.brain-import-dialog { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 48px); border: 1px solid var(--line); border-radius: var(--r-md, 12px); background: var(--bg, Canvas); color: var(--ink); padding: 18px; }
+.brain-import-dialog textarea, .brain-import-dialog input[type="text"] { width: 100%; }
+.brain-import-dialog .brain-recall-results { display: grid; gap: 8px; max-height: 55vh; overflow: auto; }
+.brain-import-dialog .brain-recall-results label { display: flex; gap: 10px; align-items: flex-start; overflow-wrap: anywhere; }
+.brain-history-viewer header p { color: var(--soft); margin-top: 4px; }
+.brain-history-transcript { display: grid; gap: 12px; max-height: 55vh; overflow: auto; margin: 12px 0; }
+.brain-history-message { padding: 10px 12px; border-radius: var(--r-sm); background: var(--hover); }
+.brain-history-message.user { background: var(--accent-wash); }
+.brain-history-message p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.brain-history-message small { display: block; color: var(--soft); font-size: 12px; overflow-wrap: anywhere; }

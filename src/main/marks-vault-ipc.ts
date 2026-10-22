@@ -23,7 +23,7 @@ export function registerVaultIpc(getWindow: () => BrowserWindow | null): void {
   register('create', async raw => createVault(password.parse(raw).password));
   register('recover', async raw => recoverVault(password.parse(raw).password));
   register('put', async raw => {
-    const data = password.extend({ name, value: z.string().min(1).max(16384), origin: z.string().max(300), header: z.string().min(1).max(80) }).strict().parse(raw);
+    const data = password.extend({ name, value: z.string().min(1).max(16384), origin: z.string().max(300), header: z.string().min(1).max(80), insecureHttp: z.boolean().optional() }).strict().parse(raw);
     return putVault(data, data.password);
   });
   register('remove', async raw => { const data = password.extend({ name }).strict().parse(raw); return removeVault(data.name, data.password); });

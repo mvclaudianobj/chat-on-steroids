@@ -261,6 +261,11 @@
         <section class="panel appearance-panel brain-panel scroll" data-panel="brain" aria-labelledby="brainTitle">
           <div class="appearance-content settings-page-content" id="brainSettings">
             <header class="settings-page-head"><h1 id="brainTitle"><i class="ico ph ph-brain" aria-hidden="true"></i>Brain</h1><p>Search and manage memories stored on this computer.</p></header>
+            <p id="brainRefreshWarning" class="brain-warning" role="alert" hidden></p>
+            <section class="appearance-section brain-approvals" id="brainApprovalsSection">
+              <header class="settings-section-head"><div><h2>Save approvals</h2><p>Review pending model requests before they become memories.</p></div><button class="btn" id="brainPendingRefresh" type="button">Refresh</button></header>
+              <div id="brainPending" class="settings-surface brain-output" role="region" aria-label="Pending memory saves"></div>
+            </section>
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>Memory status</h2><p>Your local memory is private and stays on this device.</p></div><button class="btn" id="brainRefresh" type="button">Refresh</button></header>
               <div class="settings-surface brain-overview"><p id="brainStatus" role="status">Checking local memory…</p><p id="brainCount"></p><p id="brainSize"></p></div>
@@ -270,7 +275,7 @@
               <div id="brainDoctor" class="settings-surface brain-output" role="status">Run diagnosis to check Brain.</div>
             </section>
             <section class="appearance-section">
-              <header class="settings-section-head"><div><h2>Sources</h2><p>H1a searches locally stored memories only.</p></div></header>
+              <header class="settings-section-head"><div><h2>Sources</h2><p>Local memories and the providers you enabled.</p></div></header>
               <div id="brainSources" class="settings-surface brain-output" role="status">Local database</div>
             </section>
             <section class="appearance-section">
@@ -292,17 +297,22 @@
                 </form>
               </div>
             </section>
+            <section class="appearance-section" id="brainImport"></section>
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>Brain options</h2><p>Model access and automatic context remain disabled until you enable them.</p></div></header>
               <div class="settings-surface pane appearance-settings-card" id="brainOptions">
                 <label class="setting"><span class="setting-text"><b>ChatGPT memory tools</b><em>Allow ChatGPT chats to search and request saving local memories.</em></span><input id="brainChatgptTools" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>API chat memory tools</b><em>Allow CLIProxy chats to use local memory tools.</em></span><input id="brainApiChatTools" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Ask before model saves</b><em>Review each memory requested by a model. Manual saves happen immediately.</em></span><input id="brainAskBeforeSave" type="checkbox" checked /></label>
+                <label class="setting"><span class="setting-text"><b>Remote recall</b><em>Send recall queries to the enabled providers and merge their results with local memories.</em></span><input id="brainRemoteRecall" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Remote sync</b><em>Also save new memories to the enabled ai-memory and Marks API providers.</em></span><input id="brainRemoteSync" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Agent engine memory tools</b><em>Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.</em></span><input id="brainEngineTools" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Automatic memory context</b><em>Add relevant local memories to API chat turns and to the opening ChatGPT message.</em></span><input id="brainAutoInject" type="checkbox" /></label>
               </div>
             </section>
             <section class="appearance-section">
-              <header class="settings-section-head"><div><h2>Save approvals</h2><p>Review pending model requests before they become memories.</p></div><button class="btn" id="brainPendingRefresh" type="button">Refresh</button></header>
-              <div id="brainPending" class="settings-surface brain-output" role="region" aria-label="Pending memory saves"></div>
+              <header class="settings-section-head"><div><h2>Memory providers</h2><p>Optional remote sources, off by default. Nothing leaves this computer until you enable a provider and remote recall or remote sync. Keys are kept in the vault.</p></div></header>
+              <div id="brainProviders" class="settings-surface brain-providers"></div>
             </section>
           </div>
         </section>
