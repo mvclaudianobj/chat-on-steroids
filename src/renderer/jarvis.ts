@@ -66,7 +66,14 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     if (!api.jarvisAudioStatus) return;
     void api.jarvisAudioStatus().then(result => {
       if (!result.ok) { capability.error = result.error; paint(); return; }
-      capability = result.data;
+      // A reply without data (an old main process, a mocked API) keeps the last known engines.
+      const data = result.data as Partial<typeof capability> | null | undefined;
+      capability = {
+        models: Array.isArray(data?.models) ? data.models.filter((name): name is string => typeof name === 'string') : [],
+        local: data?.local === true,
+        windows: data?.windows === true || recognitionAvailable,
+        error: typeof data?.error === 'string' ? data.error : null
+      };
       if (audioModel) {
         const selectedModel = preferences.audioModel;
         audioModel.replaceChildren(new Option(t('Detect automatically'), ''));
