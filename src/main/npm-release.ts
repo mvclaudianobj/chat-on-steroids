@@ -45,16 +45,40 @@ export function npmTarballUrl(name: string, version: string): string {
 }
 
 /**
+ * The registry answers some documents with 502s and stalls in bursts (seen 2026-10-22: the same
+ * `/@opencode%2fcli/latest` gave 200, 502 and a timeout within a minute). A network failure or a
+ * 5xx/429 is tried again after a pause; anything else is final at once.
+ */
+export const REGISTRY_ATTEMPTS = 3;
+let retryDelay = (attempt: number): number => attempt * 1500;
+/** Tests only: no pause between attempts. */
+export function setRegistryRetryDelayForTests(delay: ((attempt: number) => number) | null): void {
+  retryDelay = delay ?? (attempt => attempt * 1500);
+}
+const transient = (status: number): boolean => status === 429 || status >= 500;
+
+async function registryFetch(url: string, init: RequestInit & { timeoutMs: number }, fetchImpl: typeof fetch): Promise<Response | null> {
+  for (let attempt = 1; ; attempt++) {
+    let response: Response | null = null;
+    try {
+      response = await fetchImpl(url, { ...init, signal: AbortSignal.timeout(init.timeoutMs) });
+    } catch { response = null; }
+    if (response && !transient(response.status)) return response;
+    await response?.body?.cancel();
+    if (attempt >= REGISTRY_ATTEMPTS) return null;
+    await new Promise(resolve => setTimeout(resolve, retryDelay(attempt)));
+  }
+}
+
+/**
  * One version document (`tag` is `latest` or an exact x.y.z). Throws `release_unavailable` for
  * anything unexpected: another name, a non-x.y.z version, a missing or non-sha512 integrity.
  */
 export async function fetchNpmVersion(name: string, tag: string, fetchImpl: typeof fetch = fetch): Promise<NpmVersion> {
   if (!PACKAGE.test(name) || (tag !== 'latest' && !UPSTREAM_VERSION.test(tag))) throw new Error('release_unavailable');
   const url = `${NPM_REGISTRY}${documentPath(name)}/${tag}`;
-  let response: Response;
-  try {
-    response = await fetchImpl(url, { headers: { Accept: 'application/json', 'User-Agent': 'Chat-Marks' }, redirect: 'error', signal: AbortSignal.timeout(15_000) });
-  } catch { throw new Error('release_unavailable'); }
+  const response = await registryFetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'Chat-Marks' }, redirect: 'error', timeoutMs: 20_000 }, fetchImpl);
+  if (!response) throw new Error('release_unavailable');
   if (!response.ok) { await response.body?.cancel(); throw new Error('release_unavailable'); }
   let body: { name?: unknown; version?: unknown; dist?: { tarball?: unknown; integrity?: unknown }; optionalDependencies?: unknown };
   try { body = JSON.parse((await readBounded(response, METADATA_LIMIT)).toString('utf8')) as typeof body; }
@@ -83,10 +107,8 @@ export function verifyIntegrity(data: Buffer, integrity: string | null | undefin
 export async function downloadNpmTarball(meta: Pick<NpmVersion, 'name' | 'version' | 'tarball' | 'integrity'>, limit: number,
   fetchImpl: typeof fetch = fetch): Promise<Buffer> {
   if (meta.tarball !== npmTarballUrl(meta.name, meta.version) || !allowedRegistryUrl(meta.tarball)) throw new Error('download_failed');
-  let response: Response;
-  try {
-    response = await fetchImpl(meta.tarball, { redirect: 'error', headers: { 'User-Agent': 'Chat-Marks' }, signal: AbortSignal.timeout(600_000) });
-  } catch { throw new Error('download_failed'); }
+  const response = await registryFetch(meta.tarball, { redirect: 'error', headers: { 'User-Agent': 'Chat-Marks' }, timeoutMs: 600_000 }, fetchImpl);
+  if (!response) throw new Error('download_failed');
   if (!response.ok) { await response.body?.cancel(); throw new Error('download_failed'); }
   const data = await readBounded(response, limit);
   verifyIntegrity(data, meta.integrity);

@@ -140,13 +140,26 @@ export function githubSource(options: {
  * An npm package whose binaries are published as per-platform packages listed in its
  * `optionalDependencies` (OpenCode 2.x). `platformPackage` names the one for the host.
  */
-export function npmSource(options: { name: string; platformPackage(host: HostInfo): string | null }): ReleaseSource & { name: string } {
+export function npmSource(options: {
+  name: string;
+  platformPackage(host: HostInfo): string | null;
+  /**
+   * The upstream's own "latest version" answer, asked first because the registry's `latest`
+   * document stalls in bursts. It only names a version: what is installed still comes from the
+   * registry's exact version documents and is checked against their integrity.
+   */
+  latestHint?(fetchImpl?: typeof fetch): Promise<string | null>;
+}): ReleaseSource & { name: string } {
+  const latest = async (fetchImpl?: typeof fetch): Promise<string> => {
+    const hinted = await options.latestHint?.(fetchImpl).catch(() => null);
+    return hinted ?? (await fetchNpmVersion(options.name, 'latest', fetchImpl)).version;
+  };
   return {
     name: options.name,
-    latest: async fetchImpl => (await fetchNpmVersion(options.name, 'latest', fetchImpl)).version,
+    latest,
     async fetchArchive(expected, host, fetch) {
-      const main = await fetchNpmVersion(options.name, 'latest', fetch.fetchImpl);
-      if (main.version !== expected) throw new Error('version_changed');
+      if (await latest(fetch.fetchImpl) !== expected) throw new Error('version_changed');
+      const main = await fetchNpmVersion(options.name, expected, fetch.fetchImpl);
       const platform = options.platformPackage(host);
       // The main package must name exactly this platform package at exactly this version.
       if (!platform || main.optionalDependencies[platform] !== expected) throw new Error('unsupported_platform');

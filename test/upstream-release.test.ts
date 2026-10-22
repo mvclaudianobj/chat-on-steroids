@@ -8,8 +8,8 @@ import { allowedDownloadUrl, downloadReleaseAsset, fetchLatestRelease, isNewerVe
 import {
   checkListing, installUpstream, localRunner, parseHostProbe, parseVersion, probeEnvironment, type Runner
 } from '../src/main/upstream/install.js';
-import { OPENCODE_SPEC, opencodePlatformPackage, opencodeSupport } from '../src/main/opencode/release.js';
-import { allowedRegistryUrl, downloadNpmTarball, fetchNpmVersion, npmTarballUrl, verifyIntegrity } from '../src/main/npm-release.js';
+import { OPENCODE_SPEC, OPENCODE_UPDATE_URL, opencodeLatestHint, opencodePlatformPackage, opencodeSupport } from '../src/main/opencode/release.js';
+import { allowedRegistryUrl, downloadNpmTarball, fetchNpmVersion, npmTarballUrl, setRegistryRetryDelayForTests, verifyIntegrity } from '../src/main/npm-release.js';
 import { ZEROCLAW_SPEC, zeroclawAssetName } from '../src/main/zeroclaw/release.js';
 
 const ELF = Buffer.from([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1, 0]);
@@ -81,7 +81,7 @@ function npmFetch(options: { version: string; platform?: string; tarball: Buffer
     const url = String(input);
     calls.push(url);
     if (init?.redirect !== 'error') return new Response('redirects must be refused', { status: 500 });
-    if (url === 'https://registry.npmjs.org/@opencode%2fcli/latest') {
+    if (url === 'https://registry.npmjs.org/@opencode%2fcli/latest' || url === `https://registry.npmjs.org/@opencode%2fcli/${options.version}`) {
       return new Response(JSON.stringify({ name: '@opencode/cli', version: options.version, dist: { tarball: npmTarballUrl('@opencode/cli', options.version), integrity: sri(Buffer.from('main')) },
         optionalDependencies: options.optional ?? { [platform]: options.version, '@opencode/cli-darwin-arm64': options.version } }));
     }
@@ -93,7 +93,40 @@ function npmFetch(options: { version: string; platform?: string; tarball: Buffer
   }) as unknown as typeof fetch;
 }
 
+beforeEach(() => setRegistryRetryDelayForTests(() => 0));
+afterEach(() => setRegistryRetryDelayForTests(null));
+
 describe('upstream release helpers', () => {
+  it('tries the npm registry again after a 502 or a dropped request, and falls back to OpenCode\'s own latest answer (live 2026-10-22)', async () => {
+    const data = Buffer.from('tarball bytes');
+    const base = npmFetch({ version: '2.1.2', tarball: data });
+    let failures = 2;
+    const flaky = (async (input: string | URL, init?: RequestInit) => {
+      if (failures-- > 0) return failures === 1 ? new Response('bad gateway', { status: 502 }) : Promise.reject(new TypeError('fetch failed'));
+      return base(input, init);
+    }) as unknown as typeof fetch;
+    expect((await fetchNpmVersion('@opencode/cli', 'latest', flaky)).version).toBe('2.1.2');
+    // A 404 is final: no retry.
+    const calls: string[] = [];
+    await expect(fetchNpmVersion('@opencode/cli', '2.9.9', npmFetch({ version: '2.1.2', tarball: data }, calls))).rejects.toThrow('release_unavailable');
+    expect(calls).toHaveLength(1);
+
+    // OpenCode's update channel names the version first (the registry's latest document may be
+    // failing); the exact version documents with their integrity still come from the registry.
+    const channel = { channel: 'latest', name: 'cli', distribution: 'npm', version: '2.1.2', metadata: { package: '@opencode/cli' } };
+    const latestDown = (answer: unknown) => (async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url === 'https://registry.npmjs.org/@opencode%2fcli/latest') return new Response('bad gateway', { status: 502 });
+      if (url === OPENCODE_UPDATE_URL) return init?.redirect === 'error' ? new Response(JSON.stringify(answer)) : new Response('no', { status: 500 });
+      return base(input, init);
+    }) as unknown as typeof fetch;
+    expect(await OPENCODE_SPEC.source.latest(latestDown(channel))).toBe('2.1.2');
+    expect(await opencodeLatestHint(latestDown({ ...channel, metadata: { package: '@evil/cli' } }))).toBeNull();
+    expect(await opencodeLatestHint(latestDown({ ...channel, version: '0.0.0-dev-1' }))).toBeNull();
+    expect(await opencodeLatestHint(latestDown({ ...channel, distribution: 'github' }))).toBeNull();
+    await expect(OPENCODE_SPEC.source.latest(latestDown({ ...channel, metadata: { package: '@evil/cli' } }))).rejects.toThrow('release_unavailable');
+  });
+
   it('chooses the OpenCode 2.x npm platform package like upstream\'s install script (baseline without avx2, musl) and gates versions', () => {
     expect(opencodePlatformPackage({ arch: 'x64', avx2: true, musl: false })).toBe('@opencode/cli-linux-x64');
     expect(opencodePlatformPackage({ arch: 'x64', avx2: false, musl: false })).toBe('@opencode/cli-linux-x64-baseline');
@@ -230,7 +263,8 @@ describe.skipIf(!onLinux)('installing an upstream release into the module folder
     expect(done.phase).toBe('done');
     expect(phases).toEqual(['downloading', 'verifying', 'extracting', 'checking', 'installing', 'done']);
     expect(calls).toEqual([
-      'https://registry.npmjs.org/@opencode%2fcli/latest', 'https://registry.npmjs.org/@opencode%2fcli-linux-x64/2.1.2',
+      OPENCODE_UPDATE_URL, 'https://registry.npmjs.org/@opencode%2fcli/latest', 'https://registry.npmjs.org/@opencode%2fcli/2.1.2',
+      'https://registry.npmjs.org/@opencode%2fcli-linux-x64/2.1.2',
       'https://registry.npmjs.org/@opencode/cli-linux-x64/-/cli-linux-x64-2.1.2.tgz'
     ]);
     const binary = join(modules, 'opencode', 'bin', 'opencode');
