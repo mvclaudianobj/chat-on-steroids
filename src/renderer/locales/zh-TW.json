@@ -3019,6 +3019,8 @@
   "Agents": "代理",
   "An autonomous agent you configure here. It is not a chat or a terminal type.": "在這裡設定的自主代理。它不是聊天或終端機類型。",
   "Close setup view": "關閉設定檢視",
+  "Manage in Settings > Modules": "在 設定 > 模組 中管理",
+  "Setup ended. Its last output stays above; Configure agent starts it again.": "設定已結束。最後的輸出保留在上方；「設定代理」會重新開始。",
   "Configure agent": "設定代理",
   "Cost limits": "費用上限",
   "Enable this module first.": "請先啟用此模組。",

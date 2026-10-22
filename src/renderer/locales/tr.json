@@ -3064,6 +3064,8 @@
   "Agents": "Ajanlar",
   "An autonomous agent you configure here. It is not a chat or a terminal type.": "Burada yapılandırdığınız özerk bir ajan. Bir sohbet ya da terminal türü değildir.",
   "Close setup view": "Kurulum görünümünü kapat",
+  "Manage in Settings > Modules": "Ayarlar > Modüller'de yönet",
+  "Setup ended. Its last output stays above; Configure agent starts it again.": "Kurulum sona erdi. Son çıktısı yukarıda duruyor; Ajanı yapılandır onu yeniden başlatır.",
   "Configure agent": "Ajanı yapılandır",
   "Cost limits": "Maliyet sınırları",
   "Enable this module first.": "Önce bu modülü etkinleştirin.",

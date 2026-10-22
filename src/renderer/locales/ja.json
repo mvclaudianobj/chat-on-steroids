@@ -3019,6 +3019,8 @@
   "Agents": "エージェント",
   "An autonomous agent you configure here. It is not a chat or a terminal type.": "ここで設定する自律エージェントです。チャットやターミナルの種類ではありません。",
   "Close setup view": "セットアップ表示を閉じる",
+  "Manage in Settings > Modules": "設定 > モジュールで管理",
+  "Setup ended. Its last output stays above; Configure agent starts it again.": "セットアップが終了しました。最後の出力は上に残っています。「エージェントを設定」でもう一度開始できます。",
   "Configure agent": "エージェントを設定",
   "Cost limits": "コスト上限",
   "Enable this module first.": "先にこのモジュールを有効にしてください。",
