@@ -11,6 +11,7 @@ import { firefoxAddonUrl } from '../shared/firefox-addon.js';
 import { isApiConversationId } from '../shared/api-chat.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
+import { registerVaultIpc } from './marks-vault-ipc.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
@@ -672,6 +673,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     } catch { return { ok: false, error: 'Unable to sign out securely' }; }
   });
   registerDictationIpc(getWindow);
+  registerVaultIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
   const deletingSessionIds = new Set<string>();

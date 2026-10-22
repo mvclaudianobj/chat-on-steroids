@@ -277,6 +277,11 @@ const api = {
   getUsage: () => call<UsageOverview>('usage:get'),
   /** Codex's and Claude Code's usage from their logs here; `fresh` skips the 30-second cache. */
   getProviderUsage: (fresh = false) => call<ProviderUsage>('usage:providers', { fresh }),
+  vault: (action: string, payload?: unknown) => {
+    const allowed = ['status', 'list', 'create', 'recover', 'put', 'remove', 'reveal', 'changePassword', 'export', 'import', 'importGpg', 'pending', 'decide'];
+    if (!allowed.includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown vault action' });
+    return call<unknown>(`vault:${action}`, payload);
+  },
   getState: () => call<AppState>('state:get'),
   resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */

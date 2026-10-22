@@ -55,6 +55,8 @@ import {
   type PatchPathResolver
 } from '../codex/apply-patch/index.js';
 import { approvalCardWaiting } from '../approval-wait.js';
+import { requestVaultApproval } from '../marks-vault-approval.js';
+import { useVault } from '../marks-vault.js';
 import { maybeParseApplyPatchForExec } from '../codex/apply-patch/invocation.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../codex/command-batch.js';
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
@@ -273,6 +275,36 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       ? `Paths inside the live approved roots: ${virtualRoots.join(', ')}. A root is an approved folder, usually a parent of the project rather than the project itself, so name every folder between the root and the file — the same path exec_command takes as workdir. Reading a root lists it one level deep. ` +
         'Absolute native paths copied from command output are also accepted when they resolve inside one of these roots; globs work in either spelling.'
       : 'Paths require an approved virtual root in the form /<root>/...; no root is currently approved. Globs are supported after a root is approved.';
+
+  // The vault never returns a value to the model: the main process applies it to an
+  // administrator-configured exact HTTPS origin only after a live per-chat approval.
+  if (exposedCaps.command) reg.register('vault_use', toolDeclaration('vault_use', () => ({
+    title: 'Use a named secret',
+    description: 'Send an authenticated request with a named vault secret, without receiving its value. The app asks the person to approve once or until this chat session ends. The HTTP host is fixed by the administrator, not by this tool. Returns only HTTP status and a generic [secret:name] receipt.',
+    inputSchema: z.object({ name: z.string().min(1).max(80), path: z.string().max(300).default('/'), method: z.enum(['GET','POST']).default('GET') }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
+  })), async ({ name, path: requestPath, method }) => guard('vault_use', async () => {
+    const caller = currentCaller();
+    if (!caps.command) return fail('Vault use requires command capability');
+    if (!caller.conversationId || !caller.sessionId) return failIdentity('Verified chat identity is required for vault authorization');
+    if (!/^\/[a-zA-Z0-9/_~.-]{0,299}$/.test(requestPath) || requestPath.includes('..')) return fail('Invalid safe endpoint path');
+    if (!await requestVaultApproval(caller.conversationId, name, `${method} on saved origin${requestPath}`)) return fail('Vault request not approved or timed out');
+    try {
+      const status = await useVault(name, async entry => {
+        if (!entry.origin) throw new Error('Secret has no approved HTTPS origin');
+        const target = new URL(requestPath, entry.origin);
+        if (target.origin !== entry.origin) throw new Error('Origin mismatch');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 12_000);
+        try {
+          const response = await fetch(target, { method, headers: { [entry.header]: entry.header.toLowerCase() === 'authorization' ? `Bearer ${entry.value}` : entry.value }, redirect: 'error', credentials: 'omit', signal: controller.signal });
+          await response.body?.cancel().catch(() => undefined);
+          return String(response.status);
+        } finally { clearTimeout(timer); }
+      });
+      return ok(`Authenticated request completed: HTTP ${status}. Credential [secret:${name}] was not disclosed.`);
+    } catch { return fail(`The approved vault operation failed for [secret:${name}]. No credential was disclosed.`); }
+  }));
 
   // ------------------------------------------------------------------- read
 
