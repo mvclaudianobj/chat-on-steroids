@@ -13,6 +13,7 @@ import { firefoxAddonUrl } from '../shared/firefox-addon.js';
 import { isApiConversationId } from '../shared/api-chat.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
+import { registerJarvisAudioIpc } from './jarvis-audio.js';
 import { registerVaultIpc } from './marks-vault-ipc.js';
 import { registerBrainIpc } from './brain/ipc.js';
 import { revokeVaultChat } from './marks-vault-approval.js';
@@ -679,6 +680,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     } catch { return { ok: false, error: 'Unable to sign out securely' }; }
   });
   registerDictationIpc(getWindow);
+  registerJarvisAudioIpc(getWindow);
   registerVaultIpc(getWindow);
   // Chat Marks: Brain has one fixed, frame-checked, validated IPC surface.
   registerBrainIpc(getWindow);

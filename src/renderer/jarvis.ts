@@ -1,5 +1,5 @@
-/** Optional Windows push-to-talk for the currently selected CLIProxy chat.
- * Windows owns speech recognition; no raw audio is copied to the renderer or persisted.
+/** Opt-in push-to-talk for the currently selected CLIProxy chat.
+ * MediaRecorder retains bounded audio only in memory until the selected transcriber consumes it.
  */
 import { isApiConversationId } from '../shared/api-chat.js';
 import type { DictationEvent } from '../shared/dictation.js';
@@ -7,8 +7,9 @@ import type { AppApi } from '../preload/index.js';
 import { t } from './i18n.js';
 
 const KEY = 'chat-marks.jarvis.settings.v1';
-type Preferences = { enabled: boolean; key: 'F8' | 'F9' | 'F10' | 'F11'; language: string; tts: boolean; voice: string };
-const defaults: Preferences = { enabled: false, key: 'F8', language: '', tts: false, voice: '' };
+type Engine = 'cliproxy' | 'local' | 'windows';
+type Preferences = { enabled: boolean; key: 'F8' | 'F9' | 'F10' | 'F11'; language: string; tts: boolean; voice: string; engine: Engine; audioModel: string };
+const defaults: Preferences = { enabled: false, key: 'F8', language: '', tts: false, voice: '', engine: 'cliproxy', audioModel: '' };
 
 export function parseJarvisPreferences(value: unknown): Preferences {
   if (!value || typeof value !== 'object') return { ...defaults };
@@ -18,7 +19,9 @@ export function parseJarvisPreferences(value: unknown): Preferences {
     key: data.key === 'F9' || data.key === 'F10' || data.key === 'F11' ? data.key : 'F8',
     language: typeof data.language === 'string' ? data.language.slice(0, 35).replace(/[^a-zA-Z-]/g, '') : '',
     tts: data.tts === true,
-    voice: typeof data.voice === 'string' ? data.voice.slice(0, 120) : ''
+    voice: typeof data.voice === 'string' ? data.voice.slice(0, 120) : '',
+    engine: data.engine === 'local' || data.engine === 'windows' ? data.engine : 'cliproxy',
+    audioModel: typeof data.audioModel === 'string' && /^[\w./-]{0,128}$/.test(data.audioModel) ? data.audioModel : ''
   };
 }
 
@@ -32,12 +35,15 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   const language = find<HTMLInputElement>('jarvisLanguage');
   const tts = find<HTMLInputElement>('jarvisTts');
   const voice = find<HTMLSelectElement>('jarvisVoice');
+  const engine = find<HTMLSelectElement>('jarvisEngine');
+  const audioModel = find<HTMLSelectElement>('jarvisAudioModel');
   let preferences = defaults;
   try { preferences = parseJarvisPreferences(JSON.parse(localStorage.getItem(KEY) ?? '{}')); } catch { /* default */ }
   enable.checked = preferences.enabled;
   key.value = preferences.key;
   language.value = preferences.language;
   tts.checked = preferences.tts;
+  if (engine) engine.value = preferences.engine;
   let consented = false;
   let attempt = 0;
   let owner: string | null = null;
@@ -50,17 +56,37 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   let expectedAnswer: { sessionId: string; turnId: string } | null = null;
   let spokenTurn: string | null = null;
   const recognitionAvailable = api.dictationSupported && typeof api.startDictation === 'function';
+  const recorderAvailable = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
+  let capability: { models: string[]; local: boolean; windows: boolean; error: string | null } = { models: [], local: false, windows: recognitionAvailable, error: null };
+  let media: { recorder: MediaRecorder; stream: MediaStream; chunks: Blob[]; bytes: number; id: number; mode: Engine } | null = null;
+  const modes = (): Engine[] => [preferences.engine, ...(['cliproxy', 'local', 'windows'] as Engine[]).filter(candidate => candidate !== preferences.engine)];
+  const usable = (mode: Engine): boolean => mode === 'windows' ? recognitionAvailable : recorderAvailable && (mode === 'local' ? capability.local : capability.models.length > 0);
+  const mode = (): Engine | null => modes().find(usable) ?? null;
+  const refresh = (): void => {
+    if (!api.jarvisAudioStatus) return;
+    void api.jarvisAudioStatus().then(result => {
+      if (!result.ok) { capability.error = result.error; paint(); return; }
+      capability = result.data;
+      if (audioModel) {
+        const selectedModel = preferences.audioModel;
+        audioModel.replaceChildren(new Option(t('Detect automatically'), ''));
+        for (const name of capability.models) audioModel.append(new Option(name, name));
+        audioModel.value = capability.models.includes(selectedModel) ? selectedModel : '';
+      }
+      paint();
+    }).catch(() => { capability.error = 'Transcription model catalog is unavailable.'; paint(); });
+  };
   const eligible = (): string | null => {
     const chat = selected();
     return chat && isApiConversationId(chat.conversationId) && (!chat.engine || chat.engine === 'cliproxy') ? chat.id : null;
   };
   function paint(): void {
     button.hidden = !preferences.enabled;
-    button.disabled = !recognitionAvailable || !consented || !eligible() || stopping;
+    button.disabled = !mode() || !consented || !eligible() || stopping;
     button.dataset.state = running ? stopping ? 'stopping' : 'listening' : 'idle';
     button.setAttribute('aria-pressed', String(running));
     button.title = t('Hold to speak to Jarvis') + ` (${preferences.key})`;
-    if (!recognitionAvailable) status.textContent = t('Jarvis speech recognition currently requires Windows.');
+    if (!mode()) status.textContent = t('No transcription engine available. Configure a CLIProxy audio model, an installed local Whisper engine, or Windows speech recognition.') + (capability.error ? ` ${capability.error}` : '');
     else if (!consented) status.textContent = t('Enable microphone consent to use Jarvis.');
     else if (!eligible()) status.textContent = t('Select a CLIProxy chat to use Jarvis.');
     else if (!running && !status.textContent) status.textContent = t('Jarvis is ready.');
@@ -70,6 +96,13 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     stopping = true;
     status.textContent = t('Finishing dictation…');
     paint();
+    if (media) {
+      const current = media;
+      if (current.recorder.state !== 'inactive') current.recorder.stop();
+      current.stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    if (mode() !== 'windows') { running = false; stopping = false; owner = null; paint(); return; }
     void api.stopDictation().then(reply => {
       if (!reply.ok) { cancel(); status.textContent = t(reply.error); }
     }).catch(() => { cancel(); });
@@ -80,6 +113,15 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     committed = '';
     finished = false;
     held = false;
+    if (media) {
+      const previous = media; media = null;
+      previous.recorder.ondataavailable = null;
+      previous.recorder.onstop = null;
+      if (previous.recorder.state !== 'inactive') previous.recorder.stop();
+      previous.stream.getTracks().forEach(track => track.stop());
+      previous.chunks.length = 0;
+    }
+    void api.jarvisCancel?.().catch(() => undefined);
     if (running) void api.stopDictation().catch(() => undefined);
     running = false;
     stopping = false;
@@ -88,7 +130,7 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     paint();
   }
   function start(): void {
-    if (running || !preferences.enabled || !consented || !recognitionAvailable) return;
+    if (running || !preferences.enabled || !consented || !mode()) return;
     const target = eligible();
     if (!target) { paint(); return; }
     const id = ++attempt;
@@ -99,6 +141,46 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     finished = false;
     status.textContent = t('Preparing microphone…');
     paint();
+    const chosen = mode()!;
+    if (chosen !== 'windows') {
+      void navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(stream => {
+        if (id !== attempt || !held || !running) { stream.getTracks().forEach(track => track.stop()); return; }
+        const mime = ['audio/webm', 'audio/ogg', 'audio/mp4'].find(type => MediaRecorder.isTypeSupported(type));
+        if (!mime) { stream.getTracks().forEach(track => track.stop()); cancel(); status.textContent = t('MediaRecorder audio format is unavailable.'); return; }
+        const recorder = new MediaRecorder(stream, { mimeType: mime });
+        const row = { recorder, stream, chunks: [] as Blob[], bytes: 0, id, mode: chosen };
+        media = row;
+        recorder.ondataavailable = event => {
+          if (media !== row || !event.data.size) return;
+          row.bytes += event.data.size;
+          if (row.bytes > 12_000_000) { cancel(); status.textContent = t('Recording exceeds the 12 MB limit.'); return; }
+          row.chunks.push(event.data);
+        };
+        recorder.onstop = () => {
+          stream.getTracks().forEach(track => track.stop());
+          if (media !== row) return;
+          media = null;
+          if (!stopping || id !== attempt || !consented || owner !== eligible()) { cancel(); return; }
+          if (!row.bytes) { cancel(); status.textContent = t('No speech was sent.'); return; }
+          const blob = new Blob(row.chunks, { type: mime });
+          row.chunks.length = 0;
+          status.textContent = t('Transcribing recorded audio…');
+          void blob.arrayBuffer().then(buffer => {
+            if (id !== attempt || !stopping || !consented || owner !== eligible()) return;
+            const model = preferences.audioModel && capability.models.includes(preferences.audioModel) ? preferences.audioModel : capability.models[0] ?? '';
+            return api.jarvisTranscribe(chosen === 'local' ? 'local' : 'cliproxy', model, preferences.language, mime as 'audio/webm' | 'audio/ogg' | 'audio/mp4', new Uint8Array(buffer));
+          }).then(reply => {
+            if (!reply || id !== attempt || !stopping) return;
+            if (!reply.ok) { cancel(); status.textContent = reply.error; return; }
+            committed = reply.data.trim();
+            eventReceived({ type: 'status', status: 'stopped' });
+          }).catch(() => { if (id === attempt) { cancel(); status.textContent = t('Transcription failed.'); } });
+        };
+        try { recorder.start(250); } catch { cancel(); status.textContent = t('MediaRecorder audio format is unavailable.'); return; }
+        status.textContent = t('Listening…');
+      }).catch(() => { if (id === attempt) { cancel(); status.textContent = t('Dictation could not start. Check microphone access and try again.'); } });
+      return;
+    }
     void api.startDictation(preferences.language).then(reply => {
       if (id !== attempt) { void api.stopDictation().catch(() => undefined); return; }
       if (!reply.ok) { cancel(); status.textContent = t(reply.error); }
@@ -154,12 +236,14 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     }).catch(() => undefined).finally(() => { readingAnswer = false; });
   });
   function persist(): void {
-    preferences = parseJarvisPreferences({ enabled: enable.checked, key: key.value, language: language.value, tts: tts.checked, voice: voice.value });
+    if (running) cancel();
+    preferences = parseJarvisPreferences({ enabled: enable.checked, key: key.value, language: language.value, tts: tts.checked, voice: voice.value, engine: engine?.value, audioModel: audioModel?.value });
     localStorage.setItem(KEY, JSON.stringify(preferences));
     if (!preferences.enabled) { cancel(); consented = false; consent.checked = false; }
+    if (preferences.enabled) refresh();
     paint();
   }
-  for (const element of [enable, key, language, tts, voice]) element.addEventListener('change', persist);
+  for (const element of [enable, key, language, tts, voice, engine, audioModel].filter(Boolean)) element.addEventListener('change', persist);
   consent.addEventListener('change', () => { consented = consent.checked; if (!consented) cancel(); paint(); });
   const fillVoices = (): void => {
     if (!('speechSynthesis' in window)) return;
@@ -171,6 +255,7 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   fillVoices();
   if ('speechSynthesis' in window) speechSynthesis.addEventListener('voiceschanged', fillVoices);
   voice.addEventListener('change', () => { speechVoice = voice.value; });
+  find<HTMLButtonElement>('jarvisRefreshAudio')?.addEventListener('click', refresh);
   button.addEventListener('pointerdown', event => { if (event.button !== 0 || button.disabled) return; event.preventDefault(); held = true; button.setPointerCapture(event.pointerId); start(); });
   button.addEventListener('pointerup', () => { if (held) { held = false; stop(); } });
   button.addEventListener('lostpointercapture', () => { if (held) { held = false; stop(); } });
@@ -185,5 +270,6 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });
   window.addEventListener('beforeunload', cancel, { once: true });
   // Consent and capture must never survive a page reload.
+  refresh();
   paint();
 }
