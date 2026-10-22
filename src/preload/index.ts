@@ -388,6 +388,8 @@ const api = {
   upstreamService: (op: import('../shared/upstream-module.js').OpenCodeServiceAction) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'service', module: 'opencode', op }),
   /** ZeroClaw's read-only key facts for its Settings page (no secrets). */
   upstreamZeroClawFacts: () => call<import('../shared/upstream-module.js').ZeroClawFacts>('marksUpstream:request', { action: 'facts', module: 'zeroclaw' }),
+  upstreamMarksClawPreview: () => call<import('../shared/upstream-module.js').MarksClawMigrationPreview>('marksUpstream:request', { action: 'marksclaw-preview', module: 'zeroclaw' }),
+  upstreamMarksClawImport: (ticket: string) => call<import('../shared/upstream-module.js').MarksClawMigrationResult>('marksUpstream:request', { action: 'marksclaw-import', module: 'zeroclaw', ticket }),
   onUpstreamProgress: (listener: (progress: import('../shared/upstream-module.js').UpstreamInstallProgress) => void): (() => void) => {
     const wrapped = (_event: unknown, progress: import('../shared/upstream-module.js').UpstreamInstallProgress): void => listener(progress);
     ipcRenderer.on('marksUpstream:progress', wrapped);
