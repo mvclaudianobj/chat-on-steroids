@@ -3218,5 +3218,8 @@
   "Import cancelled.": "Đã hủy nhập.",
   "Settings imported. Credentials must be added again for each channel.": "Đã nhập cài đặt. Bạn cần nhập lại thông tin xác thực cho từng kênh.",
   "Could not export notification settings: {0}": "Không thể xuất cài đặt thông báo: {0}",
-  "Could not import notification settings: {0}": "Không thể nhập cài đặt thông báo: {0}"
+  "Could not import notification settings: {0}": "Không thể nhập cài đặt thông báo: {0}",
+  "Export notification settings": "Xuất cài đặt thông báo",
+  "Import notification settings": "Nhập cài đặt thông báo",
+  "Chat Marks notification settings": "Cài đặt thông báo Chat Marks"
 }

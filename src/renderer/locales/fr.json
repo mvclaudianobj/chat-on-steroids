@@ -3310,5 +3310,8 @@
   "Import cancelled.": "Importation annulée.",
   "Settings imported. Credentials must be added again for each channel.": "Paramètres importés. Vous devez à nouveau saisir les identifiants de chaque canal.",
   "Could not export notification settings: {0}": "Impossible d’exporter les paramètres de notification : {0}",
-  "Could not import notification settings: {0}": "Impossible d’importer les paramètres de notification : {0}"
+  "Could not import notification settings: {0}": "Impossible d’importer les paramètres de notification : {0}",
+  "Export notification settings": "Exporter les paramètres de notification",
+  "Import notification settings": "Importer les paramètres de notification",
+  "Chat Marks notification settings": "Paramètres de notification Chat Marks"
 }

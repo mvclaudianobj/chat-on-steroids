@@ -3356,5 +3356,8 @@
   "Import cancelled.": "Импорт отменён.",
   "Settings imported. Credentials must be added again for each channel.": "Настройки импортированы. Необходимо заново ввести учётные данные для каждого канала.",
   "Could not export notification settings: {0}": "Не удалось экспортировать настройки уведомлений: {0}",
-  "Could not import notification settings: {0}": "Не удалось импортировать настройки уведомлений: {0}"
+  "Could not import notification settings: {0}": "Не удалось импортировать настройки уведомлений: {0}",
+  "Export notification settings": "Экспорт настроек уведомлений",
+  "Import notification settings": "Импорт настроек уведомлений",
+  "Chat Marks notification settings": "Настройки уведомлений Chat Marks"
 }

@@ -71,6 +71,9 @@ export function mainTexts(): Record<MainText, string> {
     'Import GPG secrets': t('Import GPG secrets'),
     'Chat Marks vault': t('Chat Marks vault'),
     'GPG encrypted files': t('GPG encrypted files'),
+    'Export notification settings': t('Export notification settings'),
+    'Import notification settings': t('Import notification settings'),
+    'Chat Marks notification settings': t('Chat Marks notification settings'),
   };
 }
 

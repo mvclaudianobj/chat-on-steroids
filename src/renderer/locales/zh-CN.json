@@ -3218,5 +3218,8 @@
   "Import cancelled.": "已取消导入。",
   "Settings imported. Credentials must be added again for each channel.": "设置已导入。你需要重新输入各渠道的凭据。",
   "Could not export notification settings: {0}": "无法导出通知设置：{0}",
-  "Could not import notification settings: {0}": "无法导入通知设置：{0}"
+  "Could not import notification settings: {0}": "无法导入通知设置：{0}",
+  "Export notification settings": "导出通知设置",
+  "Import notification settings": "导入通知设置",
+  "Chat Marks notification settings": "Chat Marks 通知设置"
 }

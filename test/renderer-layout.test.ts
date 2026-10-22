@@ -42,7 +42,7 @@ beforeAll(async () => {
 
 it('finds settings on every settings page by name, description and section, never a row its page hides', () => {
   const entries = collectSettings(document);
-  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'usage', 'setup', 'settings', 'modules', 'appearance']));
+  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'notifications', 'usage', 'setup', 'settings', 'modules', 'appearance']));
   const [finish] = searchSettings(entries, '  SESSION FINISH  ', 'en');
   expect([finish!.title, finish!.page, finish!.section, finish!.tab]).toEqual(['Session finish', 'Agents & automation', 'Keep the turn open', 'settings']);
   expect(finish!.target.contains(document.getElementById('finishTool'))).toBe(true);
@@ -68,7 +68,7 @@ it('finds settings on every settings page by name, description and section, neve
 });
 
 it('titles every settings page the same way, Activity included', () => {
-  for (const panel of ['home', 'general', 'usage', 'modules', 'appearance', 'activity']) {
+  for (const panel of ['home', 'general', 'notifications', 'usage', 'modules', 'appearance', 'activity']) {
     const head = document.querySelector(`[data-panel="${panel}"] .settings-page-head`);
     expect(head?.querySelector('h1')?.textContent?.trim(), panel).toBeTruthy();
     expect(head?.querySelector('p')?.textContent?.trim(), panel).toBeTruthy();

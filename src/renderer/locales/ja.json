@@ -3218,5 +3218,8 @@
   "Import cancelled.": "インポートをキャンセルしました。",
   "Settings imported. Credentials must be added again for each channel.": "設定をインポートしました。各チャネルの認証情報を再設定してください。",
   "Could not export notification settings: {0}": "通知設定をエクスポートできませんでした: {0}",
-  "Could not import notification settings: {0}": "通知設定をインポートできませんでした: {0}"
+  "Could not import notification settings: {0}": "通知設定をインポートできませんでした: {0}",
+  "Export notification settings": "通知設定をエクスポート",
+  "Import notification settings": "通知設定をインポート",
+  "Chat Marks notification settings": "Chat Marks の通知設定"
 }

@@ -3264,5 +3264,8 @@
   "Import cancelled.": "Import abgebrochen.",
   "Settings imported. Credentials must be added again for each channel.": "Einstellungen importiert. Du musst die Zugangsdaten für jeden Kanal erneut eingeben.",
   "Could not export notification settings: {0}": "Benachrichtigungseinstellungen konnten nicht exportiert werden: {0}",
-  "Could not import notification settings: {0}": "Benachrichtigungseinstellungen konnten nicht importiert werden: {0}"
+  "Could not import notification settings: {0}": "Benachrichtigungseinstellungen konnten nicht importiert werden: {0}",
+  "Export notification settings": "Benachrichtigungseinstellungen exportieren",
+  "Import notification settings": "Benachrichtigungseinstellungen importieren",
+  "Chat Marks notification settings": "Chat Marks-Benachrichtigungseinstellungen"
 }

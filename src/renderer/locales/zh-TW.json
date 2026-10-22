@@ -3218,5 +3218,8 @@
   "Import cancelled.": "已取消匯入。",
   "Settings imported. Credentials must be added again for each channel.": "設定已匯入。你需要重新輸入每個管道的憑證。",
   "Could not export notification settings: {0}": "無法匯出通知設定：{0}",
-  "Could not import notification settings: {0}": "無法匯入通知設定：{0}"
+  "Could not import notification settings: {0}": "無法匯入通知設定：{0}",
+  "Export notification settings": "匯出通知設定",
+  "Import notification settings": "匯入通知設定",
+  "Chat Marks notification settings": "Chat Marks 通知設定"
 }

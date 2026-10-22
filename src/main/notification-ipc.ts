@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { NOTIFICATION_CHANNELS } from '../shared/notification-center.js';
 import { importNotificationSettings, notificationSettings, notificationView, saveNotificationSettings, setNotificationCredential, testNotificationChannel } from './notification-center.js';
 import { logWarn } from './logger.js';
+import { dialogLabel, mainText } from './main-texts.js';
 
 const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
@@ -21,8 +22,8 @@ const VERSION = 1;
 const MAX_IMPORT_BYTES = 256 * 1024;
 async function exportSettings(window: BrowserWindow): Promise<boolean> {
   const dialogResult = await dialog.showSaveDialog(window, {
-    title: 'Export notification settings', defaultPath: 'chat-marks-notifications.json',
-    filters: [{ name: 'Chat Marks notification settings', extensions: ['json'] }]
+    ...dialogLabel('Export notification settings'), defaultPath: 'chat-marks-notifications.json',
+    filters: [{ name: mainText('Chat Marks notification settings'), extensions: ['json'] }]
   });
   if (dialogResult.canceled || !dialogResult.filePath) return false;
   // Strict whitelist: exported file never contains credentials, passwords, vault metadata or key handles.
@@ -47,8 +48,8 @@ async function exportSettings(window: BrowserWindow): Promise<boolean> {
 }
 async function importSettings(window: BrowserWindow): Promise<{ imported: boolean }> {
   const dialogResult = await dialog.showOpenDialog(window, {
-    title: 'Import notification settings', properties: ['openFile'],
-    filters: [{ name: 'Chat Marks notification settings', extensions: ['json'] }]
+    ...dialogLabel('Import notification settings'), properties: ['openFile'],
+    filters: [{ name: mainText('Chat Marks notification settings'), extensions: ['json'] }]
   });
   const selected = dialogResult.filePaths[0];
   if (dialogResult.canceled || !selected) return { imported: false };

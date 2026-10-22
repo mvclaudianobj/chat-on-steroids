@@ -3218,5 +3218,8 @@
   "Import cancelled.": "가져오기가 취소되었습니다.",
   "Settings imported. Credentials must be added again for each channel.": "설정을 가져왔습니다. 각 채널의 자격 증명을 다시 입력해야 합니다.",
   "Could not export notification settings: {0}": "알림 설정을 내보내지 못했습니다: {0}",
-  "Could not import notification settings: {0}": "알림 설정을 가져오지 못했습니다: {0}"
+  "Could not import notification settings: {0}": "알림 설정을 가져오지 못했습니다: {0}",
+  "Export notification settings": "알림 설정 내보내기",
+  "Import notification settings": "알림 설정 가져오기",
+  "Chat Marks notification settings": "Chat Marks 알림 설정"
 }
