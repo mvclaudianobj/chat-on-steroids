@@ -288,6 +288,15 @@ const api = {
     ipcRenderer.on('vault:pending-changed', wrapped);
     return () => ipcRenderer.removeListener('vault:pending-changed', wrapped);
   },
+  remoteHosts: (action: string, payload?: unknown) => {
+    if (!['list', 'save', 'delete', 'test', 'install', 'unlock', 'fingerprint', 'trust', 'project', 'preview', 'import', 'pending', 'decide'].includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown remote action' });
+    return call<unknown>(`remoteHosts:${action}`, payload);
+  },
+  onRemoteApprovalsChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('remoteHosts:pending-changed', wrapped);
+    return () => ipcRenderer.removeListener('remoteHosts:pending-changed', wrapped);
+  },
   getState: () => call<AppState>('state:get'),
   resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */

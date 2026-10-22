@@ -66,6 +66,7 @@ import { publishMainTexts } from './main-texts.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
 import { initMarksModulesUi } from './marks-modules-ui.js';
 import { initMarksVaultUi } from './marks-vault.js';
+import { initRemoteHostsUi } from './remote-hosts.js';
 
 declare global {
   interface Window {
@@ -86,6 +87,7 @@ initKeychainNotice(api);
 initLanguage();
 initLayoutPreviews();
 initMarksVaultUi(api);
+initRemoteHostsUi(api);
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
 ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
 ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));

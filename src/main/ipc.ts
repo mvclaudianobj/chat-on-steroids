@@ -11,6 +11,8 @@ import { firefoxAddonUrl } from '../shared/firefox-addon.js';
 import { isApiConversationId } from '../shared/api-chat.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
+import { registerRemoteHostsIpc } from './remote/hosts-ipc.js';
+import { revokeRemoteChat } from './remote/approval.js';
 import { registerVaultIpc } from './marks-vault-ipc.js';
 import { revokeVaultChat } from './marks-vault-approval.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
@@ -675,6 +677,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   registerDictationIpc(getWindow);
   registerVaultIpc(getWindow);
+  registerRemoteHostsIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
   const deletingSessionIds = new Set<string>();
@@ -1792,6 +1795,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       if (summary?.conversationId) {
         for (const conversationId of [summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)]) {
           revokeVaultChat(conversationId);
+          revokeRemoteChat(conversationId);
         }
       }
       logInfo(

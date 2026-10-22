@@ -34,6 +34,7 @@ import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { initSecretsPath, keychainReadPending } from './secrets.js';
+import { initRemoteHosts } from './remote/hosts.js';
 import { initMarksVault, warmVaultRedaction } from './marks-vault.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
@@ -442,6 +443,7 @@ void app.whenReady().then(async () => {
   initBrowserProofPath(userData);
   initSecretsPath(userData);
   initMarksVault(userData);
+  initRemoteHosts(userData);
   initKeychainNotice(userData, {
     platform: process.platform,
     contents: () => (window && !window.isDestroyed() ? window.webContents : null),
