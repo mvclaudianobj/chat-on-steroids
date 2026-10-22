@@ -34,6 +34,7 @@ import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { initSecretsPath, keychainReadPending } from './secrets.js';
+import { initMarksVault, warmVaultRedaction } from './marks-vault.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
@@ -443,6 +444,7 @@ void app.whenReady().then(async () => {
   initWorkerArchivePath(userData);
   initBrowserProofPath(userData);
   initSecretsPath(userData);
+  initMarksVault(userData);
   initKeychainNotice(userData, {
     platform: process.platform,
     contents: () => (window && !window.isDestroyed() ? window.webContents : null),
@@ -491,6 +493,7 @@ void app.whenReady().then(async () => {
     return;
   }
   if (windowActivation.isDisabled()) return;
+  await warmVaultRedaction();
   // Refresh and revalidate the Markspanel session throughout the app lifetime.
   // A revoked token or unavailable identity service closes this runtime through
   // the existing bounded shutdown, rather than continuing to publish local tools.
