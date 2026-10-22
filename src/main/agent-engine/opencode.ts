@@ -29,6 +29,7 @@
  *   terminal may open while a turn runs. Every attach first makes sure the service runs.
  */
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { z } from 'zod';
 import { logInfo, logWarn } from '../logger.js';
 import { notifyChanged } from '../session/recorder.js';
@@ -796,7 +797,7 @@ function hookTerminals(): void {
 }
 
 function terminalOf(backendSessionId: string | null, cwd: string | null): EngineTerminal | null {
-  if (!backendSessionId || !OPENCODE_SESSION.test(backendSessionId) || !cwd || !cwd.startsWith('/')) return null;
+  if (!backendSessionId || !OPENCODE_SESSION.test(backendSessionId) || !cwd || !(cwd.startsWith('/') || path.isAbsolute(cwd))) return null;
   return { argv: ['-s', backendSessionId, cwd], mode: 'live' };
 }
 

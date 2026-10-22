@@ -1,5 +1,6 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import http from 'node:http';
+import path from 'node:path';
 import type { AddressInfo } from 'node:net';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -626,8 +627,8 @@ describe('the OpenCode background service', () => {
     expect(service.parseRegistration(JSON.stringify({ url: 'http://127.0.0.1:49374', pid: 5, password: 'x', version: '2.1.2' })))
       .toEqual({ url: 'http://127.0.0.1:49374', pid: 5, password: 'x', version: '2.1.2' });
     expect(service.parseRegistration('not json')).toBeNull();
-    expect(service.registrationPath({ XDG_STATE_HOME: '/x/state' }, '/home/u')).toBe('/x/state/opencode/service.json');
-    expect(service.registrationPath({}, '/home/u')).toBe('/home/u/.local/state/opencode/service.json');
+    expect(service.registrationPath({ XDG_STATE_HOME: '/x/state' }, '/home/u')).toBe(path.join('/x/state', 'opencode', 'service.json'));
+    expect(service.registrationPath({}, '/home/u')).toBe(path.join('/home/u', '.local', 'state', 'opencode', 'service.json'));
     // A registration left by a service that died (another pid answers) is a stopped service.
     state.registration = JSON.stringify({ url: fake.url, pid: 99, password: PASSWORD });
     expect(await service.openCodeServiceView()).toMatchObject({ state: 'stopped' });

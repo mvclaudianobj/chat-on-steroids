@@ -46,8 +46,15 @@ app.whenReady().then(async () => {
   await capture('sidebar.png');
   await js(`document.getElementById('newChat').click()`);
   await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-chatgpt"]')`);
-  assert.deepEqual(await js(`[...document.querySelectorAll('.row-menu .row-menu-item')].map(b=>b.dataset.rowAction+'='+b.textContent.trim())`),
-    ['new-chat-chatgpt=ChatGPT','new-terminal-markscode=MarksCode','new-terminal-codex=Codex','new-terminal-claude=Claude']);
+  const menuEntries = await js(`[...document.querySelectorAll('.row-menu .row-menu-item')].map(b=>({action:b.dataset.rowAction,label:b.textContent.trim()}))`);
+  assert.equal(menuEntries[0]?.action, 'new-chat-chatgpt', 'ChatGPT must be first');
+  // MarksCode was retired; the new-chat list follows offered, active engines instead.
+  for (const [action, label] of [['new-terminal-codex','Codex'], ['new-terminal-claude','Claude']]) {
+    assert.ok(menuEntries.some(item=>item.action===action && item.label===label), `${action} must be offered`);
+  }
+  assert.ok(!menuEntries.some(item=>item.action==='new-terminal-markscode'||item.action==='new-terminal-marksclaw'||item.action==='new-terminal-zeroclaw'), 'Retired or non-terminal modules must not be offered as terminals');
+  assert.equal(new Set(menuEntries.map(item=>item.action)).size, menuEntries.length, 'No duplicate menu actions');
+  assert.ok(menuEntries.every(item=>item.action==='new-chat-chatgpt'||item.action.startsWith('new-terminal-')||item.action.startsWith('new-chat-engine-')), 'Only supported chat and terminal actions');
   await capture('menu.png');
   // The Inbox layout's compose button opens the same menu.
   await js(`document.querySelector('.row-menu')?.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
@@ -56,9 +63,9 @@ app.whenReady().then(async () => {
   await js(`document.querySelector('[data-inbox-control="compose"]').click()`);
   await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-chatgpt"]')`);
   assert.deepEqual(await js(`[...document.querySelectorAll('.row-menu .row-menu-item')].map(b=>b.dataset.rowAction)`),
-    ['new-chat-chatgpt','new-terminal-markscode','new-terminal-codex','new-terminal-claude']);
+    menuEntries.map(item=>item.action), 'Inbox and Projects must expose the same complete chat menu');
   await capture('inbox-menu.png');
   assert.deepEqual(errors,[]);
-  console.log('PASS: New chat opens one menu with ChatGPT first, then MarksCode, Codex and Claude, in the Projects and Inbox layouts');
+  console.log('PASS: New chat has ChatGPT first, Codex and Claude, and any additional offered engine, in Projects and Inbox layouts');
   win.destroy();await server.close();app.exit(0);
 }).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'failure.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await server?.close();app.exit(1);});
