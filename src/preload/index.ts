@@ -120,6 +120,9 @@ const api = {
   notificationCenterImport: () => call<{ imported: boolean }>('marksNotify:request', { action: 'import' }),
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
+  jarvisAudioStatus: () => call<{ models: string[]; local: boolean; windows: boolean; error: string | null }>('jarvis:audio', { action: 'status' }),
+  jarvisTranscribe: (engine: 'cliproxy' | 'local', model: string, language: string, mime: 'audio/webm' | 'audio/ogg' | 'audio/mp4', bytes: Uint8Array) => call<string>('jarvis:audio', { action: 'transcribe', engine, model, language, mime, bytes }),
+  jarvisCancel: () => call<null>('jarvis:audio', { action: 'cancel' }),
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */
   startDictation: (language = '') => call<{ status: 'starting' }>('dictation:start', { language }),
   stopDictation: () => call<void>('dictation:stop'),

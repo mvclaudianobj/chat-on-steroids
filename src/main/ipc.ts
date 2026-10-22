@@ -16,6 +16,7 @@ import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
 import { registerRemoteHostsIpc } from './remote/hosts-ipc.js';
 import { revokeRemoteChat } from './remote/approval.js';
+import { registerJarvisAudioIpc } from './jarvis-audio.js';
 import { registerVaultIpc } from './marks-vault-ipc.js';
 import { registerBrainIpc } from './brain/ipc.js';
 import { registerCompanyIpc } from './company-ipc.js';
@@ -687,6 +688,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     } catch { return { ok: false, error: 'Unable to sign out securely' }; }
   });
   registerDictationIpc(getWindow);
+  registerJarvisAudioIpc(getWindow);
   registerVaultIpc(getWindow);
   // Chat Marks: Brain has one fixed, frame-checked, validated IPC surface.
   registerBrainIpc(getWindow);
