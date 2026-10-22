@@ -4705,6 +4705,30 @@ alone picks its glyph; static markup names the glyph class. `--ico` sizes the la
 marks. Do not add hand-drawn SVG icons; the sprite keeps only the product mark.
 `test/icon-font.test.ts` checks names, package codepoints and stray SVG.
 
+Chat Marks' outbound **Notification Center** (`renderer/notification-center.ts`,
+`main/notification-{center,ipc,events,smtp}.ts`, `shared/notification-center.ts`)
+is an optional settings surface under General, independent of native desktop notices.
+The four channels (SMTP, Telegram, Meta WhatsApp Cloud and Evolution API) are disabled
+by default. The main process exclusively owns delivery and credentials: validated
+non-secret channel settings live in the `marks-notification-center` durable record;
+provider credentials live in the existing OS-protected secret store at
+`plugin:marks-notify:<channel>` and **never** return through IPC. The authenticated
+`marksNotify:request` IPC supports `get`, `save`, `credential` (write-only), and
+`test`; preload exposes `notificationCenterGet`, `notificationCenterSave`,
+`notificationCenterSetCredential` and `notificationCenterTest` with typed replies.
+Renderer gets only Boolean credential-presence flags. Saved data is schema-validated;
+a missing/invalid record resolves to off-by-default settings, not a network send.
+The session ledger owns turn outcomes, approval-wait owns pending human decisions,
+and the version owners report availability; notifications only observe those events
+and never answer a permission prompt or start an update. Per-event throttling,
+per-channel hourly limits, bounded batch windows, opt-in excerpts, HTTPS/TLS
+enforcement and restricted template substitution belong to the main process.
+`test/notification-center.test.ts`, `test/notification-smtp.test.ts` and
+`scripts/verify-notification-center.cjs` exercise fake transports and real Electron
+UI without genuine third-party credentials. Real-provider delivery still requires
+separate manual homologation; no automatic migration into the later Marks Vault K
+is assumed until its approved storage/use contract is integrated.
+
 `renderer/pet-machine.ts` owns the optional Tur Tur Sahur companion's gesture,
 animation and autonomous-action state. `renderer/pet.ts` projects it with Pointer
 Events and one visible-window animation clock. The composer launcher and context

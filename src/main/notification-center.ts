@@ -4,6 +4,7 @@ import { readDurable, writeDurableNow } from './durable.js';
 import { getSecret, hasSecret, setSecret } from './secrets.js';
 import { NOTIFICATION_CHANNELS, NOTIFICATION_EVENTS, type NotificationChannel, type NotificationEvent, type NotificationCenterSettings, type NotificationCenterView } from '../shared/notification-center.js';
 import { sendSmtp } from './notification-smtp.js';
+import { logInfo, logWarn } from './logger.js';
 
 const STATE = 'marks-notification-center';
 const DEFAULT_EVENTS = Object.fromEntries(NOTIFICATION_EVENTS.map(e => [e, false])) as Record<NotificationEvent, boolean>;
@@ -99,7 +100,7 @@ export async function queueOutboundNotice(notice: OutboundNotice): Promise<void>
       event: notice.event,
       title: `${count} Chat Marks events`, project: 'Chat Marks'
     };
-    void dispatchNotice(payload).catch(() => undefined);
+    void dispatchNotice(payload).catch(() => logWarn(`Notification ${notice.event}: delivery failed; private provider details omitted`));
   }, windowSeconds * 1000) };
   entry.timer.unref();
   batches.set(notice.event, entry);
@@ -129,14 +130,24 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
   for (const channel of NOTIFICATION_CHANNELS) {
     if (options.channel && options.channel !== channel) continue;
     const choice = settings.channels[channel];
-    if (!options.test && (!choice.enabled || !choice.events[notice.event])) continue;
-    if (!choice.destinations.length) continue;
+    if (!options.test && !choice.enabled) { logInfo(`Notification ${channel}: skipped ${notice.event} (channel disabled)`); continue; }
+    if (!options.test && !choice.events[notice.event]) { logInfo(`Notification ${channel}: skipped ${notice.event} (event unsubscribed)`); continue; }
+    if (!choice.destinations.length) { logInfo(`Notification ${channel}: skipped ${notice.event} (no destinations)`); continue; }
     const fingerprint = `${channel}:${notice.event}`;
     const bucket = counts.get(channel);
-    if (!options.test && bucket && now - bucket.at < 3600000 && bucket.count + choice.destinations.length > LIMIT_PER_HOUR) continue;
-    if (!options.test && now - (lastSent.get(fingerprint) ?? -Infinity) < settings.throttleMinutes * 60000) continue;
+    if (!options.test && bucket && now - bucket.at < 3600000 && bucket.count + choice.destinations.length > LIMIT_PER_HOUR) {
+      logInfo(`Notification ${channel}: skipped ${notice.event} (hourly limit)`);
+      continue;
+    }
+    if (!options.test && now - (lastSent.get(fingerprint) ?? -Infinity) < settings.throttleMinutes * 60000) {
+      logInfo(`Notification ${channel}: skipped ${notice.event} (throttled)`);
+      continue;
+    }
     const secret = await getSecret(key(channel));
-    if (!secret) throw new Error(`Configure the ${channel} credential first`);
+    if (!secret) {
+      logWarn(`Notification ${channel}: refused ${notice.event} (credential missing)`);
+      throw new Error(`Configure the ${channel} credential first`);
+    }
     const values = { title: notice.title.slice(0, 180), project: notice.project.slice(0, 160), event: notice.event, excerpt: choice.includeExcerpt ? (notice.excerpt ?? '').slice(0, 160) : '' };
     const title = fill(choice.titleTemplate, values);
     const body = fill(choice.bodyTemplate, values);
@@ -160,7 +171,7 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
       const template = {
         name: cfg.template,
         language: { code: cfg.language || 'pt_BR' },
-        ...(parameters.length ? { components: [{ type: 'body', parameters: parameters.map(name => ({ type: 'text', text: (values as Record<string, string>)[name] ?? '' })) }] } : {})
+        ...(parameters.length ? { components: [{ type: 'body', parameters: parameters.map(name => ({ type: 'text', text: ({ ...values, body } as Record<string, string>)[name] ?? '' })) }] } : {})
       };
       for (const to of choice.destinations) {
         const version = /^\/v\d+\.\d+\/?$/.test(base.pathname) ? base.pathname.replace(/\/$/, '') : '/v22.0';
@@ -180,6 +191,7 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
       lastSent.set(fingerprint, now);
       counts.set(channel, { at: bucket && now - bucket.at < 3600000 ? bucket.at : now, count: (bucket && now - bucket.at < 3600000 ? bucket.count : 0) + choice.destinations.length });
     }
+    logInfo(`Notification ${channel}: ${options.test ? 'test' : notice.event} sent to ${choice.destinations.length} destination(s)`);
   }
   return delivered;
 }

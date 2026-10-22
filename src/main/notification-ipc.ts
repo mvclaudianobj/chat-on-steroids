@@ -2,6 +2,7 @@ import { ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { NOTIFICATION_CHANNELS } from '../shared/notification-center.js';
 import { notificationView, saveNotificationSettings, setNotificationCredential, testNotificationChannel } from './notification-center.js';
+import { logWarn } from './logger.js';
 
 const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
@@ -24,6 +25,7 @@ export function registerNotificationCenterIpc(getWindow: () => BrowserWindow | n
       return { ok: true, data };
     } catch (error) {
       // Never echo exception text from transport: fetch errors may carry endpoint/token URLs.
+      logWarn(`Notification IPC: request refused (${error instanceof z.ZodError ? 'invalid schema' : 'permission, credential, setting or provider failure'}); sensitive details omitted`);
       return { ok: false, error: error instanceof z.ZodError ? 'Invalid notification settings' : 'Notification request failed. Check channel configuration and connection.' };
     }
   });
