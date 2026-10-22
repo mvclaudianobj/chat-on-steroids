@@ -37,6 +37,7 @@
           <i class="ico ph ph-house" aria-hidden="true"></i>Workspace
         </button>
         <button data-tab="general" type="button"><i class="ico ph ph-sliders-horizontal" aria-hidden="true"></i>General</button>
+        <button data-tab="notifications" type="button"><i class="ico ph ph-bell" aria-hidden="true"></i>Notifications</button>
         <button data-tab="usage" type="button"><i class="ico ph ph-chart-line" aria-hidden="true"></i>Usage</button>
 <button data-tab="setup" type="button">
           <i class="ico ph ph-list-checks" aria-hidden="true"></i>Setup
@@ -238,6 +239,23 @@
                 <label class="setting"><span class="setting-text"><b>Keep plugin URLs across restarts</b><em>For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. The local port stays the same too, so the tunnel can point at it. Anyone with that URL can use your Chat Marks plugins until you turn this off. Needs secure storage.</em><em id="mcpPortMoved" class="is-warn" role="status" hidden></em></span><input id="mcpPersistentUrls" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send messages, start new chats and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel appearance-panel notifications-panel scroll" data-panel="notifications" aria-labelledby="notificationsTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head appearance-page-head">
+              <div><h1 id="notificationsTitle">Notifications</h1><p>Manage notifications and delivery channels.</p></div>
+            </header>
+            <section class="appearance-section notification-center" id="notificationCenterSection" aria-labelledby="notificationCenterTitle">
+              <header class="settings-section-head">
+                <div><h2 id="notificationCenterTitle"><i class="ico ph ph-bell" aria-hidden="true"></i> Notification center</h2><p>Send important Chat Marks events through email, Telegram or WhatsApp. Each channel has its own recipients and event rules.</p></div>
+              </header>
+              <div class="settings-surface notification-center-surface">
+                <p id="notificationCenterStatus" class="notification-center-status" role="status" aria-live="polite">Loading notification settings…</p>
+                <div id="notificationCenterSettings"></div>
               </div>
             </section>
           </div>

@@ -109,6 +109,12 @@ export interface SessionDetail {
 }
 
 const api = {
+  notificationCenterGet: () => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'get' }),
+  notificationCenterSave: (settings: import('../shared/notification-center.js').NotificationCenterSettings) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'save', settings }),
+  notificationCenterSetCredential: (channel: import('../shared/notification-center.js').NotificationChannel, credential: string, masterPassword: string) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'credential', channel, credential, masterPassword }),
+  notificationCenterTest: (channel: import('../shared/notification-center.js').NotificationChannel) => call<{ delivered: number }>('marksNotify:request', { action: 'test', channel }),
+  notificationCenterExport: () => call<boolean>('marksNotify:request', { action: 'export' }),
+  notificationCenterImport: () => call<{ imported: boolean }>('marksNotify:request', { action: 'import' }),
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */

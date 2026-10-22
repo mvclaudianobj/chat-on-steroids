@@ -4706,6 +4706,38 @@ alone picks its glyph; static markup names the glyph class. `--ico` sizes the la
 marks. Do not add hand-drawn SVG icons; the sprite keeps only the product mark.
 `test/icon-font.test.ts` checks names, package codepoints and stray SVG.
 
+Chat Marks' outbound **Notification Center** (`renderer/notification-center.ts`,
+`main/notification-{center,credentials,ipc,events,smtp}.ts`, `shared/notification-center.ts`)
+is a dedicated Settings > Notifications page, independent of native desktop notices.
+The four channels (SMTP, Telegram, Meta WhatsApp Cloud and Evolution API) are disabled
+by default. The main process exclusively owns delivery and credentials: validated
+non-secret channel settings live in the `marks-notification-center` durable record;
+provider credentials are entries `notification/<channel>` in Vault K's portable,
+encrypted store and **never** return through IPC. Writing/rotating a credential
+requires the administrator's master password; routine dispatch invokes Vault K's
+`useVault` in the main process and never asks for the master password. The authenticated,
+main-frame-checked `marksNotify:request` IPC supports `get`, `save`, `credential`
+(write-only), `test`, `export`, and `import`. Preload exposes typed fixed entrypoints,
+never a generic secret reader. File dialogs and IO happen only in the main process:
+the versioned JSON export contains allowlisted non-secret settings, never vault data.
+Import rejects unknown formats/keys and atomically requires credential reactivation
+per channel before applying imported preferences; the separate durable activation
+record is never included in exports. Old Vault K entries may stay encrypted but are
+inert until newly saved from Notifications with the master password.
+Renderer gets only Boolean credential-presence flags. Saved data is schema-validated;
+a missing/invalid record resolves to off-by-default settings, not a network send.
+The session ledger owns turn outcomes, approval-wait owns pending human decisions,
+and the version owners report availability; notifications only observe those events
+and never answer a permission prompt or start an update. Per-event throttling,
+per-channel hourly limits, bounded batch windows, opt-in excerpts, HTTPS/TLS
+enforcement and restricted template substitution belong to the main process.
+`test/notification-center.test.ts`, `test/notification-persistence.test.ts`,
+`test/notification-http-providers.test.ts`, `test/notification-smtp.test.ts` and
+`scripts/verify-notification-center.cjs` cover settings import/export round trips,
+Vault K, fake transports and real Electron UI without real credentials. Real-provider
+delivery still requires separate manual homologation. This item is stacked on Vault
+K's PR: do not merge, tag or release it before the Vault contract is integrated.
+
 `renderer/pet-machine.ts` owns the optional Tur Tur Sahur companion's gesture,
 animation and autonomous-action state. `renderer/pet.ts` projects it with Pointer
 Events and one visible-window animation clock. The composer launcher and context
