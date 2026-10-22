@@ -37,9 +37,9 @@ afterEach(() => {
 });
 
 it('shows enabled modules in the terminal details section without a backend selector', async () => {
-  const open = async () => ({ ok: true as const, data: { id: 'module', cwd: '/approved', session: 'marks_markscode' } });
+  const open = async () => ({ ok: true as const, data: { id: 'module', cwd: '/approved', session: 'marks_opencode' } });
   const api = {
-    cliStatus: async () => ({ ok: true as const, data: [{ id: 'markscode', name: 'MarksCode', installed: true, enabled: true, running: true, supported: true, version: '1', detail: 'ready' }] }),
+    cliStatus: async () => ({ ok: true as const, data: [{ id: 'opencode', name: 'OpenCode', installed: true, enabled: true, running: true, supported: true, version: '1', detail: 'ready' }] }),
     cliSessions: async () => ({ ok: true as const, data: [] }),
     cliOpen: open,
     cliWrite: async () => ({ ok: true as const, data: undefined }),

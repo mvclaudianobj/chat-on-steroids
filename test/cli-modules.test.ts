@@ -10,6 +10,8 @@ const fixture = vi.hoisted(() => ({
   resumeHasSession: null as null | (() => void),
   pty: { onData: vi.fn(), onExit: vi.fn(), write: vi.fn(), resize: vi.fn(), kill: vi.fn(), pause: vi.fn(), resume: vi.fn() },
   durable: ['codex'] as unknown,
+  probes: [] as string[][],
+  tmuxCreated: 0,
   save: vi.fn()
 }));
 vi.mock('electron', () => ({
@@ -17,6 +19,12 @@ vi.mock('electron', () => ({
   ipcMain: { handle: (_name: string, callback: typeof fixture.handle) => { fixture.handle = callback; } }
 }));
 vi.mock('node-pty', () => ({ spawn: vi.fn(() => fixture.pty) }));
+vi.mock('node:fs/promises', async importOriginal => {
+  const real = await importOriginal<typeof import('node:fs/promises')>();
+  // Upstream binaries "exist" on PATH for the version probe's stat; everything else is real.
+  const fake = (file: unknown) => typeof file === 'string' && /^\/usr\/local\/bin\/(opencode|zeroclaw)$/.test(file);
+  return { ...real, stat: async (file: string, ...rest: unknown[]) => fake(file) ? { isFile: () => true, size: 1, mtimeMs: 1 } : (real.stat as any)(file, ...rest) };
+});
 vi.mock('node:child_process', () => {
   const execFile = (file: string, args: string[], _options: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
     fixture.commands.push([file, ...args]);
@@ -42,7 +50,15 @@ vi.mock('node:child_process', () => {
       else if (args[1] === 'codex') callback(null, '/usr/local/bin/codex\n', '');
       else if (args[1] === 'claude') callback(null, '/usr/local/bin/claude\n', '');
       else if (args[1] === 'markscode') callback(null, '/usr/local/bin/markscode\n', '');
+      else if (args[1] === 'opencode') callback(null, '/usr/local/bin/opencode\n', '');
+      else if (args[1] === 'zeroclaw') callback(null, '/usr/local/bin/zeroclaw\n', '');
       else callback(new Error('missing'), '', '');
+    } else if (file === '/usr/bin/env' && args[0] === '-i') {
+      // An upstream module's private-HOME version probe.
+      fixture.probes.push(args);
+      callback(null, args.at(-2)!.endsWith('opencode') ? '1.19.3\n' : 'zeroclaw 0.8.6 (c473221)\n', '');
+    } else if (args.includes('display-message')) {
+      callback(null, `${fixture.tmuxCreated}\n`, '');
     } else if (file === '/usr/local/bin/codex') callback(null, 'codex-cli 1.0\n', '');
     else callback(null, '', '');
   };
@@ -60,11 +76,11 @@ vi.mock('../src/main/durable.js', () => ({
     return fixture.save(name, value);
   }
 }));
-vi.mock('../src/main/cli-source-install.js', () => ({ installFork: vi.fn() }));
+vi.mock('../src/main/cli-source-install.js', () => ({ installPublishedCli: vi.fn() }));
 
 import {
-  cliAction, cliChatRuntime, cliCreateSession, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
-  registerCliEngineOpenHook, registerCliModuleIpc, registerCliModuleStopHook
+  cliAction, cliChatRuntime, cliCreateSession, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalRefresh, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
+  OPENCODE_ATTACH_SCRIPT, registerCliEngineOpenHook, registerCliEngineRegistration, registerCliModuleIpc, registerCliModuleStopHook
 } from '../src/main/cli-modules.js';
 
 beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
@@ -228,38 +244,98 @@ describe('Persistent coding CLI terminal', () => {
       fixture.missingSession = false;
     }
   });
-  it('attaches a MarksCode chat\'s live terminal through the shared seam with only `-s <session> .`', async () => {
+  it('attaches an OpenCode chat\'s live terminal through the fixed launcher with only `--dir <cwd> -s <session>`', async () => {
     if (process.platform === 'win32') return;
-    expect(await cliModuleState('markscode')).toEqual({ enabled: false, command: true, binary: null });
-    const args = ['-s', 'ses_123', '.'];
+    const args = ['--dir', '/approved/project', '-s', 'ses_e9fa19daaffebP7AerPiuan5CM'];
+    try {
+      await cliAction('opencode', 'enable');
+      expect(await cliModuleState('opencode')).toEqual({ enabled: true, command: true, binary: '/usr/local/bin/opencode', managed: false });
+      for (const bad of [['--dir', '/approved/project', '-s', '--fork'], ['--dir', 'relative', '-s', 'ses_1'], ['--dir', '/a/../b', '-s', 'ses_1'],
+        ['-s', 'ses_1', '--dir', '/approved'], ['--dir', '/approved', '-s', 'ses_1', '--password'], ['--dir', '/approved', '-s', 'ses 1'],
+        ['-s', 'ses_123', '.'], ['--dir', '/approved\u0000', '-s', 'ses_1']]) {
+        await expect(cliEngineTerminal('opencode', { sessionId: 'chat-session-o', projectId: null, args: bad, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      }
+      await expect(cliEngineTerminal('codex', { sessionId: 'chat-session-o', projectId: null, args, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      const session = await cliEngineTerminal('opencode', { sessionId: 'chat-session-o', projectId: null, args, title: 'OpenCode · My chat' });
+      expect(session).toMatchObject({ module: 'opencode', engineChat: 'chat-session-o', args });
+      fixture.missingSession = true;
+      const hook = vi.fn(async (_session: unknown): Promise<void> => undefined);
+      registerCliEngineOpenHook('opencode', hook);
+      // Without a running server's registration the terminal is refused before tmux starts.
+      await expect(cliOpen(session.id, 80, 24, 'opencode-no-server')).rejects.toThrow('not running');
+      expect(fixture.commands.some(command => command.includes('new-session'))).toBe(false);
+      registerCliEngineRegistration('opencode', async () => '/home/test/.config/chat-marks/opencode/server');
+      await cliOpen(session.id, 80, 24, 'opencode-terminal');
+      expect(hook).toHaveBeenCalledWith(expect.objectContaining({ engineChat: 'chat-session-o' }));
+      // The URL and password are read from the 0600 file when the TUI starts: never in tmux's argv or environment.
+      const created = fixture.commands.find(command => command.includes('new-session'))!;
+      expect(created).toEqual([
+        'tmux', '-L', expect.any(String), 'new-session', '-d', '-s', session.tmuxSession, '-c', '/home/test',
+        'sh', '-c', OPENCODE_ATTACH_SCRIPT, 'marks-cli', '/home/test/.config/chat-marks/opencode/server', '/usr/local/bin/opencode', ...args
+      ]);
+      expect(OPENCODE_ATTACH_SCRIPT).toContain('exec "$b" attach "$u" "$@"');
+      expect(created.join(' ')).not.toMatch(/OPENCODE_SERVER_PASSWORD=[^$]|http:\/\//);
+      // A terminal older than the running server is ended, so the next open recreates it.
+      fixture.missingSession = false;
+      fixture.commands.length = 0;
+      fixture.tmuxCreated = 1_000;
+      await cliEngineTerminalRefresh('chat-session-o', 2_000_000);
+      expect(fixture.commands.some(command => command.includes('kill-session'))).toBe(true);
+      fixture.commands.length = 0;
+      await cliEngineTerminalRefresh('chat-session-o', 500_000);
+      expect(fixture.commands.some(command => command.includes('kill-session'))).toBe(false);
+    } finally {
+      registerCliEngineOpenHook('opencode', null);
+      registerCliEngineRegistration('opencode', null);
+      fixture.missingSession = false;
+      await cliAction('opencode', 'disable');
+    }
+  });
+
+  it('probes upstream versions with a private HOME and runs ZeroClaw\'s zerocode TUI or its quickstart', async () => {
+    if (process.platform === 'win32') return;
+    try {
+      await cliAction('zeroclaw', 'enable');
+      const status = (await cliStatus()).find(item => item.id === 'zeroclaw')!;
+      expect(status).toMatchObject({ version: '0.8.6', upstream: true, legacy: false, managed: false });
+      // Probed once per binary (cached by path, size and mtime), always under the private folder.
+      const probe = fixture.probes.find(item => item.at(-2) === '/usr/local/bin/zeroclaw')!;
+      expect(probe.slice(-2)).toEqual(['/usr/local/bin/zeroclaw', '--version']);
+      expect(probe).toContain('HOME=/home/test/.config/chat-marks/modules/zeroclaw/.probe');
+      expect(probe.some(arg => /markscode|\.zeroclaw/.test(arg))).toBe(false);
+      fixture.missingSession = true;
+      const terminal = await cliCreateSession('zeroclaw', null);
+      await cliOpen(terminal.id, 80, 24, 'zeroclaw-terminal');
+      expect(fixture.commands.find(command => command.includes('new-session'))!.slice(-4)).toEqual(['sh', '-c', 'exec "$@"', 'marks-cli', '/usr/local/bin/zerocode'].slice(-4));
+      fixture.commands.length = 0;
+      const quickstart = await cliCreateSession('zeroclaw', null, 'quickstart');
+      expect(quickstart).toMatchObject({ args: ['quickstart'], title: 'ZeroClaw quickstart' });
+      await cliOpen(quickstart.id, 80, 24, 'zeroclaw-quickstart');
+      expect(fixture.commands.find(command => command.includes('new-session'))!.slice(-3)).toEqual(['marks-cli', '/usr/local/bin/zeroclaw', 'quickstart']);
+      await expect(cliCreateSession('codex', null, 'quickstart')).rejects.toThrow('Only ZeroClaw');
+      await expect(cliAction('zeroclaw', 'install')).rejects.toThrow('Settings > Modules');
+    } finally {
+      fixture.missingSession = false;
+      await cliAction('zeroclaw', 'disable');
+    }
+  });
+
+  it('never resolves, probes, installs or opens the retired MarksCode and MarksClaw, but still stops their sessions', async () => {
+    if (process.platform === 'win32') return;
     try {
       await cliAction('markscode', 'enable');
-      expect(await cliModuleState('markscode')).toEqual({ enabled: true, command: true, binary: '/usr/local/bin/markscode' });
-      for (const bad of [['-s', '--dangerously-skip', '.'], ['-s', 'ses_123'], ['-s', 'ses_123', '/'], ['-s', 'ses 1', '.'], ['serve', 'ses_123', '.'],
-        ['resume', 'thread-1', '--remote', 'unix:///home/test/a.sock'], ['--resume', '3f2b8c1e-0d4a-4c3b-9e2f-1a2b3c4d5e6f'], ['-s', 'ses_1\u0000', '.']]) {
-        await expect(cliEngineTerminal('markscode', { sessionId: 'chat-session-m', projectId: null, args: bad, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
-      }
-      // Another module's shape is refused for MarksCode, and MarksCode's for Codex.
-      await expect(cliEngineTerminal('codex', { sessionId: 'chat-session-m', projectId: null, args, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
-      const session = await cliEngineTerminal('markscode', { sessionId: 'chat-session-m', projectId: null, args, title: 'MarksCode · My chat' });
-      expect(session).toMatchObject({ module: 'markscode', projectId: null, title: 'MarksCode · My chat', engineChat: 'chat-session-m', args });
-      expect((await cliEngineTerminal('markscode', { sessionId: 'chat-session-m', projectId: null, args, title: 'other' })).id).toBe(session.id);
-      fixture.missingSession = true;
-      // The open hook (the service must answer) runs before tmux starts; a refusal stops the attach.
-      registerCliEngineOpenHook('markscode', async () => { throw new Error('The MarksCode service is stopped. Start it from Settings > Modules.'); });
-      await expect(cliOpen(session.id, 80, 24, 'markscode-refused')).rejects.toThrow('service is stopped');
-      expect(fixture.commands.some(command => command.includes('new-session'))).toBe(false);
-      const hook = vi.fn(async (_session: unknown): Promise<void> => undefined);
-      registerCliEngineOpenHook('markscode', hook);
-      await cliOpen(session.id, 80, 24, 'markscode-terminal');
-      expect(hook).toHaveBeenCalledWith(expect.objectContaining({ engineChat: 'chat-session-m' }));
-      // "$@" passes the binary and each argument as argv: nothing is parsed by a shell.
-      expect(fixture.commands.find(command => command.includes('new-session'))).toEqual([
-        'tmux', '-L', expect.any(String), 'new-session', '-d', '-s', session.tmuxSession, '-c', '/home/test', 'sh', '-c', 'exec "$@"', 'marks-cli', '/usr/local/bin/markscode', ...args
-      ]);
+      expect(await cliModuleState('markscode')).toEqual({ enabled: true, command: true, binary: null, managed: false });
+      fixture.commands.length = 0;
+      const status = (await cliStatus()).find(item => item.id === 'markscode')!;
+      expect(status).toMatchObject({ legacy: true, installed: false, version: null });
+      expect(fixture.commands.some(command => command.join(' ').includes('markscode'))).toBe(false);
+      await expect(cliAction('markscode', 'install')).rejects.toThrow('retired');
+      await expect(cliAction('marksclaw', 'update')).rejects.toThrow('retired');
+      await expect(cliCreateSession('markscode', null)).rejects.toThrow('retired');
+      await expect(cliChatRuntime('markscode', null)).rejects.toThrow('not installed');
+      await cliAction('markscode', 'stop');
+      expect(fixture.commands.some(command => command.includes('list-sessions'))).toBe(true);
     } finally {
-      registerCliEngineOpenHook('markscode', null);
-      fixture.missingSession = false;
       await cliAction('markscode', 'disable');
     }
   });

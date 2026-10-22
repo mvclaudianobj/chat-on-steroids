@@ -137,13 +137,13 @@ describe('turn projector (synthetic CLI streams)', () => {
     expect(turn.usage).toEqual({ inputTokens: 3000, outputTokens: 120, cachedInputTokens: 0, reasoningTokens: 0 });
   });
 
-  it('projects a MarksCode-shaped turn: a TUI-answered permission, an error, a stop that settles the open tool, then ignores late events', async () => {
-    const markscode = fixture('markscode-turn');
+  it('projects an OpenCode-shaped turn: a TUI-answered permission, an error, a stop that settles the open tool, then ignores late events', async () => {
+    const opencode = fixture('opencode-turn');
     const { sink, rows } = memorySink();
     const answers: Array<[string, ApprovalOutcome]> = [];
-    const { turn, gate } = projector(markscode.engine, sink, answers);
+    const { turn, gate } = projector(opencode.engine, sink, answers);
     await turn.start('Format the code');
-    await play(turn, gate, markscode.steps);
+    await play(turn, gate, opencode.steps);
     expect(outline(rows)).toEqual([
       'user api-user:api-turn-1 Format the code',
       'turn_start',
@@ -153,11 +153,13 @@ describe('turn projector (synthetic CLI streams)', () => {
       'tool apply_patch tool_execution_error Edited a.ts [did not finish]',
       'turn_end stopped'
     ]);
-    expect(rows.at(-1)).toMatchObject({ kind: 'turn_end', detail: 'Stopped from the MarksCode terminal' });
+    expect(rows.at(-1)).toMatchObject({ kind: 'turn_end', detail: 'Stopped from the OpenCode terminal' });
     // Answered in the attached TUI: the card goes and the app sends no answer of its own.
-    expect(answers).toEqual([['perm-1', 'resolved']]);
-    expect(approval.marksCodeApprovalDecision('resolved')).toBeNull();
-    expect(approval.marksCodeApprovalDecision('always')).toBe('always');
+    expect(answers).toEqual([['per_1', 'resolved']]);
+    expect(approval.openCodeApprovalDecision('resolved')).toBeNull();
+    // "Always" is never sent upstream (it would allow the pattern for every chat of the folder).
+    expect(approval.openCodeApprovalDecision('always')).toBe('once');
+    expect(approval.openCodeApprovalDecision('stop')).toBe('reject');
     expect(gate.view()).toBeNull();
     expect(turn.ended).toBe('stopped');
   });

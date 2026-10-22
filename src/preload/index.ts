@@ -124,7 +124,7 @@ const api = {
   terminalResize: (id: string, cols: number, rows: number) => call<void>('workspaceTerminal:request', { action: 'resize', id, cols, rows }),
   terminalAck: (id: string, count: number) => call<void>('workspaceTerminal:request', { action: 'ack', id, count }),
   terminalClose: (id: string) => call<void>('workspaceTerminal:request', { action: 'close', id }),
-  cliStatus: () => call<Array<{ id: 'markscode' | 'codex' | 'claude' | 'marksclaw'; name: string; installed: boolean; enabled: boolean; supported: boolean; running: boolean; version: string | null; detail: string }>>('marksCli:request', { action: 'status' }),
+  cliStatus: () => call<import('../main/cli-modules.js').CliModuleStatus[]>('marksCli:request', { action: 'status' }),
   cliChatOpen: (backend: 'markscode' | 'codex' | 'claude', projectId: string | null) => call<import('../main/cli-chat.js').CliChatThread>('cliChat:request', { action: 'open', backend, projectId }),
   cliChatSend: (backend: 'markscode' | 'codex' | 'claude', projectId: string | null, prompt: string) => call<import('../main/cli-chat.js').CliChatThread>('cliChat:request', { action: 'send', backend, projectId, prompt }),
   cliChatCancel: (backend: 'markscode' | 'codex' | 'claude', projectId: string | null) => call<import('../main/cli-chat.js').CliChatThread>('cliChat:request', { action: 'cancel', backend, projectId }),
@@ -154,11 +154,10 @@ const api = {
   apiChatChatSettings: (sessionId: string) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'chatSettings', sessionId }),
   apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
   apiChatApprove: (sessionId: string, approvalId: string, decision: import('../shared/api-chat.js').ApiChatApprovalDecision) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'approve', sessionId, approvalId, decision }),
-  /** Explicit user action: start the MarksCode background service, then its status. */
-  apiChatStartEngineService: (engine: 'markscode') => call<{ available: boolean; detail: string; fix: 'enable' | 'install' | 'start' | null }>('marksApiChat:request', { action: 'startEngineService', engine }),
-  cliAction: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', action: 'enable' | 'disable' | 'install' | 'update' | 'stop') => call<unknown>('marksCli:request', { action, module }),
+  cliAction: (module: import('../main/cli-modules.js').CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'stop') => call<unknown>('marksCli:request', { action, module }),
   cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),
-  cliCreateSession: (module: 'markscode' | 'codex' | 'claude' | 'marksclaw', projectId: string | null) => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId }),
+  /** `quickstart`: ZeroClaw's `zeroclaw quickstart` instead of its `zerocode` terminal. */
+  cliCreateSession: (module: import('../main/cli-modules.js').CliId, projectId: string | null, kind?: 'quickstart') => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId, ...(kind ? { kind } : {}) }),
   cliOpen: (sessionId: string, attachmentId: string, cols: number, rows: number) => call<{ id: string; cwd: string; session: string }>('marksCli:request', { action: 'open', sessionId, attachmentId, cols, rows }),
   cliWrite: (attachmentId: string, data: string) => call<void>('marksCli:request', { action: 'write', attachmentId, data }),
   cliResize: (attachmentId: string, cols: number, rows: number) => call<void>('marksCli:request', { action: 'resize', attachmentId, cols, rows }),
@@ -333,6 +332,17 @@ const api = {
     const wrapped = (_event: unknown, progress: import('../shared/cliproxy.js').CliProxyInstallProgress): void => listener(progress);
     ipcRenderer.on('marksCliProxy:progress', wrapped);
     return () => ipcRenderer.removeListener('marksCliProxy:progress', wrapped);
+  },
+  // Chat Marks: upstream OpenCode and ZeroClaw modules (official releases into the module folder).
+  upstreamStatus: (module: import('../shared/upstream-module.js').UpstreamModuleId, refresh = false) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'status', module, refresh }),
+  /** Installs or updates to `version`, the release the user confirmed. */
+  upstreamInstall: (module: import('../shared/upstream-module.js').UpstreamModuleId, mode: 'install' | 'update', version: string) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'install', module, mode, version }),
+  /** Restarts the app's OpenCode server (it starts again on the next use). */
+  upstreamRestartServer: () => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'restartServer', module: 'opencode' }),
+  onUpstreamProgress: (listener: (progress: import('../shared/upstream-module.js').UpstreamInstallProgress) => void): (() => void) => {
+    const wrapped = (_event: unknown, progress: import('../shared/upstream-module.js').UpstreamInstallProgress): void => listener(progress);
+    ipcRenderer.on('marksUpstream:progress', wrapped);
+    return () => ipcRenderer.removeListener('marksUpstream:progress', wrapped);
   },
   installUpdate: () => call<boolean>('update:install'),
   /** Check/stage/apply supported updates and request one connector refresh round. May restart. */

@@ -20,7 +20,7 @@ const turnSchema = z.object({ turnId: z.string().min(1).max(100), startedAt: z.n
 export const chatRecordSchema = z.object({
   /** Absent means `cliproxy`. */
   engine: z.enum(AGENT_ENGINE_IDS).optional(),
-  /** The engine's own session/thread id once it has one (Codex thread, Claude session, MarksCode session). */
+  /** The engine's own session/thread id once it has one (Codex thread, Claude session, OpenCode session). */
   backendSessionId: z.string().min(1).max(200).optional(),
   model: modelId.nullable(),
   effort: z.enum(API_CHAT_EFFORTS).nullable(),

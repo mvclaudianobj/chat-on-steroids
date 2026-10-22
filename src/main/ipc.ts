@@ -3,6 +3,7 @@ import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { registerCliModuleIpc } from './cli-modules.js';
 import { registerApiChatIpc } from './api-chat/ipc.js';
 import { registerCliProxyIpc } from './cliproxy/ipc.js';
+import { registerUpstreamIpc } from './upstream/ipc.js';
 import { registerCliChatIpc } from './cli-chat.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
@@ -649,6 +650,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   registerCliModuleIpc(getWindow);
   registerApiChatIpc(getWindow);
   registerCliProxyIpc(getWindow); // Chat Marks: CLIProxyAPI versions, install/update, management keys.
+  registerUpstreamIpc(getWindow); // Chat Marks: upstream OpenCode and ZeroClaw versions and install/update.
   registerCliChatIpc(getWindow);
   // Sign out is an application admission transition. End this process after
   // clearing its secure session so the next startup must authenticate again.

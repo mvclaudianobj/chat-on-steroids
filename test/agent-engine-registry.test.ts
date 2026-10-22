@@ -51,10 +51,10 @@ beforeEach(() => {
 });
 
 describe('agent engine registry', () => {
-  it('lists every engine in order; Codex and MarksCode are unavailable while their modules are off', async () => {
+  it('lists every engine in order; OpenCode, Codex and Claude are unavailable while their modules are off, MarksCode is retired', async () => {
     const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; terminal: string | null }>;
     expect(engines.map(engine => `${engine.id}:${engine.available}:${engine.terminal}`)).toEqual([
-      'cliproxy:true:null', 'markscode:false:live', 'codex:false:live', 'claude:false:handover'
+      'cliproxy:true:null', 'opencode:false:live', 'codex:false:live', 'claude:false:handover', 'markscode:false:null'
     ]);
   });
 
@@ -91,19 +91,20 @@ describe('agent engine registry', () => {
     expect(cliproxy.create).toHaveBeenCalledWith({ projectId: null });
     await expect(request({ action: 'createChat', engine: 'claude' })).rejects.toThrow('off');
     await expect(request({ action: 'createChat', engine: 'codex' })).rejects.toThrow('Enable the Codex module in Settings > Modules first');
-    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('Enable the MarksCode module in Settings > Modules');
+    await expect(request({ action: 'createChat', engine: 'opencode' })).rejects.toThrow('Enable the OpenCode module in Settings > Modules');
+    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('MarksCode chats are read-only. New chats use OpenCode.');
     expect(() => parseApiChatRequest({ action: 'createChat', engine: 'gemini' })).toThrow();
   });
 
   it("loads the named engine's models, CLIProxy's catalog when none is named", async () => {
     const cliproxy = fakeEngine('cliproxy');
-    const markscode = fakeEngine('markscode');
+    const opencode = fakeEngine('opencode');
     registry.registerAgentEngine(cliproxy);
-    registry.registerAgentEngine(markscode);
+    registry.registerAgentEngine(opencode);
     await request({ action: 'models', query: 'opus', limit: 20 });
-    await request({ action: 'models', engine: 'markscode', refresh: true });
+    await request({ action: 'models', engine: 'opencode', refresh: true });
     expect(cliproxy.models).toHaveBeenCalledWith({ query: 'opus', limit: 20 });
-    expect(markscode.models).toHaveBeenCalledWith({ refresh: true });
+    expect(opencode.models).toHaveBeenCalledWith({ refresh: true });
   });
 
   it('refuses a chat whose record this version cannot read, and keeps that record untouched', async () => {

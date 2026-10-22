@@ -2,7 +2,7 @@
  * The approval binding every engine shares. The app mints the approval id (a UUID the renderer
  * answers), binds it to the sha256 of the canonical action it showed, and keeps it in process
  * memory only: a restart never leaves an approval that could be answered. An engine's own
- * request id (a Codex JSON-RPC id, a Claude `request_id`, a MarksCode permission id) is kept
+ * request id (a Codex JSON-RPC id, a Claude `request_id`, an OpenCode permission id) is kept
  * beside it so the engine answers exactly the request the user saw; the renderer never sees it.
  */
 import { createHash, randomUUID } from 'node:crypto';
@@ -136,7 +136,11 @@ export function claudeApprovalDecision(outcome: ApprovalOutcome, shownInput: Rec
   return outcome === 'stop' ? { behavior: 'deny', message: 'The user stopped this turn.' } : null;
 }
 
-/** MarksCode `permission/:id/reply`. */
-export function marksCodeApprovalDecision(outcome: ApprovalOutcome): 'once' | 'always' | 'reject' | null {
-  return outcome === 'approve' ? 'once' : outcome === 'always' ? 'always' : outcome === 'deny' || outcome === 'stop' ? 'reject' : null;
+/**
+ * OpenCode `POST /permission/:id/reply`. "Always" is answered `once` upstream: OpenCode's own
+ * `always` allows the pattern for every chat of the folder and beats their deny rules; the
+ * engine switches this chat to Auto instead.
+ */
+export function openCodeApprovalDecision(outcome: ApprovalOutcome): 'once' | 'reject' | null {
+  return outcome === 'approve' || outcome === 'always' ? 'once' : outcome === 'deny' || outcome === 'stop' ? 'reject' : null;
 }

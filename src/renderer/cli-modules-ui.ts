@@ -2,17 +2,26 @@ import type { AppApi } from '../preload/index.js';
 import type { CliSession } from '../main/cli-modules.js';
 import { createWorkspaceTerminal, type TerminalTransport } from './workspace-terminal.js';
 import { openRowMenu, type RowMenuItem } from './row-menu.js';
-import { t } from './i18n.js';
+import { t, ui } from './i18n.js';
 import { chatTypeIcon, chatTypeMark } from './chat-types.js';
+import { icon } from './dom.js';
+import { createUpstreamManageUi, type UpstreamManageUi } from './upstream-manage-ui.js';
+import type { CliModuleStatus } from '../main/cli-modules.js';
 
-const IDS = ['markscode', 'codex', 'claude', 'marksclaw'] as const;
+/** cli-modules' CLI_IDS order. MarksCode and MarksClaw are retired: shown only while active or running. */
+const IDS = ['opencode', 'codex', 'claude', 'zeroclaw', 'markscode', 'marksclaw'] as const;
 type Id = typeof IDS[number];
-type Status = { id: Id; name: string; installed: boolean; enabled: boolean; running: boolean; supported: boolean; version: string | null; detail: string };
+type Status = CliModuleStatus;
+const NAMES: Readonly<Record<Id, string>> = {
+  opencode: 'OpenCode', codex: 'Codex', claude: 'Claude', zeroclaw: 'ZeroClaw', markscode: 'MarksCode', marksclaw: 'MarksClaw'
+};
+const LEGACY: ReadonlySet<Id> = new Set(['markscode', 'marksclaw']);
+const UPSTREAM = (id: Id): id is 'opencode' | 'zeroclaw' => id === 'opencode' || id === 'zeroclaw';
 export type CliModuleSummary = { id: string; name: string; enabled: boolean };
 
 export function createCliModulesUi(api: AppApi, hooks: {
   showTab(name: string): void; openChatView(name: string): void; workspace(): string | null; newChatItems?(): RowMenuItem[];
-  /** After the MarksCode service was started from its row: the chat engines are listed again. */
+  /** After an upstream module (OpenCode) was installed or updated: the chat engines are listed again. */
   onEngineService?(): void;
 }) {
   const nav = document.getElementById('moduleCliNav')!;
@@ -38,7 +47,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
   moduleTerminal.className = 'marks-cli-terminal';
   moduleView.append(moduleTerminal);
   chatBody.append(moduleView);
-  const rows = new Map<Id, { navigation: HTMLButtonElement; panel: HTMLElement; row: HTMLElement; active: HTMLInputElement; detail: HTMLElement; output: HTMLElement; project: HTMLSelectElement }>();
+  const rows = new Map<Id, { navigation: HTMLButtonElement; panel: HTMLElement; row: HTMLElement; active: HTMLInputElement; detail: HTMLElement; output: HTMLElement; project: HTMLSelectElement; manage: UpstreamManageUi | null }>();
   const current = new Map<Id, Status>();
   const sessions = new Map<string, CliSession>();
   const terminalManagers = new Map<string, ReturnType<typeof createWorkspaceTerminal>>();
@@ -47,32 +56,42 @@ export function createCliModulesUi(api: AppApi, hooks: {
   let selectedSessionId: string | null = null;
 
   for (const id of IDS) {
-    const name = id === 'markscode' ? 'MarksCode' : id === 'codex' ? 'Codex' : id === 'claude' ? 'Claude' : 'MarksClaw';
+    const name = NAMES[id];
     const navigation = document.createElement('button');
     navigation.type = 'button'; navigation.className = 'modules-subnav'; navigation.dataset.modulePage = `module-${id}`;
     navigation.textContent = name; navigation.hidden = true;
     tabs.insertBefore(navigation, nav.nextSibling);
     const row = document.createElement('section'); row.className = 'appearance-section';
-    row.append(text('h2', name));
+    row.dataset.cliModule = id;
+    // Retired forks stay out of sight unless still active or running (refresh below).
+    row.hidden = LEGACY.has(id);
+    const title = text('h2', name);
+    if (id === 'opencode') title.prepend(chatTypeMark('opencode', 'module-mark'));
+    if (id === 'zeroclaw') title.prepend(icon('i-module-zeroclaw', 'ico chat-type-icon module-mark'));
+    row.append(title);
     const surface = document.createElement('div'); surface.className = 'settings-surface modules-service';
     const enableLabel = document.createElement('label'); enableLabel.className = 'setting modules-toggle';
     enableLabel.append(text('span', 'Activate module', 'setting-text'));
     const activeCheck = document.createElement('input'); activeCheck.type = 'checkbox'; enableLabel.append(activeCheck);
     const detail = text('p', 'Checking installation…', 'modules-detail');
     const actions = document.createElement('div'); actions.className = 'modules-service-actions';
-    for (const action of ['install', 'update', 'stop'] as const) {
+    // Upstream modules install and update their official release from their own versions block;
+    // the retired forks only keep Stop.
+    const operations = LEGACY.has(id) || UPSTREAM(id) ? ['stop'] as const : ['install', 'update', 'stop'] as const;
+    for (const action of operations) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
       button.textContent = action === 'install' ? 'Install / instructions' : action === 'update' ? 'Update' : 'Stop session';
       button.addEventListener('click', () => void operate(id, action)); actions.append(button);
     }
-    if (id === 'markscode') {
-      // MarksCode chats run on its shared background service; it starts only when asked here.
-      const start = document.createElement('button'); start.type = 'button'; start.className = 'btn'; start.id = 'markscodeServiceStart';
-      start.textContent = t('Start MarksCode service');
-      start.addEventListener('click', () => void startService(start, detail));
-      actions.append(start);
+    if (id === 'zeroclaw') {
+      // `zeroclaw quickstart` creates the first agent; the ordinary terminal is the zerocode TUI.
+      const quickstart = document.createElement('button'); quickstart.type = 'button'; quickstart.className = 'btn'; quickstart.id = 'zeroclawQuickstart';
+      ui(quickstart, 'textContent', () => t('Quickstart'));
+      quickstart.addEventListener('click', () => void createSession(id, hooks.workspace(), 'quickstart'));
+      actions.append(quickstart);
     }
     surface.append(enableLabel, detail, actions); row.append(surface); parent.append(row);
+    const manage = UPSTREAM(id) ? createUpstreamManageUi(api, id, surface, () => { void refresh(); hooks.onEngineService?.(); }) : null;
 
     const panel = document.createElement('section'); panel.className = 'panel appearance-panel modules-panel scroll';
     panel.dataset.panel = `module-${id}`;
@@ -86,7 +105,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
     const controls = document.createElement('div'); controls.className = 'modules-service-actions'; controls.append(project, create, detach);
     const output = text('p', 'This terminal can reconnect to the same tmux session when Chat Marks reopens.', 'modules-detail');
     content.append(controls, output); panel.append(content); panels.append(panel);
-    rows.set(id, { navigation, panel, row, active: activeCheck, detail, output, project });
+    rows.set(id, { navigation, panel, row, active: activeCheck, detail, output, project, manage });
     activeCheck.addEventListener('change', () => void operate(id, activeCheck.checked ? 'enable' : 'disable'));
   }
 
@@ -95,7 +114,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
   // upstream buttons keep their handlers: the Projects sidebar's #newChat and the Inbox
   // layout's compose button, which the Inbox repaints. This listens before them, on the document.
   const NEW_CHAT_BUTTONS = '#newChat, [data-inbox-control="compose"]';
-  const enabledModules = (): Id[] => IDS.filter(id => current.get(id)?.enabled);
+  const enabledModules = (): Id[] => IDS.filter(id => current.get(id)?.enabled && !LEGACY.has(id));
   // Native providers beside ChatGPT (CLIProxy API chats) come right after it, before the terminals.
   const providerItems = (): RowMenuItem[] => hooks.newChatItems?.() ?? [];
   const hasMenu = (): boolean => enabledModules().length > 0 || providerItems().length > 0;
@@ -153,8 +172,11 @@ export function createCliModulesUi(api: AppApi, hooks: {
         current.set(status.id, status);
         row.detail.classList.remove('modules-error');
         row.active.checked = status.enabled;
-        row.navigation.hidden = !status.enabled;
-        row.detail.textContent = `${status.version ?? 'Not installed'} · ${status.running ? 'Running · ' : ''}${status.detail}`;
+        row.navigation.hidden = !status.enabled || status.legacy;
+        if (status.legacy) row.row.hidden = !status.enabled && !status.running;
+        row.detail.textContent = status.legacy ? status.detail
+          : `${status.version ?? 'Not installed'}${status.upstream && status.installed && !status.managed ? ` (${t('not installed by Chat Marks')})` : ''} · ${status.running ? 'Running · ' : ''}${status.detail}`;
+        void row.manage?.refresh();
       }
       paintNewChat();
       const catalog = await api.cliSessions();
@@ -177,17 +199,6 @@ export function createCliModulesUi(api: AppApi, hooks: {
     if (!reply.ok) row.detail.textContent = reply.error;
     if (action === 'disable') for (const session of sessions.values()) if (session.module === id) void disconnect(session.id);
     await refresh();
-  }
-  async function startService(button: HTMLButtonElement, detail: HTMLElement): Promise<void> {
-    button.disabled = true;
-    detail.textContent = t('Starting the MarksCode service…');
-    try {
-      const reply = await api.apiChatStartEngineService('markscode');
-      detail.textContent = reply.ok ? (reply.data.available ? t('MarksCode service running. MarksCode chats are available in New chat.') : t(reply.data.detail)) : t(reply.error);
-      if (reply.ok && reply.data.available) hooks.onEngineService?.();
-    } finally {
-      button.disabled = false;
-    }
   }
   async function setProjects(id: Id): Promise<void> {
     const select = rows.get(id)!.project;
@@ -333,13 +344,13 @@ export function createCliModulesUi(api: AppApi, hooks: {
     terminalManagers.set(session.id, manager);
     return manager;
   }
-  async function createSession(moduleId: string, projectId: string | null): Promise<void> {
+  async function createSession(moduleId: string, projectId: string | null, kind?: 'quickstart'): Promise<void> {
     const id = IDS.find(candidate => candidate === moduleId);
-    if (!id) return;
+    if (!id || LEGACY.has(id)) return;
     const row = rows.get(id)!;
     if (!current.get(id)?.enabled) { row.output.textContent = 'Enable this module first.'; return; }
     row.output.textContent = 'Criando sessão CLI…';
-    const reply = await api.cliCreateSession(id, projectId || null);
+    const reply = kind ? await api.cliCreateSession(id, projectId || null, kind) : await api.cliCreateSession(id, projectId || null);
     if (!reply.ok) { row.output.textContent = reply.error; return; }
     sessions.set(reply.data.id, reply.data);
     paintSessions();

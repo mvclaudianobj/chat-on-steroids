@@ -15,9 +15,13 @@ import { icon } from './dom.js';
 /** `chatgpt` is a native ChatGPT chat, `api` an API chat whose engine this version cannot read. */
 export type ChatType = 'chatgpt' | 'terminal' | 'api' | AgentEngineId;
 
-/** One line drawing per engine (icons.css `.cm-glyph-*`); never a vendor's logo. */
+/**
+ * One drawing per engine (icons.css `.cm-glyph-*`): a line drawing, or the project's own simple
+ * mark when its licence allows it (OpenCode's MIT `mark.svg`); never a company's brand logo.
+ */
 const ENGINE_ICONS: Readonly<Record<AgentEngineId, string>> = {
   cliproxy: 'i-engine-cliproxy',
+  opencode: 'i-engine-opencode',
   markscode: 'i-engine-markscode',
   codex: 'i-engine-codex',
   claude: 'i-engine-claude'

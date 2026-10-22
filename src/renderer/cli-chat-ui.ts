@@ -11,7 +11,8 @@ export function initCliChatUi(api: AppApi, hooks: { workspace(): string | null }
   const select = document.createElement('select');
   select.id = 'cliChatBackend'; select.className = 'cli-chat-backend'; select.setAttribute('aria-label', 'Chat backend');
   select.title = 'Choose a conversation backend';
-  for (const [id, label] of [['chatgpt', 'ChatGPT'], ['markscode', 'MarksCode'], ['codex', 'Codex'], ['claude', 'Claude']] as const) {
+  // MarksCode is retired: its headless backend is no longer offered (it would run the fork).
+  for (const [id, label] of [['chatgpt', 'ChatGPT'], ['codex', 'Codex'], ['claude', 'Claude']] as const) {
     const option = document.createElement('option'); option.value = id; option.textContent = label; select.append(option);
   }
   header.prepend(select);

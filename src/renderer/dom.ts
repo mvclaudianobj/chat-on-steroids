@@ -37,6 +37,8 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-engine-cliproxy': 'cm:route',
   'i-engine-codex': 'cm:codex',
   'i-engine-markscode': 'cm:code',
+  'i-engine-opencode': 'cm:opencode',
+  'i-module-zeroclaw': 'cm:claw',
   'i-dock-restore': 'corners-in',
   'i-export': 'download-simple',
   'i-eye': 'eye',

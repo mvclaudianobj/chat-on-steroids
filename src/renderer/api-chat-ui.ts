@@ -41,6 +41,7 @@ export interface ApiChatUi {
 /** The menu wording of each engine; the reserved ones are offered once main reports them available. */
 const ENGINE_MENU: Readonly<Record<AgentEngineId, { title(): string; project(): string }>> = {
   cliproxy: { title: () => t('Chat with CLIProxy'), project: () => t('New CLIProxy chat in this project') },
+  opencode: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.opencode]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.opencode]) },
   markscode: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.markscode]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.markscode]) },
   codex: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.codex]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.codex]) },
   claude: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.claude]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.claude]) }
@@ -88,7 +89,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     ui(option, 'textContent', text);
     approval.append(option);
   }
-  // Engines with a terminal: Codex and MarksCode attach their TUI live to the same session,
+  // Engines with a terminal: Codex and OpenCode attach their TUI live to the same session,
   // Claude Code hands its session over. One button; its wording and whether it waits for the turn follow the mode.
   const terminal = document.createElement('button');
   terminal.type = 'button';

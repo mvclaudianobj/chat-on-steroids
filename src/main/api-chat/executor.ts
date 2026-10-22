@@ -407,8 +407,7 @@ async function endTurn(sessionId: string, turnId: string, outcome: TurnOutcome, 
 export function recoverApiChats(): Promise<void> {
   recovery ??= (async () => {
     // Engine-neutral: no backend session survives this process, so every engine's open turn closes
-    // here, except an engine that recovers its own (Codex resumes its thread, MarksCode re-attaches
-    // to its still-running service session).
+    // here, except an engine that recovers its own (Codex resumes its thread).
     for (const [sessionId, record] of Object.entries(await chatRecords())) {
       const open = record.openTurn;
       if (!open || running.has(sessionId) || recoversOwnTurns(engineOf(record))) continue;

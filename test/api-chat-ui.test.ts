@@ -38,8 +38,8 @@ afterEach(() => { Object.assign(globalThis, old); });
 const view = (over: Partial<{ model: string | null; effort: 'low' | 'medium' | 'high' | null; running: boolean }> = {}) =>
   ({ sessionId: 'session-api', conversationId: 'cosapi-1', model: 'gpt-5', effort: null, running: false, ...over });
 
-const engineList = (available: string[] = ['cliproxy']) => (['cliproxy', 'markscode', 'codex', 'claude'] as const).map(id => ({
-  id, label: { cliproxy: 'CLIProxy', markscode: 'MarksCode', codex: 'Codex', claude: 'Claude Code' }[id], available: available.includes(id), detail: '',
+const engineList = (available: string[] = ['cliproxy']) => (['cliproxy', 'opencode', 'codex', 'claude', 'markscode'] as const).map(id => ({
+  id, label: { cliproxy: 'CLIProxy', opencode: 'OpenCode', codex: 'Codex', claude: 'Claude Code', markscode: 'MarksCode' }[id], available: available.includes(id), detail: '',
   terminal: id === 'cliproxy' ? null : id === 'claude' ? 'handover' : 'live'
 }));
 
@@ -274,26 +274,26 @@ it("names the chat's engine in the header and loads that engine's models", async
   await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerModel').options].map(option => option.value)).toEqual(['gpt-6-codex']));
 });
 
-it('offers a MarksCode chat once main reports it available, and opens its live terminal through the shared seam', async () => {
+it('offers an OpenCode chat once main reports it available, and opens its live terminal through the shared seam', async () => {
   const api = apiMock({
-    apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'markscode']) })),
-    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'anthropic/sonnet-5' }), engine: 'markscode', approval: 'ask', pending: null, running: true } })),
-    apiChatTerminal: vi.fn(async () => ({ ok: true as const, data: { cliSessionId: 'cli-markscode-1' } }))
+    apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'opencode']) })),
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'anthropic/sonnet-5' }), engine: 'opencode', approval: 'ask', pending: null, running: true } })),
+    apiChatTerminal: vi.fn(async () => ({ ok: true as const, data: { cliSessionId: 'cli-opencode-1' } }))
   });
   const openCliSession = vi.fn();
   const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => 'project-1', selectChat: vi.fn(), selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }), openCliSession });
   await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(2));
-  expect(chats.newChatItems().map(item => `${item.action}=${item.label()}`)).toEqual(['new-chat-cliproxy=CLIProxy', 'new-chat-markscode=MarksCode']);
-  expect(chats.projectChatItems('menu-project').map(item => item.label())).toEqual(['New CLIProxy chat in this project', 'New MarksCode chat in this project']);
+  expect(chats.newChatItems().map(item => `${item.action}=${item.label()}`)).toEqual(['new-chat-cliproxy=CLIProxy', 'new-chat-opencode=OpenCode']);
+  expect(chats.projectChatItems('menu-project').map(item => item.label())).toEqual(['New CLIProxy chat in this project', 'New OpenCode chat in this project']);
   chats.sync();
-  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('MarksCode · anthropic/sonnet-5'));
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('OpenCode · anthropic/sonnet-5'));
   const button = $<HTMLButtonElement>('apiChatTerminal');
   await vi.waitFor(() => expect(button.hidden).toBe(false));
-  // Live: the TUI joins the same service session, so it opens while a turn runs.
+  // Live: the TUI attaches to the same server session, so it opens while a turn runs.
   expect(button.disabled).toBe(false);
-  expect(button.title).toBe("Open this chat's MarksCode session in a terminal");
+  expect(button.title).toBe("Open this chat's OpenCode session in a terminal");
   button.click();
-  await vi.waitFor(() => expect(openCliSession).toHaveBeenCalledWith('cli-markscode-1'));
+  await vi.waitFor(() => expect(openCliSession).toHaveBeenCalledWith('cli-opencode-1'));
   expect(api.apiChatTerminal).toHaveBeenCalledWith('session-api');
 });
 
@@ -355,7 +355,7 @@ it('keeps the terminal button hidden for a CLIProxy chat', async () => {
 
 it('shows each chat type icon in New chat, the project menu, the Terminals list and the chat header', async () => {
   const api = { ...apiMock({
-    apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'markscode', 'codex', 'claude']) })),
+    apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'opencode', 'codex', 'claude']) })),
     apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'opus' }), engine: 'claude', approval: 'ask', pending: null } }))
   }),
   cliStatus: async () => ({ ok: true as const, data: [{ id: 'claude', name: 'Claude', enabled: true, detail: '', version: '1', running: false }] }),
@@ -367,8 +367,8 @@ it('shows each chat type icon in New chat, the project menu, the Terminals list 
   const cli = createCliModulesUi(api, { showTab: vi.fn(), openChatView: () => undefined, workspace: () => null, newChatItems: chats.newChatItems });
   repaint = cli.repaintNewChat;
   await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(4));
-  expect(chats.newChatItems().map(item => item.icon)).toEqual(['i-engine-cliproxy', 'i-engine-markscode', 'i-engine-codex', 'i-engine-claude']);
-  expect(chats.projectChatItems('p').map(item => item.icon)).toEqual(['i-engine-cliproxy', 'i-engine-markscode', 'i-engine-codex', 'i-engine-claude']);
+  expect(chats.newChatItems().map(item => item.icon)).toEqual(['i-engine-cliproxy', 'i-engine-opencode', 'i-engine-codex', 'i-engine-claude']);
+  expect(chats.projectChatItems('p').map(item => item.icon)).toEqual(['i-engine-cliproxy', 'i-engine-opencode', 'i-engine-codex', 'i-engine-claude']);
   $('newChat').click();
   const chatgpt = await vi.waitFor(() => {
     const item = dom.window.document.querySelector<HTMLElement>('[data-row-action="new-chat-chatgpt"]');

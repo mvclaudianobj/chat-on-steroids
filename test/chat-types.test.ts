@@ -13,7 +13,10 @@ const old = globalThis.document;
 beforeAll(() => { Object.assign(globalThis, { document: dom.window.document }); });
 afterAll(() => { Object.assign(globalThis, { document: old }); });
 
-it('gives every registered engine its own icon, drawn by a Chat Marks line glyph', () => {
+/** Engines drawn with their project's own simple mark (licence permitting) instead of a line drawing. */
+const PROJECT_MARKS = new Set(['opencode']);
+
+it('gives every registered engine its own icon: a Chat Marks line glyph, or its project\'s own simple mark', () => {
   const icons = AGENT_ENGINE_IDS.map(chatTypeIcon);
   expect(new Set(icons).size).toBe(AGENT_ENGINE_IDS.length);
   for (const [index, id] of AGENT_ENGINE_IDS.entries()) {
@@ -22,9 +25,14 @@ it('gives every registered engine its own icon, drawn by a Chat Marks line glyph
     // A line drawing in the shared stroke, painted through a mask in currentColor (no fixed colour).
     const rule = new RegExp(String.raw`\.cm-glyph-${glyph!.slice(3)} \{[^}]*mask-image: url\("data:image/svg\+xml,([^"]+)"\)`).exec(iconsCss);
     expect(rule, id).not.toBeNull();
+    // Painted through a mask in currentColor either way: no fixed colour in the artwork.
+    expect(rule![1]).not.toMatch(/fill='#|stroke='#|fill='(?:white|red)/);
+    if (PROJECT_MARKS.has(id)) continue;
     expect(rule![1]).toContain("stroke-width='16'");
     expect(rule![1]).toContain("fill='none'");
   }
+  // OpenCode's MIT `packages/identity/mark.svg`: the frame and its 40% inner square.
+  expect(iconsCss).toContain("d='M384 416H128V96H384V416ZM320 160H192V352H320V160Z'");
 });
 
 it('draws ChatGPT chats with the app\'s fox, terminals with the terminal glyph, and an unreadable engine as a chat', () => {

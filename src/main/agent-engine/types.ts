@@ -1,6 +1,6 @@
 /**
  * Chat Marks agent engines: the contract between the API chat screen (IPC `marksApiChat:request`)
- * and whatever runs a chat's model. `cliproxy` wraps the existing executor; MarksCode, Codex and
+ * and whatever runs a chat's model. `cliproxy` wraps the existing executor; OpenCode, Codex and
  * Claude Code implement the same contract later and write their turns through the projector.
  *
  * Invariants every engine keeps:
@@ -69,7 +69,7 @@ export interface AgentEngine {
   /**
    * The one terminal entry point (IPC `terminal`): opens the chat's backend session in its module
    * terminal (cli-modules tmux, one durable session per chat) and answers that terminal's id.
-   * A `live` engine (Codex, MarksCode) attaches to the session the app keeps running; a `handover` engine
+   * A `live` engine (Codex, OpenCode) attaches to the session the app keeps running; a `handover` engine
    * (Claude Code) stops its own process first and refuses while a turn runs.
    */
   openTerminal?(sessionId: string): Promise<{ cliSessionId: string }>;
@@ -90,7 +90,7 @@ export interface EngineFileChange {
 
 /**
  * The engine-neutral events a CLI engine's adapter (Codex app-server notifications, Claude
- * stream-json lines, MarksCode SSE) translates its own stream into. The projector writes them
+ * stream-json lines, OpenCode SSE) translates its own stream into. The projector writes them
  * into the session store in the shapes the API chat already uses.
  */
 export type EngineEvent =
