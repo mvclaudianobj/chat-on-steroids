@@ -638,7 +638,8 @@ const listeners = new Set<() => void>();
  * peer without an id share one entry each). Two browsers may run different versions - Firefox
  * updates its add-on on its own schedule - and one shared value followed whichever asked last.
  */
-const extensionVersions = new Map<string, { version: string; engine?: 'gecko'; seenAt: number }>();
+type ObservedExtension = { version: string; host: 'cos' | 'browser' | 'unknown'; engine?: 'gecko'; seenAt: number };
+const extensionVersions = new Map<string, ObservedExtension>();
 /**
  * When each (version, build) pair was last announced. Two browsers with the extension installed
  * alternate requests, and a single "current" pair would turn every alternation into a fresh
@@ -1323,15 +1324,20 @@ export function noteExtensionUpdateHold(hold: unknown, browser: string | null = 
 }
 
 /**
- * The version the app reports: the oldest among browsers heard from recently, so an outdated copy
- * keeps its notice while a current one polls too. With none recent, the last one heard from: a
- * mismatched companion can fail the protocol gate before it ever counts as present.
+ * The version the app reports belongs to the browser selected for ChatGPT. In particular, when
+ * the built-in browser is current, an older companion still polling from Chrome must not keep
+ * asking the user to update the built-in browser's extension. Among copies of the selected
+ * browser type, the oldest recent one still wins, so a real mismatch is not hidden. With none
+ * recent, retain the last selected-browser sighting for the protocol-mismatch warning.
  */
 function reportedExtension(): { version: string; engine?: 'gecko' } | null {
   const now = Date.now();
-  let oldest: { version: string; engine?: 'gecko'; seenAt: number } | null = null;
-  let latest: { version: string; engine?: 'gecko'; seenAt: number } | null = null;
+  const browser = getConfig().ui.chatBrowser;
+  let oldest: ObservedExtension | null = null;
+  let latest: ObservedExtension | null = null;
   for (const entry of extensionVersions.values()) {
+    if (browser === 'cos' ? entry.host !== 'cos' :
+      entry.host === 'cos' || (browser === 'firefox' ? entry.engine !== 'gecko' : entry.engine === 'gecko')) continue;
     if (!latest || entry.seenAt >= latest.seenAt) latest = entry;
     if (now - entry.seenAt < BROWSER_PRESENT_MS && (!oldest || isNewer(oldest.version, entry.version))) oldest = entry;
   }
@@ -1355,7 +1361,9 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
   const before = reportedExtension();
   const source = browserOf(req) ?? (req.headers['x-extension-host'] === 'cos' ? 'cos' : 'unknown');
   extensionVersions.delete(source);
-  extensionVersions.set(source, { version: extensionVersion, ...(geckoExtension(req) ? { engine: 'gecko' as const } : {}), seenAt: Date.now() });
+  const headerHost = req.headers['x-extension-host'];
+  const host = headerHost === 'cos' || headerHost === 'browser' ? headerHost : 'unknown';
+  extensionVersions.set(source, { version: extensionVersion, host, ...(geckoExtension(req) ? { engine: 'gecko' as const } : {}), seenAt: Date.now() });
   if (extensionVersions.size > 16) extensionVersions.delete(extensionVersions.keys().next().value!);
   const after = reportedExtension();
   const reportChanged = before?.version !== after?.version || before?.engine !== after?.engine;
