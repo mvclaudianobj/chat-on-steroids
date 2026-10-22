@@ -1,6 +1,6 @@
 /** Chat Marks H1a: local-only memory administration and explicit composer recall. */
 import type { AppApi } from '../preload/index.js';
-import type { BrainMemory, BrainSettings } from '../shared/brain.js';
+import type { BrainMemory, BrainProviderId, BrainProviderStatus, BrainRecallItem, BrainRecallResult, BrainSettings } from '../shared/brain.js';
 import { onLanguageChange, t, ui } from './i18n.js';
 import { toast } from './dom.js';
 
@@ -106,22 +106,38 @@ export function initBrainUi(api: AppApi): { refresh: () => Promise<void> } {
   async function refresh(): Promise<void> {
     try {
       const [status, sources] = await Promise.all([
-        request<{ available: boolean; count: number; bytes: number }>(api, 'status'),
-        request<Array<{id: string; enabled: boolean; type: string}>>(api, 'sources')
+        request<{ available: boolean; count: number; bytes: number; chatgptRefresh?: string | null }>(api, 'status'),
+        request<BrainProviderStatus[]>(api, 'sources')
       ]);
       element('brainStatus').textContent = status.available ? t('Local memory available') : t('Local memory unavailable');
       element('brainCount').textContent = `${t('Memories')}: ${status.count}`;
       element('brainSize').textContent = `${t('Storage')}: ${Math.round(status.bytes / 1024)} KiB`;
-      element('brainSources').replaceChildren(plain(sources.map(source => `${source.id}: ${source.type}`).join(', ')));
+      paintSources(sources);
+      paintRefreshWarning(status.chatgptRefresh ?? null);
     } catch { element('brainStatus').textContent = t('Local memory unavailable'); }
     try {
       const settings = await request<BrainSettings>(api, 'settings.get');
       element<HTMLInputElement>('brainChatgptTools').checked = settings.chatgptTools;
       element<HTMLInputElement>('brainApiChatTools').checked = settings.apiChatTools;
       element<HTMLInputElement>('brainAskBeforeSave').checked = settings.askBeforeSaving;
+      element<HTMLInputElement>('brainRemoteRecall').checked = settings.remoteRecall;
+      element<HTMLInputElement>('brainRemoteSync').checked = settings.remoteSync;
+      providers.paint(settings);
     } catch { /* No setting is silently changed when its saved file cannot be read. */ }
     await Promise.all([search(), paintPending()]);
   }
+  function paintSources(sources: BrainProviderStatus[]): void {
+    element('brainSources').replaceChildren(...sources.map(source => plain(`${source.label}: ${providerStateText(source)}${source.count !== undefined ? ` · ${t('Memories')}: ${source.count}` : ''}`)));
+    providers.statuses(sources);
+  }
+  function paintRefreshWarning(state: string | null): void {
+    const warning = element('brainRefreshWarning');
+    // `current` means ChatGPT confirmed the Core declaration that includes the memory tools.
+    warning.hidden = !state || state === 'current';
+    warning.textContent = state === 'unpublished' ? t('The Core plugin is not connected, so ChatGPT cannot use the memory tools yet.')
+      : t('ChatGPT has not refreshed the Core plugin yet, so it cannot use the memory tools. Refresh the Core plugin in ChatGPT, then start a new chat.');
+  }
+  const providers = providerPanel(api, () => void refresh());
   async function paintPending(): Promise<void> {
     const host = element('brainPending');
     host.replaceChildren();
@@ -129,6 +145,7 @@ export function initBrainUi(api: AppApi): { refresh: () => Promise<void> } {
     try {
       const pending = await request<Array<{ id: string; chat: string; content: string }>>(api, 'pending.list');
       approvalBanner.hidden = pending.length === 0;
+      element('brainApprovalsSection').classList.toggle('has-pending', pending.length > 0);
       if (!pending.length) { host.append(plain(t('No pending memory approvals.'))); return; }
       const heading = document.createElement('strong'); heading.textContent = t('Approve saving a memory?');
       approvalBanner.append(heading);
@@ -157,8 +174,14 @@ export function initBrainUi(api: AppApi): { refresh: () => Promise<void> } {
   root.querySelector('#brainPendingRefresh')?.addEventListener('click', () => void paintPending());
   root.querySelector('#brainDoctorRun')?.addEventListener('click', async () => {
     try {
-      const doctor = await request<{ available: boolean; quickCheck: boolean; fts: boolean }>(api, 'doctor');
-      element('brainDoctor').textContent = `${t('Database')}: ${doctor.available ? 'OK' : t('Unavailable')}  ·  SQLite: ${doctor.quickCheck ? 'OK' : 'FAIL'}  ·  FTS5: ${doctor.fts ? 'OK' : 'FAIL'}`;
+      element('brainDoctor').textContent = t('Checking…');
+      const doctor = await request<{ available: boolean; quickCheck: boolean; fts: boolean; providers?: BrainProviderStatus[]; chatgptRefresh?: string | null }>(api, 'doctor');
+      const lines = [`${t('Database')}: ${doctor.available ? 'OK' : t('Unavailable')}  ·  SQLite: ${doctor.quickCheck ? 'OK' : 'FAIL'}  ·  FTS5: ${doctor.fts ? 'OK' : 'FAIL'}`];
+      for (const provider of (doctor.providers ?? []).filter(row => row.id !== 'local'))
+        lines.push(`${provider.label}: ${providerStateText(provider)}${provider.detail ? ` (${provider.detail})` : ''}`);
+      element('brainDoctor').replaceChildren(...lines.map(plain));
+      if (doctor.providers) paintSources(doctor.providers);
+      paintRefreshWarning(doctor.chatgptRefresh ?? null);
     } catch { element('brainDoctor').textContent = t('Diagnosis unavailable'); }
   });
   root.querySelector('#brainSearchForm')?.addEventListener('submit', event => { event.preventDefault(); void search(); });
@@ -192,10 +215,10 @@ export function initBrainUi(api: AppApi): { refresh: () => Promise<void> } {
     try { const done = await request<boolean>(api, 'memories.export'); if (done) toast(t('Memory export saved')); }
     catch (error) { toast((error as Error).message); }
   });
-  for (const [id, key] of [ ['brainChatgptTools', 'chatgptTools'], ['brainApiChatTools', 'apiChatTools'], ['brainAskBeforeSave', 'askBeforeSaving'] ] as const) {
+  for (const [id, key] of [ ['brainChatgptTools', 'chatgptTools'], ['brainApiChatTools', 'apiChatTools'], ['brainAskBeforeSave', 'askBeforeSaving'], ['brainRemoteRecall', 'remoteRecall'], ['brainRemoteSync', 'remoteSync'] ] as const) {
     const control = element<HTMLInputElement>(id);
     control.addEventListener('change', async () => {
-      try { await request(api, 'settings.set', { [key]: control.checked }); }
+      try { await request(api, 'settings.set', { [key]: control.checked }); if (key === 'chatgptTools') void refresh(); }
       catch (error) { control.checked = !control.checked; toast((error as Error).message); }
     });
   }
@@ -204,7 +227,13 @@ export function initBrainUi(api: AppApi): { refresh: () => Promise<void> } {
   return { refresh };
 }
 
-/** /recall is always a local, unsent, user-selected draft operation. */
+const SOURCE_LABELS: Record<BrainRecallItem['source'], string> = { local: 'Local', aiMemory: 'ai-memory', openviking: 'OpenViking', marksApi: 'Marks API' };
+function providerStateText(status: BrainProviderStatus): string {
+  const labels: Record<BrainProviderStatus['state'], string> = { ok: 'OK', disabled: 'Off', stopped: 'Stopped', 'needs-key': 'Needs key', insecure: 'Insecure HTTP refused', unauthorized: 'Credential rejected', error: 'Error' };
+  return t(labels[status.state]);
+}
+
+/** /recall is a user-selected, unsent draft operation; remote sources only with remote recall on. */
 export function openBrainRecall(api: AppApi, draft: HTMLTextAreaElement, initialQuery = ''): void {
   const dialog = document.createElement('dialog'); dialog.className = 'brain-recall-dialog';
   const title = document.createElement('h2'); title.textContent = t('Recall memories');
@@ -213,40 +242,161 @@ export function openBrainRecall(api: AppApi, draft: HTMLTextAreaElement, initial
   const query = document.createElement('input'); query.type = 'search'; query.placeholder = t('Search saved memories…'); query.maxLength = 400;
   query.value = initialQuery.slice(0, 400);
   const find = button('Search', () => void search());
+  form.addEventListener('submit', event => { event.preventDefault(); void search(); });
   form.append(query, find);
   const results = document.createElement('div'); results.className = 'brain-recall-results';
+  const hint = plain(''); hint.className = 'brain-recall-hint'; hint.setAttribute('role', 'status');
   const actions = document.createElement('div'); actions.className = 'brain-recall-actions';
   const cancel = button('Cancel', () => dialog.close());
+  const checked = () => [...results.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')];
   const insert = button('Insert into message', () => {
-    const selected = [...results.querySelectorAll<HTMLInputElement>('input[type="checkbox"]:checked')].map(box => box.dataset.text ?? '').filter(Boolean);
-    if (!selected.length) return;
+    const selected = checked().map(box => box.dataset.text ?? '').filter(Boolean);
+    if (!selected.length) { updateInsert(); return; }
     const block = `<memory-context>\n${selected.join('\n\n').replaceAll('</memory-context>', '&lt;/memory-context&gt;')}\n</memory-context>`;
     draft.value = draft.value.trim() ? `${block}\n\n${draft.value}` : block;
     draft.dispatchEvent(new Event('input', { bubbles: true })); draft.focus(); dialog.close();
   });
-  actions.append(cancel, insert); dialog.append(title, description, form, results, actions); document.body.append(dialog);
+  insert.dataset.action = 'insert';
+  /** Never a silent button: disabled with a reason until at least one memory is chosen. */
+  function updateInsert(): void {
+    const count = checked().length;
+    const any = results.querySelector('input[type="checkbox"]') !== null;
+    insert.disabled = count === 0;
+    hint.textContent = count === 0 && any ? t('Select at least one memory to insert.') : '';
+  }
+  results.addEventListener('change', updateInsert);
+  actions.append(cancel, insert); dialog.append(title, description, form, results, hint, actions); document.body.append(dialog);
   dialog.addEventListener('close', () => dialog.remove(), { once: true });
+  let epoch = 0;
   async function search(): Promise<void> {
+    const mine = ++epoch;
+    insert.disabled = true; hint.textContent = '';
     results.replaceChildren(plain(t('Searching local memories…')));
     try {
-      const found = await request<BrainMemory[]>(api, query.value.trim() ? 'recall' : 'memories.list', query.value.trim() ? { query: query.value.trim(), limit: 12 } : undefined);
+      const text = query.value.trim();
+      let items: BrainRecallItem[]; let errors: BrainRecallResult['errors'] = [];
+      if (text) ({ items, errors } = await request<BrainRecallResult>(api, 'recall', { query: text, limit: 12 }));
+      else items = (await request<BrainMemory[]>(api, 'memories.list')).slice(0, 12).map(memory => ({ source: 'local', id: memory.id, content: memory.content, ...(memory.title ? { title: memory.title } : {}), contentHash: memory.contentHash }));
+      if (mine !== epoch) return;
       results.replaceChildren();
-      for (const memory of found.slice(0, 12)) {
-        const label = document.createElement('label'), box = document.createElement('input'); box.type = 'checkbox'; box.dataset.text = memory.content;
-        const text = document.createElement('span'); text.textContent = memory.title ? `${memory.title}: ${memory.content}` : memory.content;
-        label.append(box, text); results.append(label);
+      for (const item of items.slice(0, 12)) {
+        const label = document.createElement('label'), box = document.createElement('input'); box.type = 'checkbox';
+        const source = SOURCE_LABELS[item.source];
+        box.dataset.text = `[${source}] ${item.title ? `${item.title}: ` : ''}${item.content}`;
+        const badge = document.createElement('span'); badge.className = 'brain-recall-source'; badge.textContent = item.source === 'local' ? t('Local') : source;
+        const body = document.createElement('span'); body.textContent = item.title ? `${item.title}: ${item.content}` : item.content;
+        label.append(box, badge, body); results.append(label);
       }
-      if (!found.length) results.append(plain(t('No memories found.')));
-    } catch (error) { results.replaceChildren(plain((error as Error).message)); }
+      // One result is the obvious choice; preselect it so Insert works at once.
+      const boxes = results.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+      if (boxes.length === 1) boxes[0]!.checked = true;
+      if (!items.length) results.append(plain(text ? t('No memories found.') : t('No memories yet: use /remember or the Brain page.')));
+      if (errors.length) results.append(plain(t('Some sources were unavailable: {0}', [errors.map(row => `${SOURCE_LABELS[row.source]} (${row.error})`).join(', ')])));
+      updateInsert();
+    } catch (error) { if (mine === epoch) { results.replaceChildren(plain((error as Error).message)); updateInsert(); } }
   }
+  updateInsert();
   dialog.showModal(); query.focus(); void search();
 }
 
+/** Brain page provider cards: enable, URL, auth, vault key, MarksCode import and a live test. */
+function providerPanel(api: AppApi, changed: () => void): { paint: (settings: BrainSettings) => void; statuses: (rows: BrainProviderStatus[]) => void } {
+  const host = element('brainProviders');
+  const stateNodes = new Map<string, HTMLElement>();
+  const keyNodes = new Map<string, HTMLElement>();
+  let painted = false;
+  const save = async (id: BrainProviderId, patch: Record<string, unknown>): Promise<boolean> => {
+    try { await request(api, 'settings.set', { providers: { [id]: patch } }); changed(); return true; }
+    catch (error) { toast((error as Error).message); return false; }
+  };
+  const checkbox = (caption: string, value: boolean, onChange: (value: boolean, box: HTMLInputElement) => void): HTMLLabelElement => {
+    const label = document.createElement('label'); label.className = 'brain-provider-row';
+    const box = document.createElement('input'); box.type = 'checkbox'; box.checked = value;
+    box.addEventListener('change', () => onChange(box.checked, box));
+    const text = document.createElement('span'); text.textContent = t(caption);
+    label.append(box, text); return label;
+  };
+  const field = (caption: string, value: string, type: string, onChange?: (value: string) => void): { row: HTMLLabelElement; input: HTMLInputElement } => {
+    const row = document.createElement('label'); row.className = 'brain-provider-row';
+    const text = document.createElement('span'); text.textContent = t(caption);
+    const input = document.createElement('input'); input.type = type; input.value = value; input.maxLength = type === 'password' ? 16384 : 300;
+    input.autocomplete = 'off'; input.spellcheck = false;
+    if (onChange) input.addEventListener('change', () => onChange(input.value.trim()));
+    row.append(text, input); return { row, input };
+  };
+  function card(id: BrainProviderId, settings: BrainSettings): HTMLElement {
+    const config = settings.providers[id] as Record<string, any>;
+    const node = document.createElement('div'); node.className = 'brain-provider'; node.dataset.provider = id;
+    const head = document.createElement('div'); head.className = 'brain-provider-head';
+    const name = document.createElement('strong'); name.textContent = SOURCE_LABELS[id];
+    const state = document.createElement('span'); state.className = 'brain-provider-state'; state.dataset.state = config.enabled ? 'unknown' : 'disabled';
+    state.textContent = config.enabled ? '' : t('Off'); stateNodes.set(id, state);
+    head.append(name, state);
+    node.append(head, checkbox('Enabled', config.enabled, (value, box) => void save(id, { enabled: value }).then(done => { if (!done) box.checked = !value; })));
+    node.append(field('Server URL', config.url, 'url', value => void save(id, { url: value })).row);
+    if (id === 'aiMemory') node.append(field('Project (optional)', config.project, 'text', value => void save(id, { project: value })).row);
+    if (id === 'marksApi') {
+      const warning = plain(t('This server only speaks plain HTTP: queries, memories and credentials cross the network unencrypted.'));
+      warning.className = 'brain-warning'; warning.hidden = !String(config.url).startsWith('http:');
+      node.append(warning, checkbox('Allow insecure HTTP', config.insecureHttp, value => void save(id, { insecureHttp: value })));
+      const row = document.createElement('label'); row.className = 'brain-provider-row';
+      const text = document.createElement('span'); text.textContent = t('Authentication');
+      const select = document.createElement('select');
+      for (const [value, caption] of [['apiKey', 'API key'], ['markspanel', 'Markspanel session'], ['both', 'API key and Markspanel session']] as const) {
+        const option = document.createElement('option'); option.value = value; option.textContent = t(caption); select.append(option);
+      }
+      select.value = config.auth;
+      select.addEventListener('change', () => void save(id, { auth: select.value }));
+      row.append(text, select); node.append(row);
+    }
+    if (id === 'openviking') node.append(plain(t('Without a key, OpenViking must run in trusted mode on this computer. Start it with: openviking-server --config ~/.openviking/ov.conf')));
+    const key = document.createElement('p'); key.className = 'brain-provider-state'; keyNodes.set(id, key);
+    const password = field('Vault master password', '', 'password');
+    const value = field('Key or token', '', 'password');
+    const actions = document.createElement('div'); actions.className = 'brain-provider-row';
+    const run = async (action: string, payload: Record<string, unknown>, done: string): Promise<void> => {
+      if (!password.input.value) { toast(t('Enter the vault master password first.')); password.input.focus(); return; }
+      try { await request(api, action, { id, password: password.input.value, ...payload }); toast(t(done)); password.input.value = value.input.value = ''; changed(); }
+      catch (error) { toast((error as Error).message); }
+    };
+    actions.append(button('Save key to vault', () => { if (!value.input.value.trim()) { value.input.focus(); return; } void run('providers.setKey', { value: value.input.value }, 'Key saved in the vault'); }));
+    if (id !== 'openviking') actions.append(button('Import from MarksCode', () => void run('providers.importMarksCode', {}, 'Key saved in the vault')));
+    actions.append(button('Test connection', async () => {
+      state.textContent = t('Checking…');
+      try { const row = await request<BrainProviderStatus | undefined>(api, 'providers.test', { id }); if (row) paintState(row); }
+      catch (error) { state.textContent = (error as Error).message; }
+    }));
+    node.append(key, password.row, value.row, actions);
+    return node;
+  }
+  function paintState(row: BrainProviderStatus): void {
+    const state = stateNodes.get(row.id); const key = keyNodes.get(row.id);
+    if (state) { state.dataset.state = row.state; state.textContent = `${providerStateText(row)}${row.detail ? ` · ${row.detail}` : ''}`; }
+    if (key) key.textContent = row.hasKey ? t('Key in vault') : t('No key');
+  }
+  return {
+    paint(settings) {
+      // Repaint only once per page load so typing in a field is never replaced underneath.
+      if (painted && host.childElementCount) return;
+      painted = true;
+      host.replaceChildren(...(['aiMemory', 'openviking', 'marksApi'] as const).map(id => card(id, settings)));
+    },
+    statuses(rows) { for (const row of rows) if (row.id !== 'local') paintState(row); }
+  };
+}
+
 /** /remember only persists what the human explicitly selected or left in the composer. */
-export async function rememberBrainSelection(api: AppApi, draft: HTMLTextAreaElement): Promise<void> {
+export async function rememberBrainSelection(api: AppApi, draft: HTMLTextAreaElement, options: { clearOnSave?: boolean } = {}): Promise<boolean> {
   const start = draft.selectionStart ?? 0, end = draft.selectionEnd ?? 0;
   const text = (end > start ? draft.value.slice(start, end) : draft.value).trim();
-  if (!text) { toast(t('Select or type text to remember.')); return; }
-  try { await request(api, 'memories.save', { content: text.slice(0, 4000) }); toast(t('Memory saved')); }
-  catch (error) { toast((error as Error).message); }
+  if (!text) { toast(t('Select or type text to remember.')); return false; }
+  try {
+    const saved = await request<{ synced?: Array<{ source: BrainRecallItem['source']; ok: boolean }> }>(api, 'memories.save', { content: text.slice(0, 4000) });
+    const synced = (saved?.synced ?? []).filter(row => row.ok).map(row => SOURCE_LABELS[row.source]);
+    toast(synced.length ? t('Memory saved and synced to {0}', [synced.join(', ')]) : t('Memory saved'));
+    // A typed `/remember <text>` leaves nothing behind that could be sent by mistake.
+    if (options.clearOnSave && draft.value.trim() === text) { draft.value = ''; draft.dispatchEvent(new Event('input', { bubbles: true })); }
+    return true;
+  }
+  catch (error) { toast((error as Error).message); return false; }
 }

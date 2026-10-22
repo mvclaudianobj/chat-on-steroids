@@ -166,3 +166,7 @@ export async function brainDoctor(): Promise<{ available: boolean; quickCheck: b
     return { available: true, quickCheck, fts: true };
   } catch { return { available: false, quickCheck: false, fts: false }; }
 }
+/** Chat Marks H1b: records where a memory was synchronized; content is unchanged. */
+export async function brainSetRemote(id: string, remote: NonNullable<BrainMemory['remote']>): Promise<boolean> {
+  return serial(() => open().prepare('UPDATE memories SET remote=? WHERE id=?').run(JSON.stringify(brainMemorySchema.shape.remote.parse(remote)), id).changes > 0);
+}

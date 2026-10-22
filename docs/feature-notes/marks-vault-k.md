@@ -20,3 +20,11 @@
 - The first supported chat operation is a fixed-origin authenticated HTTPS GET/POST request, with status-only response. It is intentionally **not** an arbitrary command environment-injection mechanism; SSH and other adapters will require separate narrowly-scoped operations.
 - Validate exact work-orchestrator GPG file formats using a synthetic fixture before declaring seamless migration. No real credentials are required for this test.
 - This branch is not installed in the current Chat Marks release. Homologate the new settings section and approval banner in dev, then run native Windows/Linux validation before publication.
+
+## Execution history
+
+- Brain H1b (for the K agent): `VaultEntry` gained an optional `insecureHttp` flag. Without it an
+  origin must still be exact HTTPS; with it, an exact `http:` origin is accepted (used for the
+  plain-HTTP Marks memory API and loopback OpenViking). `listVault` reports the flag, the `put`
+  IPC accepts it, and `vault_use` refuses any entry that is not HTTPS. Test:
+  `test/brain-providers.test.ts` ("stores plain-HTTP vault origins only with the explicit insecure flag").
