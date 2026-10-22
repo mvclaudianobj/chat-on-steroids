@@ -3232,5 +3232,9 @@
   "Remember": "Merken",
   "Search local Brain memories and insert selected context into this draft.": "Durchsuche lokale Erinnerungen und füge ausgewählten Kontext in den Entwurf ein.",
   "Save selected or drafted text as a local Brain memory.": "Speichere den markierten Text oder Entwurf als lokale Brain-Erinnerung.",
-  "Approve saving a memory?": "Speichern einer Erinnerung genehmigen?"
+  "Approve saving a memory?": "Speichern einer Erinnerung genehmigen?",
+  "Agent engine memory tools": "Speicherwerkzeuge für Agent-Engines",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "Claude Code-, Codex- und OpenCode-Chats dürfen lokale Erinnerungen durchsuchen und das Speichern anfragen. Gilt für neu gestartete Engine-Prozesse.",
+  "Automatic memory context": "Automatischer Erinnerungskontext",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "Relevante lokale Erinnerungen zu API-Chat-Runden und zur ersten ChatGPT-Nachricht hinzufügen."
 }

@@ -39,6 +39,7 @@ import { redactSecretText } from '../redaction.js';
 import { notifyChanged } from '../session/recorder.js';
 import { bindSessionProject, createSession, getSession, readEvents } from '../session/store.js';
 import { ApprovalGate, argsHash, claudeApprovalDecision, type ApprovalOutcome } from './approval.js';
+import { claudeBrainMcpArgs } from '../brain/engine-mcp.js';
 import { engineOf, storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
 import { storeProjectorSink, TurnProjector, type ProjectorSink } from './projector.js';
 import type { AgentEngine, EngineChatRef, EngineEvent, EngineFileChange, EngineModelQuery, EngineTerminal, EngineToolKind } from './types.js';
@@ -294,7 +295,7 @@ interface ClaudeTurn {
   done: Promise<TurnOutcome>;
 }
 
-interface Launch { cwd: string; backendId: string; model: string | null; effort: ApiChatEffort | null }
+interface Launch { cwd: string; backendId: string; model: string | null; effort: ApiChatEffort | null; brain?: true }
 
 class ClaudeHost {
   readonly child: ChildProcessWithoutNullStreams;
@@ -623,7 +624,9 @@ export class ClaudeEngine implements AgentEngine {
   }
 
   private async ensureHost(sessionId: string, chat: ChatRecord, runtime: ClaudeRuntime, resume: boolean): Promise<ClaudeHost> {
-    const launch: Launch = { cwd: runtime.cwd, backendId: chat.backendSessionId!, model: chat.model, effort: chat.effort };
+    // Chat Marks: Brain memory tools (H1c); turning the switch on or off restarts an idle host.
+    const brainArgs = await claudeBrainMcpArgs(sessionId, runtime);
+    const launch: Launch = { cwd: runtime.cwd, backendId: chat.backendSessionId!, model: chat.model, effort: chat.effort, ...(brainArgs.length ? { brain: true as const } : {}) };
     let host = this.hosts.get(sessionId);
     if (host?.alive && host.draining) {
       // The stopped turn's own result is still to come: wait for it briefly, else start over.
@@ -639,7 +642,7 @@ export class ClaudeEngine implements AgentEngine {
     // never reached the CLI, or a session the terminal started) is corrected once from stderr.
     let mode: 'start' | 'resume' = resume ? 'resume' : 'start';
     for (let attempt = 0; ; attempt++) {
-      const started = await this.startHost(sessionId, runtime, launch, claudeArgs({ sessionId: launch.backendId, mode, permissionMode, model: launch.model, effort: launch.effort }));
+      const started = await this.startHost(sessionId, runtime, launch, [...claudeArgs({ sessionId: launch.backendId, mode, permissionMode, model: launch.model, effort: launch.effort }), ...brainArgs]);
       if (started.alive) return started;
       const reason = started.stderr;
       if (attempt === 0 && !started.sawStdout) {

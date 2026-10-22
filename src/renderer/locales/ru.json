@@ -3324,5 +3324,9 @@
   "Remember": "Помните",
   "Search local Brain memories and insert selected context into this draft.": "Найдите локальные воспоминания Brain и вставьте выбранный контекст в этот черновик.",
   "Save selected or drafted text as a local Brain memory.": "Сохраните выделенный или черновой текст в локальной памяти мозга.",
-  "Approve saving a memory?": "Разрешить сохранение воспоминания?"
+  "Approve saving a memory?": "Разрешить сохранение воспоминания?",
+  "Agent engine memory tools": "Инструменты памяти для агентных движков",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "Разрешить чатам Claude Code, Codex и OpenCode искать локальные воспоминания и запрашивать их сохранение. Применяется к новым процессам движков.",
+  "Automatic memory context": "Автоматический контекст памяти",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "Добавлять подходящие локальные воспоминания в ходы API-чатов и в первое сообщение ChatGPT."
 }

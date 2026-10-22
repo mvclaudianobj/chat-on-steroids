@@ -37,6 +37,7 @@ import { initSecretsPath, keychainReadPending } from './secrets.js';
 import { initMarksVault, warmVaultRedaction } from './marks-vault.js';
 import { initBrain } from './brain/store.js';
 import { initBrainSettings, loadBrainSettings } from './brain/settings.js';
+import { initBrainEngineMcp, stopBrainEngineMcp } from './brain/engine-mcp.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
@@ -447,6 +448,7 @@ void app.whenReady().then(async () => {
   // Chat Marks: initialize the local Brain paths without reading any other app's data.
   initBrain(userData);
   initBrainSettings(userData);
+  initBrainEngineMcp(userData);
   initKeychainNotice(userData, {
     platform: process.platform,
     contents: () => (window && !window.isDestroyed() ? window.webContents : null),
@@ -818,7 +820,7 @@ app.on('will-quit', (event) => {
       {
         name: 'admission/drain',
         budgetMs: 40_000,
-        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), stopAgentRuntimeGc()]
+        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), stopAgentRuntimeGc(), stopBrainEngineMcp()]
       },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {

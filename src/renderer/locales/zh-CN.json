@@ -3186,5 +3186,9 @@
   "Remember": "记住",
   "Search local Brain memories and insert selected context into this draft.": "搜索本地大脑记忆并将选定的上下文插入到此草稿中。",
   "Save selected or drafted text as a local Brain memory.": "将选定或起草的文本保存为本地大脑记忆。",
-  "Approve saving a memory?": "批准保存一条记忆？"
+  "Approve saving a memory?": "批准保存一条记忆？",
+  "Agent engine memory tools": "智能体引擎记忆工具",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "允许 Claude Code、Codex 和 OpenCode 聊天搜索本地记忆并请求保存。适用于新启动的引擎进程。",
+  "Automatic memory context": "自动记忆上下文",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "将相关的本地记忆添加到 API 聊天的每一轮以及 ChatGPT 的第一条消息中。"
 }

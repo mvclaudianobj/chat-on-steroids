@@ -3186,5 +3186,9 @@
   "Remember": "기억하다",
   "Search local Brain memories and insert selected context into this draft.": "로컬 뇌 기억을 검색하고 선택한 컨텍스트를 이 초안에 삽입하세요.",
   "Save selected or drafted text as a local Brain memory.": "선택하거나 초안을 작성한 텍스트를 로컬 두뇌 메모리로 저장합니다.",
-  "Approve saving a memory?": "메모리 저장을 승인하시겠습니까?"
+  "Approve saving a memory?": "메모리 저장을 승인하시겠습니까?",
+  "Agent engine memory tools": "에이전트 엔진 메모리 도구",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "Claude Code, Codex, OpenCode 채팅이 로컬 메모리를 검색하고 저장을 요청할 수 있게 합니다. 새로 시작되는 엔진 프로세스에 적용됩니다.",
+  "Automatic memory context": "자동 메모리 컨텍스트",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "관련 로컬 메모리를 API 채팅 턴과 ChatGPT 첫 메시지에 추가합니다."
 }

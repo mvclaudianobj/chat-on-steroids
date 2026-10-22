@@ -119,6 +119,8 @@ export function initBrainUi(api: AppApi): { refresh: () => Promise<void> } {
       element<HTMLInputElement>('brainChatgptTools').checked = settings.chatgptTools;
       element<HTMLInputElement>('brainApiChatTools').checked = settings.apiChatTools;
       element<HTMLInputElement>('brainAskBeforeSave').checked = settings.askBeforeSaving;
+      element<HTMLInputElement>('brainEngineTools').checked = settings.enginesEnabled;
+      element<HTMLInputElement>('brainAutoInject').checked = settings.autoInject;
     } catch { /* No setting is silently changed when its saved file cannot be read. */ }
     await Promise.all([search(), paintPending()]);
   }
@@ -192,7 +194,7 @@ export function initBrainUi(api: AppApi): { refresh: () => Promise<void> } {
     try { const done = await request<boolean>(api, 'memories.export'); if (done) toast(t('Memory export saved')); }
     catch (error) { toast((error as Error).message); }
   });
-  for (const [id, key] of [ ['brainChatgptTools', 'chatgptTools'], ['brainApiChatTools', 'apiChatTools'], ['brainAskBeforeSave', 'askBeforeSaving'] ] as const) {
+  for (const [id, key] of [ ['brainChatgptTools', 'chatgptTools'], ['brainApiChatTools', 'apiChatTools'], ['brainAskBeforeSave', 'askBeforeSaving'], ['brainEngineTools', 'enginesEnabled'], ['brainAutoInject', 'autoInject'] ] as const) {
     const control = element<HTMLInputElement>(id);
     control.addEventListener('change', async () => {
       try { await request(api, 'settings.set', { [key]: control.checked }); }
