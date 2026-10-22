@@ -2613,6 +2613,7 @@
   "Sidebar layout": "Disposition de la barre latérale",
   "Inbox": "Boîte de réception",
   "Needs approval": "Approbation requise",
+  "{0} waits for your approval": "{0} attend votre approbation",
   "Blocked": "Bloqué",
   "Search": "Rechercher",
   "Settled": "Inactifs",

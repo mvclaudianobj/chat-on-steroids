@@ -146,6 +146,8 @@ interface Deps {
   /** Chat Marks: provider chats a project's menu offers after its own New chat (CLIProxy). */
   projectChatItems?: (projectId: string) => RowMenuItem[];
   repaintCliSessions?: () => void;
+  /** Shows the Chat page, from wherever the window is (the approval notice's Open). */
+  showChat?: () => void;
 }
 
 let deps: Deps;
@@ -2057,6 +2059,7 @@ function unattributedActivity(entries: SessionSummary[]): HTMLElement | null {
 }
 
 function paintSessions(): void {
+  paintApprovalNotice();
   // Keep the pointer's elected rows alive while asynchronous activity snapshots arrive.
   if (sidebarOrder?.interacting) return;
   // Nor replace the name field mid-word: an input method's composition (Chinese, Japanese,
@@ -4016,6 +4019,53 @@ function approvalCardPanel(sessionId: string): HTMLElement {
   allow.addEventListener('click', () => void answer('allow'));
   void refresh();
   return panel;
+}
+
+/**
+ * ChatGPT's approval card waiting in a chat that is not on screen, in the window's notices: one line
+ * per chat naming it ("worker-1 waits for your approval"), with Open and the chat row's own Deny and
+ * Allow once. 2026-10-22: two workers waited 85 minutes on the card while the window showed their
+ * prime, whose chat said nothing; the folded workers' dot was the only sign, and the desktop notice
+ * never comes while the window has focus. Lines are kept by chat, so a repaint never re-reads a card
+ * or loses an answer being sent.
+ */
+const approvalNoticeLines = new Map<string, HTMLElement>();
+function approvalNoticeName(summary: SessionSummary): string {
+  if (summary.origin?.kind !== 'worker') return shownSessionTitle(summary);
+  const parentId = summary.origin.fromSessionId;
+  const parent = parentId && parentId !== selectedId ? sessions.find(row => row.id === parentId) : undefined;
+  const agent = summary.origin.agentId ?? t('worker');
+  return parent ? `${agent} · ${shownSessionTitle(parent)}` : agent;
+}
+function paintApprovalNotice(): void {
+  const box = document.getElementById('approvalNotice');
+  if (!box) return;
+  // The open chat's own row shows its card; every other waiting chat is named here.
+  const onScreen = visible && document.querySelector<HTMLElement>('.app')?.dataset.screen === 'chat' && timelineShown() ? selectedId : null;
+  const waiting = sessions.filter(row => !!row.conversationId && approvalChats.has(row.conversationId) && row.id !== onScreen);
+  // The open chat's own workers first: that is the run the person is watching.
+  const own = (row: SessionSummary) => row.origin?.kind === 'worker' && row.origin.fromSessionId === selectedId ? 0 : 1;
+  waiting.sort((a, b) => own(a) - own(b));
+  for (const [id, line] of approvalNoticeLines) if (!waiting.some(row => row.id === id)) { line.remove(); approvalNoticeLines.delete(id); }
+  for (const row of waiting) {
+    let line = approvalNoticeLines.get(row.id);
+    if (!line) {
+      line = el('div', 'approval-notice-line');
+      line.dataset.approvalSession = row.id;
+      const head = el('div', 'approval-notice-head');
+      const open = el('button', 'btn btn-quiet', () => t('Open')) as HTMLButtonElement;
+      open.type = 'button';
+      const id = row.id;
+      open.addEventListener('click', () => { deps.showChat?.(); void selectChatSession(id); });
+      head.append(icon('i-lock'), el('span', 'approval-notice-text'), open);
+      line.append(head, approvalCardPanel(row.id));
+      approvalNoticeLines.set(row.id, line);
+    }
+    const name = approvalNoticeName(row);
+    ui(line.querySelector<HTMLElement>('.approval-notice-text')!, 'textContent', () => t('{0} waits for your approval', [name]));
+    box.append(line);
+  }
+  box.hidden = waiting.length === 0;
 }
 
 /**
@@ -7451,6 +7501,7 @@ export function chatApply(state: AppState, previous?: Config): void {
 export function chatVisible(next: boolean): void {
   if (visible === next) return;
   visible = next;
+  paintApprovalNotice();
   if (next) void refreshAll();
   else {
     window.clearTimeout(toolActivityTimer);
@@ -7467,7 +7518,7 @@ async function refreshAll(): Promise<void> {
 
 /** Sessions change on every recorded event, so the reload is coalesced. */
 function scheduleReload(change?: SessionChange): void {
-  if (!visible) return;
+  if (!visible) { scheduleApprovalRead(); return; }
   if (change?.allTranscripts) changedTranscripts.all = true;
   for (const id of change?.sessionIds ?? []) changedTranscripts.ids.add(id);
   // One refresh owns the timer until its asynchronous read completes. Starting a
@@ -7480,6 +7531,29 @@ function scheduleReload(change?: SessionChange): void {
       if (listRefreshDirty) scheduleReload();
     });
   }, 400);
+}
+
+/**
+ * Off the Chat page the list is not reread, but a tool approval waiting in some chat still has to
+ * reach the window's notice (`paintApprovalNotice`): only the waiting set is taken from the read.
+ */
+let approvalReadTimer: number | undefined;
+function scheduleApprovalRead(): void {
+  if (approvalReadTimer !== undefined) return;
+  approvalReadTimer = window.setTimeout(() => {
+    void (async () => {
+      try {
+        const list = await run(api.listSessions({ limit: SESSION_PAGE_SIZE }));
+        if (!list || visible) return;
+        approvalChats = new Set(list.approval);
+        // A waiting chat the window has not listed yet still needs its row to be named.
+        const known = new Set(sessions.map(row => row.id));
+        const missing = list.sessions.filter(row => !known.has(row.id) && !!row.conversationId && approvalChats.has(row.conversationId));
+        if (missing.length) mergeSessionRows(missing);
+        paintApprovalNotice();
+      } finally { approvalReadTimer = undefined; }
+    })();
+  }, 1_000);
 }
 
 /**
@@ -8049,6 +8123,7 @@ export function openChatView(name: string): void {
 }
 
 function showView(name: string): void {
+  queueMicrotask(paintApprovalNotice);
   const pane = $('chatBody');
   if (name === 'settings') retireDictation();
   const leavingTimeline = timelineShown() && name !== 'timeline';

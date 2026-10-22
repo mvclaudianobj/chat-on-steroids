@@ -2577,6 +2577,7 @@
   "Sidebar layout": "Layout der Seitenleiste",
   "Inbox": "Posteingang",
   "Needs approval": "Wartet auf Freigabe",
+  "{0} waits for your approval": "{0} wartet auf deine Freigabe",
   "Blocked": "Blockiert",
   "Search": "Suchen",
   "Settled": "Ruhig",

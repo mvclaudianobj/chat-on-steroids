@@ -2539,6 +2539,7 @@
   "Sidebar layout": "사이드바 레이아웃",
   "Inbox": "받은편지함",
   "Needs approval": "승인 필요",
+  "{0} waits for your approval": "{0}이(가) 승인을 기다리고 있습니다",
   "Blocked": "차단됨",
   "Search": "검색",
   "Settled": "비활성",

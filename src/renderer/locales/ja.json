@@ -2539,6 +2539,7 @@
   "Sidebar layout": "サイドバーのレイアウト",
   "Inbox": "受信トレイ",
   "Needs approval": "承認待ち",
+  "{0} waits for your approval": "{0} があなたの承認を待っています",
   "Blocked": "ブロック中",
   "Search": "検索",
   "Settled": "非アクティブ",

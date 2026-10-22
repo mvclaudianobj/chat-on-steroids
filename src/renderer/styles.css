@@ -2768,6 +2768,13 @@ input[readonly] {
 .approval-card-words strong { color: var(--ink); font-weight: 600; }
 .approval-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .approval-card-status { margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+/* The same card, in the window's notices, for a chat that is not on screen (paintApprovalNotice). */
+.notice.approval-notice { display: grid; gap: 8px; }
+.approval-notice-line { display: grid; gap: 6px; }
+.approval-notice-head { display: flex; align-items: center; gap: 8px; }
+.approval-notice-head .ico { color: var(--red); }
+.approval-notice-text { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.approval-notice .approval-card { margin: 0 0 0 22px; }
 
 .meta.is-bad {
   color: var(--red);
