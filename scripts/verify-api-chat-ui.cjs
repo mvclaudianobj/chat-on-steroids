@@ -102,11 +102,11 @@ app.whenReady().then(async () => {
   await until(`document.getElementById('newChat')?.getAttribute('aria-haspopup')==='menu'`);
   win.show(); win.focus(); win.webContents.focus(); await pause(100);
   await js(`document.getElementById('newChat').click()`);
-  await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-cliproxy"]')`);
+  await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-engine-cliproxy"]')`);
   assert.deepEqual(await js(`[...document.querySelectorAll('.row-menu [data-row-action^="new-chat-"]')].map(b=>b.dataset.rowAction+'='+b.textContent.trim())`),
-    ['new-chat-chatgpt=ChatGPT','new-chat-cliproxy=CLIProxy']);
+    ['new-chat-chatgpt=ChatGPT','new-chat-engine-cliproxy=CLIProxy']);
   await capture('api-chat-menu.png');
-  await js(`document.querySelector('.row-menu [data-row-action="new-chat-cliproxy"]').click()`);
+  await js(`document.querySelector('.row-menu [data-row-action="new-chat-engine-cliproxy"]').click()`);
   await until(`document.querySelector('[data-panel="chat"]').classList.contains('is-api-chat')`);
   await until(`document.querySelector('.sess[data-id="api-chat-preview"]')!==null`);
   assert.deepEqual(await js(`window.apiChatFixture.createdWith`),{projectId:null});
@@ -149,10 +149,10 @@ app.whenReady().then(async () => {
   assert.equal(await js(shown('modelMenu')),true,'The ChatGPT model menu returns for a ChatGPT chat');
   // A project's own menu offers a CLIProxy chat that belongs to that project.
   await js(`document.querySelector('[data-row-menu="project:${PROJECT_ID}"]').click()`);
-  await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-cliproxy"]')`);
-  assert.equal(await js(`document.querySelector('.row-menu [data-row-action="new-chat-cliproxy"]').textContent.trim()`),'New CLIProxy chat in this project');
+  await until(`!!document.querySelector('.row-menu [data-row-action="new-chat-engine-cliproxy"]')`);
+  assert.equal(await js(`document.querySelector('.row-menu [data-row-action="new-chat-engine-cliproxy"]').textContent.trim()`),'New CLIProxy chat in this project');
   await capture('api-chat-project-menu.png');
-  await js(`document.querySelector('.row-menu [data-row-action="new-chat-cliproxy"]').click()`);
+  await js(`document.querySelector('.row-menu [data-row-action="new-chat-engine-cliproxy"]').click()`);
   await until(`window.apiChatFixture.createdWith?.projectId==='${PROJECT_ID}'`);
   assert.deepEqual(errors,[]);
   console.log('PASS: New chat creates a CLIProxy chat that sends through apiChatSend, shows its answer and tool row in the normal timeline, answers an edit approval, and a project menu creates one in that project');

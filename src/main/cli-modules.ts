@@ -479,22 +479,36 @@ export async function cliEngineTerminalRefresh(chatSessionId: string, sinceMs: n
   await tmux(['kill-session', '-t', `=${session.tmuxSession}`]).catch(() => undefined);
 }
 
-/** Whether a chat's handover terminal runs, and whether a terminal view is attached to it now. */
-export async function cliEngineTerminalState(chatSessionId: string): Promise<'none' | 'detached' | 'attached'> {
+/**
+ * Whether a chat's handover terminal runs, and who looks at it now: `attached` only the app's own
+ * terminal view(s), `external` also a tmux client outside the app (each app view is one client).
+ */
+export async function cliEngineTerminalState(chatSessionId: string): Promise<'none' | 'detached' | 'attached' | 'external'> {
   await loadCliModules();
   const session = sessions.find(candidate => candidate.engineChat === chatSessionId);
   if (!session) return 'none';
   try { await tmux(['has-session', '-t', `=${session.tmuxSession}`]); } catch { return 'none'; }
-  for (const entry of attachments.values()) if (entry.tmuxSession === session.tmuxSession) return 'attached';
-  const clients = await tmux(['list-clients', '-t', `=${session.tmuxSession}`, '-F', '#{client_name}']).catch(() => '');
-  return clients.trim() ? 'attached' : 'detached';
+  const views = [...attachments.values()].filter(entry => entry.tmuxSession === session.tmuxSession).length;
+  const clients = (await tmux(['list-clients', '-t', `=${session.tmuxSession}`, '-F', '#{client_name}']).catch(() => ''))
+    .split('\n').filter(line => line.trim()).length;
+  if (clients > views) return 'external';
+  return views ? 'attached' : 'detached';
 }
 
-/** Ends a chat's handover terminal session (tmux), keeping its sidebar entry for the next hand-over. */
+/**
+ * Ends a chat's handover terminal: the app's own views of it are told it exited and detached, then
+ * its tmux session (and the TUI in it, any outside client with it) is killed. The sidebar entry
+ * stays for the next hand-over. Only the chat's explicit take-back or a detached terminal leads here.
+ */
 export async function cliEndEngineTerminal(chatSessionId: string): Promise<void> {
   await loadCliModules();
   const session = sessions.find(candidate => candidate.engineChat === chatSessionId);
   if (!session) return;
+  for (const [attachmentId, entry] of attachments) {
+    if (entry.tmuxSession !== session.tmuxSession) continue;
+    emit?.(attachmentId, { exitCode: 0 });
+    cliDetach(attachmentId);
+  }
   await tmux(['kill-session', '-t', `=${session.tmuxSession}`]).catch(() => undefined);
 }
 

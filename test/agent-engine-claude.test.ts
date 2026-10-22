@@ -17,6 +17,7 @@ const ledger = await import('../src/main/agent-engine/ledger.js');
 const claude = await import('../src/main/agent-engine/claude.js');
 const { argsHash } = await import('../src/main/agent-engine/approval.js');
 import type { ClaudeEngine, ClaudeRuntime } from '../src/main/agent-engine/claude.js';
+import { ENGINE_TERMINAL_OPEN_ELSEWHERE, ENGINE_TERMINAL_OPEN_IN_APP } from '../src/shared/agent-engine.js';
 
 const FAKE = fileURLToPath(new URL('./fixtures/agent-engine/fake-claude.mjs', import.meta.url));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -25,7 +26,7 @@ let directory: string;
 let project: string;
 let logFile: string;
 let extraEnv: Record<string, string> = {};
-let terminalState: 'none' | 'detached' | 'attached' = 'none';
+let terminalState: 'none' | 'detached' | 'attached' | 'external' = 'none';
 const terminalCalls: string[] = [];
 let engine: ClaudeEngine;
 
@@ -390,13 +391,44 @@ describe('Claude Code engine against a fake CLI', () => {
     await waitFor(() => { try { process.kill(hostPid, 0); return false; } catch { return true; } });
 
     terminalState = 'attached';
-    await expect(engine.send(chat.sessionId, 'plain')).rejects.toThrow('This chat is open in a Claude Code terminal');
+    const calls = terminalCalls.length;
+    await expect(engine.send(chat.sessionId, 'plain')).rejects.toThrow(ENGINE_TERMINAL_OPEN_IN_APP);
+    terminalState = 'external';
+    await expect(engine.send(chat.sessionId, 'plain')).rejects.toThrow(ENGINE_TERMINAL_OPEN_ELSEWHERE);
+    // Refusing never closes anything, and no host started.
+    expect(terminalCalls).toHaveLength(calls);
+    expect(launches().at(-1)!.pid).toBe(hostPid);
     terminalState = 'detached';
     await engine.send(chat.sessionId, 'plain');
     await finished(chat.sessionId);
     expect(terminalCalls.at(-1)).toBe(`end:${chat.sessionId}`);
     expect(launches().at(-1)!.argv!.at(-1)).toBe(`--resume=${id}`);
     expect(launches().at(-1)!.pid).not.toBe(hostPid);
+  });
+
+  it('closes an attached hand-over terminal only on the explicit take-back, then resumes and sends', async () => {
+    const chat = await engine.create({ projectId: null });
+    const id = (await ledger.storedChatRecord(chat.sessionId))!.backendSessionId!;
+    await engine.send(chat.sessionId, 'plain');
+    await finished(chat.sessionId);
+    await engine.openTerminal(chat.sessionId);
+    for (const state of ['attached', 'external'] as const) {
+      terminalState = state;
+      const before = launches().length;
+      await engine.send(chat.sessionId, 'plain', { takeBackTerminal: true });
+      const events = await finished(chat.sessionId);
+      expect(terminalCalls.at(-1)).toBe(`end:${chat.sessionId}`);
+      expect(launches()).toHaveLength(before + 1);
+      expect(launches().at(-1)!.argv!.at(-1)).toBe(`--resume=${id}`);
+      expect(events.at(-1)).toMatchObject({ kind: 'turn_end', outcome: 'completed' });
+      await engine.openTerminal(chat.sessionId);
+    }
+    // The terminal still refuses to open while the chat answers.
+    terminalState = 'none';
+    await engine.send(chat.sessionId, 'hang');
+    await pending(chat.sessionId);
+    await expect(engine.openTerminal(chat.sessionId)).rejects.toThrow('Claude Code is still answering in this chat');
+    await engine.stop(chat.sessionId);
   });
 
   it('restarts the process with --resume when the chat\'s model or effort changed', async () => {

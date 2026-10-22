@@ -548,3 +548,4 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .api-chat-approval-actions button { min-height: 30px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--edge); background: var(--card); color: var(--ink); font: inherit; cursor: pointer; }
 .api-chat-approval-actions button.primary { background: var(--ink); color: var(--card); border-color: var(--ink); }
 .api-chat-approval-actions button:disabled { opacity: 0.6; cursor: default; }
+.api-chat-take-back-text { margin: 0; }

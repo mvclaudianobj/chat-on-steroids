@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const durable = new Map<string, unknown>();
+const modules = vi.hoisted(() => ({ enabled: new Set<string>() }));
 vi.mock('../src/main/durable.js', () => ({
   readDurable: async (name: string) => structuredClone(durable.get(name) ?? null),
   writeDurableNow: async (name: string, value: unknown) => { durable.set(name, structuredClone(value)); }
 }));
-// Codex and MarksCode are registered for real; here their modules are off, so they are listed unavailable.
+// OpenCode, Codex and Claude are registered for real; here their modules are off, so they are listed unavailable.
 vi.mock('../src/main/cli-modules.js', () => ({
   cliEngineRuntime: async () => ({ ok: false, detail: 'Enable the Codex module in Settings > Modules first' }),
   cliModuleState: async () => ({ enabled: false, command: true, binary: null })
@@ -48,14 +49,38 @@ beforeEach(() => {
   ledger.resetChatLedgerForTests();
   registry.resetAgentEnginesForTests();
   settings.resetApiChatSettingsForTests();
+  modules.enabled.clear();
+  registry.setAgentEngineModulesForTests(async id => modules.enabled.has(id));
 });
 
 describe('agent engine registry', () => {
-  it('lists every engine in order; OpenCode, Codex and Claude are unavailable while their modules are off, MarksCode is retired', async () => {
-    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; terminal: string | null }>;
-    expect(engines.map(engine => `${engine.id}:${engine.available}:${engine.terminal}`)).toEqual([
-      'cliproxy:true:null', 'opencode:false:live', 'codex:false:live', 'claude:false:handover', 'markscode:false:null'
+  it('lists every engine in order; OpenCode, Codex and Claude are unavailable while their modules are off, MarksCode is retired and hidden', async () => {
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; hidden: boolean; terminal: string | null }>;
+    expect(engines.map(engine => `${engine.id}:${engine.available}:${engine.enabled}:${engine.hidden}:${engine.terminal}`)).toEqual([
+      'cliproxy:true:true:false:null', 'opencode:false:false:false:live', 'codex:false:false:false:live', 'claude:false:false:false:handover', 'markscode:false:false:true:null'
     ]);
+  });
+
+  it('reports an engine whose module is on but which cannot run as enabled, with its reason', async () => {
+    registry.registerAgentEngine(fakeEngine('claude', false));
+    modules.enabled.add('claude');
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; detail: string }>;
+    expect(engines.find(engine => engine.id === 'claude')).toMatchObject({ available: false, enabled: true, detail: 'off' });
+    expect(engines.find(engine => engine.id === 'codex')).toMatchObject({ available: false, enabled: false });
+  });
+
+  it('hides the retired MarksCode from new chats, without probing it, and keeps routing its existing chats', async () => {
+    const markscode = fakeEngine('markscode');
+    registry.registerAgentEngine(markscode);
+    modules.enabled.add('markscode');
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; hidden: boolean; terminal: string | null }>;
+    expect(engines.find(engine => engine.id === 'markscode')).toMatchObject({ available: false, enabled: false, hidden: true });
+    expect(markscode.status).not.toHaveBeenCalled();
+    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('MarksCode chats are read-only. New chats use OpenCode.');
+    expect(markscode.create).not.toHaveBeenCalled();
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, { [SESSION]: { engine: 'markscode', backendSessionId: 'ses_1', model: null, effort: null } });
+    expect(await request({ action: 'chatSettings', sessionId: SESSION })).toMatchObject({ engine: 'markscode' });
+    expect(await request({ action: 'send', sessionId: SESSION, text: 'hi' })).toEqual({ turnId: 'markscode-turn' });
   });
 
   it('routes every chat action by the chat ledger record, and a record without engine to CLIProxy', async () => {

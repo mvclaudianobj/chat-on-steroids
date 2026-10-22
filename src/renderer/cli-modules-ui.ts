@@ -148,7 +148,8 @@ export function createCliModulesUi(api: AppApi, hooks: {
         },
         ...providerItems(),
         ...enabledModules().map((id, index) => ({
-          action: `new-chat-${id}`, icon: chatTypeIcon('terminal'), label: () => current.get(id)?.name ?? id, separated: index === 0,
+          // Terminal modules have their own namespace: an engine of the same name is `new-chat-engine-<id>`.
+          action: `new-terminal-${id}`, icon: chatTypeIcon('terminal'), label: () => current.get(id)?.name ?? id, separated: index === 0,
           run: () => void createSession(id, hooks.workspace())
         }))
       ]
@@ -394,7 +395,8 @@ export function createCliModulesUi(api: AppApi, hooks: {
   return {
     createSession,
     openSession,
-    cliModules: (): ReadonlyArray<CliModuleSummary> => [...current.values()].map(status => ({
+    // The retired forks never open a terminal, so no menu lists them.
+    cliModules: (): ReadonlyArray<CliModuleSummary> => [...current.values()].filter(status => !LEGACY.has(status.id)).map(status => ({
       id: status.id,
       name: status.name,
       enabled: status.enabled

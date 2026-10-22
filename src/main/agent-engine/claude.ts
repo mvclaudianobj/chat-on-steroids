@@ -26,7 +26,7 @@
 import { spawn as spawnProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { AGENT_ENGINE_LABELS } from '../../shared/agent-engine.js';
+import { AGENT_ENGINE_LABELS, ENGINE_TERMINAL_OPEN_ELSEWHERE, ENGINE_TERMINAL_OPEN_IN_APP } from '../../shared/agent-engine.js';
 import {
   API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS, API_CONVERSATION_PREFIX, isApiConversationId,
   type ApiChatEffort, type ApiChatModel, type ApiChatView
@@ -79,7 +79,9 @@ export interface ClaudeRuntime {
 }
 
 export interface ClaudeTerminalDeps {
-  state(chatSessionId: string): Promise<'none' | 'detached' | 'attached'>;
+  /** `attached`: only the app's own terminal view; `external`: a tmux client outside the app too. */
+  state(chatSessionId: string): Promise<'none' | 'detached' | 'attached' | 'external'>;
+  /** Detaches the app's views and ends the terminal's tmux session (the TUI with it). */
   end(chatSessionId: string): Promise<void>;
   open(chat: { sessionId: string; projectId: string | null; args: string[]; title: string }): Promise<{ id: string }>;
 }
@@ -519,7 +521,12 @@ export class ClaudeEngine implements AgentEngine {
     return this.view(chat.id);
   }
 
-  async send(sessionId: string, question: string): Promise<{ turnId: string }> {
+  /**
+   * With the hand-over terminal attached, a send is refused with ENGINE_TERMINAL_OPEN_IN_APP (or
+   * _ELSEWHERE) unless `takeBackTerminal`: the user's explicit "Close the terminal and continue
+   * here". Then that terminal ends (Claude Code saved the session) and the host resumes it.
+   */
+  async send(sessionId: string, question: string, options: { takeBackTerminal?: boolean } = {}): Promise<{ turnId: string }> {
     this.hook();
     await this.recover();
     if (!question.trim() || question.length > MAX_CLAUDE_INPUT_CHARS) throw new Error('Write a message of up to 100,000 characters');
@@ -530,10 +537,12 @@ export class ClaudeEngine implements AgentEngine {
     let turn: ClaudeTurn | null = null;
     try {
       const terminal = await this.deps.terminal?.state(chat.id) ?? 'none';
-      if (terminal === 'attached') throw new Error('This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.');
-      if (terminal === 'detached') {
+      if ((terminal === 'attached' || terminal === 'external') && !options.takeBackTerminal) {
+        throw new Error(terminal === 'external' ? ENGINE_TERMINAL_OPEN_ELSEWHERE : ENGINE_TERMINAL_OPEN_IN_APP);
+      }
+      if (terminal !== 'none') {
         await this.deps.terminal!.end(chat.id);
-        logInfo(`Claude Code chat ${chat.id}: ended its hand-over terminal before resuming in the app`);
+        logInfo(`Claude Code chat ${chat.id}: ended its ${terminal} hand-over terminal before resuming in the app`);
       }
       const runtime = await this.deps.runtime(chat.projectId);
       const resume = (await readEvents(chat.id, { kinds: ['turn_start'] })).length > 0;

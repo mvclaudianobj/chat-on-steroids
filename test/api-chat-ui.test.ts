@@ -38,10 +38,12 @@ afterEach(() => { Object.assign(globalThis, old); });
 const view = (over: Partial<{ model: string | null; effort: 'low' | 'medium' | 'high' | null; running: boolean }> = {}) =>
   ({ sessionId: 'session-api', conversationId: 'cosapi-1', model: 'gpt-5', effort: null, running: false, ...over });
 
-const engineList = (available: string[] = ['cliproxy']) => (['cliproxy', 'opencode', 'codex', 'claude', 'markscode'] as const).map(id => ({
-  id, label: { cliproxy: 'CLIProxy', opencode: 'OpenCode', codex: 'Codex', claude: 'Claude Code', markscode: 'MarksCode' }[id], available: available.includes(id), detail: '',
-  terminal: id === 'cliproxy' ? null : id === 'claude' ? 'handover' : 'live'
-}));
+const engineList = (available: string[] = ['cliproxy'], extra: Partial<Record<string, { enabled?: boolean; hidden?: boolean; detail?: string }>> = {}) =>
+  (['cliproxy', 'opencode', 'codex', 'claude', 'markscode'] as const).map(id => ({
+    id, label: { cliproxy: 'CLIProxy', opencode: 'OpenCode', codex: 'Codex', claude: 'Claude Code', markscode: 'MarksCode' }[id], available: available.includes(id),
+    enabled: available.includes(id), hidden: id === 'markscode', detail: '',
+    terminal: id === 'cliproxy' || id === 'markscode' ? null : id === 'claude' ? 'handover' : 'live', ...extra[id]
+  }));
 
 function apiMock(over: Record<string, unknown> = {}) {
   return {
@@ -84,7 +86,7 @@ it('offers CLIProxy after ChatGPT in New chat and opens the created API chat in 
     expect(found.length).toBe(2);
     return found;
   });
-  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'new-chat-cliproxy']);
+  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'new-chat-engine-cliproxy']);
   expect(items[1]!.textContent).toContain('CLIProxy');
   items[1]!.click();
   await vi.waitFor(() => expect(selectChat).toHaveBeenCalledWith('session-api'));
@@ -105,7 +107,7 @@ it("offers a CLIProxy chat in a project's menu that belongs to that project, not
     expect(found).toHaveLength(1);
     return found;
   });
-  expect(items[0]!.action).toBe('new-chat-cliproxy');
+  expect(items[0]!.action).toBe('new-chat-engine-cliproxy');
   expect(items[0]!.label()).toBe('New CLIProxy chat in this project');
   items[0]!.run!();
   await vi.waitFor(() => expect(api.apiChatCreate).toHaveBeenCalledWith({ projectId: 'menu-project' }));
@@ -156,6 +158,39 @@ it('keeps the text and says why when an API send fails or carries attachments', 
   submit();
   expect(api.apiChatSend).toHaveBeenCalledTimes(1);
   expect(dom.window.document.querySelector('.toast')?.textContent).toContain('Attachments are not available');
+});
+
+it('offers to close an attached Claude Code terminal and continue here, and only then sends with the take-back', async () => {
+  const { ENGINE_TERMINAL_OPEN_IN_APP, ENGINE_TERMINAL_OPEN_ELSEWHERE } = await import('../src/shared/agent-engine.js');
+  let refusal = ENGINE_TERMINAL_OPEN_IN_APP;
+  const apiChatSend = vi.fn(async (_id: string, _text: string, options?: { takeBackTerminal?: true }) => options?.takeBackTerminal
+    ? { ok: true as const, data: { turnId: 'turn-2' } } : { ok: false as const, error: refusal });
+  const api = apiMock({ apiChatSend, apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: { ...view({ model: 'opus' }), engine: 'claude', approval: 'ask', pending: null } })) });
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
+  chats.sync();
+  $<HTMLTextAreaElement>('chatInput').value = 'continue the refactor';
+  submit();
+  const offer = $('apiChatTakeBack');
+  await vi.waitFor(() => expect(offer.hidden).toBe(false));
+  // Nothing closed yet: the refusal only offers the action, the text stays in the composer.
+  expect(apiChatSend).toHaveBeenCalledTimes(1);
+  expect(apiChatSend).toHaveBeenLastCalledWith('session-api', 'continue the refactor');
+  expect(offer.textContent).toContain(ENGINE_TERMINAL_OPEN_IN_APP);
+  expect($('apiChatTakeBackConfirm').textContent).toBe('Close the terminal and continue here');
+  expect($<HTMLTextAreaElement>('chatInput').value).toBe('continue the refactor');
+  expect(dom.window.document.querySelector('.toast')).toBeNull();
+  // Cancel keeps the terminal; a terminal outside the app says it will be closed too.
+  (offer.querySelector('button:not(.primary)') as HTMLButtonElement).click();
+  expect(offer.hidden).toBe(true);
+  refusal = ENGINE_TERMINAL_OPEN_ELSEWHERE;
+  submit();
+  await vi.waitFor(() => expect(offer.hidden).toBe(false));
+  expect(offer.textContent).toContain('outside the app');
+  $('apiChatTakeBackConfirm').click();
+  await vi.waitFor(() => expect(apiChatSend).toHaveBeenLastCalledWith('session-api', 'continue the refactor', { takeBackTerminal: true }));
+  await vi.waitFor(() => expect(offer.hidden).toBe(true));
+  expect($<HTMLTextAreaElement>('chatInput').value).toBe('');
+  expect(apiChatSend).toHaveBeenCalledTimes(3);
 });
 
 it('stops the running API turn from the Stop button', async () => {
@@ -239,17 +274,49 @@ it('shows a pending edit or command, answers exactly that approval and switches 
   await vi.waitFor(() => expect(mode.value).toBe('auto'));
 });
 
-it('offers only the engines main reports available, in New chat and in a project menu', async () => {
+it('offers the engines main reports available, in New chat and in a project menu', async () => {
   const api = apiMock({ apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'codex']) })) });
   const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => 'project-1', selectChat: vi.fn(), selectedChat: () => null });
   await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(2));
-  expect(chats.newChatItems().map(item => `${item.action}=${item.label()}`)).toEqual(['new-chat-cliproxy=CLIProxy', 'new-chat-codex=Codex']);
+  expect(chats.newChatItems().map(item => `${item.action}=${item.label()}`)).toEqual(['new-chat-engine-cliproxy=CLIProxy', 'new-chat-engine-codex=Codex']);
   expect(chats.newChatItems()[1]!.title!()).toBe('Chat with Codex');
   expect(chats.projectChatItems('menu-project').map(item => item.label())).toEqual(['New CLIProxy chat in this project', 'New Codex chat in this project']);
   // A CLI engine needs no CLIProxy setup: the chat is created on that engine, in that project.
   chats.projectChatItems('menu-project')[1]!.run!();
   await vi.waitFor(() => expect(api.apiChatCreate).toHaveBeenCalledWith({ projectId: 'menu-project', engine: 'codex' }));
   expect(api.apiChatStatus).toHaveBeenCalledTimes(0);
+});
+
+it('lists an enabled but unavailable engine as a disabled item with its reason, and never a hidden or switched-off one', async () => {
+  const api = apiMock({ apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'claude'], {
+    codex: { enabled: true, detail: 'Codex is not signed in. Run "codex login" in a terminal.' },
+    // The retired MarksCode is hidden even with its module on.
+    markscode: { enabled: true, hidden: true, detail: 'MarksCode chats are read-only. New chats use OpenCode.' }
+  }) })) });
+  const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => 'project-1', selectChat: vi.fn(), selectedChat: () => null });
+  await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(3));
+  const items = chats.newChatItems();
+  expect(items.map(item => `${item.action}:${item.disabled === true}`)).toEqual(['new-chat-engine-cliproxy:false', 'new-chat-engine-codex:true', 'new-chat-engine-claude:false']);
+  expect(items[1]!.detail!()).toBe('Codex is not signed in. Run "codex login" in a terminal.');
+  expect(items[1]!.title!()).toBe(items[1]!.detail!());
+  expect(items[2]!.detail).toBeUndefined();
+  const project = chats.projectChatItems('p');
+  expect(project.map(item => `${item.action}:${item.disabled === true}`)).toEqual(['new-chat-engine-cliproxy:false', 'new-chat-engine-codex:true', 'new-chat-engine-claude:false']);
+  // In the real menu the reason is the item's second line and the item cannot be picked.
+  const api2 = { ...api, cliStatus: async () => ({ ok: true as const, data: [] }), cliSessions: async () => ({ ok: true as const, data: [] }), listProjects: async () => ({ ok: true as const, data: [] }) } as any;
+  createCliModulesUi(api2, { showTab: vi.fn(), openChatView: () => undefined, workspace: () => null, newChatItems: chats.newChatItems });
+  await vi.waitFor(() => expect($('newChat').getAttribute('aria-haspopup')).toBe('menu'));
+  $('newChat').click();
+  const codex = await vi.waitFor(() => {
+    const found = dom.window.document.querySelector<HTMLButtonElement>('[data-row-action="new-chat-engine-codex"]');
+    expect(found).not.toBeNull();
+    return found!;
+  });
+  expect(codex.disabled).toBe(true);
+  expect(codex.querySelector('.row-menu-detail')?.textContent).toContain('not signed in');
+  expect(dom.window.document.querySelector('[data-row-action="new-chat-engine-markscode"]')).toBeNull();
+  codex.click();
+  expect(api.apiChatCreate).not.toHaveBeenCalled();
 });
 
 it('offers nothing before the registry answers or when it fails', async () => {
@@ -283,7 +350,7 @@ it('offers an OpenCode chat once main reports it available, and opens its live t
   const openCliSession = vi.fn();
   const chats = createApiChatUi(api, { showTab: vi.fn(), workspace: () => 'project-1', selectChat: vi.fn(), selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }), openCliSession });
   await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(2));
-  expect(chats.newChatItems().map(item => `${item.action}=${item.label()}`)).toEqual(['new-chat-cliproxy=CLIProxy', 'new-chat-opencode=OpenCode']);
+  expect(chats.newChatItems().map(item => `${item.action}=${item.label()}`)).toEqual(['new-chat-engine-cliproxy=CLIProxy', 'new-chat-engine-opencode=OpenCode']);
   expect(chats.projectChatItems('menu-project').map(item => item.label())).toEqual(['New CLIProxy chat in this project', 'New OpenCode chat in this project']);
   chats.sync();
   await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('OpenCode · anthropic/sonnet-5'));
@@ -334,7 +401,7 @@ it('offers Claude Code once main reports it available, and opens a Claude chat i
   });
   const openCliSession = vi.fn();
   const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, openCliSession, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
-  await vi.waitFor(() => expect(chats.newChatItems().map(item => item.action)).toEqual(['new-chat-cliproxy', 'new-chat-claude']));
+  await vi.waitFor(() => expect(chats.newChatItems().map(item => item.action)).toEqual(['new-chat-engine-cliproxy', 'new-chat-engine-claude']));
   expect(chats.newChatItems()[1]!.label()).toBe('Claude Code');
   expect(chats.projectChatItems('p')[1]!.label()).toBe('New Claude Code chat in this project');
   chats.sync();
@@ -376,7 +443,7 @@ it('shows each chat type icon in New chat, the project menu, the Terminals list 
     return item!;
   });
   expect(chatgpt.querySelector('.cm-glyph-fox[aria-hidden="true"]')).not.toBeNull();
-  expect(dom.window.document.querySelector('[data-row-action="new-chat-claude"] .cm-glyph-spark')).not.toBeNull();
+  expect(dom.window.document.querySelector('[data-row-action="new-chat-engine-claude"] .cm-glyph-spark')).not.toBeNull();
   // A terminal session in the sidebar: the terminal glyph before its title.
   const terminal = await vi.waitFor(() => {
     const row = dom.window.document.querySelector<HTMLElement>('.cli-module-chat');

@@ -5,12 +5,17 @@
  * outbox, the chat's own model and effort, and hiding the ChatGPT-only controls (`is-api-chat`
  * on the chat panel, styled in settings.css). D4 adds the chat's approval mode and the card that
  * answers a paused edit or command (main owns the pending call; this only shows and answers it).
- * Engines: the New chat and project menu items come from main's engine registry (only available
- * engines), and the chat's own engine names the header and chooses which model list to load.
+ * Engines: the New chat and project menu items come from main's engine registry: every enabled,
+ * not hidden engine, an unavailable one disabled with its reason. The chat's own engine names the
+ * header and chooses which model list to load. A Claude Code chat whose hand-over terminal is still
+ * attached offers "Close the terminal and continue here" instead of only refusing the send.
  */
 import type { AppApi } from '../preload/index.js';
 import { isApiConversationId, type ApiChatApprovalDecision, type ApiChatApprovalMode, type ApiChatEffort, type ApiChatModel, type ApiChatView } from '../shared/api-chat.js';
-import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineInfo, type AgentEngineTerminalMode } from '../shared/agent-engine.js';
+import {
+  AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, ENGINE_TERMINAL_OPEN_ELSEWHERE, ENGINE_TERMINAL_OPEN_IN_APP,
+  type AgentEngineId, type AgentEngineInfo, type AgentEngineTerminalMode
+} from '../shared/agent-engine.js';
 import { setIcon, toast } from './dom.js';
 import { chatTypeIcon, chatTypeMark, chatTypeOf } from './chat-types.js';
 import { t, ui } from './i18n.js';
@@ -28,9 +33,9 @@ export interface ApiChatUiHooks {
 }
 
 export interface ApiChatUi {
-  /** New chat's menu items: one per available engine (CLIProxy once its settings answered). */
+  /** New chat's menu items: one per offered engine (`new-chat-engine-<id>`), unavailable ones disabled. */
   newChatItems(): RowMenuItem[];
-  /** A project's menu items: a chat of each available engine that belongs to that project. */
+  /** A project's menu items: a chat of each offered engine that belongs to that project. */
   projectChatItems(projectId: string): RowMenuItem[];
   /** Follows the selected chat: called whenever the chat list or selection repaints. */
   sync(): void;
@@ -38,7 +43,7 @@ export interface ApiChatUi {
   refresh(): Promise<void>;
 }
 
-/** The menu wording of each engine; the reserved ones are offered once main reports them available. */
+/** The menu wording of each engine. */
 const ENGINE_MENU: Readonly<Record<AgentEngineId, { title(): string; project(): string }>> = {
   cliproxy: { title: () => t('Chat with CLIProxy'), project: () => t('New CLIProxy chat in this project') },
   opencode: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.opencode]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.opencode]) },
@@ -47,12 +52,32 @@ const ENGINE_MENU: Readonly<Record<AgentEngineId, { title(): string; project(): 
   claude: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.claude]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.claude]) }
 };
 
-/** The engines a new chat may use, in the registry's fixed order. */
-export function availableEngines(list: unknown): AgentEngineId[] {
+/** New chat's engine item ids: their own namespace, never a terminal module's (`new-terminal-<id>`). */
+export const engineMenuAction = (id: AgentEngineId): string => `new-chat-engine-${id}`;
+
+export interface OfferedEngine { id: AgentEngineId; available: boolean; detail: string }
+
+/**
+ * The engines New chat lists, in the registry's fixed order: every one whose module is enabled
+ * (or that is available), except the hidden ones. An unavailable one keeps its reason.
+ */
+export function offeredEngines(list: unknown): OfferedEngine[] {
   if (!Array.isArray(list)) return [];
-  const shown = new Set((list as AgentEngineInfo[]).filter(item => item?.available === true).map(item => item.id));
-  return AGENT_ENGINE_IDS.filter(id => shown.has(id));
+  const byId = new Map<AgentEngineId, OfferedEngine>();
+  for (const item of list as Partial<AgentEngineInfo>[]) {
+    if (!item || typeof item.id !== 'string' || !AGENT_ENGINE_IDS.includes(item.id) || item.hidden === true) continue;
+    const available = item.available === true;
+    if (!available && item.enabled !== true) continue;
+    byId.set(item.id, { id: item.id, available, detail: typeof item.detail === 'string' ? item.detail.slice(0, 200) : '' });
+  }
+  return AGENT_ENGINE_IDS.flatMap(id => byId.get(id) ?? []);
 }
+
+/** An engine listed but not usable now: a disabled item that says why (main's redacted, short detail). */
+const unavailable = (detail: string): Pick<RowMenuItem, 'disabled' | 'detail' | 'title'> => {
+  const reason = (): string => detail ? t(detail) : t('Not available right now');
+  return { disabled: true, detail: reason, title: reason };
+};
 
 export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailability: () => void = () => undefined): ApiChatUi {
   const host = document.querySelector<HTMLElement>('[data-panel="chat"]') ?? document.body;
@@ -126,6 +151,27 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     return button;
   };
   actions.append(answer('approve', () => t('Approve'), true), answer('deny', () => t('Deny')), answer('always', () => t('Approve and don\'t ask again in this chat')));
+  // A send refused because the chat's hand-over terminal is attached: the explicit way back.
+  const takeBack = document.createElement('section');
+  takeBack.className = 'api-chat-approval api-chat-take-back';
+  takeBack.id = 'apiChatTakeBack';
+  takeBack.hidden = true;
+  takeBack.setAttribute('role', 'alertdialog');
+  const takeBackText = document.createElement('p');
+  takeBackText.className = 'api-chat-take-back-text';
+  const takeBackActions = document.createElement('div');
+  takeBackActions.className = 'api-chat-approval-actions';
+  const takeBackConfirm = document.createElement('button');
+  takeBackConfirm.type = 'button';
+  takeBackConfirm.className = 'primary';
+  takeBackConfirm.id = 'apiChatTakeBackConfirm';
+  ui(takeBackConfirm, 'textContent', () => t('Close the terminal and continue here'));
+  const takeBackCancel = document.createElement('button');
+  takeBackCancel.type = 'button';
+  ui(takeBackCancel, 'textContent', () => t('Cancel'));
+  takeBackActions.append(takeBackConfirm, takeBackCancel);
+  takeBack.append(takeBackText, takeBackActions);
+  ui(takeBack, 'aria-label', () => t('Close the terminal and continue here'));
   const head = document.createElement('div');
   head.className = 'api-chat-approval-head';
   head.append(cardTitle, cardTool);
@@ -133,9 +179,9 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   ui(cardTitle, 'textContent', () => t('Approve this action?'));
   // A row of the composer dock, like the queue and plan rows: directly above the composer.
   const dockBody = document.querySelector('#composerDock .composer-dock-body');
-  if (dockBody) dockBody.append(card);
-  else if (composer) composer.before(card);
-  else host.append(card);
+  if (dockBody) dockBody.append(card, takeBack);
+  else if (composer) composer.before(card, takeBack);
+  else host.append(card, takeBack);
   const modelMenu = document.getElementById('modelMenu');
   if (modelMenu?.parentElement) modelMenu.before(controls);
   else composer?.querySelector('.composer-toolbar')?.append(controls);
@@ -160,7 +206,9 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
 
   /** Sessions this window created before the chat list carried their summary. */
   const created = new Set<string>();
-  let engines: AgentEngineId[] = [];
+  let engines: OfferedEngine[] = [];
+  /** The message a refused send left, while the take-back offer shows for that chat. */
+  let offer: { sessionId: string; text: string; elsewhere: boolean } | null = null;
   /** Engines whose chats can open a terminal, as main's registry reports them. */
   let terminalEngines = new Map<AgentEngineId, AgentEngineTerminalMode>();
   let shownFor: string | null = null;
@@ -186,6 +234,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     const selected = id ? null : hooks.selectedChat?.() ?? null;
     nativeMark.hidden = !!id || !selected || chatTypeOf(selected) !== 'chatgpt';
     paintApproval(id ? view?.pending ?? null : null);
+    paintTakeBack();
     if (!id) return;
     setIcon(labelIcon, chatTypeIcon(engineOf()), 'ico chat-type-icon api-chat-label-icon');
     labelIcon.dataset.chatType = engineOf();
@@ -231,6 +280,46 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
       paint();
     }
   }
+
+  function paintTakeBack(): void {
+    const shown = !!offer && offer.sessionId === shownFor;
+    takeBack.hidden = !shown;
+    if (!shown) return;
+    takeBackText.textContent = t(offer!.elsewhere ? ENGINE_TERMINAL_OPEN_ELSEWHERE : ENGINE_TERMINAL_OPEN_IN_APP);
+    takeBackConfirm.disabled = busy;
+    takeBackCancel.disabled = busy;
+  }
+
+  /** Sends the chat's message; a refusal for an attached hand-over terminal becomes the offer. */
+  async function sendText(id: string, text: string, takeBackTerminal = false): Promise<void> {
+    const reply = await (takeBackTerminal ? api.apiChatSend(id, text, { takeBackTerminal: true }) : api.apiChatSend(id, text))
+      .catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }));
+    if (!reply.ok) {
+      const elsewhere = reply.error === ENGINE_TERMINAL_OPEN_ELSEWHERE;
+      if (elsewhere || reply.error === ENGINE_TERMINAL_OPEN_IN_APP) { offer = { sessionId: id, text, elsewhere }; paint(); return; }
+      toast(t(reply.error));
+      return;
+    }
+    if (offer?.sessionId === id) offer = null;
+    if (input && selectedApiChat() === id && input.value.trim() === text) {
+      input.value = '';
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    paint();
+  }
+
+  // Only this explicit action closes the terminal: main detaches the app's view, ends the
+  // terminal's Claude Code (the session is saved) and resumes the chat with the message.
+  takeBackConfirm.addEventListener('click', () => {
+    const pending = offer;
+    if (!pending || busy) return;
+    busy = true;
+    paint();
+    // The composer's text as it is now (it may have been edited since), else the refused message.
+    const text = (selectedApiChat() === pending.sessionId ? input?.value.trim() : '') || pending.text;
+    void sendText(pending.sessionId, text, true).finally(() => { busy = false; paint(); });
+  });
+  takeBackCancel.addEventListener('click', () => { offer = null; paint(); input?.focus(); });
 
   function paintApproval(pending: ApiChatView['pending'] | null): void {
     card.hidden = !pending;
@@ -347,14 +436,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     const text = input?.value.trim() ?? '';
     if (!text) return;
     if (document.querySelector('#composerImages > *')) { toast(t('Attachments are not available in CLIProxy chats yet.')); return; }
-    void (async () => {
-      const reply = await api.apiChatSend(id, text).catch((error: unknown) => ({ ok: false as const, error: error instanceof Error ? error.message : String(error) }));
-      if (!reply.ok) { toast(t(reply.error)); return; }
-      if (input && selectedApiChat() === id && input.value.trim() === text) {
-        input.value = '';
-        input.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-    })();
+    void sendText(id, text);
   }, { capture: true });
 
   // Skills and @file mentions are ChatGPT tools, and their menu is hidden here: Enter must not
@@ -374,21 +456,23 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   /** Main's registry says which engines a new chat can use; nothing is offered until it answers. */
   async function refresh(): Promise<void> {
     const reply = await api.apiChatEngines?.().catch(() => null);
-    const next = reply?.ok ? availableEngines(reply.data) : [];
+    const next = reply?.ok ? offeredEngines(reply.data) : [];
     terminalEngines = new Map(reply?.ok && Array.isArray(reply.data) ? reply.data.filter(item => item?.terminal).map(item => [item.id, item.terminal!] as const) : []);
-    if (next.join() !== engines.join()) { engines = next; onAvailability(); }
+    if (JSON.stringify(next) !== JSON.stringify(engines)) { engines = next; onAvailability(); }
     paint();
   }
   void refresh();
 
   return {
-    newChatItems: () => engines.map((engine): RowMenuItem => ({
-      action: `new-chat-${engine}`, icon: chatTypeIcon(engine), label: () => AGENT_ENGINE_LABELS[engine], title: ENGINE_MENU[engine].title,
-      run: () => void create(undefined, engine)
+    newChatItems: () => engines.map(({ id, available, detail }): RowMenuItem => ({
+      action: engineMenuAction(id), icon: chatTypeIcon(id), label: () => AGENT_ENGINE_LABELS[id],
+      ...(available ? { title: ENGINE_MENU[id].title } : unavailable(detail)),
+      run: () => void create(undefined, id)
     })),
-    projectChatItems: projectId => engines.map((engine): RowMenuItem => ({
-      action: `new-chat-${engine}`, icon: chatTypeIcon(engine), label: ENGINE_MENU[engine].project,
-      run: () => void create(projectId, engine)
+    projectChatItems: projectId => engines.map(({ id, available, detail }): RowMenuItem => ({
+      action: engineMenuAction(id), icon: chatTypeIcon(id), label: ENGINE_MENU[id].project,
+      ...(available ? {} : unavailable(detail)),
+      run: () => void create(projectId, id)
     })),
     sync,
     create,
