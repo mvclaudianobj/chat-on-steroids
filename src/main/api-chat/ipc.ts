@@ -8,7 +8,7 @@ import { z } from 'zod';
 import { markspanelAccessBlocked } from '../markspanel-auth.js';
 import { logWarn } from '../logger.js';
 import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS } from '../../shared/api-chat.js';
-import { AGENT_ENGINE_IDS, DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
+import { AGENT_ENGINE_IDS, AGENT_ENGINE_ROUTES, DEFAULT_AGENT_ENGINE, ROUTED_AGENT_ENGINES } from '../../shared/agent-engine.js';
 import { agentEngine, createAgentChat, engineForChat, listAgentEngines, recoverAgentEngines } from '../agent-engine/registry.js';
 import { shutdownOpenCodeEngine } from '../agent-engine/opencode.js';
 import { ApiChatHttpError, streamCompletion } from './client.js';
@@ -22,6 +22,7 @@ const TEST_TIMEOUT_MS = 30_000;
 const modelId = z.string().min(1).max(200);
 const sessionId = z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i);
 const engine = z.enum(AGENT_ENGINE_IDS);
+const route = z.enum(AGENT_ENGINE_ROUTES);
 
 const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status') }).strict(),
@@ -36,10 +37,11 @@ const request = z.discriminatedUnion('action', [
     limit: z.number().int().min(1).max(200).optional(),
     modality: z.enum(['chat', 'image', 'audio', 'embedding', 'moderation']).optional(),
     refresh: z.boolean().optional(),
-    engine: engine.optional()
+    engine: engine.optional(),
+    route: route.optional()
   }).strict(),
   z.object({ action: z.literal('test'), model: modelId.optional() }).strict(),
-  z.object({ action: z.literal('createChat'), projectId: z.string().uuid().nullable().optional(), model: modelId.optional(), engine: engine.optional() }).strict(),
+  z.object({ action: z.literal('createChat'), projectId: z.string().uuid().nullable().optional(), model: modelId.optional(), engine: engine.optional(), route: route.optional() }).strict(),
   // `takeBackTerminal`: the user chose "Close the terminal and continue here" (Claude Code hand-over).
   z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS), takeBackTerminal: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
@@ -49,7 +51,9 @@ const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('terminal'), sessionId }).strict(),
   z.object({
     action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional(),
-    approval: z.enum(API_CHAT_APPROVAL_MODES).optional()
+    approval: z.enum(API_CHAT_APPROVAL_MODES).optional(),
+    // Codex and Claude Code: direct (the CLI's own account) or through a detected Claude Code Router.
+    route: route.optional()
   }).strict(),
   // Chat Marks D4: only this authenticated window answers an approval, never a notification.
   z.object({ action: z.literal('approve'), sessionId, approvalId: z.string().uuid(), decision: z.enum(['approve', 'deny', 'always']) }).strict()
@@ -91,11 +95,14 @@ export async function chatAction(input: z.infer<typeof request>): Promise<unknow
   switch (input.action) {
     case 'engines': return listAgentEngines();
     case 'models': {
-      const { action: _action, engine: id, ...query } = input;
+      const { action: _action, engine: id, route: chosen, ...query } = input;
       void _action;
-      return agentEngine(id ?? DEFAULT_AGENT_ENGINE).models(query);
+      const owner = agentEngine(id ?? DEFAULT_AGENT_ENGINE);
+      return owner.models(chosen && ROUTED_AGENT_ENGINES.has(owner.id) ? { ...query, route: chosen } : query);
     }
-    case 'createChat': return createAgentChat(input.engine ?? DEFAULT_AGENT_ENGINE, { projectId: input.projectId ?? null, ...(input.model ? { model: input.model } : {}) });
+    case 'createChat': return createAgentChat(input.engine ?? DEFAULT_AGENT_ENGINE, {
+      projectId: input.projectId ?? null, ...(input.model ? { model: input.model } : {}), ...(input.route ? { route: input.route } : {})
+    });
     // The turn streams on in main; the renderer follows it through session change notices.
     case 'send': {
       const owner = await engineForChat(input.sessionId);
@@ -109,10 +116,14 @@ export async function chatAction(input: z.infer<typeof request>): Promise<unknow
       if (!owner.openTerminal) throw new Error('This chat has no terminal');
       return owner.openTerminal(input.sessionId);
     }
-    case 'setChatSettings': return (await engineForChat(input.sessionId)).setChatSettings(input.sessionId, {
-      ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {}),
-      ...(input.approval !== undefined ? { approval: input.approval } : {})
-    });
+    case 'setChatSettings': {
+      const owner = await engineForChat(input.sessionId);
+      if (input.route !== undefined && !ROUTED_AGENT_ENGINES.has(owner.id)) throw new Error(`${owner.label} chats have no route`);
+      return owner.setChatSettings(input.sessionId, {
+        ...(input.model !== undefined ? { model: input.model } : {}), ...(input.effort !== undefined ? { effort: input.effort } : {}),
+        ...(input.approval !== undefined ? { approval: input.approval } : {}), ...(input.route !== undefined ? { route: input.route } : {})
+      });
+    }
     case 'approve': return (await engineForChat(input.sessionId)).approve(input.sessionId, input.approvalId, input.decision);
     default: throw new Error('Unknown API chat action');
   }

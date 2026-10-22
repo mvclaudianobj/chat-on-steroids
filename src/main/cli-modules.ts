@@ -12,6 +12,7 @@ import { normalizeEnvironment, deleteEnvValue } from './env.js';
 import { installPublishedCli } from './cli-source-install.js';
 import { localRunner, probeVersion, wslRunner } from './upstream/install.js';
 import { markspanelAccessBlocked } from './markspanel-auth.js';
+import { CLAUDE_DIRECT_SETTINGS } from './agent-engine/router.js';
 
 export const CLI_IDS = ['opencode', 'codex', 'claude', 'zeroclaw', 'markscode', 'marksclaw'] as const;
 export type CliId = typeof CLI_IDS[number];
@@ -107,7 +108,11 @@ export const OPENCODE_TERMINAL_SCRIPT = 'OPENCODE_DISABLE_AUTOUPDATE=1 exec "$@"
 /** The only argument shapes an engine terminal may carry, per module. */
 const validEngineArgs = (module: CliId, args: unknown): args is string[] => {
   if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) return false;
-  if (module === 'claude') return args.length === 2 && ENGINE_TERMINAL_ARGS.test(args[0]!) && UUID.test(args[1]!);
+  // A direct chat's hand-over TUI carries the direct route's exact flag settings (router.ts) first.
+  if (module === 'claude') {
+    const session = args.length === 4 && args[0] === '--settings' && args[1] === CLAUDE_DIRECT_SETTINGS ? args.slice(2) : args;
+    return session.length === 2 && ENGINE_TERMINAL_ARGS.test(session[0]!) && UUID.test(session[1]!);
+  }
   if (module === 'markscode') return args.length === 3 && args[0] === '-s' && MARKSCODE_SESSION.test(args[1]!) && args[2] === '.';
   if (module === 'opencode') return args.length === 3 && args[0] === '-s' && OPENCODE_SESSION.test(args[1]!)
     && ABSOLUTE_DIR.test(args[2]!) && !args[2]!.split('/').includes('..');

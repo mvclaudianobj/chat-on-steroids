@@ -139,21 +139,21 @@ const api = {
   apiChatSetKey: (key: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setKey', key }),
   apiChatSetSettings: (settings: Partial<import('../shared/api-chat.js').ApiChatSettings>) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setSettings', settings }),
   /** A page of an engine's models (CLIProxy's catalog when `engine` is omitted). */
-  apiChatModels: (query = '', offset = 0, limit = 50, refresh = false, engine?: import('../shared/agent-engine.js').AgentEngineId) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit, refresh, ...(engine ? { engine } : {}) }),
+  apiChatModels: (query = '', offset = 0, limit = 50, refresh = false, engine?: import('../shared/agent-engine.js').AgentEngineId, route?: import('../shared/agent-engine.js').AgentEngineRoute) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit, refresh, ...(engine ? { engine } : {}), ...(route ? { route } : {}) }),
   /** Every chat engine with whether a new chat can use it now. */
   apiChatEngines: () => call<import('../shared/agent-engine.js').AgentEngineInfo[]>('marksApiChat:request', { action: 'engines' }),
   apiChatToggleFavorite: (model: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'toggleFavorite', model }),
   /** A minimal real request with the model (the default one when omitted); records its availability. */
   apiChatTest: (model?: string) => call<{ model: string }>('marksApiChat:request', { action: 'test', ...(model ? { model } : {}) }),
   /** A new API chat: a local session in the `cosapi-` namespace, optionally in a project, on an engine (CLIProxy by default). */
-  apiChatCreate: (options: { projectId?: string | null; model?: string; engine?: import('../shared/agent-engine.js').AgentEngineId } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
+  apiChatCreate: (options: { projectId?: string | null; model?: string; engine?: import('../shared/agent-engine.js').AgentEngineId; route?: import('../shared/agent-engine.js').AgentEngineRoute } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
   /** Records the question and starts the answer; it streams into the session's history. */
   apiChatSend: (sessionId: string, text: string, options: { takeBackTerminal?: true } = {}) =>
     call<{ turnId: string }>('marksApiChat:request', { action: 'send', sessionId, text, ...(options.takeBackTerminal ? { takeBackTerminal: true } : {}) }),
   apiChatStop: (sessionId: string) => call<{ stopped: boolean }>('marksApiChat:request', { action: 'stop', sessionId }),
   apiChatTerminal: (sessionId: string) => call<{ cliSessionId: string }>('marksApiChat:request', { action: 'terminal', sessionId }),
   apiChatChatSettings: (sessionId: string) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'chatSettings', sessionId }),
-  apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
+  apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode; route?: import('../shared/agent-engine.js').AgentEngineRoute }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
   apiChatApprove: (sessionId: string, approvalId: string, decision: import('../shared/api-chat.js').ApiChatApprovalDecision) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'approve', sessionId, approvalId, decision }),
   cliAction: (module: import('../main/cli-modules.js').CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'stop') => call<unknown>('marksCli:request', { action, module }),
   cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),

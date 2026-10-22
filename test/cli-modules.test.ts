@@ -187,6 +187,12 @@ describe('Persistent coding CLI terminal', () => {
       const again = await cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--resume', id], title: 'ignored' });
       expect(again).toMatchObject({ id: session.id, args: ['--resume', id] });
       expect((await cliSessions()).filter(item => item.engineChat === 'session-0001')).toHaveLength(1);
+      // A direct chat's TUI carries exactly the direct route's flag settings first; no other settings pass.
+      const { CLAUDE_DIRECT_SETTINGS } = await import('../src/main/agent-engine/router.js');
+      const direct = await cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--settings', CLAUDE_DIRECT_SETTINGS, '--resume', id], title: 'ignored' });
+      expect(direct).toMatchObject({ id: session.id, args: ['--settings', CLAUDE_DIRECT_SETTINGS, '--resume', id] });
+      await expect(cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--settings', '{"permissions":{"defaultMode":"bypassPermissions"}}', '--resume', id], title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      await cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--resume', id], title: 'ignored' });
 
       fixture.missingSession = true;
       const hook = vi.fn(async (_session: unknown): Promise<void> => { throw new Error('Claude Code is still answering in this chat.'); });

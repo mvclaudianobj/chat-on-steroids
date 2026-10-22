@@ -8,7 +8,7 @@
  * The list names every engine with its status; New chat offers each enabled one (unavailable ones
  * disabled, with their reason) except the hidden ones.
  */
-import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineInfo, type AgentEngineTerminalMode } from '../../shared/agent-engine.js';
+import { AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, ROUTED_AGENT_ENGINES, type AgentEngineId, type AgentEngineInfo, type AgentEngineTerminalMode } from '../../shared/agent-engine.js';
 import type { ApiChatView } from '../../shared/api-chat.js';
 import { logWarn } from '../logger.js';
 import { claudeEngine } from './claude.js';
@@ -17,7 +17,7 @@ import { codexEngine } from './codex.js';
 import { openCodeEngine } from './opencode.js';
 import { chatEngine, storedChatRecord } from './ledger.js';
 import { getSession } from '../session/store.js';
-import type { AgentEngine } from './types.js';
+import type { AgentEngine, EngineCreateOptions } from './types.js';
 
 /** A known engine that this version cannot run yet: listed unavailable, refuses every action. */
 export function reservedEngine(id: AgentEngineId, terminalMode: AgentEngineTerminalMode | null): AgentEngine {
@@ -123,14 +123,16 @@ export async function listAgentEngines(): Promise<AgentEngineInfo[]> {
       available: false, detail: error instanceof Error ? error.message.slice(0, 200) : 'Status unavailable'
     }));
     const enabled = status.available || await moduleEnabled(id);
-    return { ...base, available: status.available, enabled, hidden: false, detail: status.detail.slice(0, 200) };
+    return { ...base, available: status.available, enabled, hidden: false, detail: status.detail.slice(0, 200),
+      ...('router' in status && typeof status.router === 'boolean' ? { router: status.router } : {}) };
   }));
 }
 
 /** A new chat on that engine; refused while the engine is unavailable or hidden. */
-export async function createAgentChat(id: AgentEngineId, options: { projectId: string | null; model?: string }): Promise<ApiChatView> {
+export async function createAgentChat(id: AgentEngineId, options: EngineCreateOptions): Promise<ApiChatView> {
   const engine = agentEngine(id);
   if (HIDDEN_ENGINES.has(id)) throw new Error(hiddenDetail(id));
+  if (options.route && !ROUTED_AGENT_ENGINES.has(id)) throw new Error(`${engine.label} chats have no route`);
   const status = await engine.status();
   if (!status.available) throw new Error(status.detail || `${engine.label} is not available`);
   return engine.create(options);

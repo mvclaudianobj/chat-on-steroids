@@ -1589,7 +1589,9 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   `source: 'mcp'` rows, so the row is placed by its turnId. Written once, it needs no revision
   and the session's tool count stays exact.
 - Codex engine (F, `codex.ts`, `codex-protocol.ts`, `jsonrpc.ts`; codex-cli 0.163, experimental
-  app-server protocol). Process model: ONE shared app-server per app instance, started lazily:
+  app-server protocol). Process model: ONE shared app-server per route (see Routes below) per app
+  instance, started lazily (direct `<hash>.sock`, router `<hash>-router.sock`; without a detected
+  router both routes use the direct one):
   `codex app-server -c approval_policy="on-request" -c sandbox_mode="workspace-write"
   -c approvals_reviewer="user" --listen unix://<userData>/codex/<sha256(userData)[:16]>.sock`
   (0700 dir, owner/symlink checked; tmp fallback when the path exceeds ~100 bytes; pidfile so a
@@ -1608,10 +1610,13 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   - `status()`: cli-modules gates (`cliEngineRuntime`: command capability, module enabled, binary
     from userData/modules, node_modules/.bin, `which`), `codex --version` gate (other major or
     older minor refused; newer minor available with a warning), `account/read` (no account and
-    `requiresOpenaiAuth` → unavailable "Codex is not signed in…"; login stays the user's). 30 s cache.
-  - `models()`: `model/list` (paged, 5 min cache) → rows with `label`, Codex's own `efforts` and
-    `defaultEffort`; the renderer disables the efforts a model lacks; an unsupported chat effort
-    is omitted from `turn/start`.
+    `requiresOpenaiAuth` → unavailable "Codex is not signed in…"; login stays the user's), asked of
+    the direct server; with a router detected the engine stays available without a direct account
+    and the detail says `direct: <account|not signed in> · Claude Code Router detected`. 30 s cache.
+  - `models({route})`: `model/list` of that route's server (paged, 5 min cache per route) → rows
+    with `label` (shown `GPT-6.1-Sol (gpt-6.1-sol)`), Codex's own `efforts` and `defaultEffort`;
+    the renderer disables the efforts a model lacks; an unsupported chat effort is omitted from
+    `turn/start`. `create` takes the route's default model.
   - `create`: `thread/start {model, cwd, approvalPolicy, approvalsReviewer:"user",
     sandbox:"workspace-write", ephemeral:false}` first (cwd = canonical local project root, else
     home; a server project is refused), then the `cosapi-` session and the ledger record
@@ -1653,16 +1658,24 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   `handover`); New chat and the project menus offer it once `status()` is available: Claude
   module active and Command on (cli-modules `cliChatRuntime`: binary, canonical cwd, `wsl.exe
   --cd … --exec` on Windows), `--version` answers and `claude auth status --json` does not say
-  `loggedIn:false` (cached 60 s; an auth-looking failure clears the cache). `models()` lists the
-  aliases `fable, opus, sonnet, haiku` plus every model a `system/init` reported; effort is the
-  shared `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
+  `loggedIn:false` (cached 60 s; an auth-looking failure clears the cache). `models({route})` is the
+  CLI's own catalog of that route: the `initialize` control answer of a probe process (`-p
+  --input-format stream-json --output-format stream-json --verbose --no-session-persistence
+  --strict-mcp-config --settings <route settings>`, sent `initialize` only and killed once it
+  answers: no prompt, no session file, no MCP server; cached 5 min per route). Each entry is
+  `{value, resolvedModel, displayName, supportedEffortLevels}` (2.1.306); the row is the alias with
+  its concrete model as label (`opus (claude-opus-5-5)`), `default` is left out (a chat without a
+  model), and models a `system/init` reported are appended; the bare aliases `fable, opus, sonnet,
+  haiku` only when the probe fails. The same answer's `account` (`tokenSource`/`apiKeySource`
+  `none` = no credential) is the direct route's sign-in check. Effort is the shared
+  `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
   `backendSessionId` (no strict-mode trust: its tools never touch the MCP kernel).
   One long-lived process per chat, spawned on send in the canonical project folder (home without
   a project) with `CLAUDECODE`/`ELECTRON_RUN_AS_NODE` removed and
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 CLAUDE_CODE_DISABLE_CRON=1` set: `-p --input-format stream-json
   --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio
-  --permission-mode <default|manual> --settings {"permissions":{"disableBypassPermissionsMode":"disable"}}
-  --disallowedTools ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
+  --permission-mode <default|manual> --settings <route settings: {"permissions":{"disableBypassPermissionsMode":"disable"}},
+  or router.ts CLAUDE_DIRECT_SETTINGS for a direct chat with a router detected> --disallowedTools ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
   it without `default` (2.1.306 renamed the choice). Never a bypass flag or mode; a `system/init`
   reporting `bypassPermissions` kills the process and fails the turn. User/project/local settings
   still load (auth helpers, env, MCP and the user's own rules keep working, and the terminal
@@ -1730,7 +1743,8 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   shows the module terminal by id (`cli-modules-ui` `openSession`: reload, show).
   cli-modules `cliEngineTerminal(module, {sessionId, projectId, args, title})` keeps one durable
   session per chat (`engineChat` + `args`, reused with new args); args are validated per module
-  (Claude: `--resume|--session-id <uuid>`; Codex: `resume <thread> --remote unix:///<abs>.sock`;
+  (Claude: `[--settings <exactly CLAUDE_DIRECT_SETTINGS>] --resume|--session-id <uuid>`, the
+  settings for a direct chat with a router detected; Codex: `resume <thread> --remote unix:///<abs>.sock`;
   OpenCode: `-s ses_<id> <abs cwd>`; anything else refused, also when a
   stored session is loaded). tmux starts
   `sh -c 'exec "$@"' marks-cli <bin> <args>`; every OpenCode terminal (engine or plain) runs
@@ -1742,10 +1756,58 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   every OpenCode terminal, also a plain one, and starts the background service with the app's
   binary and environment, so the TUI joins it instead of starting its own). A TUI reconnects by
   itself after a service restart (checked live). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
+- **Routes: direct CLI account or Claude Code Router (`router.ts`).** Claude Code Router (CCR, a
+  third-party proxy on `127.0.0.1:3456`) configures itself into the user's own CLI files
+  (`~/.claude/settings.json` `env` `ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL`/… plus `apiKeyHelper`;
+  `~/.codex/config.toml` `model_provider = "claude-code-router"`, its provider table and its own
+  `model_catalog_json`), so every Codex and Claude Code process talks to the router, never to the
+  account the CLI is signed in with. A Codex or Claude Code chat therefore has a route (ledger
+  `route`, `shared/agent-engine.ts` `AgentEngineRoute`): `direct` (default for new chats: the
+  CLI's own account) or `router` (the CLI exactly as configured; a record without `route` is
+  `router`, as every chat ran before routes). Detection reads only those two files (plus the
+  inherited `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`/`CODEX_HOME` and the existence of CCR's
+  `settings.json.ccr-original`): Claude — a loopback base URL with CCR's port 3456, that backup or a
+  `CCR_` variable; Codex — the top-level provider is CCR's (id, table `name` or its managed-block
+  marker). A remote gateway or another custom provider is the user's own setup and never
+  overridden; without a detected router both routes are the same unmodified process
+  (`effectiveRoute`) and no choice is shown. Windows (CLIs inside WSL) detects nothing (untested).
+  Direct overrides apply only to the processes the app starts; the user's files are never
+  written. Claude Code: precedence is flag `--settings` > local > project > user settings, and a
+  settings `env` beats the process environment, so the direct process gets `CLAUDE_DIRECT_SETTINGS`
+  (the hardening plus every router variable `CLAUDE_ROUTER_ENV_KEYS` set to `""` and `apiKeyHelper:
+  ""`). Checked live against 2.1.306: `""` reads as unset (`[gatewayDiscovery] skipped:
+  ANTHROPIC_BASE_URL is unset`, model `claude-opus-5-5`, `tokenSource: none` without a login of its
+  own, even with the router URL inherited), while `null` fails validation and Claude Code silently
+  drops the whole `--settings` layer. `claude auth status` reads the user's settings and has no
+  `--settings`, so it answers for the router route only; the direct account comes from the
+  probe's `initialize` answer. A direct send without one is refused before anything is recorded
+  ("Claude Code has no account of its own for direct chats. Run "claude auth login"…"). Codex: the
+  direct server adds `-c model_provider="openai"` (the built-in provider: `account/read` then
+  reports the ChatGPT login) and, when CCR replaced the catalog, `-c model_catalog_json="<CODEX_HOME>/
+  models_cache.json"` (Codex's own cached catalog of the account; an empty value is a directory
+  error, and a key cannot be unset with `-c`); `codexServerArgv` accepts only those two shapes.
+  Other user overrides (e.g. an `openai_base_url` of another local bridge) stay as configured.
+  Route change (IPC `setChatSettings {route}`, refused while a turn runs, Codex/Claude only):
+  Claude Code keeps its session (same session file; the next send resumes it with the other
+  route's settings; a direct `--resume` of a router-made session loads, checked live); Codex
+  threads keep the provider they started with (`Thread.modelProvider`) and their history holds
+  that provider's items, so the chat forgets its thread and the next send starts a new one on the
+  other route's server (the renderer says so; the chat's own history stays). A model the other
+  route does not list gives way to its default (Codex) or the CLI's default (Claude, `null`).
+  The hand-over Claude terminal of a direct chat runs `--settings <direct> --resume <uuid>`; a
+  Codex live terminal attaches to the server of the chat's route. Renderer: the composer's route
+  select (`apiChatComposerRoute`: "CLI account (direct)" / "Via Claude Code Router") shows only
+  when the view lists both `routes`; the model list is that route's, grouped under the route's
+  name; the header reads `Codex · GPT-6.1-Sol (gpt-6.1-sol) · direct` or `… · via Claude Code
+  Router`. `AgentEngineInfo.router` and the status detail say when a router is detected.
 Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
 `test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,
-turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over),
+turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over; routes:
+direct settings, catalog per route with concrete models, direct sign-in refusal, route change on
+the same session), `test/agent-engine-router.test.ts` (detection with synthetic CCR files in a
+temporary HOME, negative cases, direct overrides), `test/agent-engine-codex.test.ts` (one fake
+app-server per route: overrides, models per route, new thread after a route change),
 `test/cli-modules.test.ts` (engine terminal args, open hook, attached/external state, take-back end),
 `test/api-chat-ui.test.ts` (offered engines, unavailable ones disabled with their reason, hidden ones
 absent; the terminal button; the take-back offer), `test/cli-chat-ui.test.ts` and
