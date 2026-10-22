@@ -20,7 +20,6 @@
   "Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.",
   "Each computer needs its own plugins in ChatGPT, and they can't share a name. “Windows” names this computer's plugins “Chat On Steroids Core (Windows)” and so on. After changing it, rename this computer's plugins to match: in ChatGPT, open Settings → Plugins, select each one and edit its app name.",
   "Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.",
-  "For your own tunnel, such as a named Cloudflare tunnel, whose URL ChatGPT stores. Anyone with that URL can use your Chat On Steroids plugins until you turn this off. Needs secure storage.",
   "If tools disappear, try disconnecting and reconnecting the affected Chat On Steroids plugin, then make one tool call and check for approval again.",
   "In Chat On Steroids",
   "Install Chrome, Edge or Brave with the Chat On Steroids extension, then try again.",

@@ -9,6 +9,56 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.44.1] — Chat Marks on community v2.1.44
+
+- Integrated the complete community 2.1.44 release with every Marks integration preserved (MarksPanel login, Marks modules and project terminals, CLIProxy module and chats, agent engines, the bridge instance, the dev profile, the extension build stamp, branding and icons, and the four-part release version).
+- From the community: /image picture requests; keyboard shortcuts (Cmd/Ctrl+N new chat, Cmd/Ctrl+, Settings, Ctrl+Tab between chats, Esc twice to stop); /copy, /export and /find; copy a formula as LaTeX or MathML; hold to dictate on Windows; your own words for the automatic Continue; worker slots in the Sub-agents panel; an experimental stop-and-continue where ChatGPT offers no Send.
+- Also from the community: a message sent right after Stop goes out at once; finished sub-agent chats can be archived; "Keep plugin URLs across restarts" keeps the local port and says when it had to move; slow-starting sub-agents retry instead of giving up; gentler recovery while a page loads; and fixes for folder prompts outside a sub-agent run, refused chats, strict-trust notices, empty number fields, typed commands during an answer and Stop without a browser.
+- The blocked-chat notice in the extension now points to the chat's ⋯ menu → Release chat, as in the app.
+
+### Chat Marks
+
+<!-- Placeholder: Chat Marks features merged after this community integration (Claude/Codex/OpenCode engines, icons, ZeroClaw, Continue fix, etc.) are listed here before release. -->
+- _To be completed with the Chat Marks features of this revision._
+
+## [2.1.44] — Pictures with /image, keyboard shortcuts, and a quicker message after Stop
+
+Type /image to ask ChatGPT for a picture, move around with new keyboard shortcuts, and copy, export or search a chat from the message box. A message you send right after pressing Stop now goes out at once, and finished sub-agent chats can tidy themselves away.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### ✨ New
+
+- **Ask for a picture with /image.** Start a message with /image (or pick it from the / menu) and ChatGPT draws it with its own image tool, without Chat On Steroids in the way.
+- **Keyboard shortcuts.** Ctrl+N (⌘N on macOS) starts a new chat, Ctrl+, (⌘,) opens Settings, Ctrl+Tab and Ctrl+Shift+Tab open the next and previous chat, and Esc pressed twice in an empty message box stops the running answer.
+- **/copy, /export and /find.** Copy the newest answer, save the chat as Markdown, or search it, straight from the message box.
+- **Copy a formula.** Right-click a formula in an answer to copy it as LaTeX or MathML.
+- **Hold to dictate on Windows.** Hold Ctrl+Shift+Space in the message box to dictate, and let go to stop.
+- **Your own words for Continue.** Settings → Agents & automation lets you set the text of the automatic Continue that picks up an unfinished answer.
+- **Sidebar layout pictures in your language.** The Projects and Inbox pictures in Settings → Appearance now show your language, in light and dark.
+- **Worker slots at a glance.** The Sub-agents panel shows how many of a chat's worker slots are busy, as in "Active · 2 / 3".
+- **Experimental: stop and continue when ChatGPT offers no Send.** For long Goal and Loop work in chats where ChatGPT shows only Stop, the app can stop the turn right after a result and continue in a fresh one. Off by default; Settings → Agents & automation, under "Start a fresh turn after".
+
+### 💪 Better
+
+- **A message right after Stop goes out at once.** Before, it could wait up to three minutes (ten with Pro models) after ChatGPT had already stopped.
+- **Finished sub-agent chats tidy themselves away.** With "Archive worker chats in ChatGPT when their task is done" on (Settings → Agents & automation), a worker's chat is archived two minutes after it reports its task done, and brought back if the main chat needs it again.
+- **Your own tunnel keeps working across restarts.** "Keep plugin URLs across restarts" now keeps the local port too. If another program has taken that port, the setting tells you which port to point your tunnel at instead.
+- **A sub-agent that needs you shows on its chat** in the sidebar, even while its sub-agents are folded away.
+- **Slow-starting sub-agents keep going.** On a busy computer, a new sub-agent whose first commands arrive early is told to try again in a moment instead of giving up.
+- **Gentler recovery while a page loads.** When a chat's page is still loading, recovery waits 20 seconds before trying again instead of reloading it over and over.
+
+### 🛠 Fixed
+
+- **Chats outside a sub-agent run aren't asked for a folder.** A chat's first command was refused with "choose a folder" whenever a sub-agent run was going on in another chat.
+- **A refused chat stays refused.** ChatGPT no longer runs the command through another computer's Chat On Steroids instead.
+- **"Trust only selected chats"** now tells you where to trust a chat (its ⋯ menu in the sidebar), in your language.
+- **Emptying a number field** in Agents & automation keeps the old value instead of jumping to the minimum, such as a 10,000-token Compact & Resume threshold.
+- **/goal or /rename** typed at the start of a message now also runs when you send it with Cmd/Ctrl+Shift+Enter during an answer.
+- **Pressing Stop when the browser can't be opened** no longer shows an error. The Stop still reaches ChatGPT once the browser connects.
+
 ## [2.1.43.2] — Chat with CLIProxy and a complete CLIProxyAPI module
 
 - **Chat with CLIProxy.** New chat → CLIProxy (or a project's menu → New CLIProxy chat in this project) opens a chat whose model runs through the local CLIProxyAPI, in the app's own chat screen: streamed answers, Stop, a model and reasoning choice per chat, history like any chat, and recovery of an answer cut off by a restart. It works in the chat's project with the app's local tools (read, search, edit, run commands), step by step, under the same folder, capability and command permissions as ChatGPT; edits and commands ask first unless the chat is set to run them automatically.
