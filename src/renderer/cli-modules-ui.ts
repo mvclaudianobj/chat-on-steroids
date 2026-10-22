@@ -219,10 +219,10 @@ export function createCliModulesUi(api: AppApi, hooks: {
     const actions = document.createElement('div'); actions.className = 'modules-service-actions';
     // Upstream modules install and update their official release from their own versions block;
     // the retired forks only keep Stop.
-    const operations = LEGACY.has(id) || UPSTREAM(id) ? ['stop'] as const : ['install', 'update', 'stop'] as const;
+    const operations = ['stop'] as const;
     for (const action of operations) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
-      button.textContent = action === 'install' ? 'Install / instructions' : action === 'update' ? 'Update' : 'Stop session';
+      button.textContent = 'Stop session';
       button.addEventListener('click', () => void operate(id, action)); actions.append(button);
     }
     if (id === 'zeroclaw') {
@@ -233,6 +233,28 @@ export function createCliModulesUi(api: AppApi, hooks: {
       actions.append(openPage);
     }
     surface.append(enableLabel, detail, actions); row.append(surface); parent.append(row);
+    if (id === 'codex' || id === 'claude') {
+      const installedLine = text('p', '', 'modules-detail'); installedLine.id = `${id}InstalledVersion`;
+      const latestLine = text('p', '', 'modules-detail'); latestLine.id = `${id}LatestVersion`;
+      const badge = text('span', '', 'modules-status'); badge.id = `${id}UpdateBadge`; badge.dataset.state = 'update'; badge.hidden = true;
+      ui(badge, 'textContent', () => t('Update available'));
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn primary'; button.id = `${id}Install`; button.hidden = true;
+      button.addEventListener('click', () => void (async () => {
+        const state = current.get(id);
+        if (!state?.latest) return;
+        const action = state.installed ? (state.external ? 'update-external' : 'update') : 'install';
+        if (action === 'update-external' && !window.confirm(t('Update the existing installation of {0} in place? This changes the CLI outside Chat Marks.', [NAMES[id]]))) return;
+        if (action !== 'update-external' && !window.confirm(t('Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.', [NAMES[id], state.latest]))) return;
+        button.disabled = true;
+        const result = await api.cliAction(id, action, state.latest);
+        if (!result.ok) detail.textContent = result.error;
+        button.disabled = false;
+        await refresh();
+        if (result.ok) hooks.onEngineService?.();
+      })());
+      const versions = document.createElement('div'); versions.className = 'cliproxy-versions upstream-versions';
+      versions.append(installedLine, latestLine, badge, button); surface.append(versions);
+    }
     const manage = UPSTREAM(id) ? createUpstreamManageUi(api, id, surface, () => { void refresh(); hooks.onEngineService?.(); }) : null;
 
     if (id === 'zeroclaw') {
@@ -337,6 +359,18 @@ export function createCliModulesUi(api: AppApi, hooks: {
         if (status.legacy) row.row.hidden = !status.enabled && !status.running;
         row.detail.textContent = status.legacy ? status.detail
           : `${status.version ?? 'Not installed'}${status.upstream && status.installed && !status.managed ? ` (${t('not installed by Chat Marks')})` : ''} · ${status.running ? 'Running · ' : ''}${status.detail}`;
+        if (status.id === 'codex' || status.id === 'claude') {
+          const installed = document.getElementById(`${status.id}InstalledVersion`)!;
+          const latest = document.getElementById(`${status.id}LatestVersion`)!;
+          const badge = document.getElementById(`${status.id}UpdateBadge`)!;
+          const button = document.getElementById(`${status.id}Install`) as HTMLButtonElement;
+          installed.textContent = `${t('Installed version')}: ${status.version ?? t('Not installed')}${status.external ? ` · ${t('Using installed')} (${t('not installed by Chat Marks')})` : ''}`;
+          latest.textContent = `${t('Latest release')}: ${status.latest ?? '—'}`;
+          badge.hidden = !status.updateAvailable;
+          button.hidden = !status.latest || (status.installed && !status.updateAvailable);
+          button.textContent = status.installed ? t('Update to {0}', [status.latest ?? '']) : t('Install {0}', [status.latest ?? '']);
+          if (status.restartPending) row.detail.textContent += ` · ${t('Restarts with the new version when nothing is running')}`;
+        }
         void row.manage?.refresh().then(() => { if (status.id === 'zeroclaw') paintZeroClawStatus(); });
       }
       paintZeroClawStatus();

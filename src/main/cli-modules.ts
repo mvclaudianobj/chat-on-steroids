@@ -9,7 +9,7 @@ import { projectWorkspace } from './projects.js';
 import { getConfig, effectiveCapabilities } from './config.js';
 import { readDurable, writeDurableNow } from './durable.js';
 import { normalizeEnvironment, deleteEnvValue } from './env.js';
-import { installPublishedCli } from './cli-source-install.js';
+import { installPublishedCli, publishedLatest, publishedUpdateAvailable, verifiedVersion, externalNpmPrefix } from './cli-source-install.js';
 import { localRunner, probeVersion, wslRunner } from './upstream/install.js';
 import { markspanelAccessBlocked } from './markspanel-auth.js';
 import { CLAUDE_DIRECT_SETTINGS } from './agent-engine/router.js';
@@ -40,6 +40,10 @@ export type CliModuleStatus = {
   legacy: boolean;
   /** The binary in use is the module folder's own (false: found on PATH). */
   managed: boolean;
+  latest?: string | null;
+  updateAvailable?: boolean;
+  external?: boolean;
+  restartPending?: boolean;
 };
 type Status = CliModuleStatus;
 const SESSION_NAME = new RegExp(`^marks_(${CLI_IDS.join('|')})_[0-9a-f]{18}$`);
@@ -199,6 +203,10 @@ async function executable(name: string): Promise<string | null> {
     try { const { access } = await import('node:fs/promises'); await access(compiled); return compiled; } catch {}
     const local = path.join(installedRoot(), module, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name);
     try { const { access } = await import('node:fs/promises'); await access(local); return local; } catch {}
+    if ((module === 'codex' || module === 'claude') && process.platform !== 'win32') {
+      const personal = path.join(app.getPath('home'), '.local', 'bin', name);
+      try { const { access } = await import('node:fs/promises'); await access(personal); return personal; } catch {}
+    }
   }
   const locate = process.platform === 'win32' ? 'where.exe' : '/usr/bin/env';
   const args = process.platform === 'win32' ? [name] : ['which', name];
@@ -245,7 +253,7 @@ export async function cliModulesRoot(): Promise<string> {
 
 /** Whether a resolved binary is the module folder's own (not one found on PATH). */
 async function isManaged(id: CliId, binary: string | null): Promise<boolean> {
-  return !!binary && binary === `${await cliModulesRoot()}/${id}/bin/${manifest[id].bin}`;
+  return !!binary && binary.startsWith(`${await cliModulesRoot()}/${id}/`) && (binary.endsWith(`/bin/${manifest[id].bin}`) || binary.endsWith(`/node_modules/.bin/${manifest[id].bin}`));
 }
 
 const upstreamProbes = new Map<string, { key: string; version: string | null }>();
@@ -291,6 +299,10 @@ async function version(id: CliId): Promise<string | null> {
   const bin = await runtimeBinary(id);
   if (!bin) return null;
   if (id === 'opencode' || id === 'zeroclaw') return (await cliUpstreamVersion(id, bin)) ?? 'Version unavailable';
+  if (id === 'codex' || id === 'claude') {
+    const result = await verifiedVersion(id, bin, `${await cliModulesRoot()}/${id}/.probe`);
+    return result ?? 'Version unavailable';
+  }
   try {
     const { stdout, stderr } = await run(process.platform === 'win32' ? 'wsl.exe' : bin,
       process.platform === 'win32' ? ['--exec', bin, '--version'] : ['--version'], { timeout: 6_000, maxBuffer: 4096 });
@@ -354,8 +366,11 @@ export async function cliStatus(): Promise<Status[]> {
     const legacy = !!manifest[id].legacy;
     const bin = legacy ? null : await runtimeBinary(id);
     const v = bin ? await version(id) : null;
+    const managed = await isManaged(id, bin);
+    const latest = id === 'codex' || id === 'claude' ? await publishedLatest(id) : null;
     return { id, name: manifest[id].name, installed: v !== null, enabled: enabled.has(id), running: runningSessions.some(s => s.startsWith(`marks_${id}_`)), version: v, supported,
-      upstream: !!manifest[id].upstream, legacy, managed: await isManaged(id, bin),
+      upstream: !!manifest[id].upstream, legacy, managed, latest, updateAvailable: (id === 'codex' || id === 'claude') && publishedUpdateAvailable(v, latest), external: !!bin && !managed,
+      restartPending: pendingRestarts.has(id),
       detail: legacy ? `${manifest[id].name} is retired; its data is left untouched. Stop its terminals, then disable it.`
         : !supported ? 'Persistent terminal requires tmux on Linux/macOS or WSL with tmux on Windows.'
           : v === 'Version unavailable' ? 'CLI found, but its version check failed; check the executable before opening.'
@@ -413,7 +428,26 @@ async function tmux(args: string[]): Promise<string> {
   return stdout;
 }
 
-export async function cliAction(id: CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'stop'): Promise<Status[]> {
+const pendingRestarts = new Set<CliId>();
+let restartTimer: NodeJS.Timeout | null = null;
+function deferIdleRestart(): void {
+  if (restartTimer) return;
+  restartTimer = setInterval(() => {
+    void (async () => {
+      if (pendingRestarts.has('codex')) {
+        const { codexEngine, codexHasActiveTurns } = await import('./agent-engine/codex.js');
+        if (!codexHasActiveTurns()) { codexEngine().shutdown(); pendingRestarts.delete('codex'); }
+      }
+      if (pendingRestarts.has('claude')) {
+        const { claudeEngine } = await import('./agent-engine/claude.js');
+        if (await claudeEngine.restartIdleHosts()) pendingRestarts.delete('claude');
+      }
+      if (!pendingRestarts.size && restartTimer) { clearInterval(restartTimer); restartTimer = null; }
+    })().catch(() => undefined);
+  }, 5000);
+  restartTimer.unref?.();
+}
+export async function cliAction(id: CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'update-external' | 'stop', expected?: string): Promise<Status[]> {
   await loadCliModules();
   if (!effectiveCapabilities(getConfig()).command) throw new Error('Command execution is disabled');
   await onModule(id, async () => {
@@ -433,7 +467,20 @@ export async function cliAction(id: CliId, action: 'enable' | 'disable' | 'insta
     if (installations.has(id)) throw new Error('This module is already being installed or updated');
     installations.add(id);
     try {
-      await installPublishedCli(id as 'codex' | 'claude', source.package);
+      if (id !== 'codex' && id !== 'claude') throw new Error('unsupported_module');
+      if (!expected || !/^\d+\.\d+\.\d+$/.test(expected)) throw new Error('version_required');
+      const binary = await runtimeBinary(id);
+      const external = binary && !await isManaged(id, binary);
+      const home = process.platform === 'win32' ? await wslHome() : app.getPath('home');
+      const prefix = external && binary ? await externalNpmPrefix(id, binary, home) : null;
+      if (action === 'update-external' && (!external || !prefix)) throw new Error('external_not_writable');
+      if (action === 'update-external') {
+        if (id === 'codex' && (await import('./agent-engine/codex.js')).codexHasActiveTurns()) throw new Error('Wait for Codex to finish answering before updating its installed CLI');
+        if (id === 'claude' && (await import('./agent-engine/claude.js')).claudeEngine.hasActiveTurns()) throw new Error('Wait for Claude to finish answering before updating its installed CLI');
+      }
+      await installPublishedCli(id, source.package, expected, action, prefix);
+      pendingRestarts.add(id);
+      deferIdleRestart();
     } finally { installations.delete(id); }
     }
   });
@@ -701,7 +748,7 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
     z.object({ action: z.literal('status') }).strict(),
     z.object({ action: z.literal('sessions') }).strict(),
     z.object({ action: z.literal('create'), module: id, projectId: z.string().uuid().nullable(), kind: z.literal('quickstart').optional() }).strict(),
-    z.object({ action: z.enum(['enable', 'disable', 'install', 'update', 'stop']), module: id }).strict(),
+    z.object({ action: z.enum(['enable', 'disable', 'install', 'update', 'update-external', 'stop']), module: id, version: z.string().regex(/^\d+\.\d+\.\d+$/).optional() }).strict(),
     z.object({ action: z.literal('open'), sessionId: z.string().uuid(), attachmentId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(2).max(200) }).strict(),
     z.object({ action: z.literal('write'), attachmentId: z.string().uuid(), data: z.string().max(16_384) }).strict(),
     z.object({ action: z.literal('resize'), attachmentId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(2).max(200) }).strict(),
@@ -728,7 +775,7 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
       const data = input.action === 'status' ? await cliStatus()
         : input.action === 'sessions' ? await cliSessions()
           : input.action === 'create' ? await cliCreateSession(input.module, input.projectId, input.kind)
-        : ['enable', 'disable', 'install', 'update', 'stop'].includes(input.action) ? await cliAction((input as { module: CliId }).module, input.action as 'enable' | 'disable' | 'install' | 'update' | 'stop')
+        : ['enable', 'disable', 'install', 'update', 'update-external', 'stop'].includes(input.action) ? await cliAction((input as { module: CliId }).module, input.action as 'enable' | 'disable' | 'install' | 'update' | 'update-external' | 'stop', (input as { version?: string }).version)
           : input.action === 'open' ? await cliOpen(input.sessionId, input.cols, input.rows, input.attachmentId,
             () => owner !== event.sender || event.sender.isDestroyed())
             : input.action === 'write' ? await (async () => {
