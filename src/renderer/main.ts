@@ -2895,7 +2895,8 @@ initChat({ save: () => save(), state: () => state ,
   cliModules: marksModulesUi.cliModules,
   createCliSession: marksModulesUi.createSession,
   projectChatItems: marksModulesUi.projectChatItems,
-  repaintCliSessions: () => marksModulesUi.repaintSessions()
+  repaintCliSessions: () => marksModulesUi.repaintSessions(),
+  showChat: () => showTab('chat')
 });
 
 void (async () => {

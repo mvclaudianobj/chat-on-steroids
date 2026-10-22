@@ -2649,6 +2649,7 @@
   "Sidebar layout": "Макет боковой панели",
   "Inbox": "Входящие",
   "Needs approval": "Требует подтверждения",
+  "{0} waits for your approval": "{0} ждёт вашего одобрения",
   "Blocked": "Заблокирован",
   "Search": "Поиск",
   "Settled": "Неактивные",

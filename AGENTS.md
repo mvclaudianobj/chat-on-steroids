@@ -2275,6 +2275,19 @@ the page carries each token out once and reports `approvalResult` (`clicked`, `c
 `expired`. A standing card polls at the active cadence (2 s) even in a hidden tab.
 `sessions:approvalCard { id }` gives the panel the card and the last answer's outcome.
 
+A card waiting in a chat that is not on screen is named in the window's notices
+(`#approvalNotice`, renderer `paintApprovalNotice`): one line per waiting chat, "worker-1 waits for
+your approval" for a worker of the open chat (its parent's title added otherwise, a chat's own title
+for any other chat), the open chat's workers first, each with Open (shows the Chat page and that chat)
+and the same `approvalCardPanel` Deny / Allow once. Lines are kept by session id, so a repaint never
+re-reads a card or drops an answer being sent; the open chat's own card stays in its timeline only.
+Off the Chat page the catalog is not reread, so a `session:changed` there reads only the waiting set
+(`scheduleApprovalRead`). The desktop notice is retried on later polls while the notifier returns
+`false` (the window had focus), so leaving the window still tells the person. A poll that sees the
+card go keeps the episode as answered before it awaits anything, and writes "answered" only when no
+redraw took the episode back meanwhile (live 2.1.44.1, 2026-10-22: two workers of the open prime
+waited 85 minutes while the window had focus and only a folded dot said so).
+
 At ordinary silence recovery, a never-offered immediate correction takes priority over generated
 Goal/Loop work and is sent as a normal native user message. Include at most the next eligible
 visible queue checkpoint in that same message, never the whole queue or an additional Loop

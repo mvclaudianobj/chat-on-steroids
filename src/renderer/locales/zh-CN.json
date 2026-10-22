@@ -2539,6 +2539,7 @@
   "Sidebar layout": "侧边栏布局",
   "Inbox": "收件箱",
   "Needs approval": "需要审批",
+  "{0} waits for your approval": "{0} 正在等待你的批准",
   "Blocked": "已阻止",
   "Search": "搜索",
   "Settled": "不活跃",

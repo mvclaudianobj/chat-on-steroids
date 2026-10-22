@@ -2613,6 +2613,7 @@
   "Sidebar layout": "Layout da barra lateral",
   "Inbox": "Caixa de entrada",
   "Needs approval": "Requer aprovação",
+  "{0} waits for your approval": "{0} aguarda sua aprovação",
   "Blocked": "Bloqueado",
   "Search": "Pesquisar",
   "Settled": "Inativos",

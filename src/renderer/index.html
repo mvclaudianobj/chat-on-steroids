@@ -129,6 +129,9 @@
            state.update plus the extension version the bridge already reports; see
            src/main/update.ts. Hidden whenever there is nothing to say. -->
       <div class="notices">
+      <!-- ChatGPT's tool approval card waiting in a chat that is not on screen, a worker's above all.
+           Painted by src/renderer/chat.ts (paintApprovalNotice); the lines carry their own text. -->
+      <div class="notice approval-notice" id="approvalNotice" role="alert" hidden></div>
       <!-- A new macOS build asks once for the Keychain password; everything that needs saved keys
            waits for the answer. See src/renderer/keychain-notice.ts. -->
       <div class="notice" id="keychainNotice" role="status" hidden>
