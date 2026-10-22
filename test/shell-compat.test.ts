@@ -344,6 +344,24 @@ it('requires the final item and successful turn, while retaining exact messages 
   f.entry.turn.items.push({ type: 'assistant-message', messageId: OTHER, content: 'retry underway', phase: 'final_answer', completed: false });
   expect((await f.ask()).turns[0].endMessageId).toBeNull();
 });
+it('does not end a turn on an answer its later tool calls went past (live 2026-10-21)', async () => {
+  // GPT-6 answered, asked for a tool approval, ran more calls after Allow and ended on a plan card
+  // with no answer of its own. The earlier answer's end vetoed the automatic Continue.
+  const f = fixture(); f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  expect((await f.ask()).turns[0].endMessageId).toBe(ANSWER);
+  f.entry.turn.items.push({ type: 'chatgpt-reasoning-group', items: [
+    { type: 'mcp-tool-call', callId: OTHER, completed: true, invocation: { server: 'Chat Marks Core', tool: 'link_x/update_plan' } }] });
+  const after = (await f.ask()).turns[0];
+  expect(after.endMessageId).toBeNull();
+  expect(after.messages.find((m: any) => m.rawMessageId === ANSWER)?.rawText).toBe('Answer');
+  // Another server's call or a top-level call goes past the answer just as well.
+  f.entry.turn.items.pop(); f.entry.turn.items.push({ type: 'dynamic-tool-call', callId: OTHER, tool: 'web_search' });
+  expect((await f.ask()).turns[0].endMessageId).toBeNull();
+  // A later answer ends the turn again.
+  const LATER = '66666666-6666-4666-8666-666666666666';
+  f.entry.turn.items.push({ type: 'assistant-message', messageId: LATER, content: 'Done', phase: 'final_answer', completed: true });
+  expect((await f.ask()).turns[0].endMessageId).toBe(LATER);
+});
 it('reports an explicit per-call completion without a synthetic result message', async () => {
   const f = fixture(); f.entry.turn.items[1].items[1].completed = true;
   const turn = (await f.ask()).turns[0]; expect(turn.calls[0].answered).toBe(true);

@@ -8,8 +8,9 @@
  * https://chatgpt.com origin), and there is no message that makes the app touch a
  * file, run a command or change a permission.
  *
- * Discovery is a scan of five fixed loopback ports for a /hello that identifies the
- * app. Nothing is broadcast and nothing listens.
+ * Discovery is a scan of fixed loopback ports for a /hello that identifies the app and,
+ * once paired, the app instance this browser paired with. Nothing is broadcast and nothing
+ * listens.
  *
  * This worker also owns the observation journal. A content script lives only as long as
  * its page: a reload, a navigation or a crash takes its memory with it, and ChatGPT
@@ -150,6 +151,18 @@ let pairingError = null;
  * request re-checks immediately, so nothing is lost by believing a recent answer.
  */
 let portCheckedAt = 0;
+/**
+ * The app instance (`/hello` `instance`) this browser paired with, kept with the token.
+ *
+ * An installed app and a `npm run dev` profile can both run, each on one Auto port. Taking the
+ * first port that answered attached this browser to whichever app started first, which then
+ * asked it to update while its own app said no extension was connected. A port reporting a
+ * different instance is skipped; an app too old to report one is accepted as before. Only an
+ * explicit Connect in the popup may move this browser to another instance.
+ */
+let appInstance = null;
+/** CoS browser only: the instance of the app that runs this copy, asked once from that app. */
+let cosAppInstance = null;
 let portCompatible = null;
 let appVersion = null;
 let appProtocol = null;
@@ -347,7 +360,7 @@ function load() {
 }
 
 async function loadOnce() {
-  const stored = await chrome.storage.local.get(['port', 'token', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames', 'ownCoreApp', 'connectorApps', 'backgroundPlacement']);
+  const stored = await chrome.storage.local.get(['port', 'token', 'appInstance', 'disconnected', 'deferredRevivals', 'commandAckOutbox', 'inputOpenings', 'desktopInputTabs', 'stopOpenings', 'browserId', 'connectorNames', 'ownCoreApp', 'connectorApps', 'backgroundPlacement']);
   port = typeof stored.port === 'number' ? stored.port : null;
   connectorNames = cleanConnectorNames(stored.connectorNames);
   setBackgroundPlacement(stored.backgroundPlacement);
@@ -361,6 +374,7 @@ async function loadOnce() {
     await chrome.storage.local.set({ browserId });
   }
   token = typeof stored.token === 'string' ? stored.token : null;
+  appInstance = cleanInstance(stored.appInstance);
   // Deliberately in `local` rather than `session`: a choice to disconnect that a browser
   // restart undoes is not a choice, it is a delay.
   disconnected = stored.disconnected === true;
@@ -437,7 +451,7 @@ async function loadOnce() {
 }
 
 async function persist() {
-  await chrome.storage.local.set({ port, token, disconnected });
+  await chrome.storage.local.set({ port, token, appInstance, disconnected });
 }
 
 let liveWriteQueue = Promise.resolve();
@@ -1150,32 +1164,101 @@ function discover(force = false) {
   return discoveryFlight;
 }
 
-async function discoverNow(force) {
-  await load();
-  if (port !== null && !force) {
-    if (Date.now() - portCheckedAt < PORT_TRUST_MS) return { port, paired: token !== null, compatible: portCompatible !== false, version: appVersion, bridge: appProtocol };
-    const body = await hello(port);
-    if (body) {
-      if (body.disconnected === true) await latchAppDisconnect();
-      portCheckedAt = Date.now();
-      portCompatible = body.compatible !== false && body.bridge === BRIDGE_PROTOCOL;
-      appVersion = typeof body.version === 'string' ? body.version : null;
-      appProtocol = Number.isFinite(Number(body.bridge)) ? Number(body.bridge) : null;
-      return { port, paired: body.paired === true, compatible: portCompatible, version: appVersion, bridge: appProtocol };
+function cleanInstance(value) {
+  return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value) ? value : null;
+}
+
+/** The instance discovery must find: the CoS browser's own app, else the one paired with. */
+async function wantedInstance() {
+  if (globalThis.__cosBrowserWorker && !cosAppInstance) {
+    try {
+      cosAppInstance = cleanInstance(await globalThis.__cosBrowserWorker.call('app.bridgeInstance', []));
+    } catch {
+      // An app without the call: fall back to the instance this copy paired with.
     }
   }
+  return cosAppInstance || appInstance;
+}
+
+/**
+ * Records the instance of an accepted app. A token from before instances existed adopts the app
+ * it already talks to. The CoS copy follows its own app: a token it holds from another instance
+ * was minted there and is dropped, so it provisions again here. Anything else is recorded only
+ * by a successful `/pair`.
+ */
+function noteInstance(reported) {
+  if (!reported || reported === appInstance) return false;
+  if (appInstance === null) {
+    if (!token) return false;
+    appInstance = reported;
+    return true;
+  }
+  if (!cosAppInstance || reported !== cosAppInstance) return false;
+  closeWakeSocket();
+  token = null;
+  appInstance = reported;
+  return true;
+}
+
+function acceptPort(candidate, body) {
+  port = candidate;
+  portCheckedAt = Date.now();
+  portCompatible = body.compatible !== false && body.bridge === BRIDGE_PROTOCOL;
+  appVersion = typeof body.version === 'string' ? body.version : null;
+  appProtocol = Number.isFinite(Number(body.bridge)) ? Number(body.bridge) : null;
+  return { port: candidate, paired: body.paired === true, compatible: portCompatible, version: appVersion, bridge: appProtocol,
+    instance: cleanInstance(body.instance) };
+}
+
+/**
+ * `anyInstance` is the popup's explicit Connect: the paired instance still wins when it answers,
+ * otherwise the first app found does, and its `/pair` records the new instance.
+ */
+async function discoverNow(force, anyInstance = false) {
+  await load();
+  const wanted = await wantedInstance();
+  // An app that reports no instance (an older installed app) is somebody else's once this
+  // copy knows which instance it wants: the CoS copy beside an older installed app would
+  // otherwise take that app's port first. Without a wanted instance it is still accepted.
+  const matches = body => {
+    const reported = cleanInstance(body.instance);
+    return !wanted || reported === wanted;
+  };
+  // The CoS copy never leaves its own app, even on an explicit Connect.
+  const fallbackAllowed = anyInstance && !cosAppInstance;
+  if (port !== null && !force) {
+    if (Date.now() - portCheckedAt < PORT_TRUST_MS) return { port, paired: token !== null, compatible: portCompatible !== false, version: appVersion, bridge: appProtocol, instance: appInstance };
+    const body = await hello(port);
+    if (body && matches(body)) {
+      if (body.disconnected === true) await latchAppDisconnect();
+      const found = acceptPort(port, body);
+      if (noteInstance(found.instance)) await persist();
+      return found;
+    }
+  }
+  let fallback = null;
   for (const candidate of PORTS) {
     const body = await hello(candidate);
-    if (body) {
-      if (body.disconnected === true) await latchAppDisconnect();
-      port = candidate;
-      portCheckedAt = Date.now();
-      portCompatible = body.compatible !== false && body.bridge === BRIDGE_PROTOCOL;
-      appVersion = typeof body.version === 'string' ? body.version : null;
-      appProtocol = Number.isFinite(Number(body.bridge)) ? Number(body.bridge) : null;
-      await persist();
-      return { port: candidate, paired: body.paired === true, compatible: portCompatible, version: appVersion, bridge: appProtocol };
+    if (!body) continue;
+    // Another app instance (an installed app beside `npm run dev`): not ours, keep looking.
+    if (!matches(body)) {
+      if (fallbackAllowed && !fallback) fallback = { candidate, body };
+      continue;
     }
+    if (body.disconnected === true) await latchAppDisconnect();
+    const found = acceptPort(candidate, body);
+    noteInstance(found.instance);
+    await persist();
+    return found;
+  }
+  if (fallback) {
+    if (fallback.body.disconnected === true) await latchAppDisconnect();
+    const found = acceptPort(fallback.candidate, fallback.body);
+    // Believed only for this Connect's `/pair`: until it records the new instance, the next
+    // request looks again rather than sending the old instance's token here.
+    portCheckedAt = 0;
+    await persist();
+    return found;
   }
   port = null;
   portCheckedAt = 0;
@@ -1316,7 +1399,7 @@ function provision(reconnect = false) {
 }
 
 async function pairOnce(intent = connectionEpoch, reconnect = false) {
-  const found = await discover(true);
+  const found = reconnect ? await discoverNow(true, true) : await discover(true);
   if (!found) return { ok: false, error: 'app_not_found' };
   if (found.compatible === false) return { ok: false, error: 'incompatible_extension' };
   try {
@@ -1338,6 +1421,9 @@ async function pairOnce(intent = connectionEpoch, reconnect = false) {
     // authoritative and must not be undone just because the network answered out of order.
     if (intent !== connectionEpoch) return { ok: false, error: 'disconnected' };
     token = data.token;
+    // The instance that minted this token is the one discovery looks for from now on.
+    const paired = cleanInstance(data.instance) || found.instance;
+    if (paired) appInstance = paired;
     // Connecting is the counterpart of disconnecting, and the only thing that clears it.
     disconnected = false;
     await persist();
@@ -5676,23 +5762,27 @@ if (chrome.runtime.onStartup && typeof chrome.runtime.onStartup.addListener === 
 }
 
 /**
- * Archives one retired worker chat the app has queued (#1460), from any ChatGPT page of this
- * extension: the archive is an account-level request, so it needs no tab of that chat. At most
- * one per pass. Without such a page the app hears `deferred`, which costs no attempt.
+ * Archives one worker chat the app has queued (#1460), or restores one before its worker is woken
+ * (#1701), from any ChatGPT page of this extension: both are account-level requests, so they need
+ * no tab of that chat. At most one per pass. Without such a page the app hears `deferred`, which
+ * costs no attempt.
  */
 async function drainWorkerArchive() {
   await load();
   const next = await call('/worker-archive/next', { method: 'POST', body: '{}' });
-  const conversationId = next.ok ? cleanConversationId(next.data?.conversationId) : null;
+  const unarchive = next.ok ? cleanConversationId(next.data?.unarchive) : null;
+  const conversationId = unarchive || (next.ok ? cleanConversationId(next.data?.conversationId) : null);
   if (!conversationId) return;
+  const archive = !unarchive;
+  const done = archive ? 'archived' : 'unarchived';
   let outcome = 'deferred';
   for (const tab of await chrome.tabs.query({ url: ['https://chatgpt.com/*'] })) {
     const documentId = tab.id === undefined ? null : tabDocuments[String(tab.id)];
     if (!documentId) continue;
     let reply;
-    try { reply = await chrome.tabs.sendMessage(tab.id, { type: 'clf-archive-chat', conversationId }, { documentId }); }
+    try { reply = await chrome.tabs.sendMessage(tab.id, { type: 'clf-archive-chat', conversationId, archive }, { documentId }); }
     catch { continue; } // that document is gone; another page may still do it
-    outcome = reply?.outcome === 'archived' ? 'archived' : 'failed';
+    outcome = reply?.outcome === done ? done : 'failed';
     break;
   }
   await call('/worker-archive/result', { method: 'POST', body: JSON.stringify({ conversationId, outcome }) });

@@ -529,6 +529,8 @@ function loadWorker(options: {
   windowsGet?: (windowId: number) => Promise<{ focused?: boolean }>;
   /** Chrome's tab-group API with these groups; omitted, the browser has none. */
   tabGroups?: Array<{ id: number; windowId: number; title?: string; collapsed?: boolean }>;
+  /** The CoS browser's worker preload (`__cosBrowserWorker`); omitted, a person's own browser. */
+  cosWorker?: { call(name: string, args: unknown[]): Promise<unknown>; subscribe?(fn: unknown): void };
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
@@ -666,7 +668,8 @@ function loadWorker(options: {
     URL,
     TextEncoder,
     crypto: globalThis.crypto,
-    console
+    console,
+    ...(options.cosWorker ? { __cosBrowserWorker: options.cosWorker } : {})
   }, { filename: 'background.js' });
   if (!listener) throw new Error('background.js did not register a message listener');
 
@@ -6041,15 +6044,15 @@ describe('this install\'s connector names', () => {
 
 describe('archiving retired worker chats (#1460)', () => {
   const chat = 'aaaaaaaa-1111-4222-8333-444444444444';
-  function archiveWorker(outcome: unknown) {
+  function archiveWorker(outcome: unknown, job: Record<string, unknown> = { conversationId: chat }) {
     const results: unknown[] = [];
-    let next: string | null = chat;
+    let next: Record<string, unknown> | null = job;
     const worker = loadWorker({
       local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session: new FakeStorageArea(),
       fetch: async (input, init = {}) => {
         const route = new URL(input).pathname;
         if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
-        if (route === '/worker-archive/next') { const id = next; next = null; return response(200, { conversationId: id }); }
+        if (route === '/worker-archive/next') { const body = next ?? { conversationId: null }; next = null; return response(200, body); }
         if (route === '/worker-archive/result') { results.push(JSON.parse(String(init.body))); return response(200, { ok: true }); }
         return response(200, {});
       },
@@ -6063,7 +6066,7 @@ describe('archiving retired worker chats (#1460)', () => {
     await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
     await worker.registerTab(1);
     await worker.fireAlarm();
-    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat }, expect.objectContaining({ documentId: expect.any(String) }));
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat, archive: true }, expect.objectContaining({ documentId: expect.any(String) }));
     expect(results).toEqual([{ conversationId: chat, outcome: 'archived' }]);
   });
 
@@ -6072,6 +6075,28 @@ describe('archiving retired worker chats (#1460)', () => {
     await worker.fireAlarm();
     expect(worker.tabsSendMessage).not.toHaveBeenCalledWith(expect.anything(), expect.objectContaining({ type: 'clf-archive-chat' }), expect.anything());
     expect(results).toEqual([{ conversationId: chat, outcome: 'deferred' }]);
+  });
+
+  it('restores a chat the app archived before its worker is woken (#1701)', async () => {
+    const { worker, results } = archiveWorker({ outcome: 'unarchived' }, { conversationId: null, unarchive: chat });
+    await worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await worker.registerTab(1);
+    await worker.fireAlarm();
+    expect(worker.tabsSendMessage).toHaveBeenCalledWith(1, { type: 'clf-archive-chat', conversationId: chat, archive: false }, expect.objectContaining({ documentId: expect.any(String) }));
+    expect(results).toEqual([{ conversationId: chat, outcome: 'unarchived' }]);
+  });
+
+  it('never reports a restore as an archive, or the other way round', async () => {
+    const restoring = archiveWorker({ outcome: 'archived' }, { conversationId: null, unarchive: chat });
+    await restoring.worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await restoring.worker.registerTab(1);
+    await restoring.worker.fireAlarm();
+    expect(restoring.results).toEqual([{ conversationId: chat, outcome: 'failed' }]);
+    const archiving = archiveWorker({ outcome: 'unarchived' });
+    await archiving.worker.createTab({ id: 1, url: 'https://chatgpt.com/' });
+    await archiving.worker.registerTab(1);
+    await archiving.worker.fireAlarm();
+    expect(archiving.results).toEqual([{ conversationId: chat, outcome: 'failed' }]);
   });
 
   it('reports a failure the page could not explain as failed', async () => {
@@ -6116,5 +6141,144 @@ describe('a ChatGPT page that moves to a new address', () => {
     worker.updateTab(5, { url }, { id: 5, windowId: 7, url });
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(routeNotices(worker)).toEqual([]);
+  });
+});
+
+describe('discovery finds the app instance this browser paired with', () => {
+  // Measured: `npm run dev` started first and took 8765, the installed app took 8766, and the
+  // installed app's extensions attached to the dev app because it answered first.
+  const DEV = 'd'.repeat(32);
+  const PROD = 'a'.repeat(32);
+  type App = { instance?: string; disconnected?: boolean };
+  function apps(byPort: Record<number, App>) {
+    const authorized: Array<{ port: number; route: string; auth: string }> = [];
+    const pairs: number[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      const port = Number(url.port);
+      const app = byPort[port];
+      if (!app) throw new TypeError('Failed to fetch');
+      const auth = ((init.headers ?? {}) as Record<string, string>).authorization;
+      if (auth) authorized.push({ port, route: url.pathname, auth });
+      if (url.pathname === '/hello') {
+        return response(200, { app: 'chat-on-steroids', paired: true, disconnected: app.disconnected === true,
+          ...(app.instance ? { instance: app.instance } : {}) });
+      }
+      if (url.pathname === '/pair') {
+        pairs.push(port);
+        return response(200, { token: `token-${port}`, ...(app.instance ? { instance: app.instance } : {}) });
+      }
+      if (auth && auth !== `Bearer token-${port}` && auth !== 'Bearer legacy-token') return response(401, { error: 'unauthorised' });
+      return response(200, { ok: true });
+    });
+    return { fetch, authorized, pairs };
+  }
+
+  it('skips another instance and connects to its own on a later port, never latching that one\'s Disconnect', async () => {
+    const { fetch, authorized, pairs } = apps({ 8765: { instance: DEV, disconnected: true }, 8766: { instance: PROD } });
+    const local = new FakeStorageArea({ token: 'token-8766', appInstance: PROD });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    const status = await worker.sendPopup({ type: 'status' });
+    expect(status).toMatchObject({ connected: true, port: 8766, paired: true, disconnected: false });
+    expect(pairs).toEqual([]);
+    expect(authorized.every(row => row.port === 8766)).toBe(true);
+    expect((await local.get(['port', 'appInstance', 'token']))).toEqual({ port: 8766, appInstance: PROD, token: 'token-8766' });
+  });
+
+  it('pairs an unpaired browser with the first app found, and keeps to that instance', async () => {
+    const { fetch, pairs } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const local = new FakeStorageArea();
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8765, paired: true });
+    expect(pairs[0]).toBe(8765);
+    expect((await local.get(['appInstance'])).appInstance).toBe(DEV);
+  });
+
+  it('accepts an app too old to report an instance while it wants no particular instance', async () => {
+    const { fetch, pairs } = apps({ 8765: {} });
+    const local = new FakeStorageArea({ token: 'legacy-token' });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8765, paired: true });
+    expect(pairs).toEqual([]);
+  });
+
+  it('waits for its own instance instead of an app too old to report one, until an explicit Connect', async () => {
+    const { fetch, pairs, authorized } = apps({ 8765: {} });
+    const local = new FakeStorageArea({ token: 'token-8766', appInstance: PROD });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: false, port: null, paired: true });
+    expect(authorized.some(row => row.auth === 'Bearer token-8766')).toBe(false);
+    expect(await worker.sendPopup({ type: 'pair' })).toMatchObject({ ok: true });
+    expect(pairs).toEqual([8765]);
+  });
+
+  it('keeps a CoS browser copy off an older installed app that reports no instance (measured 2026-10-21)', async () => {
+    // The installed 2.1.43.1 on 8765 reports no instance; `npm run dev` beside it is on 8766.
+    const { fetch, pairs, authorized } = apps({ 8765: {}, 8766: { instance: DEV } });
+    const cosWorker = { call: vi.fn(async () => DEV), subscribe: () => undefined };
+    const local = new FakeStorageArea({ port: 8765, token: 'token-8765' });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch, cosWorker });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8766, paired: true });
+    expect(pairs.every(port => port === 8766)).toBe(true);
+    expect(authorized.some(row => row.port === 8765)).toBe(false);
+    expect((await local.get(['appInstance', 'port']))).toEqual({ appInstance: DEV, port: 8766 });
+  });
+
+  it('adopts the instance of the app a token from before instances already talks to', async () => {
+    const { fetch } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const local = new FakeStorageArea({ port: 8766, token: 'token-8766' });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8766 });
+    expect((await local.get(['appInstance'])).appInstance).toBe(PROD);
+  });
+
+  it('reports not connected while its instance is closed, and moves only on an explicit Connect', async () => {
+    const { fetch, pairs } = apps({ 8765: { instance: DEV } });
+    const local = new FakeStorageArea({ port: 8766, token: 'token-8766', appInstance: PROD });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: false, port: null, paired: true });
+    expect(pairs).toEqual([]);
+    expect((await local.get(['appInstance', 'token']))).toEqual({ appInstance: PROD, token: 'token-8766' });
+    expect(await worker.sendPopup({ type: 'pair' })).toMatchObject({ ok: true });
+    expect(pairs).toEqual([8765]);
+    expect((await local.get(['appInstance', 'token', 'port']))).toEqual({ appInstance: DEV, token: 'token-8765', port: 8765 });
+  });
+
+  it('an explicit Connect keeps the paired instance when it still answers', async () => {
+    const { fetch, pairs } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const local = new FakeStorageArea({ token: 'token-8766', appInstance: PROD });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'pair' })).toMatchObject({ ok: true });
+    expect(pairs.at(-1)).toBe(8766);
+    expect((await local.get(['appInstance'])).appInstance).toBe(PROD);
+  });
+
+  it('keeps the CoS browser\'s copy with the app that runs it, dropping a token another instance minted', async () => {
+    const { fetch, pairs, authorized } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const cosWorker = { call: vi.fn(async (name: string) => {
+      if (name === 'app.bridgeInstance') return PROD;
+      throw new Error(`${name} is not available in the CoS browser.`);
+    }), subscribe: () => undefined };
+    // Mis-paired by an earlier build: it held the dev app's port and token.
+    const local = new FakeStorageArea({ port: 8765, token: 'token-8765', appInstance: DEV });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch, cosWorker });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8766, paired: true });
+    expect(cosWorker.call).toHaveBeenCalledWith('app.bridgeInstance', []);
+    expect(pairs.every(port => port === 8766)).toBe(true);
+    expect(authorized.some(row => row.auth === 'Bearer token-8765')).toBe(false);
+    expect((await local.get(['appInstance', 'token', 'port']))).toEqual({ appInstance: PROD, token: 'token-8766', port: 8766 });
+    // Not even an explicit Connect moves it to another app.
+    expect(await worker.sendPopup({ type: 'pair' })).toMatchObject({ ok: true });
+    expect((await local.get(['appInstance'])).appInstance).toBe(PROD);
+  });
+
+  it('pairs a fresh CoS browser copy with its own app although another answers first', async () => {
+    const { fetch, pairs } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const cosWorker = { call: vi.fn(async () => PROD), subscribe: () => undefined };
+    const local = new FakeStorageArea();
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch, cosWorker });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8766, paired: true });
+    expect(pairs).toEqual([8766]);
+    expect((await local.get(['appInstance'])).appInstance).toBe(PROD);
   });
 });

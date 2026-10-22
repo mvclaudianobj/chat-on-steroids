@@ -914,6 +914,9 @@
       if (!message || typeof message !== 'object') continue;
       const author = message.author;
       if (!author || author.role !== 'assistant') continue;
+      // A tool request after an answer is the turn going on past it: an earlier end_turn no
+      // longer ends this turn (live 2026-10-21, see shellTurnSource).
+      if (requestOf(message) || message.recipient === 'functions.exec') return null;
       const content = message.content;
       if (!content || typeof content !== 'object' || !['text', 'multimodal_text', 'image'].includes(content.content_type)) continue;
       if (neverTerminalChannel(message)) continue;
@@ -2256,7 +2259,7 @@
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
     const place = shellQuestionPlace(entryFiber, entry, section);
     const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
-    let lastAnswer = null, previousId = null;
+    let lastAnswer = null, previousId = null, answerMessage = null;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     // GPT-6 (2026-10-12) writes each interim sentence as an assistant message inside the working
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
@@ -2280,6 +2283,7 @@
           // of the turn's question, and Edit & resubmit folded that question away (2.1.41 round).
           metadata: !user ? {} : previousId ? { parent_id: previousId, clf_parent_exact: true }
             : place ? { parent_id: place.parentId, clf_parent_exact: place.versioned } : {} });
+        if (final) answerMessage = messages[messages.length - 1];
         previousId = id;
         const key = `${turnId}:${index}:${role}`;
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
@@ -2301,6 +2305,12 @@
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
           if (++work > MAX_ROWS) return null;
+          // A tool call after an answer means the turn went on past it. Live 2026-10-21: GPT-6
+          // answered, asked for a tool approval, then after Allow ran a dozen more calls and ended
+          // on an `update_plan` card with no answer of its own. The earlier answer still read as
+          // completed, and its stale end vetoed the automatic Continue the turn needed. Only a
+          // later answer can end the turn now.
+          if (answerMessage && (step?.type === 'mcp-tool-call' || step?.type === 'dynamic-tool-call')) answerMessage.end_turn = false;
           if (step?.type === 'assistant-message' && item !== step) {
             // Interim prose whatever phase it carries: only a top-level answer can end the turn.
             const id = str(step.messageId), text = shellItemText(step);

@@ -49,6 +49,7 @@ vi.mock('electron', () => ({
 const { safeStorage } = await import('electron');
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { queueWorkerArchives, resetWorkerArchiveForTests } = await import('../src/main/worker-archive.js');
 const { initSecretsPath, resetSecretsCacheForTests, setSecret } = await import('../src/main/secrets.js');
 const {
   bridgePort,
@@ -85,6 +86,7 @@ const {
   WORKER_SENDING_GRACE_MS,
   WORKER_REDEEM_MS,
   BROWSER_RECOVERY_COOLDOWN_MS,
+  NAVIGATION_RECOVERY_COOLDOWN_MS,
   DEFAULT_PORTS,
   revealChatInBrowser,
   followChatInBackground,
@@ -880,9 +882,34 @@ describe('who is allowed to talk to it', () => {
     expect(reply.body.bridge).toBe(BRIDGE_PROTOCOL);
     expect(reply.body.paired).toBe(false);
     // Identification must not double as a status leak.
-    expect(Object.keys(reply.body)).toEqual(['app', 'version', 'bridge', 'compatible', 'paired', 'disconnected']);
+    expect(Object.keys(reply.body)).toEqual(['app', 'version', 'bridge', 'compatible', 'paired', 'disconnected', 'instance']);
     expect(reply.body.disconnected).toBe(false);
     expect(reply.body.compatible).toBe(true);
+  });
+
+  it('names its app profile with one stable instance id, so an extension can tell two running apps apart', async () => {
+    const first = (await request('GET', '/hello', { auth: null })).body.instance as string;
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    // Persisted in the profile, not the process: a restarted bridge answers the same id.
+    expect(JSON.parse(readFileSync(`${dir}/state/bridge-instance.json`, 'utf8'))).toEqual({ instance: first });
+    await stopBridge();
+    base = `http://127.0.0.1:${await startBridge()}`;
+    expect((await request('GET', '/hello', { auth: null })).body.instance).toBe(first);
+    // `/pair` names the instance that minted the token.
+    expect((await request('POST', '/pair', { auth: null, body: { reuse: true } })).body.instance).toBe(first);
+    // Another profile (the `npm run dev` one beside an installed app) is another instance.
+    const other = await makeTempDir('clf-bridge-other-');
+    try {
+      initDurableStore(other);
+      const second = (await request('GET', '/hello', { auth: null })).body.instance as string;
+      expect(second).toMatch(/^[0-9a-f]{32}$/);
+      expect(second).not.toBe(first);
+      expect((await request('GET', '/hello', { auth: null })).body.instance).toBe(second);
+    } finally {
+      initDurableStore(dir);
+      await removeTempDir(other);
+    }
+    expect((await request('GET', '/hello', { auth: null })).body.instance).toBe(first);
   });
 
   it('refuses every web page origin, chatgpt.com included', async () => {
@@ -5661,6 +5688,34 @@ describe('delivering a bootstrap', () => {
     expect(Date.now() - createdAt).toBeLessThan(30_000);
   });
 
+  it('unarchives a worker chat the app archived before it types the wake into it (#1701)', async () => {
+    await saveConfig({ ...suiteConfig, multiAgent: { ...suiteConfig.multiAgent, archiveWorkerChats: true } });
+    resetWorkerArchiveForTests();
+    await pair();
+    spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    const conversationId = 'acacacac-7654-4210-8edc-ba9876543210';
+    await request('POST', '/commands/ack', {
+      body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+    });
+    finishAgent({ conversationId }, 'the first half is done');
+    // The finished worker's chat was archived in the meantime.
+    queueWorkerArchives([conversationId]);
+    expect((await request('POST', '/worker-archive/next', { body: {} })).body).toEqual({ conversationId });
+    await request('POST', '/worker-archive/result', { body: { conversationId, outcome: 'archived' } });
+
+    wake([{ to: 'worker-1', text: 'now do the second half' }]);
+    // Nothing is opened or typed while the chat is still archived. An extension without
+    // unarchive support reads no chat to archive here.
+    expect((await request('GET', '/status')).body.revival ?? null).toBeNull();
+    expect(opened, 'only the bootstrap opened a page').toHaveLength(1);
+    expect((await request('POST', '/worker-archive/next', { body: {} })).body).toEqual({ conversationId: null, unarchive: conversationId });
+    expect((await request('POST', '/worker-archive/result', { body: { conversationId, outcome: 'unarchived' } })).status).toBe(200);
+
+    const revival = await waitForRevival();
+    expect(revival.conversationId).toBe(conversationId);
+  });
+
   it('wakes the same worker again after it has called, well inside the first wake', async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
@@ -8900,6 +8955,63 @@ describe('unattributed activity recovery', () => {
 
   /** The chat a pass was told to repair. */
   const chatOf = (repair: { conversationId: string } | null): string | null => repair?.conversationId ?? null;
+
+  it.each(['assistant-error', 'no-tab', 'compaction'] as const)(
+    'waits before retrying %s recovery after navigation', async reason => {
+      await pair();
+      let conversationId: string;
+
+      if (reason === 'assistant-error') {
+        conversationId = OTHER;
+        await events(conversationId, [openTurn('navigation-error-turn'), {
+          kind: 'chat_error', time: Date.now(), turnId: 'navigation-error-turn',
+          text: 'Connection interrupted', recoverable: true
+        }]);
+      } else if (reason === 'no-tab') {
+        conversationId = WORKER;
+        spawn({ workers: [{ task: 'check navigation recovery' }], caller: { conversationId: PRIME } });
+        const bootstrap = await redeem();
+        await request('POST', '/commands/ack', {
+          body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' }
+        });
+        await events(conversationId, [openTurn('navigation-missing-tab-turn')]);
+        await request('POST', '/closed', { body: { conversationId } });
+      } else {
+        conversationId = randomUUID();
+        const session = await createSession({ conversationId });
+        await compactSession(session.id);
+      }
+
+      const first = await maintenance();
+      expect(first).toMatchObject({ conversationId, reason });
+      vi.useFakeTimers();
+      try {
+        const failWhileNavigating = async (repair: { token: string }) => {
+          expect((await request('POST', '/repairs/claim', { body: { token: repair.token } })).body.allowed).toBe(true);
+          await request('GET', `/status?repairFailed=${encodeURIComponent(repair.token)}` +
+            '&repairAction=reloaded&why=changed&detail=navigating');
+        };
+        await failWhileNavigating(first!);
+
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(NAVIGATION_RECOVERY_COOLDOWN_MS - 1);
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+        const retry = await maintenance();
+        expect(retry).toMatchObject({ conversationId, reason });
+        expect(retry!.token).not.toBe(first!.token);
+
+        await failWhileNavigating(retry!);
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(NAVIGATION_RECOVERY_COOLDOWN_MS - 1);
+        expect(await maintenance()).toBeNull();
+        await vi.advanceTimersByTimeAsync(1);
+        expect(await maintenance()).toMatchObject({ conversationId, reason });
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
 
   it('H2 records the machine reason and immediately offers the existing assistant-error episode', async () => {
     await pair();

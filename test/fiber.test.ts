@@ -1553,6 +1553,18 @@ describe('the calls a turn says it made', () => {
     expect(turns[0]!.endMessageId).toBe('final-public');
   });
 
+  it('does not end a turn on an answer a later tool request went past', async () => {
+    // Live 2026-10-21: the turn ran more calls after its answer and ended with no answer of its own.
+    const messages = [
+      authored('old-final', 'Answered.', { status: 'finished_successfully', endTurn: true, channel: 'final' }),
+      request('later-call', 'update_plan'),
+      authored('narration', 'Updating the plan.', { status: 'finished_successfully', endTurn: false, channel: 'commentary' })
+    ];
+    const { turns } = await scan([], [{ id: 'turn-past-answer', messages, rendered: ['Answered.', 'Updating the plan.'] }]);
+
+    expect(turns[0]!.endMessageId ?? null).toBeNull();
+  });
+
   it('still lets a newer answer-capable message hold the turn open after an earlier answer ended', async () => {
     const messages = [
       authored('old-final', 'Old completed attempt.', { status: 'finished_successfully', endTurn: true, channel: 'final' }),
