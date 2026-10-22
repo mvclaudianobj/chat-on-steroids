@@ -8176,7 +8176,8 @@ function selectSession(id: string): void {
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
-  window.dispatchEvent(new Event('jarvis:selection'));
+  // Chat Marks J: the window's own Event, so a test DOM (another realm) accepts it too.
+  window.dispatchEvent(new window.Event('jarvis:selection'));
   refreshBackgroundProcesses();
   const selected = sessions.find(row => row.id === id);
   applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null);
@@ -8221,7 +8222,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
-  window.dispatchEvent(new Event('jarvis:selection'));
+  window.dispatchEvent(new window.Event('jarvis:selection'));
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
