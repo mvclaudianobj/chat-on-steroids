@@ -1,7 +1,7 @@
 import './dev-profile.js';
 import { closeRemoteSessions } from './remote/ssh.js';
 import { stopInputStartup } from './session/start-input.js';
-import { browserExtensionRequired } from '../shared/types.js';
+import { browserExtensionRequired, isNewer } from '../shared/types.js';
 import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
 /**
  * Main process entry: window, tray, and the security posture for the renderer.
@@ -42,6 +42,9 @@ import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdow
 import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
 import { createTurnNotifier } from './turn-notifications.js';
+import { createOutboundTurnWatcher } from './notification-events.js';
+import { queueOutboundNotice } from './notification-center.js';
+import { listProjects } from './projects.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
 import { initUvRuntime } from './plugins/uv-runtime.js';
@@ -106,7 +109,7 @@ import {
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { restoreManagedWorktrees } from './worktrees/index.js';
-import { applyStagedUpdate, ELEVATION_ANSWER_MS, installingVersion, onInstallerTakeover, onUpdateHandoffStep, startUpdateChecks } from './update.js';
+import { applyStagedUpdate, ELEVATION_ANSWER_MS, installingVersion, onInstallerTakeover, onUpdateHandoffStep, startUpdateChecks, onUpdateChange, updateStatus } from './update.js';
 import { setUpdateProgressStep, showUpdateProgress, untilInstallerTakesOver } from './update-progress.js';
 import { resumeUpdateRefresh } from './update-all.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
@@ -548,6 +551,24 @@ void app.whenReady().then(async () => {
   });
   turnNotifier.seed(await listSessions().catch(() => []));
   onSessionChange(change => void turnNotifier.handle(change.sessionIds ?? []));
+  const outboundTurnNotifier = createOutboundTurnWatcher(getSession, queueOutboundNotice, {
+    projectName: async projectId => (await listProjects()).find(project => project.id === projectId)?.name ?? 'Chat Marks',
+    excerpt: async sessionId => {
+      const [answer] = await readRecentEvents(sessionId, 1, { kinds: ['assistant_message'] });
+      return answer?.kind === 'assistant_message' ? answer.message.text : null;
+    }
+  });
+  outboundTurnNotifier.seed(await listSessions().catch(() => []));
+  onSessionChange(change => void outboundTurnNotifier.changed(change.sessionIds ?? []).catch(() => undefined));
+  // The updater owns availability: notify only when its observed latest version changes.
+  let announcedRelease = updateStatus().latest;
+  onUpdateChange(() => {
+    const status = updateStatus();
+    const latest = status.latest;
+    if (!latest || latest === announcedRelease || !isNewer(latest, status.current)) return;
+    announcedRelease = latest;
+    void queueOutboundNotice({ event: 'app-release', title: `Chat Marks ${latest}`, project: 'Chat Marks' }).catch(() => undefined);
+  });
   // The app's own requests follow the system proxy too, not only the tunnel (#1255).
   configureAppProxy(url => session.defaultSession.resolveProxy(url), () => [
     ...(getConfig().goal.provider.kind === 'custom' ? [getConfig().goal.provider.baseUrl] : []),
