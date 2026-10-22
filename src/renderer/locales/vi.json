@@ -3220,5 +3220,9 @@
   "Error": "Lỗi",
   "Needs key": "Cần khóa",
   "Insecure HTTP refused": "Đã từ chối HTTP không an toàn",
-  "Credential rejected": "Thông tin xác thực bị từ chối"
+  "Credential rejected": "Thông tin xác thực bị từ chối",
+  "Agent engine memory tools": "Công cụ bộ nhớ cho công cụ tác tử",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "Cho phép các cuộc trò chuyện Claude Code, Codex và OpenCode tìm kiếm ký ức cục bộ và yêu cầu lưu chúng. Áp dụng cho các tiến trình công cụ mới.",
+  "Automatic memory context": "Ngữ cảnh bộ nhớ tự động",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "Thêm ký ức cục bộ liên quan vào các lượt trò chuyện API và tin nhắn ChatGPT đầu tiên."
 }

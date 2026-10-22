@@ -16,6 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { logInfo, logWarn } from '../logger.js';
+import { brainContextBlock } from '../brain/context.js';
 import { currentCoreInstructions } from '../mcp/instructions.js';
 import { getSessionProject, projectWorkspace } from '../projects.js';
 import { strictChatAllowlistEnabled } from '../session/conversation-access.js';
@@ -224,7 +225,8 @@ export async function sendApiChat(sessionId: string, text: string, fetchImpl?: t
     const settings = await apiChatSettings();
     const model = record.model ?? settings.model;
     if (!model) throw new Error('Choose a model for this chat first');
-    const messages: ApiChatMessage[] = [{ role: 'system', content: await systemPrompt(session.id) }, ...await apiChatContext(session.id), { role: 'user', content: text }];
+    // Chat Marks: optional Brain context each turn (H1c, `autoInject`), framed as data.
+    const messages: ApiChatMessage[] = [{ role: 'system', content: [await systemPrompt(session.id), await brainContextBlock(text)].filter(Boolean).join('\n\n') }, ...await apiChatContext(session.id), { role: 'user', content: text }];
     const startedAt = Date.now();
     // Open in the ledger before the boundary exists, so a crash after it is always closed.
     await updateChatRecord(session.id, current => ({ ...(current ?? record), openTurn: { turnId, startedAt } }));

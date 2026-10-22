@@ -3220,5 +3220,9 @@
   "Error": "錯誤",
   "Needs key": "需要金鑰",
   "Insecure HTTP refused": "已拒絕不安全的 HTTP",
-  "Credential rejected": "憑證遭拒絕"
+  "Credential rejected": "憑證遭拒絕",
+  "Agent engine memory tools": "智慧代理引擎記憶工具",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "允許 Claude Code、Codex 和 OpenCode 聊天搜尋本機記憶並請求儲存。適用於新啟動的引擎程序。",
+  "Automatic memory context": "自動記憶情境",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "將相關的本機記憶加入 API 聊天的每一輪以及 ChatGPT 的第一則訊息。"
 }

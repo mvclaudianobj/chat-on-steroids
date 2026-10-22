@@ -3358,5 +3358,9 @@
   "Error": "Ошибка",
   "Needs key": "Нужен ключ",
   "Insecure HTTP refused": "Небезопасный HTTP отклонён",
-  "Credential rejected": "Учётные данные отклонены"
+  "Credential rejected": "Учётные данные отклонены",
+  "Agent engine memory tools": "Инструменты памяти для агентных движков",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "Разрешить чатам Claude Code, Codex и OpenCode искать локальные воспоминания и запрашивать их сохранение. Применяется к новым процессам движков.",
+  "Automatic memory context": "Автоматический контекст памяти",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "Добавлять подходящие локальные воспоминания в ходы API-чатов и в первое сообщение ChatGPT."
 }

@@ -3220,5 +3220,9 @@
   "Error": "エラー",
   "Needs key": "キーが必要",
   "Insecure HTTP refused": "安全でない HTTP を拒否",
-  "Credential rejected": "認証情報が拒否されました"
+  "Credential rejected": "認証情報が拒否されました",
+  "Agent engine memory tools": "エージェントエンジンのメモリツール",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "Claude Code、Codex、OpenCode のチャットがローカルメモリを検索し、保存を依頼できるようにします。新しく起動するエンジンプロセスに適用されます。",
+  "Automatic memory context": "自動メモリコンテキスト",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "関連するローカルメモリを API チャットの各ターンと ChatGPT の最初のメッセージに追加します。"
 }

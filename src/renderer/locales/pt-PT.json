@@ -3312,5 +3312,9 @@
   "Error": "Erro",
   "Needs key": "Precisa de chave",
   "Insecure HTTP refused": "HTTP inseguro recusado",
-  "Credential rejected": "Credencial recusada"
+  "Credential rejected": "Credencial recusada",
+  "Agent engine memory tools": "Ferramentas de memória dos motores de agente",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "Permitir que os chats do Claude Code, Codex e OpenCode pesquisem memórias locais e peçam para as guardar. Aplica-se a novos processos de motor.",
+  "Automatic memory context": "Contexto de memória automático",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "Adicionar memórias locais relevantes aos turnos dos chats de API e à primeira mensagem do ChatGPT."
 }

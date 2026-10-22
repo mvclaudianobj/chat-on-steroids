@@ -37,6 +37,7 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { logInfo, logWarn } from '../logger.js';
 import { redactCredentialText } from '../redaction.js';
+import { codexBrainMcpLaunch, noteBrainEngineToolCall } from '../brain/engine-mcp.js';
 import { notifyChanged } from '../session/recorder.js';
 import { bindSessionProject, createSession, getSession, readEvents } from '../session/store.js';
 import { AGENT_ENGINE_LABELS } from '../../shared/agent-engine.js';
@@ -184,8 +185,10 @@ export function defaultCodexHost(): CodexHost {
       const home = (await electron()).getPath('home');
       if (!runtime.windows) await stopOrphan(socket);
       else await run('wsl.exe', ['--exec', 'rm', '-f', socket], { timeout: 8_000 }).catch(() => undefined);
-      const [serverFile, serverArgs] = exec(runtime, codexServerArgv(socket));
-      const server = spawn(serverFile, serverArgs, { cwd: home, env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+      // Chat Marks: the Brain MCP server (H1c); its bearer token only in the server's environment.
+      const brain = await codexBrainMcpLaunch(runtime.windows);
+      const [serverFile, serverArgs] = exec(runtime, codexServerArgv(socket, brain?.args));
+      const server = spawn(serverFile, serverArgs, { cwd: home, env: { ...env, ...brain?.env }, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
       if (!runtime.windows && server.pid) await fs.writeFile(`${socket}.pid`, String(server.pid), { mode: 0o600 }).catch(() => undefined);
       try {
         await waitForSocket(runtime, socket, server);
@@ -402,6 +405,8 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
       case 'item/started': {
         const item = value.item as Record<string, unknown>;
         if (item?.type === 'fileChange' && typeof item.id === 'string') turn.files.set(item.id, codexFileChanges(item.changes));
+        // Chat Marks: attributes a Brain save on the shared app-server to this chat.
+        if (item?.type === 'mcpToolCall') noteBrainEngineToolCall('codex', turn.sessionId, `${item.server}/${item.tool}`, item.arguments);
         apply(turn, item ? codexItemStarted(item) : []);
         return;
       }

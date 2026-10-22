@@ -36,8 +36,9 @@ export const CODEX_SAFE_OVERRIDES = [
   'approvals_reviewer="user"'
 ] as const;
 
-export function codexServerArgv(socket: string): string[] {
-  return ['app-server', ...CODEX_SAFE_OVERRIDES.flatMap(value => ['-c', value]), '--listen', `unix://${socket}`];
+/** `extra`: Chat Marks' own `-c` pairs (the Brain MCP server, H1c), after the safe overrides. */
+export function codexServerArgv(socket: string, extra: readonly string[] = []): string[] {
+  return ['app-server', ...CODEX_SAFE_OVERRIDES.flatMap(value => ['-c', value]), ...extra, '--listen', `unix://${socket}`];
 }
 
 /** Our own JSON-RPC client: `proxy` carries stdio lines to the server's control socket. */

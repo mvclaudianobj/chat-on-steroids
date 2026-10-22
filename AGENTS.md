@@ -2797,6 +2797,38 @@ the curated catalog requires OAuth remotes and reviewed license inventory.
 
 H1b has no engine MCP, automatic prompt injection or MarksCode/MarksClaw archive import. Those
 are separate H phases.
+H1a has no remote Marks API, OpenViking or MarksCode/MarksClaw archive import. Those are
+later separately approved H phases.
+
+### Chat Marks Brain for agent engines (H1c)
+
+`src/main/brain/engine-mcp.ts` owns a local-only MCP route `http://127.0.0.1:<port>/mcp/brain/<secret>`
+exposing only `memory_search` and `memory_save`, Off unless `enginesEnabled`. It is its own lazily
+started loopback listener, not a path on the connector listener: that one runs only while
+ChatGPT is connected, moves port on reconnect and its origin may be published by a user's tunnel.
+Nothing hands this URL to a tunnel; the route answers 404 off its secret path, refuses a non-loopback
+Host, any Origin and forwarding headers, and needs `Authorization: Bearer <token>` (401 otherwise).
+Claude Code (one process per chat) gets a per-chat token in a 0600 `--mcp-config` file under
+`userData/brain/engine-mcp/` (0700, emptied at startup and quit) plus `--allowedTools` for the two
+tools; never `--strict-mcp-config`, so the user's own MCP servers keep loading. A changed switch
+restarts an idle host. Codex (one shared app-server) gets `-c mcp_servers.chat_marks_brain.url=…`,
+`.bearer_token_env_var="CHAT_MARKS_BRAIN_TOKEN"` and `.default_tools_approval_mode="approve"` after
+the safe overrides, the token only in the server's environment, rotated per app-server launch; a
+switch change applies at the next app-server start. OpenCode 2.1.x gets the server at runtime per
+chat location through `PUT /api/experimental/mcp/chat-marks-brain` (live on 2.1.2: no config file
+is written, a service restart forgets it), removed on quit or when the switch is off; TUI sessions
+in that location see it too. Codex and OpenCode tokens name only the engine: a save is attributed
+to the one chat whose own turn reported the same Brain call with the same arguments (`mcpToolCall`
+item, `session.tool.called`); unmatched or ambiguous saves are refused. Saves take the H1a approval,
+then re-check the chat and switch before writing with `{source:'chat', sessionId, engine}`.
+Windows/WSL engines are not wired (another loopback). Engine rows show `mcp:chat-marks-brain/<tool>`
+whichever engine spelled it (`brain/engine-names.ts`, `tool-row.ts`).
+
+`src/main/brain/context.ts` is optional automatic context (`autoInject`, Off): a `<memory-context>`
+block framed as data, at most 3,000 characters, local memories only. API chats add it to the system
+message each turn; ChatGPT gets it only in the opening message's COS_CONTEXT (`brainContext` scope
+in `prepareSessionPrompt`), so it counts against the 96k ceiling, is frozen in `deliveryText` and is
+dropped rather than failing when it does not fit. Follow-ups, workers and engines get none.
 
 Desktop session lists use stable `(updatedAt,id)` pagination. Each session selection loads a
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;

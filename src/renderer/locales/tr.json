@@ -3266,5 +3266,9 @@
   "Error": "Hata",
   "Needs key": "Anahtar gerekli",
   "Insecure HTTP refused": "Güvensiz HTTP reddedildi",
-  "Credential rejected": "Kimlik bilgisi reddedildi"
+  "Credential rejected": "Kimlik bilgisi reddedildi",
+  "Agent engine memory tools": "Ajan motoru bellek araçları",
+  "Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.": "Claude Code, Codex ve OpenCode sohbetlerinin yerel anıları aramasına ve kaydetme istemesine izin verin. Yeni motor süreçlerine uygulanır.",
+  "Automatic memory context": "Otomatik bellek bağlamı",
+  "Add relevant local memories to API chat turns and to the opening ChatGPT message.": "İlgili yerel anıları API sohbet turlarına ve ilk ChatGPT mesajına ekleyin."
 }
