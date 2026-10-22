@@ -13,6 +13,7 @@ import { isApiConversationId } from '../shared/api-chat.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
 import { registerVaultIpc } from './marks-vault-ipc.js';
+import { registerBrainIpc } from './brain/ipc.js';
 import { revokeVaultChat } from './marks-vault-approval.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
@@ -677,6 +678,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   registerDictationIpc(getWindow);
   registerVaultIpc(getWindow);
+  // Chat Marks: Brain has one fixed, frame-checked, validated IPC surface.
+  registerBrainIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
   const deletingSessionIds = new Set<string>();

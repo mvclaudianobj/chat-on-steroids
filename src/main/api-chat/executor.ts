@@ -35,6 +35,7 @@ import { assistantMessageId, MAX_ASSISTANT_CHARS, storedText, userMessageId } fr
 import { closeInterruptedTurn, recoversOwnTurns } from '../agent-engine/recovery.js';
 import { ApiChatHttpError, streamCompletion, type ApiChatMessage, type ApiCompletion, type ApiToolCall } from './client.js';
 import { apiChatTools, approvalSummary, argsHash, needsApproval, parseToolCall, runApiChatTool, toolDefinitions } from './tools.js';
+import { getBrainSettings } from '../brain/settings.js';
 import { apiChatKey, apiChatSettings, noteKeyRequired, noteModelAvailability, noteRecentModel } from './settings.js';
 
 export { API_CHAT_SESSIONS_STATE } from '../agent-engine/ledger.js';
@@ -322,7 +323,10 @@ async function executeCall(session: { id: string; conversationId: string }, turn
   const parsed = await parseToolCall(call, tools);
   const caller = { requestId: turn.requestId, conversationId: session.conversationId, sessionId: session.id, messageId: assistantMessageId(turn.turnId) };
   if (!parsed.ok) return parsed.error;
-  if (needsApproval(parsed.tool.name, parsed.args) && ((await storedChatRecord(session.id))?.approval ?? 'ask') !== 'auto') {
+  if (needsApproval(parsed.tool.name, parsed.args) && (
+    (parsed.tool.name === 'memory_save' && getBrainSettings().askBeforeSaving) ||
+    ((await storedChatRecord(session.id))?.approval ?? 'ask') !== 'auto'
+  )) {
     const approvedHash = argsHash(parsed.tool.name, parsed.args);
     const decision = await askApproval(turn, call, parsed.tool.name, parsed.args);
     if (decision === 'stop' || decision === 'resolved' || turn.stopped) return null;

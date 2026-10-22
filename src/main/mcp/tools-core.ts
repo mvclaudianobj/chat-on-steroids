@@ -57,6 +57,7 @@ import {
 import { approvalCardWaiting } from '../approval-wait.js';
 import { requestVaultApproval } from '../marks-vault-approval.js';
 import { useVault } from '../marks-vault.js';
+import { registerBrainTools } from '../brain/tools.js';
 import { maybeParseApplyPatchForExec } from '../codex/apply-patch/invocation.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../codex/command-batch.js';
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
@@ -257,8 +258,10 @@ function execPrincipal(): string | null {
  */
 const SERVER_SHELL = { shellType: 'sh', shellPath: 'sh' } as const;
 
-export function registerCoreTools(reg: SurfaceRegistrar): void {
+export function registerCoreTools(reg: SurfaceRegistrar, brainAudience: 'core' | 'api' = 'core'): void {
   const { ctx, caps, exposedCaps } = reg;
+  // Chat Marks: Brain's local-only memory tools share the Core registrar and permission gates.
+  registerBrainTools(reg, brainAudience);
   // Named from the live roots, never from a `/project` that may not exist: a worked example the
   // model cannot act on costs a refused call and a retry. What followed the root had the same
   // problem and cost more of them. `/<root>/src/main.ts` is a project's shape, so it read as a

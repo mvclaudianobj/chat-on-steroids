@@ -2831,7 +2831,33 @@ or reloading attachment previews. Old history gains badges when natively reobser
 
 Continuous recording serves the local transcript, exact identity and continuation infrastructure.
 There is no model-facing session lookup tool. `update_plan` remains recording-backed; historical
-lookup tool calls remain displayable in existing transcripts.
+lookup tool calls remain displayable in existing transcripts. Chat Marks Brain (H1a) is a
+separate, user-curated local memory store: it does not read the session archive or expose a
+general session-history lookup.
+
+### Chat Marks Brain (H1a)
+
+`src/main/brain/store.ts` owns `<userData>/brain/brain.sqlite` with SQLite WAL and FTS5;
+`src/main/brain/settings.ts` owns `state/marks-brain-settings.json`. Neither owns Chat Marks
+session history, MarksCode/MarksClaw data or a remote synchronization stream. Memory writes
+are serialized, deduplicated by normalized content hash, and redact credential shapes and
+values loaded from the K vault before storage. A damaged existing database fails closed and
+is retained for deliberate recovery; its default file mode is 0600. The database is local
+even when no model-facing Brain tools have been enabled.
+
+Brain tools default Off separately for native ChatGPT Core and CLIProxy API chats.
+`memory_search` returns bounded, untrusted background context, never instructions;
+`memory_save` requires a proven exact local session, edit permission and a non-read-only
+context, then human approval by default. Native chats use an ephemeral exact-chat pending
+approval, and API chats reuse the existing per-turn approval gate. Validate the exact
+session and active capability after approval before writing. The settings page and the
+explicit `/remember` command are user-authored saves; `/recall` inserts a bounded
+`<memory-context>` draft without sending it. The `marksBrain:request` IPC is a fixed,
+Zod-validated action list guarded to the main window/frame. Its preload is not a generic
+filesystem bridge. Keep the few Core/API registration hooks marked `Chat Marks:`.
+
+H1a has no remote Marks API, OpenViking, engine MCP, automatic prompt injection or
+MarksCode/MarksClaw archive import. Those are later separately approved H phases.
 
 Desktop session lists use stable `(updatedAt,id)` pagination. Each session selection loads a
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;

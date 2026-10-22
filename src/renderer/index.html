@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="./icons.css" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./settings.css" />
+    <link rel="stylesheet" href="./brain.css" />
     <link rel="stylesheet" href="./dictation.css" />
   </head>
   <body>
@@ -46,6 +47,7 @@
           <i class="ico ph ph-robot" aria-hidden="true"></i>Agents &amp; automation
         </button>
         <button data-tab="modules" type="button"><i class="ico ph ph-squares-four" aria-hidden="true"></i>Modules</button>
+        <button data-tab="brain" type="button"><i class="ico ph ph-brain" aria-hidden="true"></i>Brain</button>
         <button id="moduleCliNav" class="modules-subnav" data-module-page="module-cli-proxy" type="button" aria-label="CLIProxyAPI" translate="no" hidden>
           <i class="ico ph ph-plug chat-type-icon module-mark" aria-hidden="true" data-module="cliproxy"></i><span translate="no">CLIProxyAPI</span>
         </button>
@@ -248,6 +250,56 @@
                 <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send messages, start new chats and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
               </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- Chat Marks: H1a local-first Brain, independent of remote providers and imported history. -->
+        <section class="panel appearance-panel brain-panel scroll" data-panel="brain" aria-labelledby="brainTitle">
+          <div class="appearance-content settings-page-content" id="brainSettings">
+            <header class="settings-page-head"><h1 id="brainTitle"><i class="ico ph ph-brain" aria-hidden="true"></i>Brain</h1><p>Search and manage memories stored on this computer.</p></header>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Memory status</h2><p>Your local memory is private and stays on this device.</p></div><button class="btn" id="brainRefresh" type="button">Refresh</button></header>
+              <div class="settings-surface brain-overview"><p id="brainStatus" role="status">Checking local memory…</p><p id="brainCount"></p><p id="brainSize"></p></div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Diagnosis</h2><p>Check the local database, full-text search, and available connections.</p></div><button class="btn" id="brainDoctorRun" type="button">Run diagnosis</button></header>
+              <div id="brainDoctor" class="settings-surface brain-output" role="status">Run diagnosis to check Brain.</div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Sources</h2><p>H1a searches locally stored memories only.</p></div></header>
+              <div id="brainSources" class="settings-surface brain-output" role="status">Local database</div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Memories</h2><p>Search, review, edit, delete, or export your saved memories.</p></div><button class="btn" id="brainExport" type="button">Export JSONL</button></header>
+              <div class="settings-surface brain-library">
+                <form id="brainSearchForm" class="brain-search"><label for="brainQuery">Search memories</label><input id="brainQuery" type="search" maxlength="400" autocomplete="off" spellcheck="false" placeholder="Search saved memories…" /><button class="btn" type="submit">Search</button><button class="btn" id="brainClear" type="button">Clear</button></form>
+                <div id="brainResults" class="brain-results" role="region" aria-label="Saved memories"></div>
+                <form id="brainEditor" class="brain-editor">
+                  <h3 id="brainEditorTitle">New memory</h3><input id="brainMemoryId" type="hidden" />
+                  <label for="brainMemoryTitle">Title</label><input id="brainMemoryTitle" type="text" maxlength="160" />
+                  <label for="brainMemoryContent">Memory text</label><textarea id="brainMemoryContent" rows="5" maxlength="4000" required placeholder="What should Brain remember?"></textarea>
+                  <div class="brain-fields">
+                    <label for="brainMemoryType">Type<select id="brainMemoryType"><option value="semantic">Fact</option><option value="episodic">Event</option><option value="procedural">Procedure</option></select></label>
+                    <label for="brainMemoryMode">Retention<select id="brainMemoryMode"><option value="long_term">Long term</option><option value="short_term">Short term</option></select></label>
+                  </div>
+                  <label for="brainMemoryTags">Tags (comma separated)</label><input id="brainMemoryTags" type="text" maxlength="500" autocomplete="off" />
+                  <div class="brain-actions"><button class="btn" type="submit" id="brainSave">Save memory</button><button class="btn" type="button" id="brainNew">New memory</button><button class="btn" type="button" id="brainDelete" hidden>Delete memory</button></div>
+                  <p id="brainEditorStatus" role="status" aria-live="polite"></p>
+                </form>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Brain options</h2><p>Model access and automatic context remain disabled until you enable them.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card" id="brainOptions">
+                <label class="setting"><span class="setting-text"><b>ChatGPT memory tools</b><em>Allow ChatGPT chats to search and request saving local memories.</em></span><input id="brainChatgptTools" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>API chat memory tools</b><em>Allow CLIProxy chats to use local memory tools.</em></span><input id="brainApiChatTools" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Ask before model saves</b><em>Review each memory requested by a model. Manual saves happen immediately.</em></span><input id="brainAskBeforeSave" type="checkbox" checked /></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Save approvals</h2><p>Review pending model requests before they become memories.</p></div><button class="btn" id="brainPendingRefresh" type="button">Refresh</button></header>
+              <div id="brainPending" class="settings-surface brain-output" role="region" aria-label="Pending memory saves"></div>
             </section>
           </div>
         </section>
