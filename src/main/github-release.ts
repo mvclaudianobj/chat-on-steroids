@@ -1,6 +1,6 @@
 /**
  * Chat Marks: official GitHub release downloads, shared by every module that installs an
- * upstream binary (CLIProxyAPI, OpenCode, ZeroClaw). Only one repository's releases are trusted
+ * upstream binary from GitHub (CLIProxyAPI, ZeroClaw; OpenCode 2.x comes from npm, npm-release.ts). Only one repository's releases are trusted
  * per caller; every download is bounded, every redirect stays on GitHub's release hosts, and an
  * archive is only used after its SHA-256 matches what the release publishes.
  */

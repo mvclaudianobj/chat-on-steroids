@@ -137,10 +137,11 @@ export function claudeApprovalDecision(outcome: ApprovalOutcome, shownInput: Rec
 }
 
 /**
- * OpenCode `POST /permission/:id/reply`. "Always" is answered `once` upstream: OpenCode's own
- * `always` allows the pattern for every chat of the folder and beats their deny rules; the
- * engine switches this chat to Auto instead.
+ * OpenCode 2.x `POST /api/session/:id/permission/:request/reply`. "Always" is answered `once`
+ * upstream: OpenCode's own `always` saves an allow rule for the whole project (every session,
+ * across restarts, beating a session's `ask`); the engine switches this chat to Auto instead.
+ * Stop sends nothing: `interrupt` settles the run's pending requests itself.
  */
 export function openCodeApprovalDecision(outcome: ApprovalOutcome): 'once' | 'reject' | null {
-  return outcome === 'approve' || outcome === 'always' ? 'once' : outcome === 'deny' || outcome === 'stop' ? 'reject' : null;
+  return outcome === 'approve' || outcome === 'always' ? 'once' : outcome === 'deny' ? 'reject' : null;
 }

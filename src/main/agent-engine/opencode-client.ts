@@ -1,67 +1,59 @@
 /**
- * The HTTP API of an upstream OpenCode server (`opencode serve`, v1.19) as the `opencode` engine
- * uses it: the routes the OpenCode TUI itself uses (`/session…`, `/permission…`, `/global/event`),
- * so the chat and an attached TUI see one session. Shapes were read from upstream at v1.19.3
- * (`packages/opencode/src/server/…`, `schema/v1/*`) and checked against the real 1.19.3 binary.
+ * The upstream OpenCode 2.x HTTP API of its background service (`opencode service`), as the
+ * `opencode` engine uses it. Checked against the real 2.1.2 (`GET /openapi.json` and live
+ * calls): `/api/info`, `/api/model[/default]`, `/api/session[/:id[/prompt|interrupt|model|
+ * message|permission[/:req[/reply]]]]`, `/api/session/active`, `/api/event`. The endpoint and
+ * password come from the service's own registration file
+ * (`<XDG_STATE_HOME>/opencode/service.json`: `{ id, version, url, pid, password }`).
  *
- * Auth is HTTP Basic `opencode:<password>`; the password is the one the app gave the server it
- * started (`OPENCODE_SERVER_PASSWORD`). The header is built per request and never appears in an
- * error, a log line or a returned value.
+ * Auth is HTTP Basic `opencode:<password>`. The header is built per request and never appears in
+ * an error, a log line or a returned value. Errors answer `{ _tag, message }`.
  *
- * Every request except the global ones carries `directory=<project folder>`: the server loads one
- * instance per folder and routes by it.
- *
- * `/global/event` is SSE: `data: {"directory"?, "project"?, "payload": {"id","type","properties"}}`,
- * first `server.connected`, then a `server.heartbeat` every 10 s. It is volatile: whatever happens
- * while disconnected is missed, so the engine reconciles after every reconnect.
+ * `/api/event` is SSE (`data: <json>\n\n`, `: heartbeat` about every 15 s) and volatile by
+ * contract: whatever happens while disconnected is missed, so the engine reconciles from
+ * messages and pending permissions after every reconnect.
  */
 
+/** Where the service listens and its private password (never sent anywhere but that URL). */
 export interface OpenCodeEndpoint {
   url: string;
   password: string | null;
+  /** The registered server pid; `/api/info` must answer the same one. */
+  pid?: number;
 }
 
-/** `PermissionV1.Rule`: the last matching rule wins (`findLast`), `*` also matches `/`. */
-export interface OpenCodeRule { permission: string; pattern: string; action: 'allow' | 'deny' | 'ask' }
+/** `Permission.Rule`: the last matching rule wins (`core/src/permission.ts` `evaluate`). */
+export interface OpenCodeRule { action: string; resource: string; effect: 'allow' | 'deny' | 'ask' }
 
-/** One model of `/config/providers`, the fields the engine reads. */
+/** `Model.Ref`. */
+export interface OpenCodeModelRef { id: string; providerID: string; variant?: string }
+
+/** `Model.Info`, the fields the engine reads. */
 export interface OpenCodeModel {
   id: string;
   providerID: string;
   name?: string;
-  status?: string;
-  variants?: Record<string, unknown>;
+  enabled?: boolean;
+  variants?: Array<{ id: string }>;
 }
 
-export interface OpenCodeProviders {
-  providers: Array<{ id: string; name?: string; models: Record<string, OpenCodeModel> }>;
-  /** providerID → its default modelID. */
-  default: Record<string, string>;
-}
-
-/** `PermissionV1.Request`. */
+/** `Permission.Request`. */
 export interface OpenCodePermission {
   id: string;
   sessionID: string;
-  permission: string;
-  patterns: string[];
+  action: string;
+  resources: string[];
+  save?: string[];
   metadata?: Record<string, unknown>;
-  always?: string[];
-  tool?: { messageID: string; callID: string };
+  source?: { type: 'tool'; messageID: string; id: string };
+  message?: string;
 }
 
-/** One `/session/:id/message` entry. */
-export interface OpenCodeMessage {
-  info: Record<string, unknown> & { id: string; role: string };
-  parts: Array<Record<string, unknown>>;
-}
-
-/** One `/global/event` record's payload. */
+/** One `/api/event` record: `{ id, created, type, data, location?, durable? }`. */
 export interface OpenCodeEvent {
   id?: string;
   type: string;
-  properties: Record<string, unknown>;
-  directory?: string;
+  data: Record<string, unknown>;
 }
 
 export class OpenCodeHttpError extends Error {
@@ -93,17 +85,15 @@ async function boundedText(response: Response, max = MAX_BODY_BYTES): Promise<st
   return text + decoder.decode();
 }
 
-/** A short reason from an error body (`{ message }`, `{ data: { message } }`, `{ error: { message } }` or text), bounded. */
+/** A short reason from an error body (`{ message }`, `{ error: { message } }` or text), bounded. */
 function reason(body: string): string {
   try {
-    const parsed = JSON.parse(body) as { message?: unknown; data?: { message?: unknown }; error?: { message?: unknown } };
-    const message = [parsed.message, parsed.data?.message, parsed.error?.message].find(item => typeof item === 'string');
-    if (typeof message === 'string' && message) return message.slice(0, 200);
+    const parsed = JSON.parse(body) as { message?: unknown; error?: { message?: unknown } };
+    const message = typeof parsed.message === 'string' ? parsed.message : typeof parsed.error?.message === 'string' ? parsed.error.message : '';
+    if (message) return message.slice(0, 200);
   } catch { /* not JSON */ }
   return body.replace(/\s+/g, ' ').trim().slice(0, 200);
 }
-
-const enc = encodeURIComponent;
 
 export class OpenCodeClient {
   constructor(
@@ -139,83 +129,116 @@ export class OpenCodeClient {
       });
     } catch (error) {
       if (options.signal?.aborted) throw new Error('Stopped');
-      throw new Error(timeout.aborted ? 'The OpenCode server did not answer in time' : 'The OpenCode server is not reachable', { cause: error });
+      throw new Error(timeout.aborted ? 'The OpenCode service did not answer in time' : 'The OpenCode service is not reachable', { cause: error });
     }
     const text = await boundedText(response);
-    const route = path.replace(/ses_[A-Za-z0-9]+/g, ':id').replace(/per_[A-Za-z0-9]+/g, ':request');
     if (!response.ok) {
-      if (response.status === 401) throw new OpenCodeHttpError(401, 'The OpenCode server refused the password Chat Marks gave it');
-      throw new OpenCodeHttpError(response.status, `OpenCode ${method} ${route} answered ${response.status}${text ? `: ${reason(text)}` : ''}`);
+      if (response.status === 401) throw new OpenCodeHttpError(401, 'The OpenCode service refused its saved password');
+      throw new OpenCodeHttpError(response.status, `OpenCode ${method} ${path.split('?')[0]} answered ${response.status}${text ? `: ${reason(text)}` : ''}`);
     }
     if (!text.trim()) return undefined as T;
-    try { return JSON.parse(text) as T; } catch { throw new Error(`OpenCode ${method} ${route} answered something that is not JSON`); }
+    try { return JSON.parse(text) as T; } catch { throw new Error(`OpenCode ${method} ${path} answered something that is not JSON`); }
   }
 
-  /** `GET /global/health`: `{ healthy, version }`. */
-  health(timeoutMs = 3_000): Promise<{ healthy?: boolean; version?: string }> {
-    return this.request('GET', '/global/health', { timeoutMs });
+  /** `GET /api/info` (`service-probe.ts` health): `{ version, pid }`. */
+  info(timeoutMs = 3_000): Promise<{ version?: string; pid?: number }> {
+    return this.request('GET', '/api/info', { timeoutMs });
   }
 
-  /** `GET /config/providers`: the configured providers with their models, and each provider's default model. */
-  async providers(directory: string): Promise<OpenCodeProviders> {
-    const reply = await this.request<Partial<OpenCodeProviders>>('GET', '/config/providers', { query: { directory } });
-    return {
-      providers: Array.isArray(reply?.providers) ? reply.providers.filter(item => item && typeof item.id === 'string' && item.models && typeof item.models === 'object') : [],
-      default: reply?.default && typeof reply.default === 'object' ? reply.default : {}
-    };
+  /** `GET /api/model`: `Location.response(Model.Info[])` = `{ location, data }`. */
+  async models(directory?: string): Promise<OpenCodeModel[]> {
+    const reply = await this.request<{ data?: unknown }>('GET', '/api/model', { query: { 'location[directory]': directory } });
+    return Array.isArray(reply?.data) ? reply.data as OpenCodeModel[] : [];
   }
 
-  /** `POST /session` (`Session.CreateInput`): the reply is `Session.Info` itself. */
-  async createSession(directory: string, payload: { title?: string; permission: OpenCodeRule[] }): Promise<{ id: string }> {
-    const reply = await this.request<{ id?: unknown }>('POST', '/session', { query: { directory }, body: payload });
-    if (typeof reply?.id !== 'string' || !reply.id) throw new Error('OpenCode did not return a session id');
-    return { id: reply.id };
+  /** `GET /api/model/default`: `{ location, data?: Model.Info }`. */
+  async defaultModel(directory?: string): Promise<OpenCodeModel | null> {
+    const reply = await this.request<{ data?: OpenCodeModel }>('GET', '/api/model/default', { query: { 'location[directory]': directory } });
+    return reply?.data && typeof reply.data.id === 'string' ? reply.data : null;
   }
 
-  /** `GET /session/status`: `{ [sessionID]: { type: idle|busy|retry } }` of that folder's instance; absent = idle. */
-  async busy(directory: string, sessionId: string): Promise<boolean> {
-    const reply = await this.request<Record<string, { type?: string }>>('GET', '/session/status', { query: { directory } });
-    const type = reply?.[sessionId]?.type;
-    return type === 'busy' || type === 'retry';
+  /** `POST /api/session` (`session.create`): `{ data: Session.Info }`. */
+  async createSession(payload: { title?: string; model?: OpenCodeModelRef; location: { directory: string }; permissions: OpenCodeRule[] }): Promise<{ id: string }> {
+    const reply = await this.request<{ data?: { id?: unknown } }>('POST', '/api/session', { body: payload });
+    if (typeof reply?.data?.id !== 'string' || !reply.data.id) throw new Error('OpenCode did not return a session id');
+    return { id: reply.data.id };
   }
 
-  /** `GET /session/:id/message?limit=n`: the newest n messages, oldest first, each `{ info, parts }`. */
-  async messages(directory: string, sessionId: string, limit = 50): Promise<OpenCodeMessage[]> {
-    const reply = await this.request<unknown>('GET', `/session/${enc(sessionId)}/message`, { query: { directory, limit: String(limit) } });
-    return Array.isArray(reply) ? (reply as OpenCodeMessage[]).filter(item => item?.info && typeof item.info.id === 'string' && Array.isArray(item.parts)) : [];
+  /** `GET /api/session/:id` (`session.get`): `{ data: Session.Info }` (`outcome`, `time.idle`). */
+  async session(sessionId: string): Promise<{ id: string; outcome?: 'succeeded' | 'failed' | 'interrupted'; time?: { idle?: number } }> {
+    const reply = await this.request<{ data?: { id: string; outcome?: 'succeeded' | 'failed' | 'interrupted'; time?: { idle?: number } } }>('GET', `/api/session/${encodeURIComponent(sessionId)}`);
+    if (!reply?.data) throw new Error('OpenCode did not return the session');
+    return reply.data;
   }
 
-  /** `GET /permission`: every pending request of that folder's instance. */
-  async permissions(directory: string, sessionId: string): Promise<OpenCodePermission[]> {
-    const reply = await this.request<unknown>('GET', '/permission', { query: { directory } });
-    return Array.isArray(reply) ? (reply as OpenCodePermission[]).filter(item => item?.sessionID === sessionId) : [];
+  /** `GET /api/session/active` (`session.active`): `{ data: Record<sessionID, { type: 'running' }> }`, the running ones. */
+  async active(): Promise<string[]> {
+    const reply = await this.request<{ data?: Record<string, { type?: string }> }>('GET', '/api/session/active');
+    return Object.entries(reply?.data ?? {}).filter(([, value]) => value?.type === 'running').map(([id]) => id);
   }
 
-  /** `POST /permission/:requestID/reply` `{ reply: once|always|reject, message? }`. */
-  async reply(directory: string, requestId: string, reply: 'once' | 'reject', message?: string): Promise<void> {
-    await this.request('POST', `/permission/${enc(requestId)}/reply`, { query: { directory }, body: { reply, ...(message ? { message } : {}) } });
+  async running(sessionId: string): Promise<boolean> {
+    return (await this.active()).includes(sessionId);
   }
 
-  /** `POST /session/:id/prompt_async` (`SessionPrompt.PromptInput`): 204; failures are published as `session.error`. */
-  async prompt(directory: string, sessionId: string, input: { text: string; model?: { providerID: string; modelID: string }; variant?: string }): Promise<void> {
-    await this.request('POST', `/session/${enc(sessionId)}/prompt_async`, { query: { directory }, body: {
-      parts: [{ type: 'text', text: input.text }], ...(input.model ? { model: input.model } : {}), ...(input.variant ? { variant: input.variant } : {})
-    } });
+  /** `GET /api/session/:id/message?order=desc&limit=n` (`session.messages`): newest first, returned oldest first. */
+  async messages(sessionId: string, limit = 50): Promise<Array<Record<string, unknown>>> {
+    const reply = await this.request<{ data?: unknown }>('GET', `/api/session/${encodeURIComponent(sessionId)}/message`, { query: { order: 'desc', limit: String(limit) } });
+    return Array.isArray(reply?.data) ? (reply.data as Array<Record<string, unknown>>).slice().reverse() : [];
   }
 
-  /** `POST /session/:id/abort`: a boolean. */
-  async abort(directory: string, sessionId: string): Promise<boolean> {
-    return (await this.request<unknown>('POST', `/session/${enc(sessionId)}/abort`, { query: { directory } })) === true;
+  /** `GET /api/session/:id/permission` (`session.permission.list`): pending requests. */
+  async permissions(sessionId: string): Promise<OpenCodePermission[]> {
+    const reply = await this.request<{ data?: unknown }>('GET', `/api/session/${encodeURIComponent(sessionId)}/permission`);
+    return Array.isArray(reply?.data) ? reply.data as OpenCodePermission[] : [];
   }
 
-  /** `PATCH /session/:id` `{ permission }`: APPENDS the rules to the session's ruleset (`Permission.merge`). */
-  async appendPermissions(directory: string, sessionId: string, permission: OpenCodeRule[]): Promise<void> {
-    await this.request('PATCH', `/session/${enc(sessionId)}`, { query: { directory }, body: { permission } });
+  /** `GET /api/session/:id/permission/:requestID`; null when it is no longer pending (404). */
+  async permission(sessionId: string, requestId: string): Promise<OpenCodePermission | null> {
+    try {
+      const reply = await this.request<{ data?: OpenCodePermission }>('GET', `/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(requestId)}`);
+      return reply?.data ?? null;
+    } catch (error) {
+      if (error instanceof OpenCodeHttpError && error.status === 404) return null;
+      throw error;
+    }
   }
 
   /**
-   * One `/global/event` connection: resolves when the server ends it, rejects when it fails or is
-   * aborted. Every payload is handed over in order; `onEvent` may be async and is awaited.
+   * `POST /api/session/:id/permission/:requestID/reply` `{ decision, message? }`. Upstream also
+   * takes `always`, which saves an allow rule for the whole project (every session, kept across
+   * restarts, beating a session's own `ask`); this client cannot send it.
+   */
+  async reply(sessionId: string, requestId: string, decision: 'once' | 'reject', message?: string): Promise<void> {
+    await this.request('POST', `/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(requestId)}/reply`,
+      { body: { decision, ...(message ? { message } : {}) } });
+  }
+
+  /** `POST /api/session/:id/prompt` `{ text }` (`session.prompt`): `{ data: Session.Inbox.User }` whose `id` is the user message. */
+  async prompt(sessionId: string, text: string): Promise<{ id: string | null }> {
+    const reply = await this.request<{ data?: { id?: unknown } }>('POST', `/api/session/${encodeURIComponent(sessionId)}/prompt`, { body: { text } });
+    return { id: typeof reply?.data?.id === 'string' ? reply.data.id : null };
+  }
+
+  /** `POST /api/session/:id/interrupt` (`session.interrupt`): `{ interrupted }`. */
+  async interrupt(sessionId: string): Promise<boolean> {
+    const reply = await this.request<{ interrupted?: boolean }>('POST', `/api/session/${encodeURIComponent(sessionId)}/interrupt`);
+    return reply?.interrupted === true;
+  }
+
+  /** `POST /api/session/:id/model` `{ model: Model.Ref }` (`session.switchModel`). */
+  async switchModel(sessionId: string, model: OpenCodeModelRef): Promise<void> {
+    await this.request('POST', `/api/session/${encodeURIComponent(sessionId)}/model`, { body: { model } });
+  }
+
+  /** `PATCH /api/session/:id` `{ permissions }` (`session.update`): replaces the session's ruleset (204). */
+  async setPermissions(sessionId: string, permissions: OpenCodeRule[]): Promise<void> {
+    await this.request('PATCH', `/api/session/${encodeURIComponent(sessionId)}`, { body: { permissions } });
+  }
+
+  /**
+   * One `/api/event` connection: resolves when the server ends it, rejects when it fails or is
+   * aborted. Every record is handed over in order; `onEvent` may be async and is awaited.
    */
   async events(signal: AbortSignal, onEvent: (event: OpenCodeEvent) => void | Promise<void>, onOversized: () => void = () => undefined): Promise<void> {
     let response: Response;
@@ -223,7 +246,7 @@ export class OpenCodeClient {
     const connect = new AbortController();
     const timer = setTimeout(() => connect.abort(), this.timeoutMs);
     try {
-      response = await this.fetchImpl(this.url('/global/event'), {
+      response = await this.fetchImpl(this.url('/api/event'), {
         method: 'GET', headers: { ...this.headers(false), accept: 'text/event-stream' }, signal: AbortSignal.any([signal, connect.signal])
       });
     } catch (error) {
@@ -233,14 +256,14 @@ export class OpenCodeClient {
     }
     if (!response.ok || !response.body) {
       await response.body?.cancel().catch(() => undefined);
-      throw new OpenCodeHttpError(response.status, response.status === 401 ? 'The OpenCode server refused the password Chat Marks gave it' : `OpenCode event stream answered ${response.status}`);
+      throw new OpenCodeHttpError(response.status, response.status === 401 ? 'The OpenCode service refused its saved password' : `OpenCode event stream answered ${response.status}`);
     }
     const parser = new SseParser(onOversized);
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     const abort = (): void => { void reader.cancel().catch(() => undefined); };
     signal.addEventListener('abort', abort, { once: true });
-    // The server sends a heartbeat every 10 s: a stream silent for longer is dead, not idle.
+    // The server sends a heartbeat about every 15 s: a stream silent for longer is dead, not idle.
     let idle: NodeJS.Timeout | null = null;
     let stalled = false;
     const watch = (): void => {
@@ -257,15 +280,9 @@ export class OpenCodeClient {
         for (const record of parser.push(decoder.decode(value, { stream: true }))) {
           let parsed: unknown;
           try { parsed = JSON.parse(record); } catch { continue; }
-          const envelope = parsed as { directory?: unknown; payload?: { id?: unknown; type?: unknown; properties?: unknown } };
-          const payload = envelope?.payload;
-          if (!payload || typeof payload !== 'object' || typeof payload.type !== 'string') continue;
-          await onEvent({
-            type: payload.type,
-            ...(typeof payload.id === 'string' ? { id: payload.id } : {}),
-            ...(typeof envelope.directory === 'string' ? { directory: envelope.directory } : {}),
-            properties: payload.properties && typeof payload.properties === 'object' ? payload.properties as Record<string, unknown> : {}
-          });
+          if (!parsed || typeof parsed !== 'object' || typeof (parsed as OpenCodeEvent).type !== 'string') continue;
+          const event = parsed as OpenCodeEvent;
+          await onEvent({ ...event, data: event.data && typeof event.data === 'object' ? event.data : {} });
         }
       }
     } finally {

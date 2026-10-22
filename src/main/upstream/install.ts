@@ -1,11 +1,12 @@
 /**
- * Chat Marks: install and update an upstream CLI from its official GitHub release into the
- * user's own module folder (no administrator rights). Shared by OpenCode and ZeroClaw.
+ * Chat Marks: install and update an upstream CLI from its official release into the user's own
+ * module folder (no administrator rights). Shared by OpenCode (npm registry) and ZeroClaw
+ * (GitHub releases); each module's `ReleaseSource` says where its archive comes from.
  *
  * - The renderer sends the version the user confirmed; a different latest release is refused.
- * - The archive comes from the trusted repository's release hosts only (bounded), and its
- *   SHA-256 must equal what the release publishes (the API digest, and `SHA256SUMS` when the
- *   module has one) before anything is extracted.
+ * - The archive comes from the source's trusted hosts only (bounded), and its checksum must equal
+ *   what the source publishes before anything is extracted: GitHub's API digest (and
+ *   `SHA256SUMS` when the module has one), or the npm registry's `dist.integrity` (SHA-512).
  * - The archive's listing is checked first: only regular files and folders, no absolute or `..`
  *   path, nothing outside the module's allowlist. Only the allowlisted members are extracted,
  *   into a private 0700 staging folder inside the module folder (same filesystem, so the final
@@ -27,8 +28,9 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import type { UpstreamInstallProgress, UpstreamModuleId } from '../../shared/upstream-module.js';
 import {
-  downloadReleaseAsset, fetchLatestRelease, parseChecksums, verifySha256, type GitHubAsset, type GitHubRelease
+  downloadReleaseAsset, fetchLatestRelease, parseChecksums, sha256Hex, verifySha256, type GitHubAsset, type GitHubRelease
 } from '../github-release.js';
+import { downloadNpmTarball, fetchNpmVersion, npmTarballUrl } from '../npm-release.js';
 
 const exec = promisify(execFile);
 
@@ -76,25 +78,105 @@ export async function probeHost(runner: Runner): Promise<HostInfo> {
   return parseHostProbe(stdout);
 }
 
-export interface UpstreamSpec {
-  id: UpstreamModuleId;
-  name: string;
+/** The archive a source hands over: already checked against the source's own checksum. */
+export interface VerifiedArchive {
+  data: Buffer;
+  /** Its SHA-256 (hex), to re-check a copy (WSL). */
+  sha256: string;
+}
+
+export interface FetchArchiveOptions {
+  fetchImpl?: typeof fetch;
+  limit: number;
+  /** Tests (GitHub sources): this release instead of the latest one. */
+  release?: GitHubRelease;
+  /** Called once the download starts, after the metadata matched the confirmed version. */
+  onDownload?(): void;
+  onVerify?(): void;
+}
+
+/** Where a module's releases come from. Errors are the short install codes. */
+export interface ReleaseSource {
+  /** The latest version (x.y.z); `release_unavailable` when it cannot be read. */
+  latest(fetchImpl?: typeof fetch): Promise<string>;
+  /** The archive of exactly `expected` for this host, verified; `version_changed` when latest moved on. */
+  fetchArchive(expected: string, host: HostInfo, options: FetchArchiveOptions): Promise<VerifiedArchive>;
+}
+
+/** A GitHub repository's latest release; `assets` picks the archive (and checksum file) for the host. */
+export function githubSource(options: {
   repository: string;
   /** Release tags this module accepts; group 1 is x.y.z. */
   tag: RegExp;
-  archiveLimit: number;
-  /** The archive (and checksum file) for this host, or null when there is no build for it. */
   assets(release: GitHubRelease, host: HostInfo): { archive: GitHubAsset; checksums?: GitHubAsset } | null;
+}): ReleaseSource & { repository: string } {
+  return {
+    repository: options.repository,
+    latest: async fetchImpl => (await fetchLatestRelease(options.repository, options.tag, fetchImpl)).version,
+    async fetchArchive(expected, host, fetch) {
+      const release = fetch.release ?? await fetchLatestRelease(options.repository, options.tag, fetch.fetchImpl);
+      if (release.version !== expected) throw new Error('version_changed');
+      const assets = options.assets(release, host);
+      if (!assets) throw new Error('unsupported_platform');
+      const prefix = `https://github.com/${options.repository}/releases/download/`;
+      for (const asset of [assets.archive, assets.checksums]) {
+        if (asset && asset.url !== `${prefix}v${release.version}/${asset.name}`) throw new Error('unsupported_platform');
+      }
+      fetch.onDownload?.();
+      const [archive, checksums] = await Promise.all([
+        downloadReleaseAsset(assets.archive.url, prefix, fetch.limit, fetch.fetchImpl),
+        assets.checksums ? downloadReleaseAsset(assets.checksums.url, prefix, 64 * 1024, fetch.fetchImpl) : Promise.resolve(null)
+      ]);
+      fetch.onVerify?.();
+      // The API digest is required; a published checksum file must agree with it.
+      verifySha256(archive, assets.archive.sha256);
+      if (checksums) verifySha256(archive, parseChecksums(checksums.toString('utf8')).get(assets.archive.name));
+      return { data: archive, sha256: assets.archive.sha256! };
+    }
+  };
+}
+
+/**
+ * An npm package whose binaries are published as per-platform packages listed in its
+ * `optionalDependencies` (OpenCode 2.x). `platformPackage` names the one for the host.
+ */
+export function npmSource(options: { name: string; platformPackage(host: HostInfo): string | null }): ReleaseSource & { name: string } {
+  return {
+    name: options.name,
+    latest: async fetchImpl => (await fetchNpmVersion(options.name, 'latest', fetchImpl)).version,
+    async fetchArchive(expected, host, fetch) {
+      const main = await fetchNpmVersion(options.name, 'latest', fetch.fetchImpl);
+      if (main.version !== expected) throw new Error('version_changed');
+      const platform = options.platformPackage(host);
+      // The main package must name exactly this platform package at exactly this version.
+      if (!platform || main.optionalDependencies[platform] !== expected) throw new Error('unsupported_platform');
+      const meta = await fetchNpmVersion(platform, expected, fetch.fetchImpl);
+      if (meta.tarball !== npmTarballUrl(platform, expected)) throw new Error('download_failed');
+      fetch.onDownload?.();
+      const data = await downloadNpmTarball(meta, fetch.limit, fetch.fetchImpl);
+      fetch.onVerify?.();
+      return { data, sha256: sha256Hex(data) };
+    }
+  };
+}
+
+export interface UpstreamSpec {
+  id: UpstreamModuleId;
+  name: string;
+  source: ReleaseSource;
+  archiveLimit: number;
   /** Whether an archive entry may exist at all (a listed entry outside this refuses the archive). */
   allowedEntry(name: string): boolean;
   /** What is extracted, as tar member names (folders end with `/`). */
   members: readonly string[];
-  /** The executables among the members; each must be ELF and report the version. */
+  /** Leading path parts dropped on extraction (npm's `package/bin/`). */
+  strip?: number;
+  /** The executables among the extracted files (after `strip`); each must be ELF and report the version. */
   binaries: readonly string[];
   layout: 'file' | 'directory';
 }
 
-/** The first x.y.z in a `--version` line (`1.19.3`, `zeroclaw 0.8.6`). */
+/** The first x.y.z in a `--version` line (`opencode v2.1.2`, `zeroclaw 0.8.6`). */
 export function parseVersion(output: string): string | null {
   return /(?:^|[^\d.])v?(\d+(?:\.\d+){2})(?![\d.])/.exec(output)?.[1] ?? null;
 }
@@ -137,7 +219,7 @@ export interface InstallOptions {
   runner?: Runner;
   fetchImpl?: typeof fetch;
   onProgress?(progress: UpstreamInstallProgress): void;
-  /** Tests: the release instead of GitHub's latest. */
+  /** Tests (GitHub sources): the release instead of GitHub's latest. */
   release?: GitHubRelease;
   host?: HostInfo;
 }
@@ -168,24 +250,12 @@ export async function installUpstream(spec: UpstreamSpec, expected: string, mode
   let stageMade = false;
   try {
     if (!SAFE_PATH.test(options.modulesRoot)) throw new Error('install_failed');
-    const release = options.release ?? await fetchLatestRelease(spec.repository, spec.tag, options.fetchImpl);
-    if (release.version !== expected) throw new Error('version_changed');
     const host = options.host ?? await probeHost(runner);
-    const assets = spec.assets(release, host);
-    if (!assets) throw new Error('unsupported_platform');
-    const prefix = `https://github.com/${spec.repository}/releases/download/`;
-    for (const asset of [assets.archive, assets.checksums]) {
-      if (asset && asset.url !== `${prefix}v${release.version}/${asset.name}`) throw new Error('unsupported_platform');
-    }
-    report({ phase: 'downloading' });
-    const [archive, checksums] = await Promise.all([
-      downloadReleaseAsset(assets.archive.url, prefix, spec.archiveLimit, options.fetchImpl),
-      assets.checksums ? downloadReleaseAsset(assets.checksums.url, prefix, 64 * 1024, options.fetchImpl) : Promise.resolve(null)
-    ]);
-    report({ phase: 'verifying' });
-    // The API digest is required; a published checksum file must agree with it.
-    verifySha256(archive, assets.archive.sha256);
-    if (checksums) verifySha256(archive, parseChecksums(checksums.toString('utf8')).get(assets.archive.name));
+    const verified = await spec.source.fetchArchive(expected, host, {
+      fetchImpl: options.fetchImpl, limit: spec.archiveLimit, release: options.release,
+      onDownload: () => report({ phase: 'downloading' }), onVerify: () => report({ phase: 'verifying' })
+    });
+    const archive = verified.data;
 
     report({ phase: 'extracting' });
     await sh('/bin/mkdir', ['-p', '-m', '700', '--', moduleDir]);
@@ -201,7 +271,7 @@ export async function installUpstream(spec: UpstreamSpec, expected: string, mode
       if (!SAFE_PATH.test(source)) throw new Error('install_failed');
       await sh('/bin/cp', ['--', source, archivePath], 120_000);
       const copied = (await sh('/usr/bin/sha256sum', ['--', archivePath], 60_000)).stdout.trim().split(/\s+/)[0];
-      if (copied !== assets.archive.sha256) throw new Error('checksum_mismatch');
+      if (copied !== verified.sha256) throw new Error('checksum_mismatch');
     } else {
       await writeFile(archivePath, archive, { mode: 0o600 });
     }
@@ -211,7 +281,8 @@ export async function installUpstream(spec: UpstreamSpec, expected: string, mode
     const bin = `${stage}/bin`;
     await sh('/bin/mkdir', ['-m', '700', '--', bin]);
     try {
-      await sh('/usr/bin/tar', ['-xzf', archivePath, '-C', bin, '--no-same-owner', '--no-same-permissions', '--', ...spec.members], 300_000);
+      await sh('/usr/bin/tar', ['-xzf', archivePath, '-C', bin, '--no-same-owner', '--no-same-permissions',
+        ...(spec.strip ? [`--strip-components=${spec.strip}`] : []), '--', ...spec.members], 300_000);
     } catch { throw new Error('extract_failed'); }
     await sh('/bin/rm', ['-f', '--', archivePath]);
     for (const name of spec.binaries) {

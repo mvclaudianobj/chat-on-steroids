@@ -1316,8 +1316,9 @@ hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state
 zeroclaw, markscode, marksclaw`. It is separate from the upstream CLIProxyAPI systemd adapter
 (`modules.ts`), which retains its own management console security boundary. The adapters have
 exact fixed IDs, reviewed binary names and acquisition sources: Codex and Claude are installed
-into their own userData/npm prefixes (`cli-source-install.ts`); OpenCode and ZeroClaw install
-their official upstream GitHub releases (see "Upstream modules" below). No installer requests
+into their own userData/npm prefixes (`cli-source-install.ts`); OpenCode installs its official
+2.x build from the npm registry and ZeroClaw its official GitHub release (see "Upstream modules"
+below). No installer requests
 administrator privileges. The Marks forks are no longer maintained: **MarksCode and MarksClaw are
 retired legacy ids** (`manifest[id].legacy`). They stay only so a saved activation and its tmux
 sessions can be stopped and disabled: their binary is never resolved, probed (`--version`),
@@ -1328,10 +1329,15 @@ installed, built or run, and Settings shows their card only while one is active 
 tool's data: MarksCode's `~/.local/share/markscode`, `~/.config/markscode`,
 `~/.local/state/markscode`, per-project `.markscode/`, MarksClaw's `~/.marksclaw`, and the user's
 own upstream folders (`~/.local/share/opencode`, `~/.config/opencode`, `~/.opencode`,
-`~/.zeroclaw`; only the upstream programs themselves use theirs). OpenCode runs with upstream's
-default folders: nothing sets `XDG_*`,
-`OPENCODE_DB` or `OPENCODE_CONFIG_DIR`; inherited variables pointing at MarksCode and MarksCode
-`PATH` entries are removed from its environment (`opencode/server.ts`, snapshot test). Version
+`~/.zeroclaw`; only the upstream programs themselves use theirs). OpenCode 2.x runs with upstream's
+default folders (data `~/.local/share/opencode`): nothing sets `XDG_*`, `OPENCODE_DB` or
+`OPENCODE_CONFIG_DIR`; inherited variables pointing at MarksCode and MarksCode `PATH` entries are
+removed from the environment the app starts its service with (`opencode/service.ts`, test). The
+app only reads OpenCode's own service registration (`<XDG_STATE_HOME>/opencode/service.json`) to
+reach the service. Future import: the user's MarksCode history databases
+(`~/.local/share/markscode/*.db`) use the same 2.x schema as upstream OpenCode 2.x (MarksCode was
+OpenCode 2.0.25 plus patches); an import into OpenCode would be a copy the user starts, never an
+automatic migration, and is not built. Version
 probes run under `env -i` with a private HOME/XDG folder inside the module folder
 (`<module>/.probe`). Uninstall/disable removes only `<module>/bin`. Real-binary checks run with
 temporary `XDG_DATA_HOME`/`XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`XDG_CACHE_HOME`.
@@ -1547,14 +1553,14 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   ("created by a newer version") instead of reset. The `cosapi-` id and every fence are unchanged.
   Startup recovery (`recoverApiChats`) closes every open turn `interrupted` (shared helper
   `recovery.ts` `closeInterruptedTurn`), except records of an engine that claimed its own
-  recovery (`claimTurnRecovery`; Codex does).
+  recovery (`claimTurnRecovery`; Codex and OpenCode do).
 - Approvals (`approval.ts` `ApprovalGate`): the app mints the approval id and binds it to
   `argsHash` (sha256 of the tool name and canonical action), process memory only, oldest pending
   shown. The engine's own request id (Codex JSON-RPC id, Claude `request_id`, OpenCode permission
   id) stays main-side beside it; `dismiss(engineRequestId)` removes a card the engine settled
   elsewhere (its TUI). `codex/claude/openCodeApprovalDecision` map approve/always/deny/stop to
-  `accept|acceptForSession|decline|cancel`, `allow{updatedInput}|deny{message}`, `once|once|reject|reject`
-  (OpenCode's own `always` is never sent: see the OpenCode engine).
+  `accept|acceptForSession|decline|cancel`, `allow{updatedInput}|deny{message}`, `once|once|reject|–`
+  (OpenCode's own `always` is never sent and Stop answers nothing: see the OpenCode engine).
   The executor uses the same gate.
 - Projector (`projector.ts` `TurnProjector`): CLI adapters translate their stream into
   engine-neutral `EngineEvent`s (`text_delta/final`, `tool_started/output/finished` with kind
@@ -1717,16 +1723,17 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   cli-modules `cliEngineTerminal(module, {sessionId, projectId, args, title})` keeps one durable
   session per chat (`engineChat` + `args`, reused with new args); args are validated per module
   (Claude: `--resume|--session-id <uuid>`; Codex: `resume <thread> --remote unix:///<abs>.sock`;
-  OpenCode: `--dir <abs cwd> -s ses_<id>`; anything else refused, also when a
+  OpenCode: `-s ses_<id> <abs cwd>`; anything else refused, also when a
   stored session is loaded). tmux starts
-  `sh -c 'exec "$@"' marks-cli <bin> <args>`; an OpenCode engine terminal instead runs the fixed
-  launcher `OPENCODE_ATTACH_SCRIPT` (`sh -c '<constant>' marks-cli <regfile> <bin> <args>`), which
-  reads the server's URL and password from its 0600 registration file at start, so neither tmux's
-  argv nor its environment keeps them. Every open (also from the sidebar) first runs that
-  module's hook (`registerCliEngineOpenHook(module, hook)`): required for hand-over modules
-  (Claude: refuses while answering, stops its host), optional for live ones (Codex: starts the
-  server; OpenCode: starts the server and `cliEngineTerminalRefresh` ends a terminal older than
-  it, so the next start reads the new URL/password). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
+  `sh -c 'exec "$@"' marks-cli <bin> <args>`; every OpenCode terminal (engine or plain) runs
+  `OPENCODE_TERMINAL_SCRIPT` (`OPENCODE_DISABLE_AUTOUPDATE=1 exec "$@"`) instead; the TUI reads the
+  background service's URL and password itself, so neither tmux's argv nor its environment holds
+  them. Every open (also from the sidebar) first runs that module's hook
+  (`registerCliEngineOpenHook(module, hook)`): required for hand-over modules (Claude: refuses while
+  answering, stops its host), optional for live ones (Codex: starts the server; OpenCode: runs for
+  every OpenCode terminal, also a plain one, and starts the background service with the app's
+  binary and environment, so the TUI joins it instead of starting its own). A TUI reconnects by
+  itself after a service restart (checked live). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
 Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
 `test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,
@@ -1737,108 +1744,130 @@ absent; the terminal button; the take-back offer), `test/cli-chat-ui.test.ts` an
 `test/renderer-timeline.test.ts` (engine and terminal items of the same name both enabled).
 
 **OpenCode engine (`opencode`).** `agent-engine/opencode.ts` + `opencode-client.ts` (Marks-owned)
-drive **upstream OpenCode** (`anomalyco/opencode`, MIT; checked against 1.19.3) and replace the
-MarksCode engine. They use the routes the OpenCode TUI itself uses (`/session…`, `/permission…`,
-`/global/event`), not the experimental `/api/*` set, so the chat and an attached TUI share one view.
-- Server (`opencode/server.ts`): ONE per app instance, started lazily (first create/send/models or
-  terminal open): `opencode serve --hostname 127.0.0.1 --port 0 --no-mdns` in the home folder (port 0
-  = 4096 when free, else random; the port is parsed from `opencode server listening on http://…`,
-  20 s), then `GET /global/health {healthy, version}`. Auth: a new 32-byte base64url password per
-  start, only in `OPENCODE_SERVER_PASSWORD` (HTTP Basic `opencode:<pw>` per request, never logged
-  or put in an error); `OPENCODE_DISABLE_AUTOUPDATE=1`; `ELECTRON_RUN_AS_NODE` and inherited
-  `OPENCODE_SERVER_*` removed; MarksCode paths stripped (data-preservation rule). Pidfile
-  `<userData>/opencode/server.pid` (an orphan is stopped only when `/proc/<pid>/cmdline` is
-  `…/opencode serve`); registration `<userData>/opencode/server` (0600: URL, password), removed on
-  exit. It dies on `will-quit` and module Stop/Disable; an exit fails the running turns.
-  `requestOpenCodeRestart` (after an update, or the module's restart action) stops it at once
-  while no turn runs, else marks `restartPending` and stops it when the last turn ends; the next
-  use starts the new binary. Security note: OpenCode's shell tool passes its environment to
-  commands, so an approved `bash` command can read the password (same user; Ask mode keeps
-  `bash` on ask). Windows: `wsl.exe --cd ~ --exec`, the password through `WSLENV`, registration in
-  the WSL home (untested).
+drive **upstream OpenCode 2.x** (`anomalyco/opencode`, MIT; published only on npm as
+`@opencode/cli`; checked against 2.1.2) through its background service's `/api` HTTP API (the
+same model the retired MarksCode fork 2.0.25 had; its engine is the base). The TUI uses the same
+service, so the chat and an attached TUI share one session. Routes (checked against
+`GET /openapi.json` of 2.1.2 and live): `/api/info`, `/api/model[/default]` (`location[directory]`),
+`POST /api/session {title, location:{directory}, model, permissions}`, `GET|PATCH
+/api/session/:id` (PATCH replaces the ruleset), `/api/session/active`, `/api/session/:id/
+{prompt {text} → {data:{id}} | interrupt | model {model:{providerID,id,variant}} | message?order=
+desc | permission[/:req[/reply {decision, message}]]}`, SSE `/api/event` (`data: {id,type,data}`,
+`: heartbeat`). Errors answer `{_tag, message}`.
+- Service (`opencode/service.ts`): upstream's per-user background service (`opencode service
+  start|stop|restart`; it runs `<binary> serve --service`, default port 49374, registers
+  `{id, version, url, pid, password}` in `<XDG_STATE_HOME>/opencode/service.json` and keeps the
+  password in `<XDG_CONFIG_HOME>/opencode/service.json`; it inherits the caller's environment).
+  The app starts it on first use (create/send/models/terminal open; status never starts it) with
+  the resolved binary and `opencodeServiceEnvironment` (no `ELECTRON_RUN_AS_NODE`,
+  `OPENCODE_SERVER_*`/`OPENCODE_PASSWORD` or MarksCode variable/PATH entry; plus
+  `OPENCODE_DISABLE_AUTOUPDATE=1`, which 2.x's updater honors). It is the app's own only when
+  `/proc/<pid>/exe` is the resolved binary (` (deleted)` = our file before an update); without an
+  exe (macOS) the version must match. Another OpenCode's service is `foreign`: the engine is
+  unavailable ("…runs another OpenCode program…Restart it from Settings > Modules > OpenCode") and
+  only the card's Restart (`service restart` with our binary, user-confirmed) replaces it; `service
+  start` alone would leave it (checked live with 2.1.1 vs 2.1.2). Only a loopback http URL gets the
+  password; `/api/info` must answer the registered pid. The service outlives the app (quit only
+  closes event streams). Module Stop/Disable stop it when it is the app's own. After an update
+  (`requestOpenCodeRestart`) it restarts at once when nothing runs (no app turn and
+  `/api/session/active` empty, so a TUI run counts), else `restartPending`, retried when a turn
+  ends and on the next use: no running answer is cut. Windows: the same commands inside WSL
+  (untested).
 - `status()` (never throws): Command capability, module enabled, binary (cli-modules
-  `cliModuleState`: the module's own `bin/opencode` first, else PATH), its `--version` probed with a
-  private HOME (`cliUpstreamVersion`) inside the gate `opencodeSupport`: 1.19.x ok, newer 1.x
-  available with "newer than tested", <1.19 and 2.x unavailable. A PATH binary is noted "not
-  installed by Chat Marks". The name `opencode` can never resolve a MarksCode binary.
-- `create`: approved local project only (`localProjectPath`; WSL path on Windows). `POST
-  /session?directory=<folder> {title, permission}` with the ruleset `bash * ask`, `edit * ask`,
-  `question * deny` (a turn must not block on it), `external_directory * deny`, `edit .markscode/*
-  deny`, `edit */.markscode/*` deny (patterns are worktree-relative; OpenCode evaluates the last
-  matching rule, `*` matches `/`; `edit *` is never denied, which would remove the tool). The default
-  model is the first `/config/providers` default (`provider/model`). Every instance request carries
-  `directory=<folder>`.
-- `send`: refused while `/session/status` says the session is busy (its TUI); the projector opens
-  the turn, `/global/event` connects (`server.connected`), then `POST /session/:id/prompt_async
-  {parts:[{type:'text',text}], model:{providerID,modelID}, variant?}` (204; the effort is a
-  `variant` only when the model lists that key). The question is the first new user message
-  after the prompt; only parts of assistant messages whose `parentID` is that question are
-  projected. Mapping: `message.part.delta` (field `text`, of a `text` part; reasoning parts are
-  never shown) → text_delta; a `text` part with `time.end` → text_final; a `tool` part (id =
-  `callID`) running → tool_started, completed/error → tool_finished (`bash` → command with
-  `metadata.exit`; `edit/write/apply_patch` → patch with `metadata.filediff`/`diff`;
-  `read/glob/grep/list` → read; else other; an error after a rejection is "declined");
-  `step-finish` tokens → usage (summed). `session.status` idle after busy ends the turn:
-  completed, or failed after a `session.error` (fatal chat_error), or stopped / interrupted after
-  `MessageAbortedError` (the app's Stop vs another client's).
-- Approvals: `permission.asked {id, sessionID, permission, patterns, metadata, always, tool}` →
-  ApprovalGate card bound to sha256 of `{sessionID, id, permission, patterns}`. `approve` re-reads
-  `GET /permission?directory=` and refuses a vanished or changed request, then `POST
-  /permission/:id/reply {reply:'once'|'reject', message?}`. **"Always" is never sent upstream**:
-  OpenCode's `always` adds an in-memory allow rule for the whole folder instance that beats the
-  session's deny rules and affects other chats; the app answers `once`, appends the chat's Auto
-  ruleset (`PATCH /session/:id {permission}` APPENDS, deny rules last) and switches the chat to
-  Auto. A `permission.replied` this app did not send (the TUI) removes the card. Stop: `POST
-  /session/:id/abort`; the abort leaves a pending request listed upstream, so the stop answers it
-  `reject`; the turn ends on idle or after a 5 s grace.
-- The stream is volatile: bounded lines (1 MiB) and records (4 MiB), 45 s silence = dead
-  (heartbeat every 10 s), reconnect with backoff (250 ms … 8 s, then interrupted). After every
-  reconnect: messages (newest 50, oldest first) → missed settled texts and finished tools,
-  `/permission` → new/vanished cards, `/session/status` → the idle end.
-- Recovery: none of its own (it claims none). The server is the app's, so no turn survives the
-  app; `recoverApiChats` closes it `interrupted` and the next send continues the same session.
-- Terminal (live, through the shared seam): args `--dir <cwd> -s <ses_id>`; `opencode attach <url>`
-  through the fixed launcher (see Terminals); opens while a turn runs.
-Proof: `test/agent-engine-opencode.test.ts` (fake 1.19 server in-process: status gate, ruleset and
-`directory`, full turn mapping, once/deny/always→once+PATCH/stale/changed/TUI reply, Stop→abort +
-reject, session.error, server exit, SSE drop + reconcile, Basic auth never logged; the server
-process against `test/fixtures/agent-engine/fake-opencode.mjs`: exact argv, environment without
-Electron node mode, inherited auth or any MarksCode path, 0600 registration, restart-pending,
-orphan pidfile, password redacted from a failed start; the retired MarksCode engine),
-`test/cli-modules.test.ts` (OpenCode args, the fixed launcher, the age refresh, legacy modules
-never probed), `test/api-chat-ui.test.ts`. Checked against the real 1.19.3 binary on Linux with
-temporary XDG folders (health, providers, session create, status, `/permission` + reply,
-`/global/event` types, PATCH append, abort, `attach` through the launcher in tmux; the permission
-`patterns` of `edit` are worktree-relative and `/permission` keeps an aborted request).
-Needs a real run: the chat UI end to end, Windows/WSL.
+  `cliModuleState`: the module's own `bin/opencode` first, else PATH), its `--version` (`opencode
+  v2.1.2`) probed with a private HOME inside the gate `opencodeSupport`: 2.1.x ok, newer 2.x
+  available with "newer than tested", 1.x, 2.0 and 3.x unavailable ("OpenCode 2.1 or a newer 2.x is
+  needed"); a PATH binary is noted "not installed by Chat Marks"; a stopped service is noted "starts
+  on first use"; a foreign service is unavailable. The name `opencode` can never resolve a MarksCode
+  binary, and a binary path inside MarksCode's folders is refused.
+- `create`: approved local project only (`localProjectPath`; WSL path on Windows). The session is
+  created at that location with the default model (`/api/model/default`) or the chosen one and the
+  ruleset `shell * ask`, `edit * ask`, `question * deny` (a turn must not block on a form),
+  `edit /*` and `read /*` deny (outside the project resources are absolute), `external_directory *
+  deny`, `edit .markscode/*` and `edit */.markscode/*` deny (inside the project resources are
+  relative; the last matching rule wins, `*` matches `/`; all checked live: `/etc/hostname` →
+  external_directory, `.markscode/a.txt` and `sub/.markscode/b.txt` → denied).
+- `send`: refused while `/api/session/active` lists the session (its TUI); the projector opens
+  the turn, `/api/event` connects (`server.connected`), then `POST …/prompt {text}`; its answer's id
+  is the question. Mapping: `session.text.delta/ended` → text_delta/text_final (reasoning never
+  shown); `session.tool.input.started` (name) + `tool.called` → tool_started; `tool.success/
+  failed` → tool_finished (`shell` → command with `metadata.exit`; `write/edit/patch` → patch with
+  `metadata.files` or the diff its permission request showed (2.x `write` reports none); `read/
+  glob/grep/list` → read; `error.type permission.rejected` → declined); `session.step.ended`
+  tokens summed per assistant message → usage (`session.usage.updated` is the session total and
+  ignored); `session.execution.succeeded/failed/interrupted` end the turn (interrupted: the app's
+  Stop → stopped, else interrupted "stopped in its terminal").
+- Approvals: `permission.asked {id, sessionID, action, resources, save, metadata, source}` →
+  ApprovalGate card bound to sha256 of `{sessionID, requestID, action, resources}`. `approve` reads
+  `GET …/permission/:req` back and refuses a vanished or changed request, then `…/reply
+  {decision:'once'|'reject', message?}`. **"Always" is never sent upstream**: 2.x saves an
+  `always` as a project-wide allow rule (`/api/permission/saved`, persistent, and it beat another
+  session's `edit * ask` in a live check); the app answers `once`, replaces the chat's ruleset with
+  its Auto one and switches the chat to Auto (the client cannot even send `always`). Stop: `POST
+  …/interrupt`, which settles pending requests itself (nothing is answered); the turn ends on
+  `execution.interrupted` or after a 5 s grace. A `permission.replied` this app did not send (the
+  TUI) removes the card.
+- The stream is volatile: bounded lines (1 MiB) and records (4 MiB), 45 s silence = dead,
+  reconnect with backoff (250 ms … 8 s, then interrupted). After every reconnect: messages (newest
+  50, oldest first) → missed settled texts, finished tools and step tokens, pending permissions →
+  new/vanished cards, `/api/session/active` + the session's `outcome`/`time.idle` → the end.
+- Recovery (claimed, `claimTurnRecovery`): the service outlives the app, so a turn left open is
+  re-attached while its session still runs, else what finished is imported and the turn closes
+  with the session's outcome. Recovery never starts the service; a stopped one closes the turn
+  interrupted.
+- Terminal (live, through the shared seam): args `-s <ses_id> <folder>` (the TUI attaches to the
+  background service session; checked live in tmux, no second server); opens while a turn runs.
+Proof: `test/agent-engine-opencode.test.ts` (fake 2.1.2 service in-process plus the real
+`service.ts` with a fake host: status gate incl. foreign service, start on first use with the
+sanitized environment, ruleset, full turn mapping with diffs and per-step usage, once / always→
+once+Auto (never `always`) / stale / changed / deny, TUI reply, Stop→interrupt with nothing
+answered, TUI interrupt, failure, busy session, SSE drop + reconcile, re-attach and close after a
+restart, terminal args and hook, Basic auth never logged; service: registration trust, Start/Stop/
+Restart and foreign refusal, update restart with a turn or a TUI session running, stale service on
+next use, environment), `test/cli-modules.test.ts` (OpenCode args, the terminal script, the hook
+also for a plain terminal), `test/api-chat-ui.test.ts`. Checked live with the real 2.1.2 (temporary
+HOME/XDG, as the user): installed through `installUpstream` from npm (integrity checked,
+`opencode v2.1.2`), service started through `ensureOpenCodeService` (`/proc/<pid>/exe` = the
+module binary, `OPENCODE_DISABLE_AUTOUPDATE=1` in its environment), 11 models incl. OpenCode's free
+ones, a chat on `opencode/minimax-m3.1-flash-free` (free): shell card → "always" → `once` + Auto,
+no saved project rule upstream, `echo` row and answer, turn completed; the TUI attached in tmux
+showed the same session; restart-after-update path and Stop. Needs a real run: the chat UI end
+to end, Windows/WSL, macOS.
 
 ### Upstream modules: OpenCode and ZeroClaw
 
-`main/upstream/` (Marks-owned, IPC `marksUpstream:request` `status|install|restartServer`, sender/
-frame checked; preload `upstreamStatus/Install/RestartServer`, progress `marksUpstream:progress`)
-installs and updates an upstream CLI from its official GitHub release into the user's module
-folder, without root, like the CLIProxyAPI card but per user:
-- Releases (`github-release.ts`, shared with CLIProxyAPI): `releases/latest` of the trusted
-  repository only (`vX.Y.Z`, no draft/prerelease, cached 1 h), each asset's API `digest`
+`main/upstream/` (Marks-owned, IPC `marksUpstream:request` `status|install|service`, sender/frame
+checked; preload `upstreamStatus/Install/Service`, progress `marksUpstream:progress`) installs and
+updates an upstream CLI from its official release into the user's module folder, without root,
+like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`upstream/install.ts`):
+- GitHub (`githubSource`, `github-release.ts`, shared with CLIProxyAPI; ZeroClaw): `releases/latest`
+  of the trusted repository only (`vX.Y.Z`, no draft/prerelease), each asset's API `digest`
   (`sha256:…`), downloads only from `https://github.com/<repo>/releases/download/` through GitHub
   release hosts (bounded, at most five redirects).
-- `upstream/install.ts` `installUpstream(spec, confirmedVersion, mode)`: refuses a latest release
-  other than the one the user confirmed; picks the asset for the host (`HOST_PROBE_SCRIPT`: `uname
-  -m`, avx2 in /proc/cpuinfo, musl); checks the API digest (and a published `SHA256SUMS`, which
-  must agree); checks the tar listing first (only regular files and folders, no absolute or `..`
-  path, nothing outside the allowlist); extracts only the allowlisted members into a private
-  0700 `<module>/.stage-<uuid>` (same filesystem); each binary must be a regular non-link ELF file
-  and report exactly the confirmed x.y.z under `env -i` with a private HOME/XDG; then promotes:
-  `file` layout = rename over the old binary (a running server keeps its inode), `directory`
-  layout = `bin` → `bin.old`, stage → `bin` (several binaries always change together). Every step
-  is argv to a fixed program, through a Runner: direct on Linux, `wsl.exe --exec` on Windows (the
-  archive copied into WSL and re-checked with `sha256sum`; untested). Destination:
-  `<userData>/modules/<id>/bin`, or `~/.local/share/chat-marks-modules/<id>/bin` in WSL.
-- OpenCode (`opencode/release.ts`): `opencode-linux-<x64|arm64>[-baseline][-musl].tar.gz` (upstream
-  `install` script logic; no checksum file, the API digest is the checksum), exactly one member
-  `opencode`. The update indicator compares installed vs latest; a latest the gate does not
-  support (2.x) is shown "not supported yet" and never offered. After an update the server
-  restarts without interrupting a running turn (`requestOpenCodeRestart`).
+- npm (`npmSource`, `npm-release.ts`; OpenCode 2.x): only `https://registry.npmjs.org/` (no other
+  host, no redirect, no credentials). `/<pkg>/latest` (`@opencode%2fcli/latest`: exact x.y.z, its
+  `optionalDependencies` must list the host's platform package at that same version), then the
+  platform package's version document (`@opencode%2fcli-linux-x64/2.1.2`, bounded 1 MiB), whose
+  `dist.tarball` must be exactly the canonical URL and whose `dist.integrity` (SRI `sha512-…`) must
+  match the downloaded tarball before anything is extracted.
+- `installUpstream(spec, confirmedVersion, mode)`: refuses a latest other than the one the user
+  confirmed (`version_changed`); picks the build for the host (`HOST_PROBE_SCRIPT`: `uname -m`,
+  avx2 in /proc/cpuinfo, musl); checks the tar listing first (only regular files and folders, no
+  absolute or `..` path, nothing outside the allowlist); extracts only the allowlisted members
+  (with `--strip-components` for npm's `package/bin/`) into a private 0700 `<module>/.stage-<uuid>`
+  (same filesystem); each binary must be a regular non-link ELF file and report exactly the
+  confirmed x.y.z under `env -i` with a private HOME/XDG; then promotes: `file` layout = rename over
+  the old binary (a running service keeps its inode), `directory` layout = `bin` → `bin.old`,
+  stage → `bin`. Every step is argv to a fixed program, through a Runner: direct on Linux,
+  `wsl.exe --exec` on Windows (the archive copied into WSL and re-checked with `sha256sum`;
+  untested). Destination: `<userData>/modules/<id>/bin`, or `~/.local/share/chat-marks-modules/<id>/bin` in WSL.
+- OpenCode (`opencode/release.ts`, 2.x only; 1.x GitHub releases are a different server API and are
+  not used): `@opencode/cli-linux-<x64|arm64>[-baseline][-musl]` (baseline on x64 without avx2),
+  tarball `package/package.json` + `package/bin/opencode`; only `package/bin/opencode` is
+  extracted (256 MiB bound; 2.1.2 x64 is 99 MB). The update indicator compares installed vs npm
+  latest; a latest outside the gate (3.x) is shown "not supported yet" and never offered. After an
+  update the service restarts without interrupting a running answer (`requestOpenCodeRestart`).
+  OpenCode's own `opencode upgrade` is never offered and its auto-update is off.
 - ZeroClaw (`zeroclaw/release.ts`, `zeroclaw-labs/zeroclaw`, Apache-2.0, checked against 0.8.6):
   `zeroclaw-<x86_64|aarch64>-unknown-linux-<gnu|musl>.tar.gz` + `SHA256SUMS`; installs `zeroclaw`,
   `zerocode` (the TUI, which needs the daemon's exact version) and the dashboard `web/dist/`
@@ -1850,12 +1879,17 @@ folder, without root, like the CLIProxyAPI card but per user:
   `~/.zeroclaw` (shared with the retired MarksClaw fork) is never touched.
 - UI (`renderer/upstream-manage-ui.ts` in the module's card): installed version (or "not installed
   by Chat Marks" for a PATH binary), latest release, "Update available", support notes, OpenCode's
-  server state (port, restart pending), and one Install/Update button confirmed with
-  `window.confirm`; Settings shows the progress.
-Proof: `test/upstream-release.test.ts` (asset matrix, digest/SHA256SUMS, redirect hosts, listing
-allowlist, links, non-ELF, version mismatch, confirmed-version refusal, rename vs bin swap, with
-real `tar` archives). Installed through this code from the real releases on Linux (OpenCode 1.19.3
-digest-verified, `--version` 1.19.3; ZeroClaw 0.8.6, `zeroclaw 0.8.6 (c473221)`, `zerocode 0.8.6`).
+  background service (running on port / stopped, starts on first use / run by another OpenCode,
+  restart pending) with Start / Stop / Restart (Stop and Restart confirmed), and one Install/Update
+  button confirmed with `window.confirm` naming the source (npm registry / GitHub).
+Proof: `test/upstream-release.test.ts` (npm platform package matrix, the 2.x gate, `opencode
+v2.1.2` parsing, registry host allowlist, exact versions, sha512 integrity ok/mismatch, no
+redirect, canonical tarball URL, member allowlist of the npm tarball, OpenCode install/update with
+rename, refusals (moved latest, integrity, missing platform build, foreign tarball URL, extra or
+linked member, non-ELF, wrong version); GitHub digest/SHA256SUMS, redirect hosts and ZeroClaw's bin
+swap, with real `tar` archives). Installed through this code from the real sources on Linux
+(OpenCode 2.1.2 from npm, integrity-verified, `opencode v2.1.2`; ZeroClaw 0.8.6, `zeroclaw 0.8.6
+(c473221)`, `zerocode 0.8.6`).
 
 ### CLIProxyAPI module management
 
@@ -6070,8 +6104,13 @@ shared-tree change may already have addressed them.
   `~/.local/share/opencode/opencode.db` (from earlier upstream use) may be migrated by the version
   Chat Marks installs, and an older OpenCode the user runs elsewhere may then not open it. No
   one-time backup offer exists yet. Same for `~/.zeroclaw` on ZeroClaw's first run.
-- **OpenCode TUI "always":** an "always" answered in the attached TUI still allows that pattern for
-  the whole folder instance (OpenCode's own rule); only the chat's own answers avoid it.
+- **OpenCode TUI "always":** an "always" answered in the attached TUI still saves a project-wide
+  allow rule upstream (OpenCode 2.x's own rule, persistent); only the chat's own answers avoid it.
+- **OpenCode service shared with the user:** the background service is per user. When the user's
+  own OpenCode (another binary) runs it, OpenCode chats are unavailable until the user restarts it
+  from the module card; a Restart interrupts that service's running sessions.
+- **MarksCode history import:** MarksCode's databases share the OpenCode 2.x schema; no import
+  exists (see the data-preservation rule).
 
 Do not restore obsolete claims while investigating: two MCP surfaces, one global prime run,
 three browser command kinds, fixed 60s Unattributed repair, tab-query

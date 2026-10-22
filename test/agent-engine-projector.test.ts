@@ -137,7 +137,7 @@ describe('turn projector (synthetic CLI streams)', () => {
     expect(turn.usage).toEqual({ inputTokens: 3000, outputTokens: 120, cachedInputTokens: 0, reasoningTokens: 0 });
   });
 
-  it('projects an OpenCode-shaped turn: a TUI-answered permission, an error, a stop that settles the open tool, then ignores late events', async () => {
+  it('projects an OpenCode-shaped turn: a TUI-answered permission, an error, an interrupt that settles the open tool, then ignores late events', async () => {
     const opencode = fixture('opencode-turn');
     const { sink, rows } = memorySink();
     const answers: Array<[string, ApprovalOutcome]> = [];
@@ -151,17 +151,17 @@ describe('turn projector (synthetic CLI streams)', () => {
       'tool exec_command ok Ran npm run format [✓ 100 ms]',
       'error recoverable The provider is overloaded; retrying.',
       'tool apply_patch tool_execution_error Edited a.ts [did not finish]',
-      'turn_end stopped'
+      'turn_end interrupted'
     ]);
-    expect(rows.at(-1)).toMatchObject({ kind: 'turn_end', detail: 'Stopped from the OpenCode terminal' });
+    expect(rows.at(-1)).toMatchObject({ kind: 'turn_end', detail: 'The OpenCode run was stopped in its terminal' });
     // Answered in the attached TUI: the card goes and the app sends no answer of its own.
     expect(answers).toEqual([['per_1', 'resolved']]);
     expect(approval.openCodeApprovalDecision('resolved')).toBeNull();
-    // "Always" is never sent upstream (it would allow the pattern for every chat of the folder).
+    // "Always" is never sent upstream (2.x saves it for the whole project, beating every session's ask).
     expect(approval.openCodeApprovalDecision('always')).toBe('once');
-    expect(approval.openCodeApprovalDecision('stop')).toBe('reject');
+    expect(approval.openCodeApprovalDecision('stop')).toBeNull();
     expect(gate.view()).toBeNull();
-    expect(turn.ended).toBe('stopped');
+    expect(turn.ended).toBe('interrupted');
   });
 
   it('streams at most once per interval, fails a turn after a fatal error, and answers a pending approval stop at the end', async () => {

@@ -58,7 +58,7 @@ vi.mock('node:child_process', () => {
     } else if (file === '/usr/bin/env' && args[0] === '-i') {
       // An upstream module's private-HOME version probe.
       fixture.probes.push(args);
-      callback(null, args.at(-2)!.endsWith('opencode') ? '1.19.3\n' : 'zeroclaw 0.8.6 (c473221)\n', '');
+      callback(null, args.at(-2)!.endsWith('opencode') ? 'opencode v2.1.2\n' : 'zeroclaw 0.8.6 (c473221)\n', '');
     } else if (args.includes('display-message')) {
       callback(null, `${fixture.tmuxCreated}\n`, '');
     } else if (file === '/usr/local/bin/codex') callback(null, 'codex-cli 1.0\n', '');
@@ -81,8 +81,8 @@ vi.mock('../src/main/durable.js', () => ({
 vi.mock('../src/main/cli-source-install.js', () => ({ installPublishedCli: vi.fn() }));
 
 import {
-  cliAction, cliChatRuntime, cliCreateSession, cliEndEngineTerminal, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalRefresh, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
-  OPENCODE_ATTACH_SCRIPT, registerCliEngineOpenHook, registerCliEngineRegistration, registerCliModuleIpc, registerCliModuleStopHook
+  cliAction, cliChatRuntime, cliCreateSession, cliEndEngineTerminal, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
+  OPENCODE_TERMINAL_SCRIPT, registerCliEngineOpenHook, registerCliModuleIpc, registerCliModuleStopHook
 } from '../src/main/cli-modules.js';
 
 beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.clients = ''; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
@@ -259,15 +259,15 @@ describe('Persistent coding CLI terminal', () => {
       fixture.missingSession = false;
     }
   });
-  it('attaches an OpenCode chat\'s live terminal through the fixed launcher with only `--dir <cwd> -s <session>`', async () => {
+  it('attaches an OpenCode chat\'s live terminal with only `-s <session> <folder>`, self-update off, after the service hook (also for a plain terminal)', async () => {
     if (process.platform === 'win32') return;
-    const args = ['--dir', '/approved/project', '-s', 'ses_e9fa19daaffebP7AerPiuan5CM'];
+    const args = ['-s', 'ses_e9fa19daaffebP7AerPiuan5CM', '/approved/project'];
     try {
       await cliAction('opencode', 'enable');
       expect(await cliModuleState('opencode')).toEqual({ enabled: true, command: true, binary: '/usr/local/bin/opencode', managed: false });
-      for (const bad of [['--dir', '/approved/project', '-s', '--fork'], ['--dir', 'relative', '-s', 'ses_1'], ['--dir', '/a/../b', '-s', 'ses_1'],
-        ['-s', 'ses_1', '--dir', '/approved'], ['--dir', '/approved', '-s', 'ses_1', '--password'], ['--dir', '/approved', '-s', 'ses 1'],
-        ['-s', 'ses_123', '.'], ['--dir', '/approved\u0000', '-s', 'ses_1']]) {
+      for (const bad of [['-s', '--fork', '/approved'], ['-s', 'ses_1', 'relative'], ['-s', 'ses_1', '/a/../b'], ['--dir', '/approved', '-s', 'ses_1'],
+        ['-s', 'ses_1', '/approved', '--password'], ['-s', 'ses 1', '/approved'], ['-s', 'ses_123', '.'], ['-s', 'ses_1', '/approved\u0000'],
+        ['attach', 'http://127.0.0.1:1', '-s', 'ses_1']]) {
         await expect(cliEngineTerminal('opencode', { sessionId: 'chat-session-o', projectId: null, args: bad, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
       }
       await expect(cliEngineTerminal('codex', { sessionId: 'chat-session-o', projectId: null, args, title: 'x' })).rejects.toThrow('Invalid terminal arguments');
@@ -276,32 +276,28 @@ describe('Persistent coding CLI terminal', () => {
       fixture.missingSession = true;
       const hook = vi.fn(async (_session: unknown): Promise<void> => undefined);
       registerCliEngineOpenHook('opencode', hook);
-      // Without a running server's registration the terminal is refused before tmux starts.
-      await expect(cliOpen(session.id, 80, 24, 'opencode-no-server')).rejects.toThrow('not running');
+      // The hook (the service must run, or the open is refused) comes before tmux starts.
+      hook.mockRejectedValueOnce(new Error('The OpenCode background service runs another OpenCode program'));
+      await expect(cliOpen(session.id, 80, 24, 'opencode-foreign')).rejects.toThrow('another OpenCode program');
       expect(fixture.commands.some(command => command.includes('new-session'))).toBe(false);
-      registerCliEngineRegistration('opencode', async () => '/home/test/.config/chat-marks/opencode/server');
       await cliOpen(session.id, 80, 24, 'opencode-terminal');
       expect(hook).toHaveBeenCalledWith(expect.objectContaining({ engineChat: 'chat-session-o' }));
-      // The URL and password are read from the 0600 file when the TUI starts: never in tmux's argv or environment.
+      // The TUI reads the service's URL and password itself: nothing of them in tmux's argv.
       const created = fixture.commands.find(command => command.includes('new-session'))!;
       expect(created).toEqual([
         'tmux', '-L', expect.any(String), 'new-session', '-d', '-s', session.tmuxSession, '-c', '/home/test',
-        'sh', '-c', OPENCODE_ATTACH_SCRIPT, 'marks-cli', '/home/test/.config/chat-marks/opencode/server', '/usr/local/bin/opencode', ...args
+        'sh', '-c', OPENCODE_TERMINAL_SCRIPT, 'marks-cli', '/usr/local/bin/opencode', ...args
       ]);
-      expect(OPENCODE_ATTACH_SCRIPT).toContain('exec "$b" attach "$u" "$@"');
-      expect(created.join(' ')).not.toMatch(/OPENCODE_SERVER_PASSWORD=[^$]|http:\/\//);
-      // A terminal older than the running server is ended, so the next open recreates it.
-      fixture.missingSession = false;
+      expect(OPENCODE_TERMINAL_SCRIPT).toBe('OPENCODE_DISABLE_AUTOUPDATE=1 exec "$@"');
+      expect(created.join(' ')).not.toMatch(/PASSWORD|http:\/\//);
+      // A plain OpenCode terminal runs the same hook first, so its TUI joins the service the app started.
       fixture.commands.length = 0;
-      fixture.tmuxCreated = 1_000;
-      await cliEngineTerminalRefresh('chat-session-o', 2_000_000);
-      expect(fixture.commands.some(command => command.includes('kill-session'))).toBe(true);
-      fixture.commands.length = 0;
-      await cliEngineTerminalRefresh('chat-session-o', 500_000);
-      expect(fixture.commands.some(command => command.includes('kill-session'))).toBe(false);
+      const plain = await cliCreateSession('opencode', null);
+      await cliOpen(plain.id, 80, 24, 'opencode-plain');
+      expect(hook).toHaveBeenLastCalledWith(expect.objectContaining({ id: plain.id }));
+      expect(fixture.commands.find(command => command.includes('new-session'))!.slice(-4)).toEqual(['sh', '-c', OPENCODE_TERMINAL_SCRIPT, 'marks-cli', '/usr/local/bin/opencode'].slice(-4));
     } finally {
       registerCliEngineOpenHook('opencode', null);
-      registerCliEngineRegistration('opencode', null);
       fixture.missingSession = false;
       await cliAction('opencode', 'disable');
     }

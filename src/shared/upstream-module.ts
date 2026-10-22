@@ -1,7 +1,8 @@
 /**
- * Chat Marks: modules that install an upstream CLI from its official GitHub release into the
- * user's module folder (Settings > Modules): OpenCode (also the `opencode` chat engine) and
- * ZeroClaw. Shared shapes only; no paths, binaries or secrets cross to the renderer.
+ * Chat Marks: modules that install an upstream CLI from its official release into the user's
+ * module folder (Settings > Modules): OpenCode 2.x from the npm registry (also the `opencode`
+ * chat engine) and ZeroClaw from its GitHub releases. Shared shapes only; no paths, binaries or
+ * secrets cross to the renderer.
  */
 export const UPSTREAM_MODULE_IDS = ['opencode', 'zeroclaw'] as const;
 export type UpstreamModuleId = typeof UPSTREAM_MODULE_IDS[number];
@@ -29,7 +30,7 @@ export interface UpstreamModuleVersions {
   latest: string | null;
   /** The latest release is newer than the managed one and supported by this version of the app. */
   updateAvailable: boolean;
-  /** A newer release exists that this version of the app does not support yet (e.g. OpenCode 2.x). */
+  /** A newer release exists that this version of the app does not support yet (e.g. OpenCode 3.x). */
   latestUnsupported: boolean;
   /** Support of the version in use (managed first, else unmanaged); null when none. */
   support: UpstreamSupport | null;
@@ -49,20 +50,25 @@ export interface UpstreamInstallProgress {
   error?: string;
 }
 
-/** The OpenCode server the app runs for its chats (one per app instance). */
-export interface OpenCodeServerView {
-  running: boolean;
+/**
+ * OpenCode's background service (`opencode service`, one per user, shared with its TUI):
+ * `running` by the binary this app uses, `foreign` when another OpenCode program runs it.
+ */
+export interface OpenCodeServiceView {
+  state: 'running' | 'stopped' | 'foreign';
   /** The loopback port it listens on; null while stopped. */
   port: number | null;
   version: string | null;
-  /** An update was installed while a turn ran: the server restarts when the last turn ends. */
+  /** An update was installed while a session ran: the service restarts when nothing runs. */
   restartPending: boolean;
 }
+
+export type OpenCodeServiceAction = 'start' | 'stop' | 'restart';
 
 export interface UpstreamModuleStatus {
   module: UpstreamModuleId;
   versions: UpstreamModuleVersions;
   install: UpstreamInstallProgress | null;
   /** OpenCode only. */
-  server?: OpenCodeServerView;
+  service?: OpenCodeServiceView;
 }

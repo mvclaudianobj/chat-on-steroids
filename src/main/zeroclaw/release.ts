@@ -9,7 +9,7 @@
  * auto-detected locations).
  */
 import { UPSTREAM_REPOSITORIES, UPSTREAM_TAG } from '../../shared/upstream-module.js';
-import type { HostInfo, UpstreamSpec } from '../upstream/install.js';
+import { githubSource, type HostInfo, type UpstreamSpec } from '../upstream/install.js';
 
 export const ZEROCLAW_TESTED = '0.8.6';
 
@@ -25,15 +25,17 @@ const DASHBOARD = /^web\/dist\/(?:[A-Za-z0-9_@.+-]+\/)*[A-Za-z0-9_@.+-]*$/;
 export const ZEROCLAW_SPEC: UpstreamSpec = {
   id: 'zeroclaw',
   name: 'ZeroClaw',
-  repository: UPSTREAM_REPOSITORIES.zeroclaw,
-  tag: UPSTREAM_TAG,
+  source: githubSource({
+    repository: UPSTREAM_REPOSITORIES.zeroclaw,
+    tag: UPSTREAM_TAG,
+    assets(release, host) {
+      const name = zeroclawAssetName(host);
+      const archive = name ? release.assets.find(asset => asset.name === name) : undefined;
+      const checksums = release.assets.find(asset => asset.name === 'SHA256SUMS');
+      return archive && checksums ? { archive, checksums } : null;
+    }
+  }),
   archiveLimit: 96 * 1024 * 1024,
-  assets(release, host) {
-    const name = zeroclawAssetName(host);
-    const archive = name ? release.assets.find(asset => asset.name === name) : undefined;
-    const checksums = release.assets.find(asset => asset.name === 'SHA256SUMS');
-    return archive && checksums ? { archive, checksums } : null;
-  },
   allowedEntry: name => TOP.has(name) || DASHBOARD.test(name),
   members: ['zeroclaw', 'zerocode', 'web/dist/'],
   binaries: ['zeroclaw', 'zerocode'],

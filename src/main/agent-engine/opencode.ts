@@ -1,55 +1,59 @@
 /**
- * The `opencode` agent engine: a Chat Marks API chat whose turns run in a session of the upstream
- * OpenCode server the app owns (opencode/server.ts), over the routes the OpenCode TUI itself uses
- * (opencode-client.ts). The same session opens live in the module's durable tmux terminal
- * (`opencode attach <url> --dir <cwd> -s <session>`), so the TUI and the chat show one conversation.
+ * The `opencode` agent engine: a Chat Marks API chat whose turns run in a session of upstream
+ * OpenCode 2.x's background service (`opencode service`, opencode/service.ts), over its `/api`
+ * HTTP API (opencode-client.ts). The same session opens live in the module's durable tmux
+ * terminal (`opencode -s <session> <folder>`, the TUI attached to the same service), so the TUI
+ * and the chat show one conversation. Checked against the real 2.1.2.
  *
  * - status: module enabled, command capability, binary (cli-modules resolution: the module's own
- *   install first, else PATH), and its `--version` (probed with a private HOME) inside the version
- *   gate (opencode/release.ts). The server is not needed: it starts lazily on first use.
- * - create: only in an approved local project. The backend session gets a ruleset that asks
- *   before `bash` and `edit`, and denies `question` (a turn must not block on it),
- *   `external_directory` and edits under `.markscode/` (another app's data).
- * - send: the event stream connects before the prompt (`prompt_async`, the chat's model and
- *   effort as `variant`); events go through the projector in order. Only parts of assistant
- *   messages answering this turn's question are projected; the first user message after the
- *   prompt is the question (`prompt_async` answers no id).
- * - Approvals: `permission.asked` becomes an ApprovalGate card bound to the sha256 of
- *   {sessionID, id, permission, patterns}. The answer is posted to that exact request after it is
- *   read back from `/permission` and still matches. "Always" is never sent upstream (it would
- *   allow the pattern for every chat in the folder, beating their deny rules): the request is
- *   answered `once`, the chat switches to Auto and its Auto ruleset is appended (deny rules last).
- *   A `permission.replied` this app did not send (the TUI answered) removes the card.
- * - Turn end: `session.status` idle after the prompt. `session.error` `MessageAbortedError` is a
- *   stop (the user's, or another client's: interrupted); any other error fails the turn.
- * - The stream is volatile: after every reconnect the turn is reconciled from the session's
- *   messages, pending permissions and `/session/status`.
- * - recover: the server dies with the app, so no turn survives it; the engine-neutral recovery
- *   closes open turns `interrupted` and the next send continues the same OpenCode session.
- * - terminal: live; opening it starts the server if needed and recreates a terminal older than
- *   the running server (its URL and password are read at start).
+ *   install first, else PATH), its `--version` (private HOME) inside the version gate
+ *   (opencode/release.ts), and the service not run by another OpenCode program. A stopped
+ *   service is fine: it starts on first use (create, send, models, terminal open).
+ * - create: only in an approved local project. The session is created at that location with a
+ *   ruleset that asks before `shell` and `edit`, and denies `question` (a turn must not block on
+ *   a form), `external_directory`, absolute (outside the project) `edit`/`read` resources and
+ *   edits under `.markscode/` (another app's data). Inside the project resources are relative.
+ * - send: the event stream connects before the prompt is posted; events go through the projector
+ *   in order. `permission.asked` becomes an ApprovalGate card bound to the sha256 of
+ *   {sessionID, requestID, action, resources}; the answer is posted to that exact request after it
+ *   is read back and still matches. "Always" is never sent upstream (2.x saves it for the whole
+ *   project, beating every session's `ask`): it is answered `once` and the chat switches to Auto
+ *   (its own ruleset, replaced). A `permission.replied` this app did not send (the TUI) removes
+ *   the card. `session.execution.*` ends the turn.
+ * - The stream is volatile: after every reconnect the turn is reconciled from pending
+ *   permissions, `/api/session/active` and the session's messages.
+ * - recover: the service outlives the app, so a turn left open by the previous process is
+ *   re-attached while its session still runs; otherwise what finished is imported and the turn
+ *   closes with the session's outcome.
+ * - terminal: live; both the chat and the TUI are clients of the same service session, so the
+ *   terminal may open while a turn runs. Every attach first makes sure the service runs.
  */
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { logInfo, logWarn } from '../logger.js';
 import { notifyChanged } from '../session/recorder.js';
-import { bindSessionProject, createSession, getSession } from '../session/store.js';
+import { bindSessionProject, createSession, getSession, readEvents, upsertMessageEvent } from '../session/store.js';
 import { AGENT_ENGINE_LABELS } from '../../shared/agent-engine.js';
 import {
   API_CHAT_APPROVAL_MODES, API_CONVERSATION_PREFIX, isApiConversationId,
   type ApiChatApprovalDecision, type ApiChatApprovalMode, type ApiChatEffort, type ApiChatModel, type ApiChatView
 } from '../../shared/api-chat.js';
 import type { TurnOutcome } from '../../shared/session.js';
+import type { OpenCodeServiceView, UpstreamSupport } from '../../shared/upstream-module.js';
 import { MAX_API_CHAT_INPUT_CHARS } from '../api-chat/executor.js';
 import { ApprovalGate, argsHash, openCodeApprovalDecision, type ApprovalOutcome } from './approval.js';
-import { storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
-import { storeProjectorSink, TurnProjector } from './projector.js';
+import { chatRecords, storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
+import { claimTurnRecovery, closeInterruptedTurn } from './recovery.js';
+import { storeProjectorSink, TurnProjector, type ProjectorSink } from './projector.js';
+import { engineToolCallId } from './tool-row.js';
+import { assistantMessageId } from './transcript.js';
 import type { AgentEngine, EngineChatRef, EngineEvent, EngineFileChange, EngineModelQuery, EngineTerminal, EngineToolKind } from './types.js';
 import {
-  OpenCodeHttpError, type OpenCodeClient, type OpenCodeEvent, type OpenCodeMessage, type OpenCodePermission, type OpenCodeRule
+  OpenCodeHttpError, type OpenCodeClient, type OpenCodeEvent, type OpenCodeModel, type OpenCodeModelRef,
+  type OpenCodePermission, type OpenCodeRule
 } from './opencode-client.js';
-import type { UpstreamSupport } from '../../shared/upstream-module.js';
 import { opencodeSupport } from '../opencode/release.js';
+import { OPENCODE_SERVICE_FOREIGN as FOREIGN } from '../opencode/service.js';
 
 const ENGINE = 'opencode' as const;
 const LABEL = AGENT_ENGINE_LABELS.opencode;
@@ -63,39 +67,31 @@ const DECLINED = 'The user declined this in Chat Marks.';
 
 // ---------------------------------------------------------------- dependencies
 
-export interface OpenCodeServerRef {
-  client: OpenCodeClient;
-  generation: number;
-  startedAt: number;
-  version: string;
-}
-
 export interface OpenCodeDeps {
   /** The module as cli-modules sees it (enabled, command capability, resolved binary, managed or from PATH). */
   moduleState(): Promise<{ enabled: boolean; command: boolean; binary: string | null; managed: boolean }>;
   /** The binary's version, probed with a private HOME (never the user's data). */
   version(binary: string): Promise<string | null>;
   support(version: string | null): UpstreamSupport | null;
-  /** The folder the model list is read for (home; the WSL home on Windows). */
-  modelsDirectory(): Promise<string>;
-  /** The approved project's canonical folder as the server sees it (WSL path on Windows). */
+  /** The approved project's canonical folder as the service sees it (WSL path on Windows). */
   projectFolder(projectId: string): Promise<string>;
-  /** The running server, started when none runs. */
-  server(): Promise<OpenCodeServerRef>;
-  /** The server running now, without starting one. */
-  runningServer(): OpenCodeServerRef | null;
-  /** Wires turn tracking to the server: restart waits for idle; an exit fails running turns. */
-  bindServer(options: { busy(): boolean; onExit(generation: number, reason: string): void }): void;
+  /** The running service, started (by the resolved binary) when none runs. */
+  service(): Promise<{ client: OpenCodeClient }>;
+  /** The service running now, without starting one (recovery); null when stopped or not the app's. */
+  runningService(): Promise<{ client: OpenCodeClient } | null>;
+  serviceView(): Promise<OpenCodeServiceView>;
+  /** Wires turn tracking to the service: a restart after an update waits for no turn. */
+  bindService(options: { busy(): boolean }): void;
   turnsSettled(): void;
   /** The chat's durable module terminal (cli-modules `cliEngineTerminal('opencode', …)`). */
   openTerminal(chat: { sessionId: string; projectId: string; args: string[]; title: string }): Promise<{ id: string }>;
-  /** Registers the check every OpenCode engine terminal runs before it attaches (cli-modules open hook). */
-  onTerminalOpen(check: (chatSessionId: string | undefined) => Promise<void>): void;
-  /** Kills the chat's terminal when it is older than `sinceMs` (it holds a dead server's URL). */
-  refreshTerminal(chatSessionId: string, sinceMs: number): Promise<void>;
+  /** Registers the check every OpenCode terminal runs before it attaches (cli-modules open hook). */
+  onTerminalOpen(check: () => Promise<void>): void;
   reconnectDelaysMs?: readonly number[];
   stopGraceMs?: number;
 }
+
+const service = () => import('../opencode/service.js');
 
 const defaultDeps: OpenCodeDeps = {
   async moduleState() {
@@ -107,12 +103,6 @@ const defaultDeps: OpenCodeDeps = {
     return cliUpstreamVersion('opencode', binary);
   },
   support: version => opencodeSupport(version),
-  async modelsDirectory() {
-    const { app } = await import('electron');
-    if (process.platform !== 'win32') return app.getPath('home');
-    const { cliWslHome } = await import('../cli-modules.js');
-    return cliWslHome();
-  },
   async projectFolder(projectId) {
     const { projectWorkspace, localProjectPath } = await import('../projects.js');
     const local = localProjectPath(await projectWorkspace(projectId));
@@ -123,33 +113,22 @@ const defaultDeps: OpenCodeDeps = {
     if (!mapped.startsWith('/')) throw new Error('Workspace could not be mapped to WSL');
     return mapped;
   },
-  server: async () => (await import('../opencode/server.js')).ensureOpenCodeServer(),
-  runningServer: () => serverModule?.runningOpenCodeServer() ?? null,
-  bindServer: options => {
-    void import('../opencode/server.js').then(module => {
-      serverModule = module;
-      module.bindOpenCodeServer({ busy: options.busy, onExit: (server, reason) => options.onExit(server.generation, reason) });
-    });
-  },
-  turnsSettled: () => serverModule?.openCodeTurnsSettled(),
+  service: async () => (await service()).ensureOpenCodeService(),
+  runningService: async () => (await service()).runningOpenCodeService(),
+  serviceView: async () => (await service()).openCodeServiceView(),
+  bindService: options => { void service().then(module => module.bindOpenCodeService(options)); },
+  turnsSettled: () => { void service().then(module => module.openCodeTurnsSettled()); },
   openTerminal: async chat => (await import('../cli-modules.js')).cliEngineTerminal('opencode', chat),
   onTerminalOpen: check => {
-    void import('../cli-modules.js').then(({ registerCliEngineOpenHook, registerCliEngineRegistration }) => {
-      registerCliEngineOpenHook('opencode', session => check(session.engineChat));
-      // The attach launcher reads the running server's URL and password from this file.
-      registerCliEngineRegistration('opencode', async () => (await import('../opencode/server.js')).ensureOpenCodeServer().then(server => server.registration));
-    })
+    void import('../cli-modules.js').then(({ registerCliEngineOpenHook }) => registerCliEngineOpenHook('opencode', () => check()))
       .catch(error => logWarn(`OpenCode chats: terminal hook not registered: ${(error as Error).message}`));
-  },
-  refreshTerminal: async (chatSessionId, sinceMs) => (await import('../cli-modules.js')).cliEngineTerminalRefresh(chatSessionId, sinceMs)
+  }
 };
-
-let serverModule: typeof import('../opencode/server.js') | null = null;
 
 let deps: OpenCodeDeps = defaultDeps;
 let bound = false;
 
-/** Tests replace the server, module and project lookups; null restores the real ones. */
+/** Tests replace the service, module and project lookups; null restores the real ones. */
 export function setOpenCodeDepsForTests(next: Partial<OpenCodeDeps> | null): void {
   deps = next ? { ...defaultDeps, ...next } : defaultDeps;
   terminalHooked = false;
@@ -159,18 +138,12 @@ export function setOpenCodeDepsForTests(next: Partial<OpenCodeDeps> | null): voi
 function bind(): void {
   if (bound) return;
   bound = true;
-  deps.bindServer({
-    busy: () => [...running.values()].some(turn => !turn.ended),
-    onExit: (generation, reason) => {
-      for (const turn of [...running.values()]) {
-        if (turn.generation !== generation || turn.ended) continue;
-        void enqueue(turn, async () => {
-          await turn.projector.apply({ type: 'error', message: `${reason}. The OpenCode session keeps what it finished; send again to continue.`, fatal: true });
-          await end(turn, 'failed');
-        });
-      }
-    }
-  });
+  deps.bindService({ busy: () => [...running.values()].some(turn => !turn.ended) });
+}
+
+async function connect(): Promise<OpenCodeClient> {
+  bind();
+  return (await deps.service()).client;
 }
 
 // ---------------------------------------------------------------- status
@@ -190,10 +163,15 @@ export async function openCodeStatus(): Promise<OpenCodeStatus> {
   const version = await deps.version(state.binary).catch(() => null);
   const support = deps.support(version);
   if (!version || !support) return { available: false, detail: 'OpenCode did not report its version' };
-  if (support === 'unsupported') return { available: false, detail: `OpenCode ${version} is not supported by this version of Chat Marks (1.19 or a newer 1.x is needed)` };
+  if (support === 'unsupported') {
+    return { available: false, detail: `OpenCode ${version} is not supported by this version of Chat Marks (OpenCode 2.1 or a newer 2.x is needed; install it in Settings > Modules)` };
+  }
+  const view = await deps.serviceView().catch(() => null);
+  if (view?.state === 'foreign') return { available: false, detail: FOREIGN };
   const notes = [
     support === 'newer' ? 'newer than tested' : '',
-    state.managed ? '' : 'not installed by Chat Marks'
+    state.managed ? '' : 'not installed by Chat Marks',
+    view?.state === 'running' ? '' : 'the background service starts on first use'
   ].filter(Boolean);
   return { available: true, detail: `OpenCode ${version}${notes.length ? ` (${notes.join(', ')})` : ''}` };
 }
@@ -201,108 +179,118 @@ export async function openCodeStatus(): Promise<OpenCodeStatus> {
 // ---------------------------------------------------------------- rules, models, mapping
 
 /**
- * The chat's ruleset, appended after the agent's defaults. The last matching rule wins, so the
- * deny rules come last; `edit *` is never denied (a fully denied tool is removed).
+ * The session's permissions (`Permission.Ruleset`; the last matching rule wins). Inside the
+ * project resources are project-relative (`notes.txt`, `sub/x`); outside it they are absolute and
+ * gated by `external_directory`. `*` matches `/` (`*\/.markscode/*` covers nested folders).
  */
 export function openCodeRuleset(mode: ApiChatApprovalMode): OpenCodeRule[] {
-  const action = mode === 'auto' ? 'allow' : 'ask';
+  const effect = mode === 'auto' ? 'allow' : 'ask';
   return [
-    { permission: 'bash', pattern: '*', action },
-    { permission: 'edit', pattern: '*', action },
-    { permission: 'question', pattern: '*', action: 'deny' },
-    { permission: 'external_directory', pattern: '*', action: 'deny' },
-    // MarksCode's per-project data is not OpenCode's to change (paths are worktree-relative).
-    { permission: 'edit', pattern: '.markscode/*', action: 'deny' },
-    { permission: 'edit', pattern: '*/.markscode/*', action: 'deny' }
+    { action: 'shell', resource: '*', effect },
+    { action: 'edit', resource: '*', effect },
+    { action: 'question', resource: '*', effect: 'deny' },
+    { action: 'edit', resource: '/*', effect: 'deny' },
+    { action: 'read', resource: '/*', effect: 'deny' },
+    { action: 'external_directory', resource: '*', effect: 'deny' },
+    // MarksCode's per-project data is not OpenCode's to change.
+    { action: 'edit', resource: '.markscode/*', effect: 'deny' },
+    { action: 'edit', resource: '*/.markscode/*', effect: 'deny' }
   ];
 }
 
-/** `provider/model` as the chat stores it. */
-export const modelRowId = (model: { id: string; providerID: string }): string => `${model.providerID}/${model.id}`;
+/** `provider/model` as the chat stores it, the `Model.Ref` string form without its variant. */
+export const modelRowId = (model: Pick<OpenCodeModel, 'id' | 'providerID'>): string => `${model.providerID}/${model.id}`;
 
-export function modelRef(id: string): { providerID: string; modelID: string } {
+export function modelRef(id: string, variant: string | null): OpenCodeModelRef {
   const slash = id.indexOf('/');
   if (slash <= 0 || slash === id.length - 1) throw new Error('Choose an OpenCode model (provider/model)');
-  return { providerID: id.slice(0, slash), modelID: id.slice(slash + 1) };
+  return { providerID: id.slice(0, slash), id: id.slice(slash + 1), ...(variant ? { variant } : {}) };
 }
 
 /** What the user is asked about and its hash input: the exact request, nothing the renderer sent. */
-export function boundAction(request: Pick<OpenCodePermission, 'id' | 'sessionID' | 'permission' | 'patterns'>): Record<string, unknown> {
-  return { sessionID: request.sessionID, id: request.id, permission: request.permission, patterns: [...request.patterns] };
+export function boundAction(request: Pick<OpenCodePermission, 'id' | 'sessionID' | 'action' | 'resources'>): Record<string, unknown> {
+  return { sessionID: request.sessionID, requestID: request.id, action: request.action, resources: [...request.resources] };
 }
 
+export function permissionKind(action: string): EngineToolKind {
+  return action === 'shell' ? 'command' : action === 'edit' ? 'patch' : action === 'read' ? 'read' : 'other';
+}
+
+function permissionSummary(request: OpenCodePermission): { summary: string; files: string[] } {
+  const resources = request.resources.slice(0, 50);
+  const files = request.action === 'edit' || request.action === 'read' ? resources : [];
+  const summary = request.action === 'shell' ? resources.join('\n')
+    : request.action === 'edit' ? `Edit ${resources.join(', ')}`
+      : request.action === 'external_directory' ? `Access outside the project: ${resources.join(', ')}`
+        : `${request.action}: ${resources.join(', ')}`;
+  return { summary: [summary, request.message].filter(Boolean).join('\n'), files };
+}
+
+/** OpenCode 2.x tool names: `shell`, `write`/`edit`/`patch`, `read`/`glob`/`grep`/`list`, … */
 export function toolKind(name: string): EngineToolKind {
-  if (name === 'bash') return 'command';
-  if (name === 'edit' || name === 'write' || name === 'apply_patch' || name === 'patch' || name === 'multiedit') return 'patch';
+  if (name === 'shell') return 'command';
+  if (name === 'edit' || name === 'write' || name === 'patch' || name === 'apply_patch' || name === 'multiedit') return 'patch';
   if (name === 'read' || name === 'glob' || name === 'grep' || name === 'list') return 'read';
   return 'other';
 }
 
-const permissionKind = (permission: string): EngineToolKind =>
-  permission === 'bash' ? 'command' : permission === 'edit' ? 'patch' : permission === 'read' ? 'read' : 'other';
-
-function permissionSummary(request: OpenCodePermission): { summary: string; files: string[] } {
-  const patterns = request.patterns.slice(0, 50);
-  const metadata = record(request.metadata);
-  const filepath = text(metadata.filepath);
-  const files = request.permission === 'edit' ? (filepath ? [filepath] : patterns) : [];
-  const summary = request.permission === 'bash' ? (text(metadata.command) ?? patterns.join('\n'))
-    : request.permission === 'edit' ? `Edit ${files.join(', ')}`
-      : request.permission === 'external_directory' ? `Access outside the project: ${patterns.join(', ')}`
-        : `${request.permission}: ${patterns.join(', ')}`;
-  return { summary, files };
-}
-
 const record = (value: unknown): Record<string, unknown> => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 const text = (value: unknown): string | undefined => typeof value === 'string' ? value : undefined;
+const inputFile = (input: Record<string, unknown>): string | undefined => text(input.path) ?? text(input.filePath);
 
-/** The file a tool's input names (`filePath`), when it has one. */
-const inputFile = (input: Record<string, unknown>): string | undefined => text(input.filePath) ?? text(input.path);
-
-/** `metadata.filediff` / `metadata.diff` of `edit`/`write`, or `apply_patch`'s files. */
-function diffFiles(name: string, input: Record<string, unknown>, metadata: Record<string, unknown>): EngineFileChange[] | undefined {
-  const filediff = record(metadata.filediff);
-  const file = text(filediff.file) ?? text(metadata.filepath) ?? inputFile(input);
-  const diff = text(filediff.patch) ?? text(metadata.diff);
-  if (file) return [{ path: file, kind: name === 'write' && metadata.exists === false ? 'add' : 'update', ...(diff ? { diff } : {}) }];
-  const files = Array.isArray(metadata.files) ? metadata.files : [];
-  const changes = files.slice(0, 64).flatMap((item): EngineFileChange[] => {
-    const entry = record(item);
-    const path = text(entry.filePath) ?? text(entry.file) ?? text(entry.relativePath);
-    if (!path) return [];
-    const kind = entry.type === 'add' ? 'add' : entry.type === 'delete' ? 'delete' : entry.type === 'move' ? 'move' : 'update';
-    return [{ path, kind, ...(text(entry.diff) ?? text(entry.patch) ? { diff: text(entry.diff) ?? text(entry.patch) } : {}) }];
-  });
-  return changes.length ? changes : undefined;
+/** Files a `patch` tool's text names (`*** Add File:` / `*** Update File:` / `*** Delete File:`). */
+function patchFiles(patchText: string): EngineFileChange[] {
+  const files: EngineFileChange[] = [];
+  for (const match of patchText.matchAll(/^\*\*\* (Add|Update|Delete) File: (.+)$/gm)) {
+    files.push({ path: match[2]!.trim(), kind: match[1] === 'Add' ? 'add' : match[1] === 'Delete' ? 'delete' : 'update' });
+  }
+  return files.slice(0, 64);
 }
 
-/** The started row of one OpenCode tool call (a `ToolPart` in state running). */
+/** `FileDiff.Info[]` (`{ file, patch, status }`) from a tool's or a permission's metadata. */
+export function diffFiles(metadata: unknown): EngineFileChange[] | undefined {
+  const files = record(metadata).files;
+  if (!Array.isArray(files)) return undefined;
+  return files.slice(0, 64).flatMap((item): EngineFileChange[] => {
+    const diff = record(item);
+    const file = text(diff.file);
+    if (!file) return [];
+    return [{ path: file, kind: diff.status === 'added' ? 'add' : diff.status === 'deleted' ? 'delete' : 'update', ...(text(diff.patch) ? { diff: text(diff.patch) } : {}) }];
+  });
+}
+
+/** The started row of one OpenCode tool call. */
 export function toolStarted(toolId: string, name: string, inputValue: unknown, cwd: string | null): EngineEvent {
   const input = record(inputValue);
   const kind = toolKind(name);
   const base = { type: 'tool_started' as const, toolId, kind, name, input };
   if (kind === 'command') return { ...base, command: text(input.command) ?? '', ...(text(input.workdir) ?? cwd ? { cwd: text(input.workdir) ?? cwd! } : {}) };
   const file = inputFile(input);
-  if (kind === 'patch') return { ...base, ...(file ? { path: file, files: [{ path: file, kind: 'update' as const }] } : { files: [] }) };
+  if (kind === 'patch') {
+    const files = name === 'patch' || name === 'apply_patch' ? patchFiles(text(input.patchText) ?? '') : file ? [{ path: file, kind: 'update' as const }] : [];
+    return { ...base, ...(file ? { path: file } : {}), files };
+  }
   if (kind === 'read') return { ...base, ...(file ? { path: file } : {}) };
   return base;
 }
 
-/** The finished row from a `ToolPart` in state completed/error. */
-export function toolFinished(toolId: string, name: string, state: Record<string, unknown>, declined: boolean): EngineEvent {
-  const metadata = record(state.metadata);
-  const input = record(state.input);
-  const files = toolKind(name) === 'patch' ? diffFiles(name, input, metadata) : undefined;
+/**
+ * The finished row: `content` text is the output, `metadata.exit` the exit code, `metadata.files`
+ * (or the files the permission request showed) the diffs. A `permission.rejected` error is a decline.
+ */
+export function toolFinished(toolId: string, result: { content?: unknown; metadata?: unknown; error?: unknown }, declined: boolean,
+  shownFiles?: EngineFileChange[]): EngineEvent {
+  const output = Array.isArray(result.content)
+    ? result.content.map(item => record(item)).filter(item => item.type === 'text').map(item => text(item.text) ?? '').join('\n') : '';
+  const metadata = record(result.metadata);
+  const files = diffFiles(metadata) ?? shownFiles;
   const exit = typeof metadata.exit === 'number' ? metadata.exit : undefined;
-  if (state.status === 'error') {
-    const error = text(state.error) ?? 'The tool failed';
-    const rejected = declined || /rejected permission|declined this in Chat Marks/i.test(error);
-    return { type: 'tool_finished', toolId, status: rejected ? 'declined' : 'failed', output: text(metadata.output) ?? '', error: error.slice(0, 2_000),
-      ...(exit !== undefined ? { exitCode: exit } : {}) };
-  }
+  const failure = result.error === undefined ? undefined : record(result.error);
+  const error = failure ? text(failure.message) ?? 'The tool failed' : undefined;
+  const rejected = declined || failure?.type === 'permission.rejected';
   return {
-    type: 'tool_finished', toolId, status: 'ok', output: text(state.output) ?? text(metadata.output) ?? '',
-    ...(exit !== undefined ? { exitCode: exit } : {}), ...(files?.length ? { files } : {})
+    type: 'tool_finished', toolId, status: error !== undefined ? (rejected ? 'declined' : 'failed') : 'ok', output,
+    ...(exit !== undefined ? { exitCode: exit } : {}), ...(files?.length && error === undefined ? { files } : {}), ...(error !== undefined ? { error: error.slice(0, 2_000) } : {})
   };
 }
 
@@ -316,50 +304,53 @@ function deferred(): Deferred {
   return { promise, resolve, reject };
 }
 
+type Tokens = { input: number; output: number; reasoning: number; cached: number };
+
 interface Turn {
   sessionId: string;
   backendId: string;
-  directory: string;
   turnId: string;
   question: string;
-  generation: number;
-  client: OpenCodeClient;
+  cwd: string | null;
   projector: TurnProjector;
   gate: ApprovalGate;
   abort: AbortController;
   queue: Promise<void>;
+  /** Set right before the prompt is posted: execution events from then on are this turn's. */
   promptSent: boolean;
   promptAt: number;
-  /** The user message this turn posted, once seen (the first new user message after the prompt). */
-  questionId: string | null;
-  /** Messages known before the prompt: never this turn's question. */
-  before: Set<string>;
-  roles: Map<string, { role: string; parentID?: string }>;
-  /** Part ids by type, for deltas (`reasoning` deltas are not shown). */
-  partTypes: Map<string, string>;
-  /** Text parts already shown as final. */
-  shownTexts: Set<string>;
-  sawBusy: boolean;
+  promptMessageId: string | null;
   stopped: boolean;
   ended: boolean;
   connectedOnce: boolean;
+  /** Reconcile on the first connection too (a turn re-attached after a restart). */
+  reconcileFirst: boolean;
   connected: Deferred;
   failures: number;
+  toolNames: Map<string, string>;
   started: Set<string>;
   finished: Set<string>;
-  /** Steps counted for usage, by step-finish part id. */
-  steps: Map<string, { input: number; output: number; reasoning: number; cached: number }>;
-  error: string | null;
-  aborted: boolean;
+  /** Tool rows already stored (re-attached turn): never written twice. */
+  storedCalls: Set<string>;
+  /** Answer texts already shown, as a multiset: a reconcile does not repeat them. */
+  texts: string[];
+  /** Token use per assistant message (one per step) of this turn, summed into `usage`. */
+  steps: Map<string, Tokens>;
+  /** Permission requests shown as cards, by request id. */
   asked: Map<string, OpenCodePermission>;
+  /** The diffs a permission request showed, by tool call id (2.x `write` reports none itself). */
+  shownFiles: Map<string, EngineFileChange[]>;
+  /** Requests this app answered: their `permission.replied` is ours, not the TUI's. */
   answered: Set<string>;
   replies: Map<string, Deferred>;
+  /** Tool ids whose permission the user rejected: their failure is a decline. */
   rejected: Set<string>;
   stopTimer: NodeJS.Timeout | null;
   done: Deferred;
 }
 
 const running = new Map<string, Turn>();
+let recovery: Promise<void> | null = null;
 
 function enqueue(turn: Turn, work: () => Promise<void>): Promise<void> {
   const next = turn.queue.then(work);
@@ -376,22 +367,32 @@ async function openCodeChat(sessionId: string): Promise<{ session: { id: string;
   return { session: { id: session.id, conversationId: session.conversationId, projectId: session.projectId ?? null }, record: stored };
 }
 
-function newTurn(options: { sessionId: string; conversationId: string; backendId: string; directory: string; turnId: string; question: string; server: OpenCodeServerRef }): Turn {
+function newTurn(options: {
+  sessionId: string; conversationId: string; backendId: string; turnId: string; question: string; cwd: string | null;
+  firstStep?: number; sink?: ProjectorSink;
+}): Turn {
   const gate = new ApprovalGate(() => notifyChanged(options.sessionId));
   const turn: Turn = {
-    sessionId: options.sessionId, backendId: options.backendId, directory: options.directory, turnId: options.turnId, question: options.question,
-    generation: options.server.generation, client: options.server.client,
-    gate, abort: new AbortController(), queue: Promise.resolve(), promptSent: false, promptAt: 0, questionId: null, before: new Set(),
-    roles: new Map(), partTypes: new Map(), shownTexts: new Set(), sawBusy: false, stopped: false, ended: false, connectedOnce: false,
-    connected: deferred(), failures: 0, started: new Set(), finished: new Set(), steps: new Map(), error: null, aborted: false,
-    asked: new Map(), answered: new Set(), replies: new Map(), rejected: new Set(), stopTimer: null, done: deferred(),
+    sessionId: options.sessionId, backendId: options.backendId, turnId: options.turnId, question: options.question, cwd: options.cwd,
+    gate, abort: new AbortController(), queue: Promise.resolve(), promptSent: false, promptAt: 0, promptMessageId: null,
+    stopped: false, ended: false, connectedOnce: false, reconcileFirst: false, connected: deferred(), failures: 0,
+    toolNames: new Map(), started: new Set(), finished: new Set(), storedCalls: new Set(), texts: [], steps: new Map(), asked: new Map(),
+    shownFiles: new Map(), answered: new Set(), replies: new Map(), rejected: new Set(), stopTimer: null, done: deferred(),
     projector: null as unknown as TurnProjector
   };
   turn.projector = new TurnProjector({
-    engine: ENGINE, conversationId: options.conversationId, turnId: options.turnId, sink: storeProjectorSink(options.sessionId),
-    approvals: { gate, answer: (requestId, outcome) => answerRequest(turn, requestId, outcome) }
+    engine: ENGINE, conversationId: options.conversationId, turnId: options.turnId, sink: options.sink ?? storeProjectorSink(options.sessionId),
+    approvals: { gate, answer: (requestId, outcome) => answerRequest(turn, requestId, outcome) },
+    ...(options.firstStep ? { firstStep: options.firstStep } : {})
   });
   return turn;
+}
+
+/** Replaces the session's ruleset with the chat's approval mode and stores it. */
+async function setApproval(sessionId: string, client: OpenCodeClient, backendId: string, approval: ApiChatApprovalMode): Promise<void> {
+  await client.setPermissions(backendId, openCodeRuleset(approval));
+  await updateChatRecord(sessionId, current => current ? { ...current, approval } : current);
+  notifyChanged(sessionId);
 }
 
 /** The gate settled a card: post the user's decision to exactly that OpenCode request. */
@@ -401,204 +402,227 @@ function answerRequest(turn: Turn, requestId: string, outcome: ApprovalOutcome):
   const request = turn.asked.get(requestId);
   turn.asked.delete(requestId);
   const decision = openCodeApprovalDecision(outcome);
-  // A TUI answer needs none. Stop: the abort leaves the request pending upstream; reject clears it.
-  if (!decision || outcome === 'resolved') { reply?.resolve(); return; }
+  // Stop interrupts the execution, which settles its own requests; a TUI answer needs none.
+  if (!decision || outcome === 'stop' || outcome === 'resolved') { reply?.resolve(); return; }
   turn.answered.add(requestId);
-  if (decision === 'reject' && request?.tool?.callID) turn.rejected.add(request.tool.callID);
+  if (decision === 'reject' && request?.source?.id) turn.rejected.add(request.source.id);
   void (async () => {
-    await turn.client.reply(turn.directory, requestId, decision, decision === 'reject' ? DECLINED : undefined);
-    // "Always": the chat runs edits and commands automatically from now on (its own rules, appended).
-    if (outcome === 'always') await setApproval(turn.sessionId, turn.client, turn.backendId, turn.directory, 'auto');
+    const client = await connect();
+    // "Always": this chat runs edits and commands automatically from now on (its own rules, not a project-wide save).
+    if (outcome === 'always') await setApproval(turn.sessionId, client, turn.backendId, 'auto');
+    await client.reply(turn.backendId, requestId, decision, decision === 'reject' ? DECLINED : undefined);
   })().then(() => reply?.resolve(), error => {
     turn.answered.delete(requestId);
-    if (outcome !== 'stop') logWarn(`OpenCode chat ${turn.sessionId}: permission answer not delivered: ${(error as Error).message}`);
+    logWarn(`OpenCode chat ${turn.sessionId}: permission answer not delivered: ${(error as Error).message}`);
     reply?.reject(error);
   });
 }
 
-async function setApproval(sessionId: string, client: OpenCodeClient, backendId: string, directory: string, approval: ApiChatApprovalMode): Promise<void> {
-  await client.appendPermissions(directory, backendId, openCodeRuleset(approval));
-  await updateChatRecord(sessionId, current => current ? { ...current, approval } : current);
-  notifyChanged(sessionId);
-}
-
 async function raiseApproval(turn: Turn, request: OpenCodePermission): Promise<void> {
   if (request.sessionID !== turn.backendId || turn.asked.has(request.id) || turn.answered.has(request.id)) return;
-  if (typeof request.id !== 'string' || typeof request.permission !== 'string' || !Array.isArray(request.patterns)) return;
-  const shown: OpenCodePermission = { ...request, patterns: request.patterns.filter((item): item is string => typeof item === 'string') };
+  if (typeof request.id !== 'string' || typeof request.action !== 'string' || !Array.isArray(request.resources)) return;
+  const shown: OpenCodePermission = { ...request, resources: request.resources.filter((item): item is string => typeof item === 'string') };
   turn.asked.set(shown.id, shown);
+  const shownDiffs = diffFiles(shown.metadata);
+  if (shown.source?.id && shownDiffs?.length) turn.shownFiles.set(shown.source.id, shownDiffs);
   const { summary, files } = permissionSummary(shown);
   await turn.projector.apply({
-    type: 'approval_requested', requestId: shown.id, ...(shown.tool?.callID ? { toolId: shown.tool.callID } : {}), kind: permissionKind(shown.permission),
-    tool: shown.permission, summary, files, action: boundAction(shown)
+    type: 'approval_requested', requestId: shown.id, ...(shown.source?.id ? { toolId: shown.source.id } : {}), kind: permissionKind(shown.action),
+    tool: shown.action, summary, files, action: boundAction(shown)
   });
 }
 
-/** Whether a message answers this turn's question. */
-function ofTurn(turn: Turn, messageId: string): boolean {
-  const info = turn.roles.get(messageId);
-  return !!info && info.role === 'assistant' && !!turn.questionId && info.parentID === turn.questionId;
+async function startTool(turn: Turn, toolId: string, name: string, input: unknown): Promise<void> {
+  if (turn.started.has(toolId) || turn.finished.has(toolId)) return;
+  turn.started.add(toolId);
+  await turn.projector.apply(toolStarted(toolId, name, input, turn.cwd));
 }
 
-function noteMessage(turn: Turn, info: Record<string, unknown>): void {
-  const id = text(info.id);
-  const role = text(info.role);
-  if (!id || !role) return;
-  turn.roles.set(id, { role, ...(text(info.parentID) ? { parentID: text(info.parentID) } : {}) });
-  if (role === 'user' && turn.promptSent && !turn.questionId && !turn.before.has(id)) turn.questionId = id;
+async function finishTool(turn: Turn, toolId: string, event: EngineEvent): Promise<void> {
+  if (turn.finished.has(toolId)) return;
+  turn.finished.add(toolId);
+  if (turn.storedCalls.has(engineToolCallId(ENGINE, turn.turnId, toolId))) return;
+  await turn.projector.apply(event);
 }
 
-/** One assistant part: text (final once `time.end` is set), tool rows, step usage. */
-async function applyPart(turn: Turn, part: Record<string, unknown>, live: boolean): Promise<void> {
-  const id = text(part.id);
-  const type = text(part.type);
-  if (!id || !type) return;
-  turn.partTypes.set(id, type);
-  if (type === 'text') {
-    const value = text(part.text) ?? '';
-    if (record(part.time).end === undefined || turn.shownTexts.has(id) || part.synthetic === true) return;
-    turn.shownTexts.add(id);
-    if (value.trim()) await turn.projector.apply({ type: 'text_final', text: value });
-    return;
-  }
-  if (type === 'tool') {
-    const callId = text(part.callID) ?? id;
-    const name = text(part.tool) ?? 'tool';
-    const state = record(part.state);
-    if (turn.finished.has(callId)) return;
-    if (state.status === 'pending') return;
-    if (!turn.started.has(callId)) {
-      turn.started.add(callId);
-      await turn.projector.apply(toolStarted(callId, name, state.input, turn.directory));
-    }
-    if (state.status === 'completed' || state.status === 'error') {
-      turn.finished.add(callId);
-      await turn.projector.apply(toolFinished(callId, name, state, turn.rejected.has(callId)));
-    } else if (!live) {
-      // A reconcile only adds rows; a tool still running is left to the live events.
-    }
-    return;
-  }
-  if (type === 'step-finish') {
-    const tokens = record(part.tokens);
-    const num = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0;
-    turn.steps.set(id, { input: num(tokens.input), output: num(tokens.output), reasoning: num(tokens.reasoning), cached: num(record(tokens.cache).read) });
-    const total = [...turn.steps.values()].reduce((sum, step) => ({
-      input: sum.input + step.input + step.cached, output: sum.output + step.output, reasoning: sum.reasoning + step.reasoning, cached: sum.cached + step.cached
-    }), { input: 0, output: 0, reasoning: 0, cached: 0 });
-    await turn.projector.apply({ type: 'usage', inputTokens: total.input, outputTokens: total.output, reasoningTokens: total.reasoning, cachedInputTokens: total.cached });
-  }
+async function showText(turn: Turn, value: string): Promise<void> {
+  turn.texts.push(value);
+  await turn.projector.apply({ type: 'text_final', text: value });
+}
+
+/** One step's tokens (`session.step.ended`, or an assistant message's `tokens`), summed for the turn. */
+async function countStep(turn: Turn, stepId: string, tokensValue: unknown): Promise<void> {
+  const tokens = record(tokensValue);
+  const num = (value: unknown): number => typeof value === 'number' && Number.isFinite(value) ? value : 0;
+  turn.steps.set(stepId, { input: num(tokens.input), output: num(tokens.output), reasoning: num(tokens.reasoning), cached: num(record(tokens.cache).read) });
+  const total = [...turn.steps.values()].reduce((sum, step) => ({
+    input: sum.input + step.input + step.cached, output: sum.output + step.output, reasoning: sum.reasoning + step.reasoning, cached: sum.cached + step.cached
+  }), { input: 0, output: 0, reasoning: 0, cached: 0 });
+  await turn.projector.apply({ type: 'usage', inputTokens: total.input, outputTokens: total.output, reasoningTokens: total.reasoning, cachedInputTokens: total.cached });
 }
 
 async function handle(turn: Turn, event: OpenCodeEvent): Promise<void> {
   if (turn.ended) return;
   if (event.type === 'server.connected') {
     turn.failures = 0;
-    const again = turn.connectedOnce;
+    const again = turn.connectedOnce || turn.reconcileFirst;
     turn.connectedOnce = true;
     turn.connected.resolve();
     if (again) await reconcile(turn);
     return;
   }
-  const data = event.properties;
+  const data = event.data;
   if (data.sessionID !== turn.backendId) return;
+  const toolId = text(data.id) ?? '';
   switch (event.type) {
-    case 'message.updated': {
-      const info = record(data.info);
-      noteMessage(turn, info);
-      if (info.role === 'assistant' && ofTurn(turn, text(info.id) ?? '')) {
-        const error = record(info.error);
-        if (error.name === 'MessageAbortedError') turn.aborted = true;
-      }
+    case 'session.text.delta':
+      if (turn.promptSent && typeof data.delta === 'string') await turn.projector.apply({ type: 'text_delta', delta: data.delta });
+      return;
+    case 'session.text.ended':
+      if (turn.promptSent && typeof data.text === 'string') await showText(turn, data.text);
+      return;
+    case 'session.tool.input.started':
+      if (toolId && typeof data.name === 'string') turn.toolNames.set(toolId, data.name);
+      return;
+    case 'session.tool.called':
+      if (turn.promptSent && toolId) await startTool(turn, toolId, turn.toolNames.get(toolId) ?? 'tool', data.input);
+      return;
+    case 'session.tool.success':
+    case 'session.tool.failed':
+      if (!turn.promptSent || !toolId) return;
+      if (!turn.started.has(toolId)) await startTool(turn, toolId, turn.toolNames.get(toolId) ?? 'tool', undefined);
+      await finishTool(turn, toolId, toolFinished(toolId, { content: data.content, metadata: data.metadata,
+        ...(event.type === 'session.tool.failed' ? { error: data.error ?? {} } : {}) }, turn.rejected.has(toolId), turn.shownFiles.get(toolId)));
+      return;
+    case 'session.shell.started': {
+      const shell = record(data.shell);
+      const id = text(shell.id);
+      if (!id || !turn.promptSent) return;
+      await startTool(turn, `shell:${id}`, 'shell', { command: text(shell.command) ?? '', ...(text(shell.cwd) ? { workdir: text(shell.cwd) } : {}) });
       return;
     }
-    case 'message.part.updated': {
-      const part = record(data.part);
-      if (!ofTurn(turn, text(part.messageID) ?? '')) return;
-      await applyPart(turn, part, true);
+    case 'session.shell.ended': {
+      const shell = record(data.shell);
+      const id = text(shell.id);
+      if (!id || !turn.promptSent) return;
+      if (!turn.started.has(`shell:${id}`)) await startTool(turn, `shell:${id}`, 'shell', { command: text(shell.command) ?? '' });
+      await finishTool(turn, `shell:${id}`, { type: 'tool_finished', toolId: `shell:${id}`, status: 'ok', output: text(record(data.output).output) ?? '',
+        ...(typeof shell.exit === 'number' ? { exitCode: shell.exit } : {}) });
       return;
     }
-    case 'message.part.delta':
-      if (data.field !== 'text' || typeof data.delta !== 'string' || !ofTurn(turn, text(data.messageID) ?? '')) return;
-      if (turn.partTypes.get(text(data.partID) ?? '') !== 'text') return;
-      await turn.projector.apply({ type: 'text_delta', delta: data.delta });
+    case 'session.step.ended':
+    case 'session.step.failed': {
+      const stepId = text(data.assistantMessageID);
+      if (turn.promptSent && stepId && data.tokens) await countStep(turn, stepId, data.tokens);
       return;
+    }
     case 'permission.asked':
       if (turn.promptSent) await raiseApproval(turn, data as unknown as OpenCodePermission);
       return;
     case 'permission.replied': {
       const requestId = text(data.requestID);
-      if (!requestId || turn.answered.has(requestId)) return;
-      // Another client (the TUI) answered: the card goes, nothing is sent.
+      if (!requestId) return;
+      // This app's own answer comes back too; only another client's (the TUI's) removes the card here.
+      if (turn.answered.has(requestId)) return;
       const asked = turn.asked.get(requestId);
       if (asked) {
         turn.asked.delete(requestId);
-        if (data.reply === 'reject' && asked.tool?.callID) turn.rejected.add(asked.tool.callID);
+        if (data.reply === 'reject' && asked.source?.id) turn.rejected.add(asked.source.id);
         await turn.projector.apply({ type: 'approval_resolved', requestId });
       }
       return;
     }
-    case 'session.error': {
-      if (!turn.promptSent) return;
-      const error = record(data.error);
-      if (error.name === 'MessageAbortedError') { turn.aborted = true; return; }
-      turn.error = text(record(error.data).message) ?? text(error.name) ?? 'unknown error';
+    case 'session.execution.succeeded':
+      if (turn.promptSent) await end(turn, 'completed');
       return;
-    }
-    case 'session.status': {
-      const type = text(record(data.status).type);
+    case 'session.execution.failed':
       if (!turn.promptSent) return;
-      if (type === 'busy' || type === 'retry') { turn.sawBusy = true; return; }
-      if (type === 'idle' && (turn.sawBusy || turn.questionId)) await settle(turn);
+      await turn.projector.apply({ type: 'error', message: `OpenCode failed: ${(text(record(data.error).message) ?? 'unknown error').slice(0, 500)}`, fatal: true });
+      await end(turn, 'failed');
       return;
-    }
+    case 'session.execution.interrupted':
+      if (turn.promptSent) await end(turn, turn.stopped ? 'stopped' : 'interrupted',
+        turn.stopped ? undefined : data.reason === 'user' ? 'The OpenCode run was stopped in its terminal' : `OpenCode interrupted the run (${text(data.reason) ?? 'unknown'})`);
+      return;
     default:
   }
 }
 
-/** The run is over (idle): its outcome from what was seen. */
-async function settle(turn: Turn): Promise<void> {
-  if (turn.error) {
-    await turn.projector.apply({ type: 'error', message: `OpenCode failed: ${turn.error.slice(0, 500)}`, fatal: true });
-    await end(turn, 'failed');
-  } else if (turn.aborted || turn.stopped) {
-    await end(turn, turn.stopped ? 'stopped' : 'interrupted', turn.stopped ? undefined : 'The OpenCode run was stopped in its terminal');
-  } else {
-    await end(turn, 'completed');
+/** This turn's question in `/api/session/:id/message`: the prompt's own message id, else its text. */
+const isOurQuestion = (turn: Turn, message: Record<string, unknown>): boolean =>
+  message.type === 'user' && (turn.promptMessageId ? message.id === turn.promptMessageId : message.text === turn.question);
+
+/**
+ * Imports what the event stream may have missed: finished tools, settled answer texts and step
+ * tokens after this turn's question. While the session still runs, its last content part may be
+ * streaming and is left to the live events.
+ */
+async function importMessages(turn: Turn, messages: Array<Record<string, unknown>>, complete: boolean): Promise<void> {
+  let start = -1;
+  for (let index = messages.length - 1; index >= 0; index--) if (isOurQuestion(turn, messages[index]!)) { start = index; break; }
+  if (start < 0) return;
+  const after = messages.slice(start + 1).filter(message => message.type === 'assistant' || message.type === 'shell');
+  const shown = [...turn.texts];
+  for (const [messageIndex, message] of after.entries()) {
+    if (message.type === 'shell') {
+      const id = `shell:${text(message.shellID) ?? ''}`;
+      if (id === 'shell:' || turn.finished.has(id)) continue;
+      await startTool(turn, id, 'shell', { command: text(message.command) ?? '' });
+      if (message.status === 'running' && !complete) continue;
+      await finishTool(turn, id, { type: 'tool_finished', toolId: id, status: 'ok', output: text(record(message.output).output) ?? '',
+        ...(typeof message.exit === 'number' ? { exitCode: message.exit } : {}) });
+      continue;
+    }
+    const messageId = text(message.id);
+    if (messageId && message.tokens && record(message.time).completed !== undefined && !turn.steps.has(messageId)) await countStep(turn, messageId, message.tokens);
+    const content = Array.isArray(message.content) ? message.content.map(record) : [];
+    for (const [partIndex, part] of content.entries()) {
+      const streaming = !complete && messageIndex === after.length - 1 && partIndex === content.length - 1;
+      if (part.type === 'text') {
+        const value = text(part.text) ?? '';
+        const seen = shown.indexOf(value);
+        if (seen >= 0) { shown.splice(seen, 1); continue; }
+        if (!value.trim() || streaming) continue;
+        await showText(turn, value);
+      } else if (part.type === 'tool') {
+        const id = text(part.id);
+        if (!id || turn.finished.has(id)) continue;
+        const state = record(part.state);
+        const name = text(part.name) ?? 'tool';
+        turn.toolNames.set(id, name);
+        if (state.status === 'streaming' || state.status === 'pending') continue;
+        await startTool(turn, id, name, state.input);
+        if (state.status === 'completed' || state.status === 'error') {
+          await finishTool(turn, id, toolFinished(id, { content: state.content, metadata: state.metadata,
+            ...(state.status === 'error' ? { error: state.error ?? {} } : {}) }, turn.rejected.has(id), turn.shownFiles.get(id)));
+        }
+      }
+    }
   }
 }
 
-/** Adds what the stream may have missed: settled texts and finished tools of this turn's answers. */
-async function importMessages(turn: Turn, messages: OpenCodeMessage[]): Promise<void> {
-  for (const message of messages) noteMessage(turn, message.info);
-  if (!turn.questionId) {
-    // The question's `message.updated` was missed: it is the user message after the prompt with this text.
-    const question = messages.find(message => message.info.role === 'user' && !turn.before.has(message.info.id)
-      && message.parts.some(part => part.type === 'text' && part.text === turn.question));
-    if (question) turn.questionId = question.info.id;
-  }
-  for (const message of messages) {
-    if (!ofTurn(turn, message.info.id)) continue;
-    const error = record(message.info.error);
-    if (error.name === 'MessageAbortedError') turn.aborted = true;
-    else if (error.name && !turn.error) turn.error = text(record(error.data).message) ?? text(error.name) ?? 'unknown error';
-    for (const part of message.parts) await applyPart(turn, part, false);
-  }
-}
-
-/** After a reconnect: messages, pending permissions, then whether the run is over. */
+/** After a (re)connect: messages, then pending permissions, then whether the run is over. */
 async function reconcile(turn: Turn): Promise<void> {
   if (turn.ended) return;
-  const busy = await turn.client.busy(turn.directory, turn.backendId);
-  await importMessages(turn, await turn.client.messages(turn.directory, turn.backendId));
-  const pending = await turn.client.permissions(turn.directory, turn.backendId);
+  const client = await connect();
+  // Messages first: a card closes the answer step, which must already hold the settled text.
+  const live = await client.running(turn.backendId);
+  await importMessages(turn, await client.messages(turn.backendId), !live);
+  const pending = await client.permissions(turn.backendId);
   for (const request of pending) await raiseApproval(turn, request);
   for (const requestId of [...turn.asked.keys()]) {
     if (pending.some(request => request.id === requestId) || turn.replies.has(requestId)) continue;
     turn.asked.delete(requestId);
     await turn.projector.apply({ type: 'approval_resolved', requestId });
   }
-  if (!busy && turn.promptSent && turn.questionId) await settle(turn);
+  if (live || !turn.promptSent) return;
+  const info = await client.session(turn.backendId);
+  const idle = typeof info.time?.idle === 'number' ? info.time.idle : null;
+  // Not running and not yet idle since the prompt: the execution has not started yet.
+  if (idle === null || idle < turn.promptAt) return;
+  if (info.outcome === 'failed') await turn.projector.apply({ type: 'error', message: 'OpenCode failed while Chat Marks was disconnected', fatal: true });
+  await end(turn, info.outcome === 'succeeded' ? 'completed' : info.outcome === 'failed' ? 'failed' : turn.stopped ? 'stopped' : 'interrupted',
+    info.outcome === 'interrupted' && !turn.stopped ? 'OpenCode interrupted the run' : undefined);
 }
 
 async function end(turn: Turn, outcome: TurnOutcome, detail?: string): Promise<void> {
@@ -626,12 +650,13 @@ const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise(re
   signal.addEventListener('abort', done, { once: true });
 });
 
-/** The turn's event stream: reconnects with backoff until the turn ends, Stop, or the server goes. */
+/** The turn's event stream: reconnects with backoff until the turn ends, Stop, or app quit. */
 async function pump(turn: Turn): Promise<void> {
   const delays = deps.reconnectDelaysMs ?? RECONNECT_DELAYS_MS;
   while (!turn.ended && !turn.abort.signal.aborted) {
     try {
-      await turn.client.events(turn.abort.signal, event => enqueue(turn, () => handle(turn, event)),
+      const client = await connect();
+      await client.events(turn.abort.signal, event => enqueue(turn, () => handle(turn, event)),
         () => logWarn(`OpenCode chat ${turn.sessionId}: an oversized event was dropped`));
     } catch (error) {
       if (turn.abort.signal.aborted) break;
@@ -640,7 +665,7 @@ async function pump(turn: Turn): Promise<void> {
     if (turn.ended || turn.abort.signal.aborted) break;
     if (turn.failures >= delays.length) {
       await enqueue(turn, async () => {
-        await turn.projector.apply({ type: 'error', message: 'Chat Marks lost the connection to the OpenCode server. The session may still be running in its terminal.', fatal: false });
+        await turn.projector.apply({ type: 'error', message: 'Chat Marks lost the connection to the OpenCode service. The session may still be running in its terminal.', fatal: false });
         await end(turn, 'interrupted', 'The OpenCode event stream could not be reconnected');
       });
       break;
@@ -655,16 +680,113 @@ function waitConnected(turn: Turn): Promise<void> {
     setTimeout(() => reject(new Error('The OpenCode event stream did not connect')), CONNECT_WAIT_MS).unref?.())]);
 }
 
+// ---------------------------------------------------------------- recovery
+
+/** The step number of an `api-assistant:<turn>[:<step>]` message id. */
+function stepOf(messageId: string, turnId: string): number | null {
+  const base = assistantMessageId(turnId);
+  if (messageId === base) return 0;
+  if (!messageId.startsWith(`${base}:`)) return null;
+  const step = Number(messageId.slice(base.length + 1));
+  return Number.isInteger(step) && step >= 0 ? step : null;
+}
+
+async function recoverChat(sessionId: string, chat: ChatRecord): Promise<void> {
+  const open = chat.openTurn!;
+  const closed = async (detail: string): Promise<void> => { await closeInterruptedTurn(sessionId, open.turnId, detail); };
+  const session = await getSession(sessionId);
+  if (!session || !chat.backendSessionId || !OPENCODE_SESSION.test(chat.backendSessionId)) return closed('Chat Marks closed before OpenCode finished');
+  const events = (await readEvents(sessionId)).filter(event => event.turnId === open.turnId || (event.kind === 'user_message' && event.messageId === `api-user:${open.turnId}`));
+  if (!events.some(event => event.kind === 'turn_start') || events.some(event => event.kind === 'turn_end')) return closed('Chat Marks closed before OpenCode finished');
+  let client: OpenCodeClient;
+  let live: boolean;
+  try {
+    // Recovery never starts the service: a stopped one has nothing of this turn left running.
+    const found = await deps.runningService();
+    if (!found) return closed('The OpenCode service was not running when Chat Marks started');
+    client = found.client;
+    live = await client.running(chat.backendSessionId);
+  } catch (error) {
+    logWarn(`OpenCode chat ${sessionId}: not re-attached: ${(error as Error).message}`);
+    return closed('The OpenCode service was not reachable when Chat Marks started');
+  }
+  const question = events.find(event => event.kind === 'user_message');
+  let lastStep = -1;
+  let streaming = false;
+  const texts: string[] = [];
+  const calls = new Set<string>();
+  for (const event of events) {
+    if (event.kind === 'tool_call') calls.add(event.call.callId);
+    if (event.kind !== 'assistant_message' || !event.messageId) continue;
+    const step = stepOf(event.messageId, open.turnId);
+    if (step === null) continue;
+    const final = event.final === true || event.state === 'final';
+    if (step >= lastStep) { lastStep = step; streaming = !final; }
+    if (final) texts.push(event.message.text);
+    // A step the previous process left streaming is settled now; the first new answer text replaces it.
+    else await upsertMessageEvent(sessionId, { time: event.time, source: 'app', kind: 'assistant_message', turnId: open.turnId,
+      messageId: event.messageId, message: event.message, state: 'final', final: true });
+  }
+  let cwd: string | null = null;
+  if (session.projectId) cwd = await deps.projectFolder(session.projectId).catch(() => null);
+  const turn = newTurn({
+    sessionId, conversationId: session.conversationId!, backendId: chat.backendSessionId, turnId: open.turnId,
+    question: question?.kind === 'user_message' ? question.message.text : '', cwd, firstStep: streaming ? lastStep : lastStep + 1
+  });
+  turn.promptSent = true;
+  turn.promptAt = open.startedAt;
+  turn.texts.push(...texts);
+  for (const call of calls) turn.storedCalls.add(call);
+  running.set(sessionId, turn);
+  if (live) {
+    // Still running: follow it again; the first connection reconciles what happened meanwhile.
+    turn.reconcileFirst = true;
+    logInfo(`OpenCode chat ${sessionId}: re-attached to running session for turn ${open.turnId}`);
+    void pump(turn);
+    return;
+  }
+  // No longer running: import what it finished, then close the turn with its outcome.
+  await enqueue(turn, async () => {
+    await importMessages(turn, await client.messages(turn.backendId), true);
+    const info = await client.session(turn.backendId).catch(() => null);
+    const idle = typeof info?.time?.idle === 'number' ? info.time.idle : null;
+    const finishedSince = idle !== null && idle >= open.startedAt;
+    if (finishedSince && info?.outcome === 'succeeded') await end(turn, 'completed');
+    else if (finishedSince && info?.outcome === 'failed') {
+      await turn.projector.apply({ type: 'error', message: 'OpenCode failed while Chat Marks was closed', fatal: true });
+      await end(turn, 'failed');
+    } else await end(turn, 'interrupted', 'Chat Marks closed before OpenCode finished');
+  });
+  if (!turn.ended) await end(turn, 'interrupted', 'Chat Marks closed before OpenCode finished');
+}
+
+export function recoverOpenCodeChats(): Promise<void> {
+  hookTerminals();
+  bind();
+  recovery ??= (async () => {
+    for (const [sessionId, chat] of Object.entries(await chatRecords())) {
+      if (chat.engine !== ENGINE || !chat.openTurn || running.has(sessionId)) continue;
+      try {
+        await recoverChat(sessionId, chat);
+      } catch (error) {
+        logWarn(`OpenCode chat ${sessionId}: open turn not recovered: ${(error as Error).message}`);
+        running.delete(sessionId);
+        await closeInterruptedTurn(sessionId, chat.openTurn.turnId, 'Chat Marks closed before OpenCode finished').catch(() => undefined);
+      }
+    }
+  })();
+  return recovery;
+}
+
 // ---------------------------------------------------------------- terminal
 
 let terminalHooked = false;
 
-/** Every attach: the server runs, and a terminal started against an older server is recreated. */
-async function terminalReady(chatSessionId: string | undefined): Promise<void> {
+/** Every attach (also a plain OpenCode terminal): usable, and the service runs, so the TUI joins it instead of starting its own. */
+async function terminalReady(): Promise<void> {
   const status = await openCodeStatus();
   if (!status.available) throw new Error(status.detail);
-  const server = await deps.server();
-  if (chatSessionId) await deps.refreshTerminal(chatSessionId, server.startedAt);
+  await deps.service();
 }
 
 function hookTerminals(): void {
@@ -675,10 +797,10 @@ function hookTerminals(): void {
 
 function terminalOf(backendSessionId: string | null, cwd: string | null): EngineTerminal | null {
   if (!backendSessionId || !OPENCODE_SESSION.test(backendSessionId) || !cwd || !cwd.startsWith('/')) return null;
-  return { argv: ['--dir', cwd, '-s', backendSessionId], mode: 'live' };
+  return { argv: ['-s', backendSessionId, cwd], mode: 'live' };
 }
 
-/** Live: `opencode attach <url> --dir <cwd> -s <session>` in the chat's terminal, on the server the chat uses. */
+/** Live: `opencode -s <session> <folder>` in the chat's terminal, attached to the service session the chat uses. */
 async function openTerminal(sessionId: string): Promise<{ cliSessionId: string }> {
   hookTerminals();
   const { session, record: chat } = await openCodeChat(sessionId);
@@ -686,7 +808,7 @@ async function openTerminal(sessionId: string): Promise<{ cliSessionId: string }
   const directory = await deps.projectFolder(session.projectId);
   const terminal = terminalOf(chat.backendSessionId ?? null, directory);
   if (!terminal) throw new Error('This chat has no engine session yet');
-  await terminalReady(undefined);
+  await terminalReady();
   const title = (await getSession(session.id))?.title ?? '';
   const opened = await deps.openTerminal({ sessionId: session.id, projectId: session.projectId, args: terminal.argv, title: `${LABEL} · ${title.slice(0, 80)}`.trim() });
   return { cliSessionId: opened.id };
@@ -703,17 +825,17 @@ async function view(sessionId: string): Promise<ApiChatView> {
   };
 }
 
-interface ModelRow { id: string; providerID: string; name: string; variants: string[] }
+async function listModels(client: OpenCodeClient, directory?: string): Promise<{ list: OpenCodeModel[]; fallback: string | null }> {
+  const [list, fallback] = await Promise.all([client.models(directory), client.defaultModel(directory).catch(() => null)]);
+  return { list: list.filter(model => typeof model?.id === 'string' && typeof model.providerID === 'string' && model.enabled !== false), fallback: fallback ? modelRowId(fallback) : null };
+}
 
-async function listModels(client: OpenCodeClient, directory: string): Promise<{ list: ModelRow[]; defaults: Set<string> }> {
-  const reply = await client.providers(directory);
-  const list = reply.providers.flatMap(provider => Object.values(provider.models).flatMap((model): ModelRow[] => {
-    if (typeof model?.id !== 'string' || model.status === 'deprecated') return [];
-    return [{ id: model.id, providerID: typeof model.providerID === 'string' ? model.providerID : provider.id, name: typeof model.name === 'string' ? model.name : model.id,
-      variants: model.variants && typeof model.variants === 'object' ? Object.keys(model.variants) : [] }];
-  }));
-  const defaults = new Set(Object.entries(reply.default).map(([provider, model]) => `${provider}/${model}`));
-  return { list, defaults };
+/** The `Model.Ref` for a chat's model and effort; an effort is a variant only when the model has one by that name. */
+async function chatModelRef(client: OpenCodeClient, model: string, effort: ApiChatEffort | null): Promise<OpenCodeModelRef> {
+  if (!effort) return modelRef(model, null);
+  const { list } = await listModels(client);
+  const found = list.find(item => modelRowId(item) === model);
+  return modelRef(model, found?.variants?.some(variant => variant.id === effort) ? effort : null);
 }
 
 export const openCodeEngine: AgentEngine = {
@@ -727,31 +849,30 @@ export const openCodeEngine: AgentEngine = {
 
   async models(query: EngineModelQuery) {
     if (query.modality && query.modality !== 'chat') return { models: [], total: 0 };
-    const server = await deps.server();
-    const { list, defaults } = await listModels(server.client, await deps.modelsDirectory());
+    const { list, fallback } = await listModels(await connect());
     const needle = query.query?.trim().toLowerCase() ?? '';
     const rows: ApiChatModel[] = list
       .map(model => ({
         id: modelRowId(model), ownedBy: model.providerID, modality: 'chat' as const, favorite: false, recent: false, availability: null,
-        label: model.name, ...(model.variants.length ? { efforts: model.variants } : {})
+        label: typeof model.name === 'string' ? model.name : model.id,
+        ...(model.variants?.length ? { efforts: model.variants.map(variant => variant.id).filter((id): id is string => typeof id === 'string') } : {})
       }))
       .filter(row => !needle || row.id.toLowerCase().includes(needle) || row.label.toLowerCase().includes(needle))
-      .sort((left, right) => Number(defaults.has(right.id)) - Number(defaults.has(left.id)));
+      .sort((left, right) => Number(right.id === fallback) - Number(left.id === fallback));
     const offset = query.offset ?? 0;
     return { models: rows.slice(offset, offset + (query.limit ?? 50)), total: rows.length };
   },
 
   async create(options) {
-    bind();
+    await recoverOpenCodeChats();
     if (!options.projectId) throw new Error('Choose a project for an OpenCode chat first');
     const directory = await deps.projectFolder(options.projectId);
-    const server = await deps.server();
-    let model = options.model ? modelId.parse(options.model) : null;
-    if (!model) {
-      const { defaults } = await listModels(server.client, directory).catch(() => ({ defaults: new Set<string>() }));
-      model = [...defaults][0] ?? null;
-    }
-    const backend = await server.client.createSession(directory, { title: 'Chat Marks', permission: openCodeRuleset('ask') });
+    const client = await connect();
+    const fallback = options.model ? null : await client.defaultModel(directory).catch(() => null);
+    const model = options.model ? modelId.parse(options.model) : fallback ? modelRowId(fallback) : null;
+    const backend = await client.createSession({
+      title: 'Chat Marks', location: { directory }, permissions: openCodeRuleset('ask'), ...(model ? { model: modelRef(model, null) } : {})
+    });
     if (!OPENCODE_SESSION.test(backend.id)) throw new Error('OpenCode returned an unexpected session id');
     const summary = await createSession({ title: 'New OpenCode chat', titleSource: 'fallback', conversationId: `${API_CONVERSATION_PREFIX}${randomUUID()}` });
     await bindSessionProject(summary.id, options.projectId);
@@ -763,34 +884,22 @@ export const openCodeEngine: AgentEngine = {
   view,
 
   async send(sessionId, question) {
-    bind();
+    await recoverOpenCodeChats();
     if (!question.trim() || question.length > MAX_API_CHAT_INPUT_CHARS) throw new Error('Write a message of up to 100,000 characters');
     const { session, record: chat } = await openCodeChat(sessionId);
     if (!session.projectId) throw new Error('This OpenCode chat has no project');
     const directory = await deps.projectFolder(session.projectId);
-    if (!chat.model) throw new Error('Choose an OpenCode model for this chat first');
-    const ref = modelRef(chat.model);
     // Check and claim with no await between: one turn per chat.
     if (running.has(session.id)) throw new Error('This chat is still answering');
-    const placeholder = { sessionId: session.id } as Turn;
-    running.set(session.id, placeholder);
-    let turn: Turn | null = null;
+    const turn = newTurn({
+      sessionId: session.id, conversationId: session.conversationId, backendId: chat.backendSessionId!, turnId: `api-${randomUUID()}`,
+      question, cwd: directory
+    });
+    running.set(session.id, turn);
     let started = false;
     try {
-      const server = await deps.server();
-      turn = newTurn({ sessionId: session.id, conversationId: session.conversationId, backendId: chat.backendSessionId!, directory,
-        turnId: `api-${randomUUID()}`, question, server });
-      running.set(session.id, turn);
-      const client = server.client;
-      if (await client.busy(directory, turn.backendId)) throw new Error('OpenCode is still working in this session (its terminal). Send again when it finishes.');
-      for (const message of await client.messages(directory, turn.backendId, 20).catch(() => [])) turn.before.add(message.info.id);
-      // The effort is a variant only when the model lists one by that name.
-      let variant: string | undefined;
-      if (chat.effort) {
-        const { list } = await listModels(client, directory).catch(() => ({ list: [] as ModelRow[] }));
-        const found = list.find(item => modelRowId(item) === chat.model);
-        if (found?.variants.includes(chat.effort)) variant = chat.effort;
-      }
+      const client = await connect();
+      if (await client.running(turn.backendId)) throw new Error('OpenCode is still working in this session (its terminal). Send again when it finishes.');
       await turn.projector.start(question);
       started = true;
       void pump(turn);
@@ -798,20 +907,19 @@ export const openCodeEngine: AgentEngine = {
       if (turn.ended) throw new Error('The OpenCode event stream could not be opened');
       turn.promptAt = Date.now();
       turn.promptSent = true;
-      await client.prompt(directory, turn.backendId, { text: question, model: ref, ...(variant ? { variant } : {}) });
+      turn.promptMessageId = (await client.prompt(turn.backendId, question)).id;
       return { turnId: turn.turnId };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      if (turn && started) {
-        const failing = turn;
-        await enqueue(failing, async () => {
-          await failing.projector.apply({ type: 'error', message: `The OpenCode request failed: ${message}`, fatal: true });
-          await end(failing, 'failed');
+      if (started) {
+        await enqueue(turn, async () => {
+          await turn.projector.apply({ type: 'error', message: `The OpenCode request failed: ${message}`, fatal: true });
+          await end(turn, 'failed');
         });
       } else {
-        if (turn) { turn.ended = true; turn.abort.abort(); }
-        const current = running.get(session.id);
-        if (current === turn || current === placeholder) running.delete(session.id);
+        turn.ended = true;
+        turn.abort.abort();
+        if (running.get(session.id) === turn) running.delete(session.id);
       }
       throw error;
     }
@@ -820,14 +928,14 @@ export const openCodeEngine: AgentEngine = {
   async stop(sessionId) {
     await openCodeChat(sessionId);
     const turn = running.get(sessionId);
-    if (!turn || turn.ended || !turn.client) return false;
+    if (!turn || turn.ended) return false;
     turn.stopped = true;
     try {
-      await turn.client.abort(turn.directory, turn.backendId);
+      await (await connect()).interrupt(turn.backendId);
     } catch (error) {
-      logWarn(`OpenCode chat ${sessionId}: abort not delivered: ${(error as Error).message}`);
+      logWarn(`OpenCode chat ${sessionId}: interrupt not delivered: ${(error as Error).message}`);
     }
-    // Idle after the abort normally ends it; without one the turn still ends here.
+    // `session.execution.interrupted` normally ends it; without one the turn still ends here.
     turn.stopTimer ??= setTimeout(() => void enqueue(turn, () => end(turn, 'stopped')), deps.stopGraceMs ?? STOP_GRACE_MS);
     turn.stopTimer.unref?.();
     return true;
@@ -836,19 +944,19 @@ export const openCodeEngine: AgentEngine = {
   async approve(sessionId, approvalId, decision: ApiChatApprovalDecision) {
     await openCodeChat(sessionId);
     const turn = running.get(sessionId);
-    const requestId = turn?.gate?.has(approvalId) ? turn.gate.engineRequestOf(approvalId) : null;
-    const bound = turn?.gate?.hashOf(approvalId) ?? null;
+    const requestId = turn?.gate.has(approvalId) ? turn.gate.engineRequestOf(approvalId) : null;
+    const bound = turn?.gate.hashOf(approvalId) ?? null;
     if (!turn || !requestId || !bound) throw new Error('This approval is no longer pending');
     // The answer goes to exactly the request the card showed, read back from OpenCode now.
-    const live = (await turn.client.permissions(turn.directory, turn.backendId)).find(request => request.id === requestId);
-    if (!live) {
+    const live = await (await connect()).permission(turn.backendId, requestId);
+    if (!live || live.sessionID !== turn.backendId) {
       await enqueue(turn, async () => {
         turn.asked.delete(requestId);
         await turn.projector.apply({ type: 'approval_resolved', requestId });
       });
       throw new Error('This approval is no longer pending');
     }
-    if (decision !== 'deny' && argsHash(live.permission, boundAction(live)) !== bound) throw new Error('This OpenCode request changed after it was shown; it was not approved');
+    if (decision !== 'deny' && argsHash(live.action, boundAction(live)) !== bound) throw new Error('This OpenCode request changed after it was shown; it was not approved');
     const reply = deferred();
     turn.replies.set(requestId, reply);
     if (!turn.gate.answer(approvalId, decision)) {
@@ -863,15 +971,13 @@ export const openCodeEngine: AgentEngine = {
     const { session, record: chat } = await openCodeChat(sessionId);
     if (running.has(session.id) && (patch.model !== undefined || patch.effort !== undefined)) throw new Error('Wait for this answer to finish first');
     const model = patch.model !== undefined ? modelId.parse(patch.model) : chat.model;
-    if (model) modelRef(model);
+    if (model) modelRef(model, null);
     const effort: ApiChatEffort | null = patch.effort !== undefined ? patch.effort : chat.effort;
     const approval = patch.approval !== undefined ? z.enum(API_CHAT_APPROVAL_MODES).parse(patch.approval) : undefined;
-    if (approval !== undefined && approval !== (chat.approval ?? 'ask')) {
-      if (!session.projectId) throw new Error('This OpenCode chat has no project');
-      const server = await deps.server();
-      await server.client.appendPermissions(await deps.projectFolder(session.projectId), chat.backendSessionId!, openCodeRuleset(approval));
-    }
-    // The model and effort travel with every prompt: nothing to switch upstream.
+    const client = await connect();
+    // The session keeps its model upstream (`session.switchModel`); the effort is its variant.
+    if ((patch.model !== undefined || patch.effort !== undefined) && model) await client.switchModel(chat.backendSessionId!, await chatModelRef(client, model, effort));
+    if (approval !== undefined) await client.setPermissions(chat.backendSessionId!, openCodeRuleset(approval));
     await updateChatRecord(session.id, current => ({
       ...(current ?? chat), model, effort, ...(approval !== undefined ? { approval } : {})
     }));
@@ -879,31 +985,39 @@ export const openCodeEngine: AgentEngine = {
     return view(session.id);
   },
 
-  /** Nothing survives the app's server: `recoverApiChats` closes open turns as interrupted. */
-  recover: async () => { hookTerminals(); },
+  recover: () => recoverOpenCodeChats(),
 
-  /** The arguments after `opencode attach <url>`: `--dir <cwd> -s <session>`. */
+  /** The arguments after the binary: `-s <session> <folder>`, the TUI attached to the same service session. */
   terminal: (chat: EngineChatRef): EngineTerminal | null => terminalOf(chat.backendSessionId, chat.cwd),
 
   openTerminal
 };
 
-/** App quit: close every event stream; the server stops with the app. */
+// OpenCode re-attaches its own open turns on startup; the CLIProxy recovery leaves its records alone.
+claimTurnRecovery(ENGINE);
+
+/** App quit: close every event stream without ending its turn; the service keeps running and the next start re-attaches. */
 export function shutdownOpenCodeEngine(): void {
   for (const turn of running.values()) {
-    turn.abort?.abort();
+    turn.abort.abort();
     if (turn.stopTimer) clearTimeout(turn.stopTimer);
   }
 }
 
 /** Test hook: the turn's settled promise, to await a turn's end. */
 export function openCodeTurnDone(sessionId: string): Promise<void> | null {
-  return running.get(sessionId)?.done?.promise ?? null;
+  return running.get(sessionId)?.done.promise ?? null;
+}
+
+/** Test hook: the running turn's usage so far. */
+export function openCodeTurnUsage(sessionId: string): TurnProjector['usage'] {
+  return running.get(sessionId)?.projector.usage ?? null;
 }
 
 export function resetOpenCodeEngineForTests(): void {
   shutdownOpenCodeEngine();
   running.clear();
+  recovery = null;
 }
 
 export { OpenCodeHttpError };

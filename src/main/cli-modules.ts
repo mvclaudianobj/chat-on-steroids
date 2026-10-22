@@ -16,7 +16,7 @@ import { markspanelAccessBlocked } from './markspanel-auth.js';
 export const CLI_IDS = ['opencode', 'codex', 'claude', 'zeroclaw', 'markscode', 'marksclaw'] as const;
 export type CliId = typeof CLI_IDS[number];
 /**
- * Every module's source. `upstream` modules install an official GitHub release into
+ * Every module's source. `upstream` modules install an official release (OpenCode from npm, ZeroClaw from GitHub) into
  * `<userData>/modules/<id>/bin` (main/upstream, Settings > Modules shows versions and updates);
  * `package` modules install from npm. `legacy` modules are the retired Marks forks: kept so a
  * saved activation and its tmux sessions can still be stopped, never resolved, probed, installed
@@ -54,8 +54,8 @@ export type CliSession = {
   /**
    * Chat Marks agent engines: the API chat this terminal opens and the exact arguments after the
    * binary — Claude Code hands over (`--resume <uuid>` / `--session-id <uuid>`), Codex attaches
-   * live (`resume <thread> --remote unix://<sock>`), OpenCode attaches live to the app's server
-   * (`attach <url>` + `--dir <cwd> -s <session>`). Absent for an ordinary module terminal, which
+   * live (`resume <thread> --remote unix://<sock>`), OpenCode attaches live to its background
+   * service (`-s <session> <folder>`). Absent for an ordinary module terminal, which
    * starts the bare binary; a ZeroClaw quickstart terminal carries `args: ['quickstart']` alone.
    */
   engineChat?: string;
@@ -78,8 +78,9 @@ const stopListeners = new Set<(id: CliId) => void>();
 /**
  * Runs before an engine-bound terminal attaches, per module. A hand-over engine (Claude Code)
  * stops its host or throws to refuse (a turn runs); a live engine makes sure the server the
- * terminal attaches to is running (Codex starts its app-server, OpenCode starts its server and
- * recreates a terminal older than it).
+ * terminal attaches to is running (Codex starts its app-server, OpenCode its background service;
+ * OpenCode's hook runs before every OpenCode terminal, also a plain one, so the TUI joins the
+ * service the app started instead of starting its own).
  */
 const engineOpenHooks = new Map<EngineTerminalModule, (session: Readonly<CliSession>) => Promise<void>>();
 export function registerCliEngineOpenHook(module: EngineTerminalModule, hook: ((session: Readonly<CliSession>) => Promise<void>) | null): void {
@@ -96,22 +97,20 @@ const CODEX_REMOTE = /^unix:\/\/\/[^\s\u0000]{1,900}\.sock$/;
 const MARKSCODE_SESSION = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
 /** An OpenCode session id; never starts with `-`, so it cannot read as an option. */
 const OPENCODE_SESSION = /^ses_[A-Za-z0-9]{1,190}$/;
-/** An absolute folder (the chat's project, as the server sees it). */
+/** An absolute folder (the chat's project, as the service sees it). */
 const ABSOLUTE_DIR = /^\/[^\u0000-\u001f]{0,900}$/;
 /**
- * The fixed launcher of an OpenCode engine terminal: the server's URL and password are read from
- * its 0600 registration file when the terminal starts, so neither tmux's argv nor its environment
- * keeps them. `$1` the file, `$2` the binary, then the validated args.
+ * Every OpenCode terminal (the TUI) starts with OpenCode's self-update off: the module installs
+ * and updates it. The TUI reads the background service's URL and password itself.
  */
-export const OPENCODE_ATTACH_SCRIPT = 'f=$1; b=$2; shift 2; u=$(sed -n 1p -- "$f") && p=$(sed -n 2p -- "$f") || exit 1; '
-  + 'OPENCODE_SERVER_PASSWORD=$p OPENCODE_DISABLE_AUTOUPDATE=1 exec "$b" attach "$u" "$@"';
+export const OPENCODE_TERMINAL_SCRIPT = 'OPENCODE_DISABLE_AUTOUPDATE=1 exec "$@"';
 /** The only argument shapes an engine terminal may carry, per module. */
 const validEngineArgs = (module: CliId, args: unknown): args is string[] => {
   if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) return false;
   if (module === 'claude') return args.length === 2 && ENGINE_TERMINAL_ARGS.test(args[0]!) && UUID.test(args[1]!);
   if (module === 'markscode') return args.length === 3 && args[0] === '-s' && MARKSCODE_SESSION.test(args[1]!) && args[2] === '.';
-  if (module === 'opencode') return args.length === 4 && args[0] === '--dir' && ABSOLUTE_DIR.test(args[1]!) && !args[1]!.split('/').includes('..')
-    && args[2] === '-s' && OPENCODE_SESSION.test(args[3]!);
+  if (module === 'opencode') return args.length === 3 && args[0] === '-s' && OPENCODE_SESSION.test(args[1]!)
+    && ABSOLUTE_DIR.test(args[2]!) && !args[2]!.split('/').includes('..');
   if (module === 'codex') return args.length === 4 && args[0] === 'resume' && CODEX_THREAD.test(args[1]!) && args[2] === '--remote' && CODEX_REMOTE.test(args[3]!);
   return false;
 };
@@ -461,25 +460,6 @@ export async function cliEngineTerminal(id: EngineTerminalModule, chat: { sessio
 }
 
 /**
- * A live engine terminal started against a server that has since restarted holds a dead URL and
- * password: when its tmux session is older than `sinceMs`, it is ended so the next open recreates
- * it (OpenCode). The sidebar entry stays.
- */
-export async function cliEngineTerminalRefresh(chatSessionId: string, sinceMs: number): Promise<void> {
-  await loadCliModules();
-  const session = sessions.find(candidate => candidate.engineChat === chatSessionId);
-  if (!session) return;
-  const created = Number((await tmux(['display-message', '-p', '-t', `=${session.tmuxSession}`, '#{session_created}']).catch(() => '')).trim());
-  if (!Number.isFinite(created) || created <= 0 || created * 1000 >= sinceMs) return;
-  for (const [attachmentId, entry] of attachments) {
-    if (entry.tmuxSession !== session.tmuxSession) continue;
-    emit?.(attachmentId, { exitCode: 0 });
-    cliDetach(attachmentId);
-  }
-  await tmux(['kill-session', '-t', `=${session.tmuxSession}`]).catch(() => undefined);
-}
-
-/**
  * Whether a chat's handover terminal runs, and who looks at it now: `attached` only the app's own
  * terminal view(s), `external` also a tmux client outside the app (each app view is one client).
  */
@@ -607,8 +587,8 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
   if (attachments.has(attachmentId)) throw new Error('Terminal already attached');
   const session = currentSession.tmuxSession;
   // An engine's terminal: a hand-over engine's host stops first (or the open is refused); a live
-  // engine starts the server the terminal attaches to.
-  if (currentSession.engineChat) {
+  // engine starts the server the terminal attaches to (OpenCode: for every terminal).
+  if (currentSession.engineChat || id === 'opencode') {
     const hook = engineOpenHooks.get(id as EngineTerminalModule);
     if (!hook && HANDOVER_MODULES.has(id)) throw new Error('This terminal belongs to a chat engine that is not available');
     if (hook) await hook(currentSession);
@@ -670,33 +650,23 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
   }); } finally { openingAttachments.delete(attachmentId); }
 }
 
-const engineLaunchers = new Map<EngineTerminalModule, () => Promise<string>>();
-/** OpenCode: where its engine terminals read the running server's URL and password (registration file). */
-export function registerCliEngineRegistration(module: EngineTerminalModule, registration: (() => Promise<string>) | null): void {
-  if (registration) engineLaunchers.set(module, registration); else engineLaunchers.delete(module);
-}
-
 /**
  * The tmux command of a module terminal, argv only: `sh -c 'exec "$@"' marks-cli <bin> <args>`;
- * an OpenCode engine terminal runs the fixed attach launcher with its registration file; ZeroClaw
- * runs its `zerocode` TUI (or `zeroclaw quickstart`).
+ * OpenCode's with its self-update off (`OPENCODE_TERMINAL_SCRIPT`); ZeroClaw runs its `zerocode`
+ * TUI (or `zeroclaw quickstart`).
  */
 async function terminalCommand(id: CliId, bin: string, session: Readonly<CliSession>): Promise<string[]> {
+  const script = id === 'opencode' ? OPENCODE_TERMINAL_SCRIPT : 'exec "$@"';
   if (session.engineChat) {
     const args = validEngineArgs(id, session.args) ? session.args : [];
-    if (id === 'opencode') {
-      const registration = await engineLaunchers.get('opencode')?.();
-      if (!registration || !registration.startsWith('/') || /[\u0000-\u001f]/.test(registration)) throw new Error('The OpenCode server is not running');
-      return ['sh', '-c', OPENCODE_ATTACH_SCRIPT, 'marks-cli', registration, bin, ...args];
-    }
-    return ['sh', '-c', 'exec "$@"', 'marks-cli', bin, ...args];
+    return ['sh', '-c', script, 'marks-cli', bin, ...args];
   }
   const terminalBin = manifest[id].terminalBin;
   if (terminalBin) {
     if (validTerminalArgs(id, session.args)) return ['sh', '-c', 'exec "$@"', 'marks-cli', bin, ...session.args!];
     return ['sh', '-c', 'exec "$@"', 'marks-cli', `${bin.slice(0, bin.lastIndexOf('/') + 1)}${terminalBin}`];
   }
-  return ['sh', '-c', 'exec "$@"', 'marks-cli', bin];
+  return ['sh', '-c', script, 'marks-cli', bin];
 }
 
 function cliDetach(id: string): void {

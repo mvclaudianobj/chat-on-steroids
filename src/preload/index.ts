@@ -338,8 +338,8 @@ const api = {
   upstreamStatus: (module: import('../shared/upstream-module.js').UpstreamModuleId, refresh = false) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'status', module, refresh }),
   /** Installs or updates to `version`, the release the user confirmed. */
   upstreamInstall: (module: import('../shared/upstream-module.js').UpstreamModuleId, mode: 'install' | 'update', version: string) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'install', module, mode, version }),
-  /** Restarts the app's OpenCode server (it starts again on the next use). */
-  upstreamRestartServer: () => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'restartServer', module: 'opencode' }),
+  /** OpenCode's background service: Start / Stop / Restart (with the binary this app uses). */
+  upstreamService: (op: import('../shared/upstream-module.js').OpenCodeServiceAction) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'service', module: 'opencode', op }),
   onUpstreamProgress: (listener: (progress: import('../shared/upstream-module.js').UpstreamInstallProgress) => void): (() => void) => {
     const wrapped = (_event: unknown, progress: import('../shared/upstream-module.js').UpstreamInstallProgress): void => listener(progress);
     ipcRenderer.on('marksUpstream:progress', wrapped);

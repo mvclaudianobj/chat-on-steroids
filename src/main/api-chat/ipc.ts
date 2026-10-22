@@ -124,7 +124,7 @@ export const parseApiChatRequest = (payload: unknown): z.infer<typeof request> =
 export function registerApiChatIpc(getWindow: () => BrowserWindow | null): void {
   // Turns the previous run left open are closed as interrupted before any new one starts.
   void recoverAgentEngines().catch(error => logWarn(`API chat recovery failed: ${(error as Error).message}`));
-  // Quit closes OpenCode event streams; the server stops with the app (opencode/server.ts).
+  // Quit closes OpenCode event streams; its background service keeps running (opencode/service.ts).
   app.on('before-quit', shutdownOpenCodeEngine);
   ipcMain.handle('marksApiChat:request', async (event, payload: unknown) => {
     try {
