@@ -385,6 +385,15 @@ const api = {
   },
   // Chat Marks: Claude Code Router module (npm release into the module folder, its daemon, its web UI).
   ccrStatus: (refresh = false) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'status', refresh }),
+  vmsView: () => call<import('../shared/vms.js').VmView>('marksVms:request', { action: 'view' }),
+  vmsInit: (name: string, box: string, memory: number, cpus: number) => call<import('../shared/vms.js').VmView>('marksVms:request', { action: 'init', name, box, memory, cpus }),
+  vmsRun: (name: string, op: import('../shared/vms.js').VmAction, confirmation?: string, dryRun = false) => call<import('../shared/vms.js').VmJob>('marksVms:request', { action: 'run', name, op, confirmation, dryRun }),
+  vmsCancel: (name: string) => call<boolean>('marksVms:request', { action: 'cancel', name }),
+  onVmsEvent: (listener: (job: import('../shared/vms.js').VmJob) => void): (() => void) => {
+    const wrapped = (_event: unknown, job: import('../shared/vms.js').VmJob): void => listener(job);
+    ipcRenderer.on('marksVms:event', wrapped);
+    return () => ipcRenderer.removeListener('marksVms:event', wrapped);
+  },
   /** Installs or updates to `version`, the release the user confirmed; `update-external` updates the user's own copy in place. */
   ccrInstall: (mode: import('../shared/ccr-module.js').CcrInstallMode, version: string) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'install', mode, version }),
   ccrService: (op: import('../shared/ccr-module.js').CcrServiceAction) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'service', op }),
