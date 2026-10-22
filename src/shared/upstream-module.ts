@@ -11,9 +11,12 @@ export const UPSTREAM_REPOSITORIES: Readonly<Record<UpstreamModuleId, string>> =
   zeroclaw: 'zeroclaw-labs/zeroclaw'
 };
 
-/** Exactly three numbers, the upstream tag without its `v`. */
-export const UPSTREAM_VERSION = /^\d+\.\d+\.\d+$/;
-export const UPSTREAM_TAG = /^v(\d+\.\d+\.\d+)$/;
+/**
+ * Exactly three numbers, the upstream tag without its `v`: the third-party projects' own format,
+ * deliberately separate from the app's RELEASE_VERSION_PATTERN (which allows a fourth).
+ */
+export const UPSTREAM_VERSION = /^\d+(?:\.\d+){2}$/;
+export const UPSTREAM_TAG = /^v(\d+(?:\.\d+){2})$/;
 
 /** How this app's checked integration judges a version: tested, newer than tested, or not supported. */
 export type UpstreamSupport = 'ok' | 'newer' | 'unsupported';

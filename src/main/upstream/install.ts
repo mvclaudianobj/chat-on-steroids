@@ -96,7 +96,7 @@ export interface UpstreamSpec {
 
 /** The first x.y.z in a `--version` line (`1.19.3`, `zeroclaw 0.8.6`). */
 export function parseVersion(output: string): string | null {
-  return /(?:^|[^\d.])v?(\d+\.\d+\.\d+)(?![\d.])/.exec(output)?.[1] ?? null;
+  return /(?:^|[^\d.])v?(\d+(?:\.\d+){2})(?![\d.])/.exec(output)?.[1] ?? null;
 }
 
 /** A private HOME and XDG set, so a probe of the binary never reads or writes the user's own data. */
