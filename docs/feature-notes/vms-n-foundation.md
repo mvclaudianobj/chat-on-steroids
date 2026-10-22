@@ -8,6 +8,7 @@ Usage (from the repository):
 ~~~sh
 node scripts/marks-vms.mjs init sandbox --memory 2048 --cpus 2
 node scripts/marks-vms.mjs list
+node scripts/marks-vms.mjs doctor
 node scripts/marks-vms.mjs up sandbox --dry-run
 node scripts/marks-vms.mjs up sandbox
 node scripts/marks-vms.mjs status sandbox
@@ -25,8 +26,9 @@ Operations reject altered templates and pass fixed arguments without a shell.
 Destroy requires confirmation by the exact VM name.
 
 Real VM operations require Vagrant, VirtualBox, the Ubuntu 24.04 Vagrant box,
-and host-side Ansible. These dependencies were not found in the development
-environment, and no VM was started. The generated playbook only pings the
+and host-side Ansible. The read-only doctor checks tool availability using
+fixed version arguments without a shell; on 2026-10-22 it detected VirtualBox,
+but not Vagrant or Ansible on the Linux host. No VM was started. The generated playbook only pings the
 guest. There is no application IPC or GUI yet, no autonomous provisioning,
 and no connection to the vault, profiles or production app.
 

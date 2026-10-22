@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { createLab, defaultLabRoot, executeLab, listLabs } from './vms-lab-core.mjs';
+import { checkPrerequisites } from './vms-prerequisites.mjs';
 
 function usage() {
   return [
     'Chat Marks VM lab (item N, independent preview)',
     '  node scripts/marks-vms.mjs init <name> [--root ABSOLUTE_PATH] [--box BOX] [--memory MIB] [--cpus N]',
     '  node scripts/marks-vms.mjs list [--root ABSOLUTE_PATH]',
+    '  node scripts/marks-vms.mjs doctor',
     '  node scripts/marks-vms.mjs status|up|halt|provision <name> [--root ABSOLUTE_PATH] [--dry-run]',
     '  node scripts/marks-vms.mjs destroy <name> --confirm-destroy <name> [--root ABSOLUTE_PATH] [--dry-run]',
     '  Default root: ' + defaultLabRoot(),
@@ -16,11 +18,11 @@ function usage() {
 export function parseArgs(argv) {
   const [command, ...tail] = argv;
   if (command === 'help' || command === '--help' || !command) return { command: 'help' };
-  if (!['init', 'list', 'status', 'up', 'halt', 'provision', 'destroy'].includes(command)) {
+  if (!['init', 'list', 'doctor', 'status', 'up', 'halt', 'provision', 'destroy'].includes(command)) {
     throw new Error('Unknown command: ' + command);
   }
   const options = {};
-  if (command !== 'list') {
+  if (command !== 'list' && command !== 'doctor') {
     const name = tail.shift();
     if (!name || name.startsWith('--')) throw new Error('A VM name is required.');
     options.name = name;
@@ -28,6 +30,7 @@ export function parseArgs(argv) {
   const allowed = command === 'init'
     ? new Set(['--root', '--box', '--memory', '--cpus'])
     : command === 'list' ? new Set(['--root'])
+      : command === 'doctor' ? new Set()
       : new Set(['--root', '--dry-run', ...(command === 'destroy' ? ['--confirm-destroy'] : [])]);
   while (tail.length) {
     const key = tail.shift();
@@ -58,6 +61,12 @@ export async function main(argv = process.argv.slice(2)) {
   if (command === 'init') {
     const result = await createLab(options);
     process.stdout.write('VM lab created: ' + result.directory + '\n');
+    return;
+  }
+  if (command === 'doctor') {
+    const result = await checkPrerequisites();
+    for (const item of result.checks) process.stdout.write(item.id + ': ' + (item.available ? 'available' : item.reason) + '\n');
+    if (!result.ready) process.exitCode = 1;
     return;
   }
   if (command === 'list') {
