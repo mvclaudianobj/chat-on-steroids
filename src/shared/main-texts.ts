@@ -68,7 +68,9 @@ export const MAIN_TEXTS = [
   'Import encrypted Chat Marks vault',
   'Import GPG secrets',
   'Chat Marks vault',
-  'GPG encrypted files'
+  'GPG encrypted files',
+  'Export Brain memories',
+  'JSON Lines'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

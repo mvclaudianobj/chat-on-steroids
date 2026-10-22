@@ -35,6 +35,8 @@ import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { initSecretsPath, keychainReadPending } from './secrets.js';
 import { initMarksVault, warmVaultRedaction } from './marks-vault.js';
+import { initBrain } from './brain/store.js';
+import { initBrainSettings, loadBrainSettings } from './brain/settings.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
@@ -442,6 +444,9 @@ void app.whenReady().then(async () => {
   initBrowserProofPath(userData);
   initSecretsPath(userData);
   initMarksVault(userData);
+  // Chat Marks: initialize the local Brain paths without reading any other app's data.
+  initBrain(userData);
+  initBrainSettings(userData);
   initKeychainNotice(userData, {
     platform: process.platform,
     contents: () => (window && !window.isDestroyed() ? window.webContents : null),
@@ -453,6 +458,8 @@ void app.whenReady().then(async () => {
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
+  try { await loadBrainSettings(); }
+  catch { logWarn('Brain settings unavailable; all model-facing Brain integrations remain disabled'); }
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
   await loadConnectorIdentity();
