@@ -3217,5 +3217,14 @@
   "Quicker after Stop": "Быстрее после остановки",
   "A message you send right after Stop goes out at once.": "Сообщение, отправленное сразу после остановки, уходит сразу.",
   "Sub-agent chats tidy up": "Чаты субагентов убираются сами",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Если архивирование включено, чат воркера архивируется через две минуты после завершения задачи."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Если архивирование включено, чат воркера архивируется через две минуты после завершения задачи.",
+  "A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice.": "Свой маршрут для каждого чата Codex и Claude Code, отдельная страница ZeroClaw и правильное уведомление о расширении.",
+  "A route for each chat": "Маршрут для каждого чата",
+  "Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.": "Codex и Claude Code по умолчанию используют собственную учётную запись CLI или Claude Code Router, если он найден.",
+  "Real model names": "Настоящие названия моделей",
+  "Model lists show each model's full name and version, not just a short alias.": "В списках моделей видны полное название и версия каждой модели, а не только короткий псевдоним.",
+  "ZeroClaw has its own page": "У ZeroClaw своя страница",
+  "Open it below Pets in the sidebar; Configure agent now draws its setup.": "Откройте её под пунктом «Питомцы» на боковой панели; «Настроить агента» теперь показывает настройку.",
+  "The right extension notice": "Правильное уведомление о расширении",
+  "The extension update notice follows the browser you chose for ChatGPT.": "Уведомление об обновлении расширения относится к браузеру, выбранному для ChatGPT."
 }

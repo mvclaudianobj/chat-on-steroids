@@ -3125,5 +3125,14 @@
   "Quicker after Stop": "Durdur'dan sonra daha hızlı",
   "A message you send right after Stop goes out at once.": "Durdur'dan hemen sonra gönderdiğin mesaj anında gider.",
   "Sub-agent chats tidy up": "Alt ajan sohbetleri toparlanır",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Arşivleme açıkken bir çalışanın sohbeti, görevi bittikten iki dakika sonra arşivlenir."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Arşivleme açıkken bir çalışanın sohbeti, görevi bittikten iki dakika sonra arşivlenir.",
+  "A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice.": "Her Codex ve Claude Code sohbeti için bir yol, ZeroClaw'a özel bir sayfa ve doğru uzantı bildirimi.",
+  "A route for each chat": "Her sohbet için bir yol",
+  "Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.": "Codex ve Claude Code varsayılan olarak CLI'ın kendi hesabını, bulunduğunda ise Claude Code Router'ı kullanır.",
+  "Real model names": "Gerçek model adları",
+  "Model lists show each model's full name and version, not just a short alias.": "Model listeleri yalnızca kısa bir takma ad değil, her modelin tam adını ve sürümünü gösterir.",
+  "ZeroClaw has its own page": "ZeroClaw'ın kendi sayfası var",
+  "Open it below Pets in the sidebar; Configure agent now draws its setup.": "Kenar çubuğunda Maskotlar'ın altından açın; Ajanı yapılandır artık kurulumunu gösteriyor.",
+  "The right extension notice": "Doğru uzantı bildirimi",
+  "The extension update notice follows the browser you chose for ChatGPT.": "Uzantı güncelleme bildirimi, ChatGPT için seçtiğiniz tarayıcıyı izler."
 }

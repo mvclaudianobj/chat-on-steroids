@@ -3171,5 +3171,14 @@
   "Quicker after Stop": "Plus rapide après Arrêter",
   "A message you send right after Stop goes out at once.": "Un message envoyé juste après Arrêter part aussitôt.",
   "Sub-agent chats tidy up": "Les chats des sous-agents se rangent",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Avec l’archivage activé, le chat d’un worker est archivé deux minutes après la fin de sa tâche."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Avec l’archivage activé, le chat d’un worker est archivé deux minutes après la fin de sa tâche.",
+  "A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice.": "Une route pour chaque chat Codex et Claude Code, une page à part pour ZeroClaw et le bon avis d’extension.",
+  "A route for each chat": "Une route pour chaque chat",
+  "Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.": "Codex et Claude Code utilisent par défaut le compte de la CLI, ou Claude Code Router lorsqu’il est détecté.",
+  "Real model names": "De vrais noms de modèles",
+  "Model lists show each model's full name and version, not just a short alias.": "Les listes de modèles affichent le nom complet et la version de chaque modèle, pas seulement un alias court.",
+  "ZeroClaw has its own page": "ZeroClaw a sa propre page",
+  "Open it below Pets in the sidebar; Configure agent now draws its setup.": "Ouvrez-la sous Mascottes dans la barre latérale ; Configurer l’agent affiche désormais sa configuration.",
+  "The right extension notice": "Le bon avis d’extension",
+  "The extension update notice follows the browser you chose for ChatGPT.": "L’avis de mise à jour de l’extension suit le navigateur choisi pour ChatGPT."
 }

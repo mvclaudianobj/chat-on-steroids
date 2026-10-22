@@ -3079,5 +3079,14 @@
   "Quicker after Stop": "停止後すぐに",
   "A message you send right after Stop goes out at once.": "停止の直後に送ったメッセージがすぐに送信されます。",
   "Sub-agent chats tidy up": "サブエージェントのチャットを片付け",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "アーカイブをオンにすると、ワーカーのチャットはタスク完了の 2 分後にアーカイブされます。"
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "アーカイブをオンにすると、ワーカーのチャットはタスク完了の 2 分後にアーカイブされます。",
+  "A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice.": "Codex と Claude Code のチャットごとのルート、ZeroClaw 専用ページ、正しい拡張機能の通知。",
+  "A route for each chat": "チャットごとのルート",
+  "Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.": "Codex と Claude Code は既定で CLI 自身のアカウントを使い、Claude Code Router が見つかればそれも選べます。",
+  "Real model names": "実際のモデル名",
+  "Model lists show each model's full name and version, not just a short alias.": "モデル一覧には短いエイリアスだけでなく、各モデルの正式名とバージョンが表示されます。",
+  "ZeroClaw has its own page": "ZeroClaw 専用ページ",
+  "Open it below Pets in the sidebar; Configure agent now draws its setup.": "サイドバーのペットの下から開けます。エージェントを設定でセットアップが表示されるようになりました。",
+  "The right extension notice": "正しい拡張機能の通知",
+  "The extension update notice follows the browser you chose for ChatGPT.": "拡張機能の更新通知は、ChatGPT 用に選んだブラウザーに従います。"
 }

@@ -3079,5 +3079,14 @@
   "Quicker after Stop": "중지 후 더 빠르게",
   "A message you send right after Stop goes out at once.": "중지 직후 보낸 메시지가 바로 전송됩니다.",
   "Sub-agent chats tidy up": "하위 에이전트 채팅 정리",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "보관을 켜면 작업자의 채팅이 작업을 마친 지 2분 후에 보관됩니다."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "보관을 켜면 작업자의 채팅이 작업을 마친 지 2분 후에 보관됩니다.",
+  "A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice.": "Codex와 Claude Code 채팅별 경로, ZeroClaw 전용 페이지, 올바른 확장 프로그램 알림.",
+  "A route for each chat": "채팅별 경로",
+  "Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.": "Codex와 Claude Code는 기본적으로 CLI 자체 계정을 사용하며, Claude Code Router가 감지되면 이를 사용할 수도 있습니다.",
+  "Real model names": "실제 모델 이름",
+  "Model lists show each model's full name and version, not just a short alias.": "모델 목록에 짧은 별칭만이 아니라 각 모델의 전체 이름과 버전이 표시됩니다.",
+  "ZeroClaw has its own page": "ZeroClaw 전용 페이지",
+  "Open it below Pets in the sidebar; Configure agent now draws its setup.": "사이드바의 펫 아래에서 열 수 있으며, 에이전트 설정에 이제 설정 화면이 표시됩니다.",
+  "The right extension notice": "올바른 확장 프로그램 알림",
+  "The extension update notice follows the browser you chose for ChatGPT.": "확장 프로그램 업데이트 알림은 ChatGPT용으로 선택한 브라우저를 따릅니다."
 }

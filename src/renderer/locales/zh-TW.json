@@ -3079,5 +3079,14 @@
   "Quicker after Stop": "停止後更快",
   "A message you send right after Stop goes out at once.": "停止後立即傳送的訊息會馬上送出。",
   "Sub-agent chats tidy up": "子代理聊天自動整理",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "開啟封存後，worker 的聊天會在任務完成兩分鐘後封存。"
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "開啟封存後，worker 的聊天會在任務完成兩分鐘後封存。",
+  "A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice.": "每個 Codex 和 Claude Code 聊天都有自己的路由，ZeroClaw 有了專屬頁面，擴充功能提示也更準確。",
+  "A route for each chat": "每個聊天一條路由",
+  "Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.": "Codex 和 Claude Code 預設使用 CLI 自己的帳戶，偵測到 Claude Code Router 時也可經由它。",
+  "Real model names": "真實的模型名稱",
+  "Model lists show each model's full name and version, not just a short alias.": "模型清單會顯示每個模型的完整名稱和版本，而不只是簡短別名。",
+  "ZeroClaw has its own page": "ZeroClaw 有了專屬頁面",
+  "Open it below Pets in the sidebar; Configure agent now draws its setup.": "在側邊欄的寵物下方開啟；設定代理現在可以正常顯示設定畫面。",
+  "The right extension notice": "準確的擴充功能提示",
+  "The extension update notice follows the browser you chose for ChatGPT.": "擴充功能更新提示以你為 ChatGPT 選擇的瀏覽器為準。"
 }

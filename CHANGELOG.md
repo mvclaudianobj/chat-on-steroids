@@ -9,6 +9,15 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.44.2] — A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice
+
+- **A route for each Codex and Claude Code chat.** Claude Code Router writes itself into `~/.claude/settings.json` and `~/.codex/config.toml`, so every Codex and Claude Code chat silently ran through the router. Each chat now has a route: the CLI's own account (direct, the default for new chats) or Claude Code Router, chosen in the composer when a router is detected and shown in the chat header. The app reads those files only and never writes them; the direct overrides apply only to the processes it starts. Existing chats keep the route they ran with. A Claude Code chat keeps its session when the route changes; a Codex chat starts a new thread on the other route and keeps its history.
+- **Real model names.** Model lists come from each route and show the concrete model with its version, as in `opus (claude-opus-5-5)` or `GPT-6.1-Sol (gpt-6.1-sol)`, instead of bare aliases or only the router's model.
+- **Direct Claude Code needs its own sign-in.** A direct Claude Code chat without an account of its own is refused before anything is sent and says to run `claude auth login`. Codex direct uses the CLI's ChatGPT account.
+- **ZeroClaw has its own page.** A ZeroClaw item right below Pets in the sidebar (shown while the module is enabled) opens a page with Status, Configure agent and Settings; Settings → Modules keeps install and update and links there.
+- **Configure agent draws.** The setup terminal opened with no height and was refused before it started; it now fills the page, terminal sizes are kept to what the app accepts, and when the setup ends the page says so and keeps its last output. ZeroClaw runs with private folder permissions, so its daemon no longer refuses `~/.zeroclaw/data` and exits before drawing.
+- **The right extension update notice.** The extension version the app reports now comes from the browser chosen for ChatGPT, so an older copy still running in another browser no longer asks you to update the built-in browser's extension.
+
 ## [2.1.44.1] — Chat Marks on community v2.1.44
 
 - Integrated the complete community 2.1.44 release with every Marks integration preserved (MarksPanel login, Marks modules and project terminals, CLIProxy module and chats, agent engines, the bridge instance, the dev profile, the extension build stamp, branding and icons, and the four-part release version).

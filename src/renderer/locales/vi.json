@@ -3079,5 +3079,14 @@
   "Quicker after Stop": "Nhanh hơn sau khi Dừng",
   "A message you send right after Stop goes out at once.": "Tin nhắn bạn gửi ngay sau khi Dừng sẽ đi ngay lập tức.",
   "Sub-agent chats tidy up": "Cuộc trò chuyện của tác tử phụ tự dọn",
-  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Khi bật lưu trữ, cuộc trò chuyện của worker được lưu trữ hai phút sau khi xong nhiệm vụ."
+  "With archiving on, a worker's chat is archived two minutes after its task is done.": "Khi bật lưu trữ, cuộc trò chuyện của worker được lưu trữ hai phút sau khi xong nhiệm vụ.",
+  "A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice.": "Một tuyến cho mỗi cuộc trò chuyện Codex và Claude Code, trang riêng cho ZeroClaw và thông báo tiện ích mở rộng đúng.",
+  "A route for each chat": "Một tuyến cho mỗi cuộc trò chuyện",
+  "Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.": "Theo mặc định, Codex và Claude Code dùng tài khoản riêng của CLI, hoặc Claude Code Router khi phát hiện được.",
+  "Real model names": "Tên mô hình thật",
+  "Model lists show each model's full name and version, not just a short alias.": "Danh sách mô hình hiển thị tên đầy đủ và phiên bản của từng mô hình, không chỉ một bí danh ngắn.",
+  "ZeroClaw has its own page": "ZeroClaw có trang riêng",
+  "Open it below Pets in the sidebar; Configure agent now draws its setup.": "Mở trang này bên dưới Thú cưng ở thanh bên; Cấu hình tác tử giờ đã hiển thị phần thiết lập.",
+  "The right extension notice": "Thông báo tiện ích mở rộng đúng",
+  "The extension update notice follows the browser you chose for ChatGPT.": "Thông báo cập nhật tiện ích mở rộng theo trình duyệt bạn đã chọn cho ChatGPT."
 }
