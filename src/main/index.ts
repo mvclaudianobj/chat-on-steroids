@@ -34,6 +34,7 @@ import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { initSecretsPath, keychainReadPending } from './secrets.js';
+import { initRemoteHosts } from './remote/hosts.js';
 import { initMarksVault, warmVaultRedaction } from './marks-vault.js';
 import { initBrain } from './brain/store.js';
 import { initBrainSettings, loadBrainSettings } from './brain/settings.js';
@@ -452,6 +453,7 @@ void app.whenReady().then(async () => {
   initBrain(userData);
   initBrainSettings(userData);
   initBrainEngineMcp(userData);
+  initRemoteHosts(userData);
   initKeychainNotice(userData, {
     platform: process.platform,
     contents: () => (window && !window.isDestroyed() ? window.webContents : null),

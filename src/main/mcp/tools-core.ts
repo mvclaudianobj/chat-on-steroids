@@ -58,6 +58,8 @@ import { approvalCardWaiting } from '../approval-wait.js';
 import { requestVaultApproval } from '../marks-vault-approval.js';
 import { useVault } from '../marks-vault.js';
 import { registerBrainTools } from '../brain/tools.js';
+import { executeRemoteHost, remoteHostByName } from '../remote/hosts.js';
+import { requestRemoteApproval } from '../remote/approval.js';
 import { maybeParseApplyPatchForExec } from '../codex/apply-patch/invocation.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../codex/command-batch.js';
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
@@ -262,6 +264,28 @@ export function registerCoreTools(reg: SurfaceRegistrar, brainAudience: 'core' |
   const { ctx, caps, exposedCaps } = reg;
   // Chat Marks: Brain's local-only memory tools share the Core registrar and permission gates.
   registerBrainTools(reg, brainAudience);
+  if (exposedCaps.command) reg.register('remote_exec', toolDeclaration('remote_exec', () => ({
+    title: 'Run command on named SSH host',
+    description: 'Execute a command on a saved SSH profile. The app displays the exact host and command for approval before execution. Output and time are bounded.',
+    inputSchema: z.object({ name: z.string().min(1).max(80), command: z.string().min(1).max(8192) }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
+  })), async ({ name, command }) => guard('remote_exec', async () => {
+    const caller = currentCaller();
+    if (!caps.command) return fail('Remote execution requires command capability');
+    if (!caller.conversationId || !caller.sessionId) return failIdentity('Verified chat identity is required for remote execution');
+    try {
+      const profile = await remoteHostByName(name);
+      if (profile.type !== 'ssh') return fail('This remote type is not available yet');
+      const address = `${profile.user}@${profile.host}:${profile.port}`;
+      if (!await requestRemoteApproval(caller.conversationId, address, command)) return fail('Remote command denied or timed out');
+      if (!caps.command) return fail('Remote execution permission was revoked');
+      const owner = await findSessionByConversation(caller.conversationId);
+      if (!owner || owner.id !== caller.sessionId) return failIdentity('This chat no longer owns the approved remote operation');
+      // The profile may have been removed or changed while the approval card was open.
+      if (JSON.stringify(await remoteHostByName(name)) !== JSON.stringify(profile)) return fail('Remote host changed; request approval again');
+      return ok(await executeRemoteHost(profile, command));
+    } catch { return fail('Remote command failed. Check the saved host, trust and SSH key.'); }
+  }));
   // Named from the live roots, never from a `/project` that may not exist: a worked example the
   // model cannot act on costs a refused call and a retry. What followed the root had the same
   // problem and cost more of them. `/<root>/src/main.ts` is a project's shape, so it read as a

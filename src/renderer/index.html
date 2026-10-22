@@ -41,6 +41,7 @@
         </button>
         <button data-tab="general" type="button"><i class="ico ph ph-sliders-horizontal" aria-hidden="true"></i>General</button>
         <button data-tab="notifications" type="button"><i class="ico ph ph-bell" aria-hidden="true"></i>Notifications</button>
+        <button data-tab="remote-hosts" type="button"><i class="ico ph ph-monitor" aria-hidden="true"></i>Remote hosts</button>
         <button data-tab="usage" type="button"><i class="ico ph ph-chart-line" aria-hidden="true"></i>Usage</button>
 <button data-tab="setup" type="button">
           <i class="ico ph ph-list-checks" aria-hidden="true"></i>Setup
@@ -328,6 +329,25 @@
           </div>
         </section>
 
+        <section class="panel appearance-panel scroll" data-panel="remote-hosts" aria-labelledby="remoteHostsTitle">
+          <div class="appearance-content settings-page-content" id="remoteHosts">
+            <header class="settings-page-head"><h1 id="remoteHostsTitle">Remote hosts</h1><p>Saved connections. SSH uses your system key or agent.</p></header>
+            <section class="appearance-section"><div class="settings-surface pane appearance-settings-card">
+              <label class="setting"><span class="setting-text"><b>Name</b></span><input id="remoteName" autocomplete="off" /></label>
+              <label class="setting"><span class="setting-text"><b>Type</b></span><select id="remoteType"><option value="ssh">SSH</option><option value="winrm">WinRM (coming later)</option><option value="powershell">PowerShell (coming later)</option><option value="whm">WHM (coming later)</option><option value="custom">Custom (coming later)</option></select></label>
+              <label class="setting"><span class="setting-text"><b>Host</b></span><input id="remoteAddress" autocomplete="off" /></label>
+              <label class="setting"><span class="setting-text"><b>Port</b></span><input id="remotePort" type="number" min="1" max="65535" value="22" /></label>
+              <label class="setting"><span class="setting-text"><b>User</b></span><input id="remoteUser" autocomplete="off" /></label>
+              <label class="setting"><span class="setting-text"><b>Server password (one-time key installation only)</b></span><input id="remotePassword" type="password" autocomplete="new-password" /></label>
+              <div class="setting"><span class="setting-text"><em>Store the key passphrase in the vault as ssh/marks-key-mestra. The SSH agent unlock lasts at most one hour.</em></span><button class="btn" id="remoteUnlock" type="button">Unlock master key from vault</button></div>
+              <label class="setting"><span class="setting-text"><b>Project folder on host</b></span><input id="remoteFolder" placeholder="/srv/app" translate="no" autocomplete="off" /></label>
+              <div class="setting"><button class="btn" id="remoteSave" type="button">Save host</button><button class="btn" id="remotePreview" type="button">Preview MarksCode targets</button><button class="btn" id="remoteImport" type="button" disabled>Import preview</button></div>
+              <p id="remoteMessage" role="status"></p><div id="remotePreviewRows"></div><div id="remoteRows"></div>
+              <div id="remoteTerminalMount" hidden style="min-height:320px;height:320px;position:relative"><button id="remoteTerminalClose" class="btn" type="button">Hide remote terminal</button></div>
+              <header class="settings-section-head"><h2>Remote command approvals</h2></header><div id="remotePending"></div>
+            </div></section>
+          </div>
+        </section>
         <section class="panel appearance-panel modules-panel scroll" data-panel="modules" aria-labelledby="modulesTitle">
           <div class="appearance-content settings-page-content">
             <header class="settings-page-head">

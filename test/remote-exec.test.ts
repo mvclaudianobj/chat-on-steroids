@@ -52,8 +52,12 @@ async function sshCalls(): Promise<string[][]> {
   return text.split('\n').filter(Boolean).map(line => JSON.parse(line) as string[]);
 }
 
+let previousHome: string | undefined;
 beforeAll(async () => {
   directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'cos-remote-exec-')));
+  // ssh.ts adds -i ~/.ssh/marks-key-mestra when that key exists: keep this machine's own key out.
+  previousHome = process.env.HOME;
+  process.env.HOME = directory;
   initSessionStore(path.join(directory, 'sessions'));
   argvLog = path.join(directory, 'ssh-argv.jsonl');
   const fake = path.join(directory, 'ssh');
@@ -72,6 +76,7 @@ beforeAll(async () => {
   setSshProgramForTests(fake);
 });
 afterAll(async () => {
+  if (previousHome === undefined) delete process.env.HOME; else process.env.HOME = previousHome;
   setSshProgramForTests(null);
   await unifiedExecManager.terminateAllProcesses();
   // The recorder may still be writing the last call's session; stop it before removing its folder.

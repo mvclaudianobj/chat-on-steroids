@@ -70,6 +70,7 @@ import { initMarksVaultUi } from './marks-vault.js';
 import { initBrainUi } from './brain-ui.js';
 import { initCompanyUi } from './company-ui.js';
 import { mountBrainImport } from './brain-import-ui.js';
+import { initRemoteHostsUi } from './remote-hosts.js';
 
 declare global {
   interface Window {
@@ -96,6 +97,7 @@ const brainUi = initBrainUi(api);
 const companyUi = initCompanyUi(api);
 // Chat Marks H2: old-history search and confirmed imports on the Brain page.
 const brainImportUi = mountBrainImport(api, { showTab: name => showTab(name), selectChat: selectChatSession });
+initRemoteHostsUi(api);
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
 ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
 ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));

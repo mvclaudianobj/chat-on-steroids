@@ -76,6 +76,8 @@ export function mainTexts(): Record<MainText, string> {
     'Export notification settings': t('Export notification settings'),
     'Import notification settings': t('Import notification settings'),
     'Chat Marks notification settings': t('Chat Marks notification settings'),
+    'Select a copy of remote-targets.json': t('Select a copy of remote-targets.json'),
+    'JSON files': t('JSON files'),
   };
 }
 

@@ -73,7 +73,9 @@ export const MAIN_TEXTS = [
   'JSON Lines',
   'Export notification settings',
   'Import notification settings',
-  'Chat Marks notification settings'
+  'Chat Marks notification settings',
+  'Select a copy of remote-targets.json',
+  'JSON files'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];
