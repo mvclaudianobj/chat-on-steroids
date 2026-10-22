@@ -21,6 +21,7 @@ const SPECS: Readonly<Record<UpstreamModuleId, UpstreamSpec>> = { opencode: OPEN
 const LATEST_TTL_MS = 60 * 60_000;
 const latest = new Map<UpstreamModuleId, { at: number; version: string }>();
 const lastInstall = new Map<UpstreamModuleId, UpstreamInstallProgress>();
+const latestAnnouncement = new Map<UpstreamModuleId, string>();
 
 const module = z.enum(UPSTREAM_MODULE_IDS);
 const request = z.discriminatedUnion('action', [
@@ -46,6 +47,7 @@ export function setUpstreamIpcDepsForTests(next: Partial<UpstreamIpcDeps> | null
   deps = next ? { ...defaultDeps, ...next } : defaultDeps;
   latest.clear();
   lastInstall.clear();
+  latestAnnouncement.clear();
 }
 
 /** What this app supports of a module's version: OpenCode has a gate, ZeroClaw is a terminal only. */
@@ -77,6 +79,13 @@ export async function upstreamVersions(id: UpstreamModuleId, refresh = false): P
   const inUse = binaries.managed ?? binaries.unmanaged;
   const latestSupport = supportOf(id, found.version);
   const newer = isNewerVersion(binaries.managed, found.version);
+  // Only the version owner's observed result may announce module updates.
+  if (newer && found.version && latestAnnouncement.get(id) !== found.version) {
+    latestAnnouncement.set(id, found.version);
+    void import('../notification-center.js').then(({ queueOutboundNotice }) =>
+      queueOutboundNotice({ event: 'module-update', title: `${id} ${found.version}`, project: 'Chat Marks' })
+    ).catch(() => undefined);
+  }
   return {
     installed: binaries.managed, unmanaged: binaries.unmanaged, latest: found.version,
     updateAvailable: newer && latestSupport !== 'unsupported',

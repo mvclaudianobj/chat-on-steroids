@@ -1,6 +1,7 @@
 // A fake `claude -p --input-format stream-json --output-format stream-json` for the Claude engine
 // tests: no model, no network. It logs its argv and every stdin line to FAKE_CLAUDE_LOG, answers
-// `initialize` and `interrupt`, and plays a scenario chosen by the user message's text.
+// `initialize` (with FAKE_CLAUDE_[DIRECT_]MODELS / _ACCOUNT, by the route its --settings say) and
+// `interrupt`, and plays a scenario chosen by the user message's text.
 import { appendFileSync } from 'node:fs';
 import { createInterface } from 'node:readline';
 
@@ -92,7 +93,12 @@ createInterface({ input: process.stdin }).on('line', line => {
   try { message = JSON.parse(line); } catch { return; }
   log({ in: message });
   if (message.type === 'control_request' && message.request?.subtype === 'initialize') {
-    out({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: { commands: [], models: [] } } });
+    // The catalog and account of this process's route: the direct route's flag settings unset the key helper.
+    const settings = argv[argv.indexOf('--settings') + 1] ?? '';
+    const pick = (name) => process.env[`FAKE_CLAUDE_${settings.includes('"apiKeyHelper":""') ? 'DIRECT_' : ''}${name}`];
+    const account = pick('ACCOUNT');
+    out({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id,
+      response: { commands: [], models: JSON.parse(pick('MODELS') ?? '[]'), ...(account ? { account: JSON.parse(account) } : {}) } } });
   } else if (message.type === 'control_request' && message.request?.subtype === 'interrupt') {
     out({ type: 'control_response', response: { subtype: 'success', request_id: message.request_id, response: {} } });
     for (const resolve of waiting.values()) resolve(null);

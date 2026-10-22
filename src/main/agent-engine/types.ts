@@ -11,7 +11,7 @@
  * - Whether a turn runs is process memory, one per chat. Stop is local and exact.
  * - Approvals are minted by the app (approval.ts); the renderer answers only that exact id.
  */
-import type { AgentEngineId, AgentEngineTerminalMode } from '../../shared/agent-engine.js';
+import type { AgentEngineId, AgentEngineRoute, AgentEngineTerminalMode } from '../../shared/agent-engine.js';
 import type {
   ApiChatApprovalDecision, ApiChatApprovalMode, ApiChatEffort, ApiChatModel, ApiChatView, ApiModelModality
 } from '../../shared/api-chat.js';
@@ -23,12 +23,23 @@ export interface EngineModelQuery {
   limit?: number;
   modality?: ApiModelModality;
   refresh?: boolean;
+  /** Codex and Claude Code: the list of that route (router.ts); default `direct`. */
+  route?: AgentEngineRoute;
 }
 
 export interface EngineChatSettingsPatch {
   model?: string;
   effort?: ApiChatEffort | null;
   approval?: ApiChatApprovalMode;
+  /** Codex and Claude Code only, between turns; other engines refuse it. */
+  route?: AgentEngineRoute;
+}
+
+export interface EngineCreateOptions {
+  projectId: string | null;
+  model?: string;
+  /** Codex and Claude Code: default `direct`. */
+  route?: AgentEngineRoute;
 }
 
 /** The chat an engine is asked about: the app's ids and the engine's own session, once it has one. */
@@ -38,6 +49,8 @@ export interface EngineChatRef {
   backendSessionId: string | null;
   /** The project's canonical folder, when the chat belongs to one. */
   cwd: string | null;
+  /** Codex and Claude Code: the chat's route (absent: `router`, as stored before routes). */
+  route?: AgentEngineRoute;
 }
 
 /** How to open the chat's backend session in a durable terminal (cli-modules tmux). */
@@ -51,10 +64,10 @@ export interface AgentEngine {
   readonly label: string;
   readonly terminalMode: AgentEngineTerminalMode | null;
   /** Whether a new chat can be created now, with a short reason. Never throws for "not set up". */
-  status(): Promise<{ available: boolean; detail: string }>;
+  status(): Promise<{ available: boolean; detail: string; router?: boolean }>;
   /** This engine's own model list, in the catalog's row shape. */
   models(query: EngineModelQuery): Promise<{ models: ApiChatModel[]; total: number }>;
-  create(options: { projectId: string | null; model?: string }): Promise<ApiChatView>;
+  create(options: EngineCreateOptions): Promise<ApiChatView>;
   view(sessionId: string): Promise<ApiChatView>;
   /**
    * Resolves once the question is recorded; the turn streams on in main. `takeBackTerminal` is the

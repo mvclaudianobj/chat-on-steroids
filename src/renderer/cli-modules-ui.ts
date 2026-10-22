@@ -18,11 +18,13 @@ const LEGACY: ReadonlySet<Id> = new Set(['markscode', 'marksclaw']);
 const UPSTREAM = (id: Id): id is 'opencode' | 'zeroclaw' => id === 'opencode' || id === 'zeroclaw';
 /**
  * Modules that are terminal types (New chat, the project's New terminal, the sidebar Terminals).
- * ZeroClaw is not: it is an autonomous agent the user configures from its own Settings page,
- * whose Configure agent terminal opens there and is never listed as a terminal.
+ * ZeroClaw is not: it is an autonomous agent the user configures from its own page (the sidebar's
+ * ZeroClaw item under Pets), whose Configure agent terminal opens there and is never listed as a terminal.
  */
 export const TERMINAL_MODULE = (id: string): boolean => IDS.includes(id as Id) && !LEGACY.has(id as Id) && id !== 'zeroclaw';
 export type CliModuleSummary = { id: string; name: string; enabled: boolean };
+/** ZeroClaw's own page: a main view like Plugins, Skills and Pets, opened from the sidebar. */
+export const ZEROCLAW_PAGE = 'zeroclaw';
 
 export function createCliModulesUi(api: AppApi, hooks: {
   showTab(name: string): void; openChatView(name: string): void; workspace(): string | null; newChatItems?(): RowMenuItem[];
@@ -52,17 +54,38 @@ export function createCliModulesUi(api: AppApi, hooks: {
   moduleTerminal.className = 'marks-cli-terminal';
   moduleView.append(moduleTerminal);
   chatBody.append(moduleView);
-  const rows = new Map<Id, { navigation: HTMLButtonElement; panel: HTMLElement; row: HTMLElement; active: HTMLInputElement; detail: HTMLElement; output: HTMLElement; project: HTMLSelectElement; manage: UpstreamManageUi | null }>();
+  // ZeroClaw's sidebar item, right below Pets, shown while its module is enabled.
+  const zeroclawLink = document.createElement('button');
+  zeroclawLink.type = 'button'; zeroclawLink.className = 'btn sidebar-primary-link'; zeroclawLink.id = 'sidebarZeroClaw';
+  zeroclawLink.dataset.sidebarPage = ZEROCLAW_PAGE; zeroclawLink.translate = false; zeroclawLink.hidden = true;
+  zeroclawLink.append(moduleMark('zeroclaw'), document.createTextNode('ZeroClaw'));
+  zeroclawLink.addEventListener('click', () => hooks.showTab(ZEROCLAW_PAGE));
+  const pets = document.getElementById('sidebarPets');
+  if (pets?.parentElement === sidebarPrimary) pets.after(zeroclawLink); else sidebarPrimary.append(zeroclawLink);
+  const rows = new Map<Id, { navigation: HTMLButtonElement | null; panel: HTMLElement; row: HTMLElement; active: HTMLInputElement; detail: HTMLElement; output: HTMLElement; project: HTMLSelectElement; manage: UpstreamManageUi | null }>();
   const current = new Map<Id, Status>();
   const sessions = new Map<string, CliSession>();
   const terminalManagers = new Map<string, ReturnType<typeof createWorkspaceTerminal>>();
   const terminalMounts = new Map<string, HTMLElement>();
   const sessionButtons = new Map<string, HTMLButtonElement>();
   let selectedSessionId: string | null = null;
-  let zeroclaw: { status: HTMLElement; versions: HTMLElement; output: HTMLElement; terminal: HTMLElement; facts: HTMLElement; close: HTMLButtonElement } | null = null;
+  let zeroclaw: { panel: HTMLElement; status: HTMLElement; versions: HTMLElement; output: HTMLElement; terminal: HTMLElement; facts: HTMLElement; close: HTMLButtonElement } | null = null;
 
-  /** ZeroClaw's Settings page: an area that grows with its settings over time. */
-  function zeroclawPage(content: HTMLElement): void {
+  /**
+   * ZeroClaw's page, opened from the sidebar like Plugins, Skills and Pets: an area that grows with
+   * its agent settings over time. Install and update stay in its Settings > Modules card.
+   */
+  function zeroclawPage(): HTMLElement {
+    const panel = document.createElement('section'); panel.className = 'panel plugins-panel zeroclaw-panel';
+    panel.dataset.panel = ZEROCLAW_PAGE;
+    const content = document.createElement('div'); content.className = 'plugins-content zeroclaw-content';
+    const head = document.createElement('header'); head.className = 'plugin-page-head';
+    const headText = document.createElement('div');
+    const pageTitle = text('h1', 'ZeroClaw'); pageTitle.translate = false; pageTitle.prepend(moduleMark('zeroclaw'));
+    const lead = document.createElement('p');
+    ui(lead, 'textContent', () => t('An autonomous agent you configure here. It is not a chat or a terminal type.'));
+    headText.append(pageTitle, lead); head.append(headText); content.append(head);
+    panel.append(content);
     const section = (titleText: () => string, intro: () => string): { box: HTMLElement; surface: HTMLElement } => {
       const box = document.createElement('section'); box.className = 'appearance-section';
       const head = document.createElement('header'); head.className = 'settings-section-head';
@@ -74,13 +97,14 @@ export function createCliModulesUi(api: AppApi, hooks: {
       box.append(head, surface); content.append(box);
       return { box, surface };
     };
-    const lead = document.createElement('p'); lead.className = 'modules-detail';
-    ui(lead, 'textContent', () => t('An autonomous agent you configure here. It is not a chat or a terminal type.'));
-    content.append(lead);
     const status = section(() => t('Status'), () => t('Installed version and the module\'s state. Install and update it in Settings > Modules.'));
     const statusLine = text('p', '', 'modules-detail'); statusLine.id = 'zeroclawPageStatus';
     const versions = text('p', '', 'modules-detail'); versions.id = 'zeroclawPageVersions';
-    status.surface.append(statusLine, versions);
+    const manageModule = document.createElement('button'); manageModule.type = 'button'; manageModule.className = 'btn'; manageModule.id = 'zeroclawManageModule';
+    ui(manageModule, 'textContent', () => t('Manage in Settings > Modules'));
+    manageModule.addEventListener('click', () => hooks.showTab('modules'));
+    const statusActions = document.createElement('div'); statusActions.className = 'modules-service-actions'; statusActions.append(manageModule);
+    status.surface.append(statusLine, versions, statusActions);
     const agent = section(() => t('Agent'), () => t('Create or change your agent with ZeroClaw\'s own guided setup (zeroclaw quickstart).'));
     const configure = document.createElement('button'); configure.type = 'button'; configure.className = 'btn primary'; configure.id = 'zeroclawConfigure';
     ui(configure, 'textContent', () => t('Configure agent'));
@@ -99,7 +123,8 @@ export function createCliModulesUi(api: AppApi, hooks: {
     refreshFacts.addEventListener('click', () => void paintZeroClawFacts());
     const factsActions = document.createElement('div'); factsActions.className = 'modules-service-actions'; factsActions.append(refreshFacts);
     settings.surface.append(facts, factsActions);
-    zeroclaw = { status: statusLine, versions, output, terminal, facts, close };
+    zeroclaw = { panel, status: statusLine, versions, output, terminal, facts, close };
+    return panel;
   }
 
   async function paintZeroClawFacts(): Promise<void> {
@@ -156,7 +181,13 @@ export function createCliModulesUi(api: AppApi, hooks: {
     zeroclaw.output.textContent = '';
     zeroclaw.terminal.hidden = false;
     zeroclaw.close.hidden = false;
-    const manager = managerFor(session, zeroclaw.terminal);
+    const output = zeroclaw.output;
+    const manager = managerFor(session, zeroclaw.terminal, () => {
+      // ZeroClaw (or the terminal) ended: its last output and exit status stay in the terminal.
+      if (manager.tabs().some(tab => tab.exited)) output.textContent = t('Setup ended. Its last output stays above; Configure agent starts it again.');
+    });
+    // A setup that ended is started again; one still running is reattached.
+    for (const tab of manager.tabs()) if (tab.exited) manager.closeTab(tab.id);
     const mount = terminalMounts.get(session.id)!;
     mount.hidden = false;
     manager.show(mount, true);
@@ -164,12 +195,15 @@ export function createCliModulesUi(api: AppApi, hooks: {
 
   for (const id of IDS) {
     const name = NAMES[id];
-    const navigation = document.createElement('button');
-    navigation.type = 'button'; navigation.className = 'modules-subnav'; navigation.dataset.modulePage = `module-${id}`;
-    navigation.setAttribute('aria-label', name); navigation.translate = false;
-    // Every module's management entry shows its own icon, like CLIProxyAPI's plug.
-    navigation.append(moduleMark(id), text('span', name)); navigation.hidden = true;
-    tabs.insertBefore(navigation, nav.nextSibling);
+    // Every module's management entry shows its own icon, like CLIProxyAPI's plug. ZeroClaw's
+    // page is a main view opened from the sidebar instead of a Settings sub-page.
+    const navigation = id === 'zeroclaw' ? null : document.createElement('button');
+    if (navigation) {
+      navigation.type = 'button'; navigation.className = 'modules-subnav'; navigation.dataset.modulePage = `module-${id}`;
+      navigation.setAttribute('aria-label', name); navigation.translate = false;
+      navigation.append(moduleMark(id), text('span', name)); navigation.hidden = true;
+      tabs.insertBefore(navigation, nav.nextSibling);
+    }
     const row = document.createElement('section'); row.className = 'appearance-section';
     row.dataset.cliModule = id;
     // Retired forks stay out of sight unless still active or running (refresh below).
@@ -185,29 +219,60 @@ export function createCliModulesUi(api: AppApi, hooks: {
     const actions = document.createElement('div'); actions.className = 'modules-service-actions';
     // Upstream modules install and update their official release from their own versions block;
     // the retired forks only keep Stop.
-    const operations = LEGACY.has(id) || UPSTREAM(id) ? ['stop'] as const : ['install', 'update', 'stop'] as const;
+    const operations = ['stop'] as const;
     for (const action of operations) {
       const button = document.createElement('button'); button.type = 'button'; button.className = 'btn';
-      button.textContent = action === 'install' ? 'Install / instructions' : action === 'update' ? 'Update' : 'Stop session';
+      button.textContent = 'Stop session';
       button.addEventListener('click', () => void operate(id, action)); actions.append(button);
     }
+    if (id === 'zeroclaw') {
+      // The card keeps install and update; the agent itself is configured on ZeroClaw's page.
+      const openPage = document.createElement('button'); openPage.type = 'button'; openPage.className = 'btn'; openPage.id = 'zeroclawOpenPage';
+      ui(openPage, 'textContent', () => t('Open {0}', ['ZeroClaw']));
+      openPage.addEventListener('click', () => hooks.showTab(ZEROCLAW_PAGE));
+      actions.append(openPage);
+    }
     surface.append(enableLabel, detail, actions); row.append(surface); parent.append(row);
+    if (id === 'codex' || id === 'claude') {
+      const installedLine = text('p', '', 'modules-detail'); installedLine.id = `${id}InstalledVersion`;
+      const latestLine = text('p', '', 'modules-detail'); latestLine.id = `${id}LatestVersion`;
+      const badge = text('span', '', 'modules-status'); badge.id = `${id}UpdateBadge`; badge.dataset.state = 'update'; badge.hidden = true;
+      ui(badge, 'textContent', () => t('Update available'));
+      const button = document.createElement('button'); button.type = 'button'; button.className = 'btn primary'; button.id = `${id}Install`; button.hidden = true;
+      button.addEventListener('click', () => void (async () => {
+        const state = current.get(id);
+        if (!state?.latest) return;
+        const action = state.installed ? (state.external ? 'update-external' : 'update') : 'install';
+        if (action === 'update-external' && !window.confirm(t('Update the existing installation of {0} in place? This changes the CLI outside Chat Marks.', [NAMES[id]]))) return;
+        if (action !== 'update-external' && !window.confirm(t('Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.', [NAMES[id], state.latest]))) return;
+        button.disabled = true;
+        const result = await api.cliAction(id, action, state.latest);
+        if (!result.ok) detail.textContent = result.error;
+        button.disabled = false;
+        await refresh();
+        if (result.ok) hooks.onEngineService?.();
+      })());
+      const versions = document.createElement('div'); versions.className = 'cliproxy-versions upstream-versions';
+      versions.append(installedLine, latestLine, badge, button); surface.append(versions);
+    }
     const manage = UPSTREAM(id) ? createUpstreamManageUi(api, id, surface, () => { void refresh(); hooks.onEngineService?.(); }) : null;
 
+    if (id === 'zeroclaw') {
+      // ZeroClaw's own area: status, Configure agent (its terminal opens here) and its settings,
+      // beside the Plugins, Skills and Pets pages.
+      const panel = zeroclawPage();
+      const library = document.querySelector('[data-panel="pets"]')?.parentElement ?? panels;
+      library.append(panel);
+      rows.set(id, { navigation, panel, row, active: activeCheck, detail, output: zeroclaw!.output, project: document.createElement('select'), manage });
+      activeCheck.addEventListener('change', () => void operate(id, activeCheck.checked ? 'enable' : 'disable'));
+      continue;
+    }
     const panel = document.createElement('section'); panel.className = 'panel appearance-panel modules-panel scroll';
     panel.dataset.panel = `module-${id}`;
     const content = document.createElement('div'); content.className = 'appearance-content settings-page-content';
     const pageTitle = text('h1', name);
     pageTitle.prepend(moduleMark(id));
     content.append(pageTitle);
-    if (id === 'zeroclaw') {
-      // ZeroClaw's own area: status, Configure agent (its terminal opens here) and its settings.
-      zeroclawPage(content);
-      panel.append(content); panels.append(panel);
-      rows.set(id, { navigation, panel, row, active: activeCheck, detail, output: zeroclaw!.output, project: document.createElement('select'), manage });
-      activeCheck.addEventListener('change', () => void operate(id, activeCheck.checked ? 'enable' : 'disable'));
-      continue;
-    }
     const project = document.createElement('select'); project.className = 'btn'; project.setAttribute('aria-label', 'Workspace');
     const create = document.createElement('button'); create.className = 'btn'; create.textContent = 'Open / reconnect terminal';
     create.addEventListener('click', () => void createSession(id, project.value || hooks.workspace()));
@@ -284,10 +349,28 @@ export function createCliModulesUi(api: AppApi, hooks: {
         current.set(status.id, status);
         row.detail.classList.remove('modules-error');
         row.active.checked = status.enabled;
-        row.navigation.hidden = !status.enabled || status.legacy;
+        if (row.navigation) row.navigation.hidden = !status.enabled || status.legacy;
+        if (status.id === 'zeroclaw') {
+          zeroclawLink.hidden = !status.enabled;
+          document.getElementById('zeroclawOpenPage')?.toggleAttribute('hidden', !status.enabled);
+          // Disabled while its page is on screen: back to the chat.
+          if (!status.enabled && zeroclaw?.panel.classList.contains('is-active')) hooks.showTab('chat');
+        }
         if (status.legacy) row.row.hidden = !status.enabled && !status.running;
         row.detail.textContent = status.legacy ? status.detail
           : `${status.version ?? 'Not installed'}${status.upstream && status.installed && !status.managed ? ` (${t('not installed by Chat Marks')})` : ''} · ${status.running ? 'Running · ' : ''}${status.detail}`;
+        if (status.id === 'codex' || status.id === 'claude') {
+          const installed = document.getElementById(`${status.id}InstalledVersion`)!;
+          const latest = document.getElementById(`${status.id}LatestVersion`)!;
+          const badge = document.getElementById(`${status.id}UpdateBadge`)!;
+          const button = document.getElementById(`${status.id}Install`) as HTMLButtonElement;
+          installed.textContent = `${t('Installed version')}: ${status.version ?? t('Not installed')}${status.external ? ` · ${t('Using installed')} (${t('not installed by Chat Marks')})` : ''}`;
+          latest.textContent = `${t('Latest release')}: ${status.latest ?? '—'}`;
+          badge.hidden = !status.updateAvailable;
+          button.hidden = !status.latest || (status.installed && !status.updateAvailable);
+          button.textContent = status.installed ? t('Update to {0}', [status.latest ?? '']) : t('Install {0}', [status.latest ?? '']);
+          if (status.restartPending) row.detail.textContent += ` · ${t('Restarts with the new version when nothing is running')}`;
+        }
         void row.manage?.refresh().then(() => { if (status.id === 'zeroclaw') paintZeroClawStatus(); });
       }
       paintZeroClawStatus();
@@ -435,7 +518,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
       sessionButtons.set(session.id, button);
     }
   }
-  function managerFor(session: CliSession, parent: HTMLElement = moduleTerminal): ReturnType<typeof createWorkspaceTerminal> {
+  function managerFor(session: CliSession, parent: HTMLElement = moduleTerminal, onTabsChanged?: () => void): ReturnType<typeof createWorkspaceTerminal> {
     const existing = terminalManagers.get(session.id);
     if (existing) return existing;
     const mount = document.createElement('div');
@@ -454,7 +537,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
       close: attachmentId => api.cliDetach(attachmentId),
       onEvent: listener => api.onCliEvent(listener)
     };
-    const manager = createWorkspaceTerminal(() => undefined, mount, { id: `cliTerminal-${session.id}`, onEmpty: () => undefined, transport });
+    const manager = createWorkspaceTerminal(() => undefined, mount, { id: `cliTerminal-${session.id}`, onEmpty: () => undefined, transport, ...(onTabsChanged ? { onTabsChanged } : {}) });
     manager.update(session.projectId ? { id: session.projectId, name: session.title, path: '', createdAt: session.createdAt } : null);
     terminalManagers.set(session.id, manager);
     return manager;
@@ -462,7 +545,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
   async function createSession(moduleId: string, projectId: string | null, kind?: 'quickstart'): Promise<void> {
     const id = IDS.find(candidate => candidate === moduleId);
     if (!id || LEGACY.has(id)) return;
-    if (id === 'zeroclaw') { hooks.showTab('module-zeroclaw'); await openZeroClawSetup(); return; }
+    if (id === 'zeroclaw') { hooks.showTab(ZEROCLAW_PAGE); await openZeroClawSetup(); return; }
     const row = rows.get(id)!;
     if (!current.get(id)?.enabled) { row.output.textContent = 'Enable this module first.'; return; }
     row.output.textContent = 'Criando sessão CLI…';
@@ -482,7 +565,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
   async function showSession(sessionId: string): Promise<void> {
     const session = sessions.get(sessionId);
     if (!session || !current.get(session.module)?.enabled) return;
-    if (!TERMINAL_MODULE(session.module)) { hooks.showTab(`module-${session.module}`); if (session.module === 'zeroclaw') await openZeroClawSetup(); return; }
+    if (!TERMINAL_MODULE(session.module)) { if (session.module === 'zeroclaw') { hooks.showTab(ZEROCLAW_PAGE); await openZeroClawSetup(); } return; }
     hooks.showTab('chat');
     hooks.openChatView('cli-module');
     selectedSessionId = sessionId;
@@ -517,7 +600,11 @@ export function createCliModulesUi(api: AppApi, hooks: {
       name: status.name,
       enabled: status.enabled
     })),
-    normalizeTab: (name: string) => IDS.some(id => name === `module-${id}` && !current.get(id)?.enabled) ? 'modules' : name,
+    normalizeTab: (name: string) => {
+      // ZeroClaw's former Settings sub-page is its page now; with the module off, Settings > Modules.
+      if (name === 'module-zeroclaw' || name === ZEROCLAW_PAGE) return current.get('zeroclaw')?.enabled ? ZEROCLAW_PAGE : 'modules';
+      return IDS.some(id => name === `module-${id}` && !current.get(id)?.enabled) ? 'modules' : name;
+    },
     onTabOpening: (name: string) => {
       if (name === 'modules') void refresh();
       if (name === 'chat') {
@@ -530,12 +617,12 @@ export function createCliModulesUi(api: AppApi, hooks: {
       }
     },
     onTabShown: (name: string) => {
+      if (name === ZEROCLAW_PAGE) { void refresh(); void paintZeroClawFacts(); return; }
       const id = IDS.find(id => name === `module-${id}`);
-      if (id === 'zeroclaw') { void refresh(); void paintZeroClawFacts(); }
-      else if (id) { void refresh(); void setProjects(id); }
+      if (id) { void refresh(); void setProjects(id); }
     },
     paintNavigation: (name: string) => {
-      for (const [id, row] of rows) row.navigation.classList.toggle('is-sel', name === `module-${id}`);
+      for (const [id, row] of rows) row.navigation?.classList.toggle('is-sel', name === `module-${id}`);
     },
     modulePage: (button: HTMLElement | null | undefined) => button?.dataset.modulePage && IDS.some(id => button.dataset.modulePage === `module-${id}`) ? button.dataset.modulePage : null,
     repaintSessions: paintSessions,

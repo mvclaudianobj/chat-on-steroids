@@ -181,6 +181,21 @@ async function writeSessionWithinDeadline(value: string): Promise<void> {
   }
 }
 
+/**
+ * Chat Marks H1b: the current Markspanel bearer for the opt-in Brain Marks memory provider.
+ * Main-only; it never crosses IPC and is not refreshed here (the session monitor owns refresh).
+ */
+export async function markspanelBrainSession(): Promise<{ access: string; id?: string } | null> {
+  if (markspanelAccessBlocked()) return null;
+  try {
+    const stored = await getSecret(STORE);
+    if (!stored) return null;
+    const data = JSON.parse(stored) as Saved;
+    if (typeof data.access !== 'string' || !data.access || typeof data.expiry !== 'number' || data.expiry <= Date.now()) return null;
+    return { access: data.access, ...(typeof data.id === 'string' && data.id ? { id: data.id } : {}) };
+  } catch { return null; }
+}
+
 /** Remove local credentials; a revoked session will also fail the next server validation. */
 export function logoutMarkspanel(): Promise<void> {
   if (logoutInFlight) return logoutInFlight;

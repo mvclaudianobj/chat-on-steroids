@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.44.2': {
+    lead: () => t("A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice."),
+    highlights: [
+      { icon: 'i-git-branch', title: () => t("A route for each chat"), text: () => t("Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.") },
+      { icon: 'i-agents', title: () => t("Real model names"), text: () => t("Model lists show each model's full name and version, not just a short alias.") },
+      { icon: 'i-module-zeroclaw', title: () => t("ZeroClaw has its own page"), text: () => t("Open it below Pets in the sidebar; Configure agent now draws its setup.") },
+      { icon: 'i-browser', title: () => t("The right extension notice"), text: () => t("The extension update notice follows the browser you chose for ChatGPT.") }
+    ]
+  },
   '2.1.44.1': {
     lead: () => t("Pictures with /image, keyboard shortcuts, and a quicker message after Stop."),
     highlights: [

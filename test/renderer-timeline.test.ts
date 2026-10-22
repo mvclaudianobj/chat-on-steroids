@@ -6525,6 +6525,59 @@ async function typed(text: string, skills: Array<{ id: string; name: string }> =
   return { ...app, input };
 }
 
+// Chat Marks Brain (H1b bug reports): a typed /remember really saves, and /recall never has a silent Insert.
+function brainFake(app: { w: any }, memories: Array<{ id: string; content: string; title?: string }> = []) {
+  const calls: Array<{ action: string; payload: any }> = [];
+  app.w.api.brain = async (action: string, payload?: any) => {
+    calls.push({ action, payload });
+    if (action === 'memories.save') return { ok: true, data: { id: '00000000-0000-4000-8000-000000000001', content: payload.content, synced: [] } };
+    if (action === 'memories.list') return { ok: true, data: memories.map(row => ({ ...row, contentHash: 'a'.repeat(64), tags: [] })) };
+    if (action === 'recall') return { ok: true, data: { items: memories.map(row => ({ source: 'local', ...row, contentHash: 'a'.repeat(64) })), errors: [], remote: false } };
+    return { ok: true, data: [] };
+  };
+  return calls;
+}
+it('saves a typed /remember with its text, toasts, and leaves nothing to send', async () => {
+  const app = await boot([], false);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  const calls = brainFake(app);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/remember o projeto usa pnpm';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle(); await settle();
+  expect(calls.filter(call => call.action === 'memories.save')).toEqual([{ action: 'memories.save', payload: { content: 'o projeto usa pnpm' } }]);
+  expect(app.w.document.querySelector('.toast')?.textContent).toBe('Memory saved');
+  expect(input.value).toBe('');
+  expect(app.live.sent).toHaveLength(0);
+});
+it('disables /recall Insert with a hint and shows how to add memories when there are none', async () => {
+  const app = await boot([], false);
+  brainFake(app);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  input.value = '/recall';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle(); await settle();
+  const dialog = app.w.document.querySelector('.brain-recall-dialog')!;
+  expect(dialog.textContent).toContain('No memories yet: use /remember or the Brain page.');
+  expect((dialog.querySelector('[data-action="insert"]') as HTMLButtonElement).disabled).toBe(true);
+  expect(app.w.document.querySelector('.brain-recall-dialog')).not.toBeNull();
+});
+it('preselects a single /recall result so Insert puts it into the draft with its source', async () => {
+  const app = await boot([], false);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  brainFake(app, [{ id: '00000000-0000-4000-8000-000000000002', content: 'O projeto usa pnpm' }]);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/recall pnpm';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle(); await settle();
+  const dialog = app.w.document.querySelector('.brain-recall-dialog')!;
+  const insert = dialog.querySelector('[data-action="insert"]') as HTMLButtonElement;
+  expect(insert.disabled).toBe(false);
+  insert.click(); await settle();
+  expect(input.value).toBe('<memory-context>\n[Local] O projeto usa pnpm\n</memory-context>');
+});
+
 it('runs a typed /goal as the Goal command and sends the rest as its message', async () => {
   const { w, live } = await typed('/goal Reply with exactly: done');
   expect((w.document.getElementById('chatAutomation') as HTMLSelectElement).value).toBe('goal');

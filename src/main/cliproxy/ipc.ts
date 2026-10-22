@@ -28,6 +28,7 @@ const request = z.discriminatedUnion('action', [
 let lastInstall: CliProxyInstallProgress | null = null;
 /** A management write answered "failed to save config" since the last repair. */
 let saveFailed = false;
+let announcedUpdate: string | null = null;
 
 export async function cliProxyVersions(refresh = false): Promise<CliProxyVersions> {
   const installable = installablePlatform();
@@ -36,6 +37,12 @@ export async function cliProxyVersions(refresh = false): Promise<CliProxyVersion
     latestRelease({ refresh }).then(release => ({ version: release.version, error: undefined }),
       (error: Error) => ({ version: null, error: error.message === 'release_unavailable' ? error.message : 'release_unavailable' }))
   ]);
+  if (isUpdateAvailable(installed, latest.version) && latest.version && announcedUpdate !== latest.version) {
+    announcedUpdate = latest.version;
+    void import('../notification-center.js').then(({ queueOutboundNotice }) =>
+      queueOutboundNotice({ event: 'module-update', title: `CLIProxyAPI ${latest.version}`, project: 'Chat Marks' })
+    ).catch(() => undefined);
+  }
   return {
     installed, installedOfficial: isOfficialVersion(installed), latest: latest.version,
     updateAvailable: isUpdateAvailable(installed, latest.version), installable,

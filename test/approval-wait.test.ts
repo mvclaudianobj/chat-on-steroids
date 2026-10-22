@@ -120,6 +120,66 @@ describe('approval card episodes', () => {
     expect(deps.rows).toEqual([]);
     expect(deps.notices).toEqual([]);
   });
+
+  it('keeps a worker waiting through the flicker the live log shows, and notices it once', async () => {
+    // Live 2.1.44.1, 2026-10-22, worker-1 of a two-worker run: "waits" at 14:36:32.973, "no longer
+    // shows" 1.531 s later, "shows the same tool approval card again" 0.764 s after that, then the
+    // card stood for 85 minutes. The page polls every 2 s while the card stands.
+    const logs: string[] = [];
+    deps.log = message => { logs.push(message); };
+    const card = { id: 'node-1', lines: ['Allow ChatGPT to use Chat Marks Core?', 'Run one command.'], allow: true };
+    const start = 1_000;
+    await noteApprovalCard('worker-chat', true, 'worker-session', deps, start, card);
+    await noteApprovalCard('worker-chat', false, 'worker-session', deps, start + 1_531);
+    await noteApprovalCard('worker-chat', true, 'worker-session', deps, start + 2_295, { ...card, id: 'node-2' });
+    for (let at = start + 4_295; at < start + 10 * 60_000; at += 2_000)
+      await noteApprovalCard('worker-chat', true, 'worker-session', deps, at, { ...card, id: 'node-2' });
+    const end = start + 10 * 60_000;
+    expect(approvalCardWaiting('worker-chat', end)).toBe(true);
+    expect(approvalWaitingChats(end)).toEqual(['worker-chat']);
+    expect(approvalCardView('worker-chat', end)?.id).toBe('node-2');
+    // One episode, one row that ends saying waiting, one notice.
+    expect(new Set(deps.rows.map(row => row[1])).size).toBe(1);
+    expect(deps.rows.at(-1)![2]).toBe(APPROVAL_WAITING_TEXT);
+    expect(deps.notices).toEqual(['worker-session']);
+    expect(logs.filter(line => line.includes('waits for the user'))).toHaveLength(1);
+    expect(logs.filter(line => line.includes('redrawn, not answered'))).toHaveLength(1);
+  });
+
+  it('keeps the episode when the redrawn card comes while "answered" is still being written', async () => {
+    // The redraw poll is not serialized behind the one that saw the card go: with a slow write it
+    // found no answered episode, started a new one and reset its notice clock.
+    const card = { id: 'node-1', lines: ['Allow ChatGPT to use Chat Marks Core?', 'Write one file.'], allow: true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card);
+    await noteApprovalCard('chat', true, 'session', deps, 1_000 + APPROVAL_NOTICE_GRACE_MS, card);
+    expect(deps.notices).toEqual(['session']);
+    let release!: () => void;
+    const slow = new Promise<void>(resolve => { release = resolve; });
+    const record = deps.record;
+    deps.record = async (...args) => { if (args[2] === APPROVAL_ANSWERED_TEXT) await slow; return record(...args); };
+    const gone = noteApprovalCard('chat', false, 'session', deps, 40_000);
+    await noteApprovalCard('chat', true, 'session', deps, 41_000, { ...card, id: 'node-2' });
+    release();
+    await gone;
+    expect(approvalCardWaiting('chat', 41_000)).toBe(true);
+    expect(new Set(deps.rows.map(row => row[1])).size).toBe(1);
+    expect(deps.rows.at(-1)![2]).toBe(APPROVAL_WAITING_TEXT);
+    expect(deps.notices).toEqual(['session']);
+  });
+
+  it('tries the desktop notice again while the window had focus and showed none', async () => {
+    // A focused window showing another chat got no notice, and none ever came after it lost focus.
+    let focused = true;
+    deps.notify = sessionId => { if (focused) return false; deps.notices.push(sessionId); return true; };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000);
+    await noteApprovalCard('chat', true, 'session', deps, 1_000 + APPROVAL_NOTICE_GRACE_MS);
+    await noteApprovalCard('chat', true, 'session', deps, 3_000 + APPROVAL_NOTICE_GRACE_MS);
+    expect(deps.notices).toEqual([]);
+    focused = false;
+    await noteApprovalCard('chat', true, 'session', deps, 5_000 + APPROVAL_NOTICE_GRACE_MS);
+    await noteApprovalCard('chat', true, 'session', deps, 7_000 + APPROVAL_NOTICE_GRACE_MS);
+    expect(deps.notices).toEqual(['session']);
+  });
 });
 
 // The sidebar's Inbox ranks every chat, not only the open one, so the list carries the waits.

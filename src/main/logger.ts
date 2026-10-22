@@ -18,6 +18,7 @@
 import { promises as fs, statSync, writeFileSync } from 'node:fs';
 import type { LogEntry } from '../shared/types.js';
 import { currentAgent } from './mcp/call-context.js';
+import { redactVaultText } from './marks-vault-redaction.js';
 
 const MAX_ENTRIES = 500;
 /** One rotation keeps the previous file, so the last two of these are always on disk. */
@@ -261,7 +262,7 @@ export function resetLoggerForTests(): void {
 
 /** Masks anything shaped like a credential, wherever it appears in a message. */
 export function redact(message: string): string {
-  return message
+  return redactVaultText(message)
     .replace(/\bsk-[A-Za-z0-9_-]{8,}/g, 'sk-***')
     .replace(/\b(ey[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})/g, '***jwt***')
     .replace(/\b[A-Za-z0-9_-]{40,}\b/g, (match) =>

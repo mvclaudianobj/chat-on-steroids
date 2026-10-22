@@ -2768,6 +2768,13 @@ input[readonly] {
 .approval-card-words strong { color: var(--ink); font-weight: 600; }
 .approval-card-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .approval-card-status { margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+/* The same card, in the window's notices, for a chat that is not on screen (paintApprovalNotice). */
+.notice.approval-notice { display: grid; gap: 8px; }
+.approval-notice-line { display: grid; gap: 6px; }
+.approval-notice-head { display: flex; align-items: center; gap: 8px; }
+.approval-notice-head .ico { color: var(--red); }
+.approval-notice-text { flex: 1; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.approval-notice .approval-card { margin: 0 0 0 22px; }
 
 .meta.is-bad {
   color: var(--red);
@@ -3793,6 +3800,43 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .setting > input[type='checkbox']:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
 /* A switch that needs another one first (Allow actions needs the control API) reads as inactive. */
 .setting > input[type='checkbox']:disabled { opacity: .45; cursor: default; }
+.notification-center-surface { padding: 0 18px; }
+.notification-center-status { margin: 10px 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+.notification-center-status:empty { display: none; }
+.notification-center-status.is-error, .notification-channel-note.is-error { color: var(--red); }
+.notification-center-timing, .notification-channel-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 16px; row-gap: 10px; }
+.notification-center-timing { padding: 16px 0; }
+.notification-center-field { min-width: 0; margin: 0; }
+.notification-center-field > :is(input, textarea, select), .notification-secret-row > input { min-width: 0; width: 100%; }
+.notification-center-field textarea { min-height: 70px; }
+.notification-channel { padding: 20px 0; border-top: 1px solid var(--line); }
+.notification-channel-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 14px; }
+.notification-channel-head h3 { margin: 0; color: var(--ink); font-size: calc(15px * var(--text-scale, 1)); }
+.notification-channel-head p, .notification-channel-note { margin: 4px 0 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; }
+.notification-channel-head > .setting { padding: 0; min-height: 0; }
+.notification-channel-head .setting-text { flex: 0 1 auto; }
+.notification-channel-fields > .field:has(textarea) { grid-column: 1 / -1; }
+.notification-channel-events { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 18px; margin: 20px 0 0; padding: 0; border: 0; }
+.notification-channel-events legend { margin-bottom: 8px; color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); font-weight: 600; }
+.notification-channel-events .setting { min-height: 44px; padding: 9px 0; }
+.notification-channel-events .setting + .setting { border-top: 0; }
+.notification-channel-events .setting-text em:empty { display: none; }
+.notification-channel-fields > .notification-secret-row { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: 12px; align-items: end; }
+.notification-secret-row .btn { min-height: 36px; }
+.notification-vault-notice:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 12px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+.notification-vault-notice .btn { min-height: 34px; }
+.notification-channel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding-top: 16px; }
+.notification-center-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 16px 0; border-top: 1px solid var(--line); }
+.notification-center-footer .btn { min-height: 38px; }
+.notification-center :is(button, input, textarea, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 900px) {
+  .notification-channel-fields > .notification-secret-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .notification-secret-row > .btn { grid-column: 1 / -1; justify-self: start; }
+}
+@media (max-width: 680px) {
+  .notification-center-timing, .notification-channel-fields, .notification-channel-events { grid-template-columns: minmax(0, 1fr); }
+  .notification-channel-fields > .notification-secret-row { grid-template-columns: minmax(0, 1fr); }
+}
 .setting:has(> input[type='checkbox']:disabled) .setting-text { opacity: .6; }
 .setting-timing { margin: -4px 0 8px; padding: 0 0 10px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
 .setting-timing > summary { display: flex; align-items: center; gap: 6px; width: fit-content; cursor: pointer; color: var(--soft); list-style: none; }

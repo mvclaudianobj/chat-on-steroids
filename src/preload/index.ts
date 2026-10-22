@@ -31,6 +31,8 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AppState, Capabilities, CompanionDiagnostics, Config, Diagnosis, LogEntry } from '../shared/types.js';
+import { BRAIN_IMPORT_ACTIONS } from '../shared/brain-import-actions.js';
+import type { BrainImportProgress } from '../shared/brain-import.js';
 import type {
   Handoff,
   ImageStorageClearMode,
@@ -109,6 +111,12 @@ export interface SessionDetail {
 }
 
 const api = {
+  notificationCenterGet: () => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'get' }),
+  notificationCenterSave: (settings: import('../shared/notification-center.js').NotificationCenterSettings) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'save', settings }),
+  notificationCenterSetCredential: (channel: import('../shared/notification-center.js').NotificationChannel, credential: string, masterPassword: string) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'credential', channel, credential, masterPassword }),
+  notificationCenterTest: (channel: import('../shared/notification-center.js').NotificationChannel) => call<{ delivered: number }>('marksNotify:request', { action: 'test', channel }),
+  notificationCenterExport: () => call<boolean>('marksNotify:request', { action: 'export' }),
+  notificationCenterImport: () => call<{ imported: boolean }>('marksNotify:request', { action: 'import' }),
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */
@@ -139,23 +147,23 @@ const api = {
   apiChatSetKey: (key: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setKey', key }),
   apiChatSetSettings: (settings: Partial<import('../shared/api-chat.js').ApiChatSettings>) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setSettings', settings }),
   /** A page of an engine's models (CLIProxy's catalog when `engine` is omitted). */
-  apiChatModels: (query = '', offset = 0, limit = 50, refresh = false, engine?: import('../shared/agent-engine.js').AgentEngineId) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit, refresh, ...(engine ? { engine } : {}) }),
+  apiChatModels: (query = '', offset = 0, limit = 50, refresh = false, engine?: import('../shared/agent-engine.js').AgentEngineId, route?: import('../shared/agent-engine.js').AgentEngineRoute) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit, refresh, ...(engine ? { engine } : {}), ...(route ? { route } : {}) }),
   /** Every chat engine with whether a new chat can use it now. */
   apiChatEngines: () => call<import('../shared/agent-engine.js').AgentEngineInfo[]>('marksApiChat:request', { action: 'engines' }),
   apiChatToggleFavorite: (model: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'toggleFavorite', model }),
   /** A minimal real request with the model (the default one when omitted); records its availability. */
   apiChatTest: (model?: string) => call<{ model: string }>('marksApiChat:request', { action: 'test', ...(model ? { model } : {}) }),
   /** A new API chat: a local session in the `cosapi-` namespace, optionally in a project, on an engine (CLIProxy by default). */
-  apiChatCreate: (options: { projectId?: string | null; model?: string; engine?: import('../shared/agent-engine.js').AgentEngineId } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
+  apiChatCreate: (options: { projectId?: string | null; model?: string; engine?: import('../shared/agent-engine.js').AgentEngineId; route?: import('../shared/agent-engine.js').AgentEngineRoute } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
   /** Records the question and starts the answer; it streams into the session's history. */
   apiChatSend: (sessionId: string, text: string, options: { takeBackTerminal?: true } = {}) =>
     call<{ turnId: string }>('marksApiChat:request', { action: 'send', sessionId, text, ...(options.takeBackTerminal ? { takeBackTerminal: true } : {}) }),
   apiChatStop: (sessionId: string) => call<{ stopped: boolean }>('marksApiChat:request', { action: 'stop', sessionId }),
   apiChatTerminal: (sessionId: string) => call<{ cliSessionId: string }>('marksApiChat:request', { action: 'terminal', sessionId }),
   apiChatChatSettings: (sessionId: string) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'chatSettings', sessionId }),
-  apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
+  apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode; route?: import('../shared/agent-engine.js').AgentEngineRoute }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
   apiChatApprove: (sessionId: string, approvalId: string, decision: import('../shared/api-chat.js').ApiChatApprovalDecision) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'approve', sessionId, approvalId, decision }),
-  cliAction: (module: import('../main/cli-modules.js').CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'stop') => call<unknown>('marksCli:request', { action, module }),
+  cliAction: (module: import('../main/cli-modules.js').CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'update-external' | 'stop', version?: string) => call<unknown>('marksCli:request', { action, module, ...(version ? { version } : {}) }),
   cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),
   /** `quickstart`: ZeroClaw's `zeroclaw quickstart` instead of its `zerocode` terminal. */
   cliCreateSession: (module: import('../main/cli-modules.js').CliId, projectId: string | null, kind?: 'quickstart') => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId, ...(kind ? { kind } : {}) }),
@@ -277,6 +285,34 @@ const api = {
   getUsage: () => call<UsageOverview>('usage:get'),
   /** Codex's and Claude Code's usage from their logs here; `fresh` skips the 30-second cache. */
   getProviderUsage: (fresh = false) => call<ProviderUsage>('usage:providers', { fresh }),
+  vault: (action: string, payload?: unknown) => {
+    const allowed = ['status', 'list', 'create', 'recover', 'put', 'remove', 'reveal', 'changePassword', 'export', 'import', 'importGpg', 'pending', 'decide'];
+    if (!allowed.includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown vault action' });
+    return call<unknown>(`vault:${action}`, payload);
+  },
+  brain: (action: string, payload?: unknown) => {
+    // Chat Marks: model memory administration is a fixed local-only IPC action list.
+    const allowed: string[] = ['status','doctor','sources','settings.get','settings.set','recall','memories.list','memories.search','memories.get','memories.save','memories.update','memories.delete','memories.export','pending.list','pending.decide','providers.test','providers.setKey','providers.importMarksCode', ...BRAIN_IMPORT_ACTIONS];
+    if (!allowed.includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown Brain action' });
+    return call<unknown>('marksBrain:request', { action, payload });
+  },
+  /** Chat Marks H2: copy, index and import progress of old history. */
+  onBrainProgress: (listener: (event: BrainImportProgress) => void): (() => void) => {
+    const handler = (_event: unknown, value: BrainImportProgress): void => listener(value);
+    ipcRenderer.on('marksBrain:progress', handler);
+    return () => ipcRenderer.removeListener('marksBrain:progress', handler);
+  },
+  onBrainApprovalsChanged: (listener: () => void): (() => void) => {
+    const handler = (): void => listener();
+    ipcRenderer.on('marksBrain:approvalsChanged', handler);
+    return () => ipcRenderer.removeListener('marksBrain:approvalsChanged', handler);
+  },
+  /** The vault's pending chat requests changed; read them again with `vault('pending')`. */
+  onVaultPendingChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('vault:pending-changed', wrapped);
+    return () => ipcRenderer.removeListener('vault:pending-changed', wrapped);
+  },
   getState: () => call<AppState>('state:get'),
   resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */
@@ -346,6 +382,18 @@ const api = {
     const wrapped = (_event: unknown, progress: import('../shared/upstream-module.js').UpstreamInstallProgress): void => listener(progress);
     ipcRenderer.on('marksUpstream:progress', wrapped);
     return () => ipcRenderer.removeListener('marksUpstream:progress', wrapped);
+  },
+  // Chat Marks: Claude Code Router module (npm release into the module folder, its daemon, its web UI).
+  ccrStatus: (refresh = false) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'status', refresh }),
+  /** Installs or updates to `version`, the release the user confirmed; `update-external` updates the user's own copy in place. */
+  ccrInstall: (mode: import('../shared/ccr-module.js').CcrInstallMode, version: string) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'install', mode, version }),
+  ccrService: (op: import('../shared/ccr-module.js').CcrServiceAction) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'service', op }),
+  /** Opens CCR's web UI in the browser (main reads its address; it never reaches the renderer). */
+  ccrOpenUi: () => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'openUi' }),
+  onCcrProgress: (listener: (progress: import('../shared/ccr-module.js').CcrInstallProgress) => void): (() => void) => {
+    const wrapped = (_event: unknown, progress: import('../shared/ccr-module.js').CcrInstallProgress): void => listener(progress);
+    ipcRenderer.on('marksCcr:progress', wrapped);
+    return () => ipcRenderer.removeListener('marksCcr:progress', wrapped);
   },
   installUpdate: () => call<boolean>('update:install'),
   /** Check/stage/apply supported updates and request one connector refresh round. May restart. */

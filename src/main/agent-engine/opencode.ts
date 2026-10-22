@@ -55,6 +55,7 @@ import {
 } from './opencode-client.js';
 import { opencodeSupport } from '../opencode/release.js';
 import { OPENCODE_SERVICE_FOREIGN as FOREIGN } from '../opencode/service.js';
+import { noteBrainEngineToolCall, wireOpenCodeBrain } from '../brain/engine-mcp.js';
 
 const ENGINE = 'opencode' as const;
 const LABEL = AGENT_ENGINE_LABELS.opencode;
@@ -486,6 +487,8 @@ async function handle(turn: Turn, event: OpenCodeEvent): Promise<void> {
       if (toolId && typeof data.name === 'string') turn.toolNames.set(toolId, data.name);
       return;
     case 'session.tool.called':
+      // Chat Marks: attributes a Brain save on the shared service to this chat.
+      if (toolId) noteBrainEngineToolCall(ENGINE, turn.sessionId, turn.toolNames.get(toolId) ?? '', data.input);
       if (turn.promptSent && toolId) await startTool(turn, toolId, turn.toolNames.get(toolId) ?? 'tool', data.input);
       return;
     case 'session.tool.success':
@@ -901,6 +904,8 @@ export const openCodeEngine: AgentEngine = {
     try {
       const client = await connect();
       if (await client.running(turn.backendId)) throw new Error('OpenCode is still working in this session (its terminal). Send again when it finishes.');
+      // Chat Marks: the Brain MCP server for this location (H1c), runtime-only; never blocks the turn.
+      await wireOpenCodeBrain(client, directory).catch(error => logWarn(`OpenCode Brain tools unavailable: ${(error as Error).message.slice(0, 200)}`));
       await turn.projector.start(question);
       started = true;
       void pump(turn);

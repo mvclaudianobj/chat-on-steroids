@@ -682,6 +682,7 @@ describe('who is allowed to talk to it', () => {
   // Its moz-extension:// origin says it is Firefox too.
   it('tells an older Firefox add-on apart by its origin', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
     const firefox = 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b';
     await request('GET', '/status', { host: 'browser', origin: firefox, extensionVersion: '2.1.37.1002' });
     expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
@@ -693,6 +694,7 @@ describe('who is allowed to talk to it', () => {
   // record. Its user agent is on every one.
   it('keeps an older Firefox add-on apart on requests that carry no origin', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
     const firefox = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0';
     await request('GET', '/status', { host: 'browser', origin: 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b', extensionVersion: '2.1.37.1002', userAgent: firefox });
     await request('GET', '/status', { host: 'browser', origin: null, extensionVersion: '2.1.37.1002', userAgent: firefox });
@@ -731,10 +733,10 @@ describe('who is allowed to talk to it', () => {
     } finally { unsubscribe(); }
   });
 
-  // 2.1.41 bug hunt: with Chrome current and Firefox still on the add-on it had not updated yet, the one
-  // reported version followed whichever browser asked last, and the update notice came and went.
-  it('reports the oldest extension among connected browsers, with its engine, until that browser goes quiet', async () => {
+  // An older Firefox add-on must be reported when Firefox is selected, even as Chrome keeps polling.
+  it('reports the oldest selected-browser extension until it goes quiet', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
     const chrome = 'a'.repeat(32), firefox = 'b'.repeat(32);
@@ -742,7 +744,7 @@ describe('who is allowed to talk to it', () => {
       request('POST', '/status', { host: 'browser', browser, extensionVersion, engine, body: { openConversations: [] } });
     try {
       await ask(chrome, APP_VERSION);
-      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: null });
       expect((await bridgeStatus()).extensionEngine).toBeUndefined();
       await ask(firefox, '0.0.1', 'gecko');
       for (let i = 0; i < 3; i++) {
@@ -757,14 +759,40 @@ describe('who is allowed to talk to it', () => {
       changed.mockClear();
       await vi.advanceTimersByTimeAsync(20_002);
       expect(changed).toHaveBeenCalled();
-      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
-      expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+      // With no live Firefox sighting, keep its last reported version until another Firefox
+      // comes back; Chrome's version must not masquerade as Firefox's.
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
       // The same browser updated in place replaces its own entry.
       await ask(firefox, '0.0.1', 'gecko');
       expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
       await ask(firefox, APP_VERSION, 'gecko');
       expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
     } finally { unsubscribe(); vi.useRealTimers(); }
+  });
+
+  it('keeps old external extensions out of the native-browser update notice', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+    const native = 'c'.repeat(32), external = 'e'.repeat(32);
+    const status = (host: string, browser: string, extensionVersion: string) =>
+      request('POST', '/status', { host, browser, extensionVersion, body: { openConversations: [] } });
+    await status('browser', external, '2.1.42.1');
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: null, externalExtension: { version: '2.1.42.1' } });
+    await status('cos', native, APP_VERSION);
+    for (let i = 0; i < 2; i++) {
+      await status('browser', external, i === 0 ? '2.1.42.1' : '2.1.43.1');
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION, cosExtension: { present: true } });
+    }
+    // A genuinely outdated native extension still needs its warning, despite external Chrome
+    // being up to date. Once native reloads, only that updated version should be reported.
+    await status('cos', native, '2.1.43.1');
+    await status('browser', external, APP_VERSION);
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.43.1' });
+    await status('cos', native, APP_VERSION);
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    await status('browser', external, '2.1.42.1');
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.42.1' });
   });
 
   it('publishes external expiry while the CoS companion continues polling', async () => {

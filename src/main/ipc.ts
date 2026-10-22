@@ -4,13 +4,18 @@ import { registerCliModuleIpc } from './cli-modules.js';
 import { registerApiChatIpc } from './api-chat/ipc.js';
 import { registerCliProxyIpc } from './cliproxy/ipc.js';
 import { registerUpstreamIpc } from './upstream/ipc.js';
+import { registerCcrIpc } from './ccr/ipc.js';
 import { registerCliChatIpc } from './cli-chat.js';
+import { registerNotificationCenterIpc } from './notification-ipc.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
 import { isApiConversationId } from '../shared/api-chat.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
+import { registerVaultIpc } from './marks-vault-ipc.js';
+import { registerBrainIpc } from './brain/ipc.js';
+import { revokeVaultChat } from './marks-vault-approval.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
@@ -652,11 +657,13 @@ export async function openSessionChat(id: string): Promise<void> {
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  registerNotificationCenterIpc(getWindow);
   registerWorkspaceTerminalIpc(getWindow);
   registerCliModuleIpc(getWindow);
   registerApiChatIpc(getWindow);
   registerCliProxyIpc(getWindow); // Chat Marks: CLIProxyAPI versions, install/update, management keys.
   registerUpstreamIpc(getWindow); // Chat Marks: upstream OpenCode and ZeroClaw versions and install/update.
+  registerCcrIpc(getWindow); // Chat Marks: Claude Code Router module (install/update, service, router availability for chat routes).
   registerCliChatIpc(getWindow);
   // Sign out is an application admission transition. End this process after
   // clearing its secure session so the next startup must authenticate again.
@@ -672,6 +679,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     } catch { return { ok: false, error: 'Unable to sign out securely' }; }
   });
   registerDictationIpc(getWindow);
+  registerVaultIpc(getWindow);
+  // Chat Marks: Brain has one fixed, frame-checked, validated IPC surface.
+  registerBrainIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
   const deletingSessionIds = new Set<string>();
@@ -1786,6 +1796,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ], false);
       }
       await deleteSession(id);
+      if (summary?.conversationId) {
+        for (const conversationId of [summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)]) {
+          revokeVaultChat(conversationId);
+        }
+      }
       logInfo(
         detached.length > 0
           ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
@@ -2071,7 +2086,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // checkpoints and automatic continuations already have their instructions.
       // An edit of a chat's first question (#365) replaces the message that carried its setup.
       return ((entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish') || entry.editFramed
-        ? prepareSessionPrompt(text, entry, limits, authored)
+        ? prepareSessionPrompt(text, { ...entry, brainContext: true }, limits, authored)
         : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits, entry) : text;
     },
     applyAutomation: async (conversationId, automation, phase, objective, loopAfterTurn) => {
