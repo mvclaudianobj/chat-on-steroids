@@ -27,6 +27,7 @@ import type { CodexEngine, CodexHost } from '../src/main/agent-engine/codex.js';
 
 const FAKE = fileURLToPath(new URL('./fixtures/agent-engine/codex-fake-app-server.cjs', import.meta.url));
 const SOCKET = '/tmp/chat-marks-codex-test.sock';
+const ROUTER_SOCKET = '/tmp/chat-marks-codex-test-router.sock';
 const run = promisify(execFile);
 
 // ---------------------------------------------------------------- schema subset (checked in, from generate-json-schema)
@@ -89,32 +90,43 @@ let cwd: string;
 let counter = 0;
 let engine: CodexEngine | null = null;
 
-function fakeHost(options: { script?: Record<string, unknown>; version?: string; unavailable?: string } = {}) {
+function fakeHost(options: { script?: Record<string, unknown>; version?: string; unavailable?: string; router?: boolean } = {}) {
   const id = ++counter;
   const logFile = path.join(directory, `fake-${id}.log`);
   const scriptFile = path.join(directory, `fake-${id}.json`);
   writeFileSync(scriptFile, JSON.stringify(options.script ?? {}));
   const env = { ...process.env, CODEX_FAKE_LOG: logFile, CODEX_FAKE_SCRIPT: scriptFile, CODEX_FAKE_VERSION: options.version ?? '0.163.0' };
   const opened: string[][] = [];
+  const routing = options.router
+    ? { detected: true, provider: 'claude-code-router', directOverrides: ['model_provider="openai"', 'model_catalog_json="/home/user/.codex/models_cache.json"'] }
+    : { detected: false, provider: null, directOverrides: [] };
   const terminals: Array<{ sessionId: string; projectId: string | null; args: string[]; title: string }> = [];
-  let terminalHook: (() => Promise<void>) | null = null;
+  let terminalHook: ((chatSessionId: string | null) => Promise<void>) | null = null;
   const host: CodexHost = {
     runtime: async () => options.unavailable ? { ok: false, detail: options.unavailable } : { ok: true, runtime: { binary: FAKE, windows: false } },
     run: async (_runtime, args) => (await run(process.execPath, [FAKE, ...args], { env })).stdout.trim(),
-    open: async () => {
-      const argv = protocol.codexServerArgv(SOCKET);
+    routing: () => routing,
+    open: async (_runtime, route) => {
+      const socket = route === 'router' ? ROUTER_SOCKET : SOCKET;
+      const argv = protocol.codexServerArgv(socket, route === 'direct' ? routing.directOverrides : []);
       opened.push(argv);
       // The fake is server and proxy at once: its stdio is the socket's WebSocket, as with 0.163.
-      const client = spawn(process.execPath, [FAKE, ...argv], { env, stdio: ['pipe', 'pipe', 'pipe'] });
-      return { client, server: null, socket: SOCKET };
+      const client = spawn(process.execPath, [FAKE, ...argv], { env: { ...env, CODEX_FAKE_ROUTE: route, ...(route === 'router' ? { CODEX_FAKE_LOG: `${logFile}.router` } : {}) }, stdio: ['pipe', 'pipe', 'pipe'] });
+      return { client, server: null, socket };
     },
     workspace: async () => cwd,
     appVersion: async () => '2.1.42',
     openTerminal: async chat => { terminals.push(chat); return { id: 'cli-codex-1' }; },
     onTerminalOpen: listener => { terminalHook = listener; }
   };
-  const messages = (): Logged[] => existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Logged) : [];
-  return { host, messages, opened, terminals, terminalHook: () => terminalHook, requests: (method: string) => messages().filter(message => message.method === method) };
+  const messages = (route: 'direct' | 'router' = 'direct'): Logged[] => {
+    const file = route === 'router' ? `${logFile}.router` : logFile;
+    return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Logged) : [];
+  };
+  return {
+    host, messages, opened, terminals, terminalHook: () => terminalHook,
+    requests: (method: string, route: 'direct' | 'router' = 'direct') => messages(route).filter(message => message.method === method)
+  };
 }
 
 async function until<T>(check: () => Promise<T | null | undefined | false> | T | null | undefined | false, what = 'condition'): Promise<T> {
@@ -276,15 +288,15 @@ describe('JSON-RPC peer', () => {
 
 describe('Codex engine (fake app-server)', () => {
   it('is available when installed, supported and signed in; otherwise it says why', async () => {
-    expect(await start().engine.status()).toEqual({ available: true, detail: 'Codex 0.163.0 · chatgpt' });
+    expect(await start().engine.status()).toEqual({ available: true, detail: 'Codex 0.163.0 · chatgpt', router: false });
     engine!.shutdown();
-    expect(await start({ script: { account: { account: null, requiresOpenaiAuth: true } } }).engine.status()).toEqual({ available: false, detail: CODEX_NOT_SIGNED_IN });
+    expect(await start({ script: { account: { account: null, requiresOpenaiAuth: true } } }).engine.status()).toEqual({ available: false, detail: CODEX_NOT_SIGNED_IN, router: false });
     engine!.shutdown();
     const old = start({ version: '0.150.0' });
-    expect(await old.engine.status()).toEqual({ available: false, detail: 'Codex 0.150.0 is not supported; Chat Marks supports Codex 0.163.0' });
+    expect(await old.engine.status()).toEqual({ available: false, detail: 'Codex 0.150.0 is not supported; Chat Marks supports Codex 0.163.0', router: false });
     expect(old.fake.opened).toEqual([]);
     engine!.shutdown();
-    expect(await start({ unavailable: 'Codex is not installed' }).engine.status()).toEqual({ available: false, detail: 'Codex is not installed' });
+    expect(await start({ unavailable: 'Codex is not installed' }).engine.status()).toEqual({ available: false, detail: 'Codex is not installed', router: false });
     expect(recoversOwnTurns('codex')).toBe(true);
   });
 
@@ -491,5 +503,92 @@ describe('Codex engine (fake app-server)', () => {
     await engine.send(chat.sessionId, 'again');
     expect(await engine.turnDone(chat.sessionId)).toBe('completed');
     expect(fake.messages().filter(message => message.method === 'thread/resume' || message.method === 'turn/start').map(message => message.method)).toEqual(['thread/resume', 'turn/start']);
+  });
+});
+
+describe('Codex engine: routes (one app-server per route)', () => {
+  const codexModel = (id: string, displayName: string, isDefault = false) => ({ id, model: id, displayName, hidden: false, isDefault, supportedReasoningEfforts: [], defaultReasoningEffort: 'medium' });
+  // As codex-cli 0.163 lists them on the user's machine: the account's catalog direct, the router's one model otherwise.
+  const routed = (extra: Record<string, unknown> = {}) => ({
+    router: true,
+    script: {
+      routes: {
+        direct: { models: [codexModel('gpt-6.1-sol', 'GPT-6.1-Sol', true), codexModel('gpt-6-luna', 'GPT-6-Luna')] },
+        router: { account: { account: null, requiresOpenaiAuth: false }, models: [codexModel('Local/router-model', 'Local/router-model', true)] }
+      },
+      ...extra
+    }
+  });
+
+  it('starts the direct server with the overrides that neutralize the router, and the router server as configured', () => {
+    expect(protocol.codexServerArgv(SOCKET, ['model_provider="openai"', 'model_catalog_json="/home/user/.codex/models_cache.json"'])).toEqual([
+      'app-server', '-c', 'approval_policy="on-request"', '-c', 'sandbox_mode="workspace-write"', '-c', 'approvals_reviewer="user"',
+      '-c', 'model_provider="openai"', '-c', 'model_catalog_json="/home/user/.codex/models_cache.json"', '--listen', `unix://${SOCKET}`
+    ]);
+    expect(() => protocol.codexServerArgv(SOCKET, ['approval_policy="never"'])).toThrow('Invalid Codex route override');
+    expect(() => protocol.codexServerArgv(SOCKET, ['model_provider="evil"'])).toThrow();
+  });
+
+  it('reports the direct account and the detected router, and lists each route\'s own models', async () => {
+    const { fake, engine } = start(routed());
+    expect(await engine.status()).toEqual({ available: true, router: true, detail: 'Codex 0.163.0 · direct: chatgpt · Claude Code Router detected' });
+    // Status asks the direct server only.
+    expect(fake.opened.map(argv => argv.at(-1))).toEqual([`unix://${SOCKET}`]);
+    expect(fake.opened[0]).toContain('model_provider="openai"');
+    expect((await engine.models({ route: 'direct' })).models.map(model => [model.id, model.label])).toEqual([['gpt-6.1-sol', 'GPT-6.1-Sol'], ['gpt-6-luna', 'GPT-6-Luna']]);
+    expect((await engine.models({ route: 'router' })).models.map(model => model.id)).toEqual(['Local/router-model']);
+    expect(fake.opened.map(argv => argv.at(-1))).toEqual([`unix://${SOCKET}`, `unix://${ROUTER_SOCKET}`]);
+    expect(fake.opened[1]).not.toContain('model_provider="openai"');
+  });
+
+  it('stays available through the router when the direct route has no account', async () => {
+    const { engine } = start({ router: true, script: { account: { account: null, requiresOpenaiAuth: true } } });
+    expect(await engine.status()).toEqual({ available: true, router: true, detail: 'Codex 0.163.0 · direct: not signed in · Claude Code Router detected' });
+  });
+
+  it('creates direct chats on the direct server; a route change starts a new thread on the other server with its default model', async () => {
+    const { fake, engine } = start(routed({ turns: [[completed()]], routes: {
+      direct: { models: [codexModel('gpt-6.1-sol', 'GPT-6.1-Sol', true)] },
+      router: { account: { account: null, requiresOpenaiAuth: false }, models: [codexModel('Local/router-model', 'Local/router-model', true)], turns: [[completed()]] }
+    } }));
+    const chat = await engine.create({ projectId: null });
+    expect(chat).toMatchObject({ route: 'direct', routes: ['direct', 'router'], model: 'gpt-6.1-sol' });
+    expect(await ledger.storedChatRecord(chat.sessionId)).toMatchObject({ route: 'direct', backendSessionId: 'thread-1' });
+    await engine.send(chat.sessionId, 'hi');
+    await engine.turnDone(chat.sessionId);
+    expect(fake.requests('turn/start').map(message => message.params?.threadId)).toEqual(['thread-1']);
+
+    // To the router: Codex threads keep their provider, so the chat forgets its thread and takes the router's model.
+    expect(await engine.setChatSettings(chat.sessionId, { route: 'router' })).toMatchObject({ route: 'router', model: 'Local/router-model' });
+    expect((await ledger.storedChatRecord(chat.sessionId))?.backendSessionId).toBeUndefined();
+    await engine.send(chat.sessionId, 'again');
+    await engine.turnDone(chat.sessionId);
+    expect(fake.requests('thread/resume', 'router')).toEqual([]);
+    expect(fake.requests('turn/start', 'router').map(message => [message.params?.threadId, message.params?.model])).toEqual([['router-thread-1', 'Local/router-model']]);
+    expect(fake.requests('turn/start')).toHaveLength(1);
+    expect((await ledger.storedChatRecord(chat.sessionId))?.backendSessionId).toBe('router-thread-1');
+    // The live terminal attaches to the server of the chat's route.
+    expect(await engine.openTerminal!(chat.sessionId)).toEqual({ cliSessionId: 'cli-codex-1' });
+    expect(fake.terminals.at(-1)?.args).toEqual(['resume', 'router-thread-1', '--remote', `unix://${ROUTER_SOCKET}`]);
+    await fake.terminalHook()!(chat.sessionId);
+  });
+
+  it('refuses a route change while a turn runs', async () => {
+    const { engine } = start(routed({ turns: [[{ waitMs: 2_000 }, completed()]] }));
+    const chat = await engine.create({ projectId: null });
+    await engine.send(chat.sessionId, 'hi');
+    await expect(engine.setChatSettings(chat.sessionId, { route: 'router' })).rejects.toThrow('Wait for the answer to finish before changing the route.');
+    await engine.stop(chat.sessionId);
+  });
+
+  it('keeps one server and the thread without a detected router', async () => {
+    const { fake, engine } = start({ script: { models: [codexModel('gpt-6.1-sol', 'GPT-6.1-Sol', true)] } });
+    const chat = await engine.create({ projectId: null });
+    expect(chat).toMatchObject({ route: 'direct', routes: [] });
+    await engine.setChatSettings(chat.sessionId, { route: 'router' });
+    expect((await ledger.storedChatRecord(chat.sessionId))?.backendSessionId).toBe('thread-1');
+    await engine.models({ route: 'router' });
+    expect(fake.opened.map(argv => argv.at(-1))).toEqual([`unix://${SOCKET}`]);
+    expect(fake.opened[0]).not.toContain('model_provider="openai"');
   });
 });

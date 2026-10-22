@@ -20,6 +20,19 @@ export const AGENT_ENGINE_LABELS: Readonly<Record<AgentEngineId, string>> = {
   markscode: 'MarksCode'
 };
 
+/**
+ * Which way a Codex or Claude Code chat reaches its model (main/agent-engine/router.ts):
+ * `direct` uses the CLI's own account, overriding a detected Claude Code Router for the processes
+ * the app starts (never the user's files); `router` runs the CLI exactly as configured, through the
+ * router when one is set up. New chats are `direct`; a chat stored without a route is `router`
+ * (every chat created before routes ran with the user's configuration as it was).
+ */
+export const AGENT_ENGINE_ROUTES = ['direct', 'router'] as const;
+export type AgentEngineRoute = typeof AGENT_ENGINE_ROUTES[number];
+export const DEFAULT_AGENT_ENGINE_ROUTE: AgentEngineRoute = 'direct';
+/** The engines whose chats have a route. */
+export const ROUTED_AGENT_ENGINES: ReadonlySet<AgentEngineId> = new Set<AgentEngineId>(['codex', 'claude']);
+
 export function isAgentEngineId(value: unknown): value is AgentEngineId {
   return typeof value === 'string' && (AGENT_ENGINE_IDS as readonly string[]).includes(value);
 }
@@ -47,6 +60,8 @@ export interface AgentEngineInfo {
   /** Short, one-line reason or location, e.g. the endpoint or why it is unavailable. */
   detail: string;
   terminal: AgentEngineTerminalMode | null;
+  /** Codex and Claude Code: whether a Claude Code Router is configured for this CLI (the router route is offered). */
+  router?: boolean;
 }
 
 /**

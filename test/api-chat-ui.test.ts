@@ -336,9 +336,52 @@ it("names the chat's engine in the header and loads that engine's models", async
   });
   const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
   chats.sync();
-  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Codex · gpt-6-codex'));
-  await vi.waitFor(() => expect(api.apiChatModels).toHaveBeenCalledWith('', 0, 200, false, 'codex'));
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Codex · gpt-6-codex · direct'));
+  await vi.waitFor(() => expect(api.apiChatModels).toHaveBeenCalledWith('', 0, 200, false, 'codex', 'direct'));
   await vi.waitFor(() => expect([...$<HTMLSelectElement>('apiChatComposerModel').options].map(option => option.value)).toEqual(['gpt-6-codex']));
+  // Without a detected router there is nothing to choose.
+  expect($('apiChatComposerRoute').hidden).toBe(true);
+});
+
+it('offers the route of a Codex or Claude Code chat when a router is detected, with each route\'s versioned models', async () => {
+  let current: Record<string, unknown> = { ...view({ model: 'opus' }), engine: 'claude', approval: 'ask', pending: null, route: 'direct', routes: ['direct', 'router'] };
+  const models: Record<string, unknown[]> = {
+    direct: [{ id: 'opus', label: 'opus (claude-opus-5-5)', ownedBy: 'anthropic', modality: 'chat', favorite: false, recent: false, availability: null },
+      { id: 'haiku', label: 'haiku (claude-haiku-5-5)', ownedBy: 'anthropic', modality: 'chat', favorite: false, recent: false, availability: null }],
+    router: [{ id: 'Local/router-model', ownedBy: 'anthropic', modality: 'chat', favorite: false, recent: false, availability: null }]
+  };
+  const api = apiMock({
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: current })),
+    apiChatSetChatSettings: vi.fn(async (_id: string, settings: { route?: string }) => {
+      current = { ...current, ...settings, ...(settings.route === 'router' ? { model: 'Local/router-model' } : {}) };
+      return { ok: true as const, data: current };
+    }),
+    apiChatModels: vi.fn(async (_q: string, _o: number, _l: number, _r: boolean, _engine: string, route: string) => ({ ok: true as const, data: { total: models[route]!.length, models: models[route] } }))
+  });
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
+  chats.sync();
+  const select = $<HTMLSelectElement>('apiChatComposerRoute');
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Claude Code · opus (claude-opus-5-5) · direct'));
+  expect(select.hidden).toBe(false);
+  expect([...select.options].map(option => [option.value, option.textContent])).toEqual([['direct', 'CLI account (direct)'], ['router', 'Via Claude Code Router']]);
+  expect(select.value).toBe('direct');
+  const group = $<HTMLSelectElement>('apiChatComposerModel').querySelector('optgroup')!;
+  expect(group.label).toBe('CLI account (direct)');
+  expect([...group.querySelectorAll('option')].map(option => option.textContent)).toEqual(['opus (claude-opus-5-5)', 'haiku (claude-haiku-5-5)']);
+
+  select.value = 'router';
+  select.dispatchEvent(new dom.window.Event('change'));
+  await vi.waitFor(() => expect(api.apiChatSetChatSettings).toHaveBeenCalledWith('session-api', { route: 'router' }));
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Claude Code · Local/router-model · via Claude Code Router'));
+  expect(api.apiChatModels).toHaveBeenCalledWith('', 0, 200, false, 'claude', 'router');
+  await vi.waitFor(() => expect($<HTMLSelectElement>('apiChatComposerModel').querySelector('optgroup')!.label).toBe('Via Claude Code Router'));
+
+  // Between turns only.
+  current = { ...current, running: true };
+  chats.sync();
+  await chats.refresh();
+  api.onSessionChanged.mock.calls[0][0]({ sessionIds: ['session-api'] });
+  await vi.waitFor(() => expect(select.disabled).toBe(true));
 });
 
 it('offers an OpenCode chat once main reports it available, and opens its live terminal through the shared seam', async () => {
@@ -405,7 +448,7 @@ it('offers Claude Code once main reports it available, and opens a Claude chat i
   expect(chats.newChatItems()[1]!.label()).toBe('Claude Code');
   expect(chats.projectChatItems('p')[1]!.label()).toBe('New Claude Code chat in this project');
   chats.sync();
-  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Claude Code · opus'));
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Claude Code · opus · direct'));
   await vi.waitFor(() => expect($('apiChatTerminal').hidden).toBe(false));
   $('apiChatTerminal').click();
   await vi.waitFor(() => expect(openCliSession).toHaveBeenCalledWith('cli-claude-1'));
@@ -454,7 +497,7 @@ it('shows each chat type icon in New chat, the project menu, the Terminals list 
   expect(terminal.textContent).toBe('Build shell');
   // The opened chat's header: its engine's icon beside the engine label, which stays the text.
   chats.sync();
-  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Claude Code · opus'));
+  await vi.waitFor(() => expect($('apiChatLabel').textContent).toBe('Claude Code · opus · direct'));
   expect($('apiChatLabel').querySelector('.chat-type-icon')?.getAttribute('data-chat-type')).toBe('claude');
   expect(dom.window.document.querySelector<HTMLElement>('.chat-head-type')!.hidden).toBe(true);
   // A ChatGPT chat shows the fox before its title; a new chat shows none.

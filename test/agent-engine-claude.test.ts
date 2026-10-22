@@ -29,6 +29,8 @@ let extraEnv: Record<string, string> = {};
 let terminalState: 'none' | 'detached' | 'attached' | 'external' = 'none';
 const terminalCalls: string[] = [];
 let engine: ClaudeEngine;
+/** The user's Claude Code Router setup as the engine sees it: never this machine's real files. */
+let routing: { detected: boolean; model: string | null } = { detected: false, model: null };
 
 const runtime = async (): Promise<ClaudeRuntime> => ({ bin: process.execPath, argsPrefix: [FAKE], cwd: project });
 
@@ -44,6 +46,7 @@ function makeEngine(): ClaudeEngine {
       open: async chat => { terminalCalls.push(`open:${chat.sessionId}:${chat.args.join(' ')}`); return { id: 'cli-1' }; }
     },
     attachModuleHooks: () => undefined,
+    routing: () => routing,
     env: () => ({ ...process.env, FAKE_CLAUDE_LOG: logFile, ...extraEnv }),
     initializeTimeoutMs: 5_000,
     interruptGraceMs: 2_000,
@@ -53,7 +56,9 @@ function makeEngine(): ClaudeEngine {
 
 interface LogEntry { pid: number; argv?: string[]; cwd?: string; background?: string | null; cron?: string | null; in?: Record<string, any> }
 const logEntries = (): LogEntry[] => existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as LogEntry) : [];
-const launches = (): LogEntry[] => logEntries().filter(entry => entry.argv);
+/** Chat processes; the catalog probes (`initialize` only, see `probes`) are counted apart. */
+const launches = (): LogEntry[] => logEntries().filter(entry => entry.argv && !entry.argv.includes('--no-session-persistence'));
+const probes = (): LogEntry[] => logEntries().filter(entry => entry.argv?.includes('--no-session-persistence'));
 const controlResponses = (): Array<Record<string, any>> => logEntries().map(entry => entry.in).filter((message): message is Record<string, any> => message?.type === 'control_response');
 const controlRequests = (subtype: string): Array<Record<string, any>> => logEntries().map(entry => entry.in).filter((message): message is Record<string, any> => message?.type === 'control_request' && message.request?.subtype === subtype);
 
@@ -89,6 +94,7 @@ beforeEach(async () => {
   logFile = path.join(directory, `log-${crypto.randomUUID()}.jsonl`);
   writeFileSync(logFile, '');
   extraEnv = {};
+  routing = { detected: false, model: null };
   terminalState = 'none';
   terminalCalls.length = 0;
   engine = makeEngine();
@@ -170,11 +176,11 @@ describe('Claude Code engine: argv and pure mapping', () => {
   });
 
   it('reports available with version and sign-in, unavailable when signed out or the module is off, never throwing', async () => {
-    expect(await engine.status()).toEqual({ available: true, detail: '2.1.306 (Claude Code) · signed in' });
-    const signedOut = claude.createClaudeEngine({ runtime, attachModuleHooks: () => undefined,
+    expect(await engine.status()).toEqual({ available: true, detail: '2.1.306 (Claude Code) · signed in', router: false });
+    const signedOut = claude.createClaudeEngine({ runtime, attachModuleHooks: () => undefined, routing: () => routing,
       probe: async (_r, args) => args[0] === 'auth' ? { code: 1, stdout: '{"loggedIn":false}', stderr: '' } : { code: 0, stdout: '2.1.306\n', stderr: '' } });
     expect(await signedOut.status()).toMatchObject({ available: false, detail: expect.stringMatching(/not signed in/) });
-    const off = claude.createClaudeEngine({ runtime: async () => { throw new Error('This module has been disabled'); }, attachModuleHooks: () => undefined });
+    const off = claude.createClaudeEngine({ runtime: async () => { throw new Error('This module has been disabled'); }, attachModuleHooks: () => undefined, routing: () => routing });
     expect(await off.status()).toEqual({ available: false, detail: 'Activate the Claude module in Settings > Modules' });
   });
 });
@@ -444,5 +450,128 @@ describe('Claude Code engine against a fake CLI', () => {
     expect(argv.slice(argv.indexOf('--effort'), argv.indexOf('--effort') + 2)).toEqual(['--effort', 'low']);
     expect(argv.at(-1)).toMatch(/^--resume=/);
     await expect(engine.setChatSettings(chat.sessionId, { model: '--dangerously-skip-permissions' })).rejects.toThrow();
+  });
+});
+
+describe('Claude Code engine: routes (direct CLI account or a detected Claude Code Router)', () => {
+  // As Claude Code 2.1.306 answers `initialize`: the direct route's own catalog, and the router's.
+  const DIRECT_MODELS = JSON.stringify([
+    { value: 'default', resolvedModel: 'claude-opus-5-5', displayName: 'Default (recommended)', supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus', supportedEffortLevels: ['low', 'medium', 'high', 'xhigh', 'max'] },
+    { value: 'haiku', resolvedModel: 'claude-haiku-5-5', displayName: 'Haiku', supportedEffortLevels: ['low', 'high'] }
+  ]);
+  const ROUTER_MODELS = JSON.stringify([
+    { value: 'opus', resolvedModel: 'claude-opus-5-5', displayName: 'Opus' },
+    { value: 'anthropic/claude-ccr-h00', resolvedModel: 'anthropic/claude-ccr-h00', displayName: 'Local/router-model', description: 'From gateway' },
+    { value: 'Local/router-model', resolvedModel: 'Local/router-model', displayName: 'Local/router-model', description: 'Custom model' }
+  ]);
+  const signedIn = (yes: boolean) => JSON.stringify(yes ? { tokenSource: 'claude.ai', apiProvider: 'firstParty' } : { tokenSource: 'none', apiProvider: 'firstParty' });
+
+  beforeEach(() => {
+    routing = { detected: true, model: 'Local/router-model' };
+    extraEnv = { FAKE_CLAUDE_DIRECT_MODELS: DIRECT_MODELS, FAKE_CLAUDE_DIRECT_ACCOUNT: signedIn(true), FAKE_CLAUDE_MODELS: ROUTER_MODELS, FAKE_CLAUDE_ACCOUNT: JSON.stringify({ tokenSource: 'apiKeyHelper', apiKeySource: 'apiKeyHelper' }) };
+  });
+
+  it('unsets the router for the direct route only: "" values and an empty key helper in the flag layer', () => {
+    const direct = JSON.parse(claude.CLAUDE_DIRECT_SETTINGS);
+    expect(direct.permissions).toEqual({ disableBypassPermissionsMode: 'disable' });
+    expect(direct.apiKeyHelper).toBe('');
+    expect(Object.keys(direct.env)).toEqual(expect.arrayContaining(['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_BASE_URL', 'ANTHROPIC_MODEL', 'ANTHROPIC_AUTH_TOKEN']));
+    // Claude Code refuses `null` (and then drops the whole layer); "" is what it reads as unset.
+    expect(Object.values(direct.env).every(value => value === '')).toBe(true);
+    expect(claude.CLAUDE_DIRECT_SETTINGS).not.toContain('null');
+    const id = '3f2b8c1e-0d4a-4c3b-9e2f-1a2b3c4d5e6f';
+    const argv = claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', settings: claude.CLAUDE_DIRECT_SETTINGS });
+    expect(argv.slice(argv.indexOf('--settings'), argv.indexOf('--settings') + 2)).toEqual(['--settings', claude.CLAUDE_DIRECT_SETTINGS]);
+    expect(() => claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', settings: '{"permissions":{"defaultMode":"bypassPermissions"}}' })).toThrow('Invalid Claude flag settings');
+  });
+
+  it('says a router is detected and whether the direct route has an account of its own', async () => {
+    extraEnv.FAKE_CLAUDE_DIRECT_ACCOUNT = signedIn(false);
+    expect(await engine.status()).toEqual({ available: true, router: true, detail: '2.1.306 (Claude Code) · direct: not signed in · Claude Code Router detected' });
+    // The direct account was read from a process with the direct settings that got `initialize` only.
+    expect(probes()).toHaveLength(1);
+    expect(probes()[0]!.argv).toEqual(expect.arrayContaining(['--strict-mcp-config', '--settings', claude.CLAUDE_DIRECT_SETTINGS]));
+    expect(logEntries().filter(entry => entry.in?.type === 'user')).toEqual([]);
+    const fresh = makeEngine();
+    extraEnv.FAKE_CLAUDE_DIRECT_ACCOUNT = signedIn(true);
+    expect((await fresh.status()).detail).toBe('2.1.306 (Claude Code) · direct: signed in · Claude Code Router detected');
+    await fresh.resetForTests();
+  });
+
+  it('lists each route\'s own catalog with the concrete model of every alias', async () => {
+    const direct = await engine.models({ route: 'direct' });
+    expect(direct.models.map(model => [model.id, model.label, model.efforts])).toEqual([
+      ['opus', 'opus (claude-opus-5-5)', ['low', 'medium', 'high']],
+      ['haiku', 'haiku (claude-haiku-5-5)', ['low', 'high']]
+    ]);
+    const router = await engine.models({ route: 'router' });
+    expect(router.models.map(model => [model.id, model.label])).toEqual([
+      ['opus', 'opus (claude-opus-5-5)'], ['anthropic/claude-ccr-h00', 'Local/router-model'], ['Local/router-model', undefined]
+    ]);
+    expect(probes().map(entry => entry.argv!.includes(claude.CLAUDE_DIRECT_SETTINGS))).toEqual([true, false]);
+    // Cached per route: a second list starts nothing.
+    await engine.models({ route: 'direct' });
+    expect(probes()).toHaveLength(2);
+    // Without a catalog (the probe failed) the bare aliases stay choosable.
+    expect(claude.claudeModelRows(null, [], {}).models.map(model => model.id)).toEqual(['fable', 'opus', 'sonnet', 'haiku']);
+  });
+
+  it('starts new chats direct, runs them with the direct settings, and moves a chat between routes on the same session', async () => {
+    const chat = await engine.create({ projectId: null });
+    expect(chat).toMatchObject({ route: 'direct', routes: ['direct', 'router'] });
+    const record = await ledger.storedChatRecord(chat.sessionId);
+    expect(record).toMatchObject({ route: 'direct' });
+    const id = record!.backendSessionId!;
+    await engine.send(chat.sessionId, 'plain');
+    await finished(chat.sessionId);
+    expect(launches().at(-1)!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', settings: claude.CLAUDE_DIRECT_SETTINGS }));
+
+    // Between turns: the same Claude session resumes with the router route's settings.
+    expect(await engine.setChatSettings(chat.sessionId, { route: 'router' })).toMatchObject({ route: 'router' });
+    await engine.send(chat.sessionId, 'plain');
+    await finished(chat.sessionId);
+    expect(launches()).toHaveLength(2);
+    expect(launches().at(-1)!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'resume', permissionMode: 'default', settings: claude.CLAUDE_FLAG_SETTINGS }));
+    expect((await ledger.storedChatRecord(chat.sessionId))?.backendSessionId).toBe(id);
+
+    // A route change waits for the running answer.
+    await engine.send(chat.sessionId, 'hang');
+    await pending(chat.sessionId);
+    await expect(engine.setChatSettings(chat.sessionId, { route: 'direct' })).rejects.toThrow(claude.CLAUDE_ROUTE_WHILE_RUNNING);
+    await engine.stop(chat.sessionId);
+
+    // The hand-over terminal runs on the chat's route too.
+    await engine.setChatSettings(chat.sessionId, { route: 'direct' });
+    await engine.openTerminal(chat.sessionId);
+    expect(terminalCalls.at(-1)).toBe(`open:${chat.sessionId}:--settings ${claude.CLAUDE_DIRECT_SETTINGS} --resume ${id}`);
+    expect(engine.terminal({ sessionId: chat.sessionId, conversationId: chat.conversationId, backendSessionId: id, cwd: null, route: 'router' }))
+      .toEqual({ argv: ['--resume', id], mode: 'handover' });
+  });
+
+  it('refuses a direct send without the CLI\'s own login, records nothing, and drops a model the other route lacks', async () => {
+    extraEnv.FAKE_CLAUDE_DIRECT_ACCOUNT = signedIn(false);
+    const chat = await engine.create({ projectId: null, route: 'router', model: 'Local/router-model' });
+    await engine.send(chat.sessionId, 'plain');
+    await finished(chat.sessionId);
+    // To direct: the router's model is not in the direct catalog, so the chat takes the CLI's default.
+    expect(await engine.setChatSettings(chat.sessionId, { route: 'direct' })).toMatchObject({ route: 'direct', model: null });
+    const before = (await store.readEvents(chat.sessionId)).length;
+    await expect(engine.send(chat.sessionId, 'plain')).rejects.toThrow(claude.CLAUDE_DIRECT_NOT_SIGNED_IN);
+    expect(await store.readEvents(chat.sessionId)).toHaveLength(before);
+    expect(launches()).toHaveLength(1);
+  });
+
+  it('changes nothing without a detected router: no override, no route choice', async () => {
+    routing = { detected: false, model: null };
+    const chat = await engine.create({ projectId: null });
+    expect(chat).toMatchObject({ route: 'direct', routes: [] });
+    await engine.send(chat.sessionId, 'plain');
+    await finished(chat.sessionId);
+    expect(launches().at(-1)!.argv).toContain(claude.CLAUDE_FLAG_SETTINGS);
+    expect(launches().at(-1)!.argv).not.toContain(claude.CLAUDE_DIRECT_SETTINGS);
+    // A chat stored before routes reads as the configured CLI (`router`).
+    await ledger.updateChatRecord(chat.sessionId, current => { const { route: _route, ...rest } = current!; void _route; return rest; });
+    expect((await engine.view(chat.sessionId)).route).toBe('router');
   });
 });
