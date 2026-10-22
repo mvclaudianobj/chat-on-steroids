@@ -28,7 +28,9 @@ const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status'), module, refresh: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('install'), module, mode: z.enum(['install', 'update']), version: z.string().regex(UPSTREAM_VERSION) }).strict(),
   z.object({ action: z.literal('service'), module: z.literal('opencode'), op: z.enum(['start', 'stop', 'restart']) }).strict(),
-  z.object({ action: z.literal('facts'), module: z.literal('zeroclaw') }).strict()
+  z.object({ action: z.literal('facts'), module: z.literal('zeroclaw') }).strict(),
+  z.object({ action: z.literal('marksclaw-preview'), module: z.literal('zeroclaw') }).strict(),
+  z.object({ action: z.literal('marksclaw-import'), module: z.literal('zeroclaw'), ticket: z.string().uuid() }).strict()
 ]);
 
 export interface UpstreamIpcDeps {
@@ -141,6 +143,8 @@ export function registerUpstreamIpc(getWindow: () => BrowserWindow | null): void
         case 'status': return { ok: true, data: await upstreamStatus(input.module, input.refresh) };
         case 'install': return { ok: true, data: await upstreamInstall(input.module, input.mode, input.version, progress) };
         case 'facts': return { ok: true, data: await (await import('../zeroclaw/settings.js')).zeroclawFacts() };
+        case 'marksclaw-preview': return { ok: true, data: await (await import('../zeroclaw/migration.js')).marksClawMigrationPreview() };
+        case 'marksclaw-import': return { ok: true, data: await (await import('../zeroclaw/migration.js')).importMarksClaw(input.ticket) };
         case 'service': {
           await (await import('../opencode/service.js')).openCodeServiceAction(input.op);
           return { ok: true, data: await upstreamStatus('opencode') };

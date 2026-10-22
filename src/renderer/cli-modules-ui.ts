@@ -123,6 +123,49 @@ export function createCliModulesUi(api: AppApi, hooks: {
     refreshFacts.addEventListener('click', () => void paintZeroClawFacts());
     const factsActions = document.createElement('div'); factsActions.className = 'modules-service-actions'; factsActions.append(refreshFacts);
     settings.surface.append(facts, factsActions);
+    const migration = section(() => t('Import from MarksClaw'), () => t('Preview legacy data, make a private backup and import compatible profiles. Credentials and sessions are never activated.'));
+    const preview = document.createElement('button'); preview.type = 'button'; preview.className = 'btn'; preview.id = 'zeroclawMarksPreview';
+    ui(preview, 'textContent', () => t('Preview MarksClaw import'));
+    const apply = document.createElement('button'); apply.type = 'button'; apply.className = 'btn primary'; apply.id = 'zeroclawMarksImport'; apply.hidden = true;
+    ui(apply, 'textContent', () => t('Back up and import compatible settings'));
+    const report = text('p', '', 'modules-detail'); report.id = 'zeroclawMarksReport'; report.setAttribute('role', 'status');
+    let ticket = '';
+    preview.addEventListener('click', async () => {
+      ticket = ''; apply.hidden = true; preview.disabled = true;
+      try {
+        const reply = await api.upstreamMarksClawPreview();
+        if (!reply.ok) { report.textContent = reply.error; return; }
+        const view = reply.data;
+        if (!view.available) { report.textContent = t('No MarksClaw profile found.'); return; }
+        report.textContent = [
+          `${t('Configuration')}: ${view.configuration ? t('Yes') : t('No')}`,
+          `${t('Agents')}: ${view.agents.length}`,
+          `${t('Risk profiles')}: ${view.riskProfiles.length}`,
+          `${t('Runtime profiles')}: ${view.runtimeProfiles.length}`,
+          `${t('Sessions (backup only)')}: ${view.sessions ? t('Yes') : t('No')}`,
+          `${t('Devices (backup only)')}: ${view.devices ? t('Yes') : t('No')}`,
+          `${t('Encrypted credentials (backup only)')}: ${view.encryptedCredentials ? t('Yes') : t('No')}`,
+          `${t('Conflicting profiles (preserved)')}: ${view.conflicts.length}`,
+          `${t('Compatible entries to import')}: ${view.importable}`
+        ].join(' · ');
+        ticket = view.ticket;
+        apply.hidden = !ticket;
+      } catch { report.textContent = t('Could not inspect the MarksClaw profile.'); }
+      finally { preview.disabled = false; }
+    });
+    apply.addEventListener('click', async () => {
+      if (!ticket || !window.confirm(t('Create a private backup and import compatible MarksClaw settings? Existing ZeroClaw profiles will be preserved.'))) return;
+      const confirmed = ticket; ticket = ''; apply.hidden = true; preview.disabled = true;
+      try {
+        const reply = await api.upstreamMarksClawImport(confirmed);
+        report.textContent = reply.ok
+          ? t('Backup created: {0}. Imported: {1}; existing profiles preserved: {2}.', [reply.data.backupName, reply.data.imported, reply.data.skipped])
+          : reply.error;
+        if (reply.ok) void paintZeroClawFacts();
+      } catch { report.textContent = t('MarksClaw import failed; review the backup before retrying.'); }
+      finally { preview.disabled = false; }
+    });
+    migration.surface.append(preview, apply, report);
     zeroclaw = { panel, status: statusLine, versions, output, terminal, facts, close };
     return panel;
   }
