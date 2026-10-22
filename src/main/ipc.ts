@@ -5,6 +5,7 @@ import { registerApiChatIpc } from './api-chat/ipc.js';
 import { registerCliProxyIpc } from './cliproxy/ipc.js';
 import { registerUpstreamIpc } from './upstream/ipc.js';
 import { registerCcrIpc } from './ccr/ipc.js';
+import { registerVmsIpc } from './vms.js';
 import { registerCliChatIpc } from './cli-chat.js';
 import { registerNotificationCenterIpc } from './notification-ipc.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
@@ -657,6 +658,7 @@ export async function openSessionChat(id: string): Promise<void> {
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  registerVmsIpc(getWindow);
   registerNotificationCenterIpc(getWindow);
   registerWorkspaceTerminalIpc(getWindow);
   registerCliModuleIpc(getWindow);

@@ -571,3 +571,11 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .zeroclaw-panel .zeroclaw-setup-terminal { margin-bottom: 18px; }
 .zeroclaw-panel :is(button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .zeroclaw-facts dd { margin: 0; overflow-wrap: anywhere; }
+.vms-create { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px; }
+.vms-create label { display: flex; flex: 1 1 140px; flex-direction: column; gap: 5px; min-width: 120px; }
+.vms-create input { width: 100%; min-width: 0; }
+.vms-list { display: grid; gap: 12px; margin-top: 12px; }
+.vms-lab { padding: 16px; }
+.vms-lab h3 { margin: 0 0 8px; }
+.vms-log { max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vms-doctor { padding: 12px 16px; }
