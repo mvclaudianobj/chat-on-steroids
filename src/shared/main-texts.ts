@@ -63,7 +63,12 @@ export const MAIN_TEXTS = [
   'Keep checkout',
   'Remove checkout; preserve Git branch',
   // The turn-completion notice when an answer has no text to show.
-  'ChatGPT finished.'
+  'ChatGPT finished.',
+  'Export encrypted Chat Marks vault',
+  'Import encrypted Chat Marks vault',
+  'Import GPG secrets',
+  'Chat Marks vault',
+  'GPG encrypted files'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];
