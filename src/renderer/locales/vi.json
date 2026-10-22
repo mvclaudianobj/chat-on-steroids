@@ -1,4 +1,13 @@
 {
+  "Hold to speak to Jarvis": "Giữ để nói chuyện với Jarvis",
+  "Jarvis speech recognition currently requires Windows.": "Nhận dạng giọng nói Jarvis hiện yêu cầu Windows.",
+  "Enable microphone consent to use Jarvis.": "Cho phép sử dụng micrô để dùng Jarvis.",
+  "Select a CLIProxy chat to use Jarvis.": "Chọn cuộc trò chuyện CLIProxy cho Jarvis.",
+  "Jarvis is ready.": "Jarvis đã sẵn sàng.",
+  "No speech was sent.": "Không có lời nói nào được gửi.",
+  "Sending Jarvis message…": "Đang gửi tin nhắn Jarvis…",
+  "Jarvis message sent to this CLIProxy chat.": "Đã gửi tin nhắn đến cuộc trò chuyện CLIProxy này.",
+  "Jarvis message could not be sent.": "Không thể gửi tin nhắn Jarvis.",
   "Dictation unavailable": "Không thể sử dụng đọc chính tả",
   "Cancel dictation": "Hủy đọc chính tả",
   "Stop dictation": "Dừng đọc chính tả",

@@ -1,4 +1,13 @@
 {
+  "Hold to speak to Jarvis": "押している間だけJarvisに話しかけます",
+  "Jarvis speech recognition currently requires Windows.": "Jarvisの音声認識は現在Windowsでのみ利用できます。",
+  "Enable microphone consent to use Jarvis.": "Jarvisを利用するにはマイクの使用を許可してください。",
+  "Select a CLIProxy chat to use Jarvis.": "Jarvisで使用するCLIProxyチャットを選択してください。",
+  "Jarvis is ready.": "Jarvisの準備ができました。",
+  "No speech was sent.": "音声は送信されませんでした。",
+  "Sending Jarvis message…": "Jarvisのメッセージを送信中…",
+  "Jarvis message sent to this CLIProxy chat.": "このCLIProxyチャットに送信しました。",
+  "Jarvis message could not be sent.": "Jarvisのメッセージを送信できませんでした。",
   "Dictation unavailable": "音声入力を利用できません",
   "Cancel dictation": "音声入力をキャンセル",
   "Stop dictation": "音声入力を停止",

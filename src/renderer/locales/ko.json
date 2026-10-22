@@ -1,4 +1,13 @@
 {
+  "Hold to speak to Jarvis": "누르고 있는 동안 Jarvis에 말하기",
+  "Jarvis speech recognition currently requires Windows.": "Jarvis 음성 인식은 현재 Windows가 필요합니다.",
+  "Enable microphone consent to use Jarvis.": "Jarvis에 마이크 권한을 부여하세요.",
+  "Select a CLIProxy chat to use Jarvis.": "Jarvis에 사용할 CLIProxy 채팅을 선택하세요.",
+  "Jarvis is ready.": "Jarvis가 준비되었습니다.",
+  "No speech was sent.": "음성이 전송되지 않았습니다.",
+  "Sending Jarvis message…": "Jarvis 메시지 전송 중…",
+  "Jarvis message sent to this CLIProxy chat.": "이 CLIProxy 채팅에 메시지를 보냈습니다.",
+  "Jarvis message could not be sent.": "Jarvis 메시지를 보낼 수 없습니다.",
   "Dictation unavailable": "음성 받아쓰기를 사용할 수 없음",
   "Cancel dictation": "받아쓰기 취소",
   "Stop dictation": "받아쓰기 중지",

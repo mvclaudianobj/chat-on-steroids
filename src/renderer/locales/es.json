@@ -1,4 +1,13 @@
 {
+  "Hold to speak to Jarvis": "Mantén pulsado para hablar con Jarvis",
+  "Jarvis speech recognition currently requires Windows.": "El reconocimiento de voz de Jarvis requiere Windows por ahora.",
+  "Enable microphone consent to use Jarvis.": "Autoriza el micrófono para usar Jarvis.",
+  "Select a CLIProxy chat to use Jarvis.": "Selecciona un chat CLIProxy para usar Jarvis.",
+  "Jarvis is ready.": "Jarvis está listo.",
+  "No speech was sent.": "No se envió ninguna voz.",
+  "Sending Jarvis message…": "Enviando mensaje de Jarvis…",
+  "Jarvis message sent to this CLIProxy chat.": "Mensaje enviado a este chat CLIProxy.",
+  "Jarvis message could not be sent.": "No se pudo enviar el mensaje de Jarvis.",
   "Dictation unavailable": "Dictado no disponible",
   "Cancel dictation": "Cancelar dictado",
   "Stop dictation": "Detener dictado",

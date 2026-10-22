@@ -28,6 +28,7 @@ import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
 import { initSettingsSearch } from './settings-search.js';
 import { installNotificationCenter } from './notification-center.js';
+import { initJarvis } from './jarvis.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -78,6 +79,7 @@ declare global {
 
 const api = window.api;
 installNotificationCenter(api);
+initJarvis(api, selectedChatSession);
 
 document.getElementById('marksPanelLogout')?.addEventListener('click', async () => {
   const button = document.getElementById('marksPanelLogout') as HTMLButtonElement;
