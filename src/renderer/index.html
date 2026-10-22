@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./settings.css" />
     <link rel="stylesheet" href="./brain.css" />
+    <link rel="stylesheet" href="./company.css" />
     <link rel="stylesheet" href="./dictation.css" />
   </head>
   <body>
@@ -25,6 +26,7 @@
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
           <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button"><i class="ico ph ph-cube" aria-hidden="true"></i>Skills</button>
           <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button"><i class="ico ph ph-paw-print" aria-hidden="true"></i>Pets</button>
+          <button class="btn sidebar-primary-link" id="sidebarCompany" data-sidebar-page="company" type="button"><i class="ico ph ph-house" aria-hidden="true"></i>Company</button>
         </div>
       <!-- Settings search: while it holds a query, its results take the page list's place. -->
       <div class="settings-find" id="settingsFindBox" hidden>
@@ -507,6 +509,21 @@
               <div id="skillsRecommended" class="pet-library-grid" aria-live="polite"></div>
             </section>
           </div>
+        </section>
+        <section class="panel company-panel" data-panel="company" aria-label="Company">
+          <div class="company-shell" id="companyRoot">
+            <header class="company-header">
+              <div><div class="company-eyebrow">MARKS / ORGANIZATION <span class="company-preview">VISUAL PROTOTYPE</span></div><h1 id="companyTitle">Company</h1><p>Coordinate responsibilities, requests and decisions in one place.</p></div>
+              <div class="company-header-actions"><button class="btn" id="companySettings" type="button"><i class="ico ph ph-gear-six"></i> Settings</button><button class="btn btn-solid" id="companyNewRequest" type="button"><i class="ico ph ph-plus"></i> New request</button></div>
+            </header>
+            <div class="company-metrics" id="companyMetrics"></div>
+            <div class="company-toolbar"><div class="company-views" role="group" aria-label="Company view"><button type="button" class="btn is-sel" id="companyBoardTab" aria-pressed="true">Board</button><button type="button" class="btn" id="companyOfficeTab" aria-pressed="false">Office</button></div><span class="company-mode">LOCAL PREVIEW · No live agents connected</span></div>
+            <div id="companyEmpty" class="company-empty" hidden><div class="company-empty-icon"><i class="ico ph ph-house"></i></div><h2>Your company starts here</h2><p>Use sample requests to explore the board and office, or create your first request.</p><button type="button" class="btn btn-solid" id="companyLoadDemo">Explore sample data</button></div>
+            <div id="companyBoard" class="company-board" aria-label="Requests by status"></div>
+            <div id="companyOffice" class="company-office" hidden></div>
+            <div class="company-bottom"><section class="company-surface"><h2>CEO desk <span class="company-panel-ornament">↗</span></h2><div id="companyCeo"></div></section><section class="company-surface"><h2>Activity <span class="company-panel-ornament">↗</span></h2><div id="companyActivity"></div></section></div>
+          </div>
+          <dialog class="company-dialog" id="companyDialog"><form method="dialog" id="companyForm"><div class="company-dialog-head"><h2 id="companyDialogTitle">Request details</h2><button type="button" id="companyClose" class="btn" aria-label="Close">×</button></div><div id="companyDialogContent"></div><div class="company-dialog-actions" id="companyDialogActions"></div></form></dialog>
         </section>
         <section class="panel plugins-panel pets-panel" data-panel="pets">
           <div class="plugins-content">

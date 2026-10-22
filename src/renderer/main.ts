@@ -68,6 +68,7 @@ import { paintSharedTunnel } from './tunnel-warning.js';
 import { initMarksModulesUi } from './marks-modules-ui.js';
 import { initMarksVaultUi } from './marks-vault.js';
 import { initBrainUi } from './brain-ui.js';
+import { initCompanyUi } from './company-ui.js';
 import { mountBrainImport } from './brain-import-ui.js';
 
 declare global {
@@ -92,6 +93,7 @@ initLayoutPreviews();
 initMarksVaultUi(api);
 // Chat Marks: the local Brain page shares the Settings navigation and app IPC.
 const brainUi = initBrainUi(api);
+const companyUi = initCompanyUi(api);
 // Chat Marks H2: old-history search and confirmed imports on the Brain page.
 const brainImportUi = mountBrainImport(api, { showTab: name => showTab(name), selectChat: selectChatSession });
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
@@ -256,11 +258,12 @@ function placePermissions(tab: string): void {
 
 function showTab(name: string): void {
   name = marksModulesUi.normalizeTab(name);
+  if (name === 'company') void companyUi.refresh();
   if (name === 'brain') { void brainUi.refresh(); void brainImportUi.refresh(); }
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
   // Chat Marks: ZeroClaw's page is a main view beside them, opened from the sidebar.
-  const library = name === 'plugins' || name === 'skills' || name === 'pets' || name === 'zeroclaw';
+  const library = name === 'plugins' || name === 'skills' || name === 'pets' || name === 'zeroclaw' || name === 'company';
   const settings = name !== 'chat' && !library;
   // Opening Settings asks whether "Up to date" is still true (the check itself waits ten minutes).
   if (settings && document.querySelector<HTMLElement>('.app')!.dataset.screen !== 'settings') void api.refreshUpdate();
@@ -374,6 +377,7 @@ $('sessionList').addEventListener('click', event => {
 $('newChat').addEventListener('click', () => showTab('chat'));
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
 $('sidebarPets').addEventListener('click', () => showTab('pets'));
+$('sidebarCompany').addEventListener('click', () => showTab('company'));
 $('sidebarSkills').addEventListener('click', () => showTab('skills'));
 api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
