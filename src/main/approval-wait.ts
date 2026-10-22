@@ -19,6 +19,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { queueOutboundNotice } from './notification-center.js';
 
 /** Hidden idle tabs poll every 30 s; two missed polls end the episode. */
 export const APPROVAL_FRESH_MS = 75_000;
@@ -172,6 +173,7 @@ export async function noteApprovalCard(
   if (wait.sessionId && !wait.noticed && now - wait.since >= APPROVAL_NOTICE_GRACE_MS) {
     wait.noticed = true;
     try { deps.notify(wait.sessionId); } catch { /* The row still says it. */ }
+    void queueOutboundNotice({ event: 'approval-pending', title: 'Approval pending', project: 'Chat Marks' }).catch(() => undefined);
   }
 }
 

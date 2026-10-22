@@ -200,6 +200,15 @@
                 <label class="setting"><span class="setting-text"><b>Mention Plugins instead of Core</b><em>Ordinary messages the app sends mention Chat Marks Plugins. Goal, Loop, workers and recovery always mention Core. Messages you send in ChatGPT itself are unchanged.</em></span><input id="mentionPlugins" type="checkbox" /></label>
               </div>
             </section>
+            <section class="appearance-section notification-center" id="notificationCenterSection" aria-labelledby="notificationCenterTitle">
+              <header class="settings-section-head">
+                <div><h2 id="notificationCenterTitle"><i class="ico ph ph-bell" aria-hidden="true"></i> Notification center</h2><p>Send important Chat Marks events through email, Telegram or WhatsApp. Each channel has its own recipients and event rules.</p></div>
+              </header>
+              <div class="settings-surface notification-center-surface">
+                <p id="notificationCenterStatus" class="notification-center-status" role="status" aria-live="polite">Loading notification settings…</p>
+                <div id="notificationCenterSettings"></div>
+              </div>
+            </section>
             <section class="appearance-section" id="privacyScreenshotsSetting">
               <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT sees of your screen.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
