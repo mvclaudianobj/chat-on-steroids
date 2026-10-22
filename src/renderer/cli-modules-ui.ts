@@ -16,6 +16,12 @@ const NAMES: Readonly<Record<Id, string>> = {
 };
 const LEGACY: ReadonlySet<Id> = new Set(['markscode', 'marksclaw']);
 const UPSTREAM = (id: Id): id is 'opencode' | 'zeroclaw' => id === 'opencode' || id === 'zeroclaw';
+/**
+ * Modules that are terminal types (New chat, the project's New terminal, the sidebar Terminals).
+ * ZeroClaw is not: it is an autonomous agent the user configures from its own Settings page,
+ * whose Configure agent terminal opens there and is never listed as a terminal.
+ */
+export const TERMINAL_MODULE = (id: string): boolean => IDS.includes(id as Id) && !LEGACY.has(id as Id) && id !== 'zeroclaw';
 export type CliModuleSummary = { id: string; name: string; enabled: boolean };
 
 export function createCliModulesUi(api: AppApi, hooks: {
@@ -53,6 +59,108 @@ export function createCliModulesUi(api: AppApi, hooks: {
   const terminalMounts = new Map<string, HTMLElement>();
   const sessionButtons = new Map<string, HTMLButtonElement>();
   let selectedSessionId: string | null = null;
+  let zeroclaw: { status: HTMLElement; versions: HTMLElement; output: HTMLElement; terminal: HTMLElement; facts: HTMLElement; close: HTMLButtonElement } | null = null;
+
+  /** ZeroClaw's Settings page: an area that grows with its settings over time. */
+  function zeroclawPage(content: HTMLElement): void {
+    const section = (titleText: () => string, intro: () => string): { box: HTMLElement; surface: HTMLElement } => {
+      const box = document.createElement('section'); box.className = 'appearance-section';
+      const head = document.createElement('header'); head.className = 'settings-section-head';
+      const wrap = document.createElement('div');
+      const h2 = document.createElement('h2'); ui(h2, 'textContent', titleText);
+      const p = document.createElement('p'); ui(p, 'textContent', intro);
+      wrap.append(h2, p); head.append(wrap);
+      const surface = document.createElement('div'); surface.className = 'settings-surface modules-service';
+      box.append(head, surface); content.append(box);
+      return { box, surface };
+    };
+    const lead = document.createElement('p'); lead.className = 'modules-detail';
+    ui(lead, 'textContent', () => t('An autonomous agent you configure here. It is not a chat or a terminal type.'));
+    content.append(lead);
+    const status = section(() => t('Status'), () => t('Installed version and the module\'s state. Install and update it in Settings > Modules.'));
+    const statusLine = text('p', '', 'modules-detail'); statusLine.id = 'zeroclawPageStatus';
+    const versions = text('p', '', 'modules-detail'); versions.id = 'zeroclawPageVersions';
+    status.surface.append(statusLine, versions);
+    const agent = section(() => t('Agent'), () => t('Create or change your agent with ZeroClaw\'s own guided setup (zeroclaw quickstart).'));
+    const configure = document.createElement('button'); configure.type = 'button'; configure.className = 'btn primary'; configure.id = 'zeroclawConfigure';
+    ui(configure, 'textContent', () => t('Configure agent'));
+    configure.addEventListener('click', () => void openZeroClawSetup());
+    const close = document.createElement('button'); close.type = 'button'; close.className = 'btn'; close.id = 'zeroclawConfigureClose'; close.hidden = true;
+    ui(close, 'textContent', () => t('Close setup view'));
+    close.addEventListener('click', () => { for (const session of sessions.values()) if (session.module === 'zeroclaw') void disconnect(session.id); terminal.hidden = true; close.hidden = true; });
+    const controls = document.createElement('div'); controls.className = 'modules-service-actions'; controls.append(configure, close);
+    const output = text('p', '', 'modules-detail'); output.id = 'zeroclawConfigureStatus'; output.setAttribute('role', 'status');
+    const terminal = document.createElement('div'); terminal.className = 'marks-cli-terminal zeroclaw-setup-terminal'; terminal.id = 'zeroclawSetupTerminal'; terminal.hidden = true;
+    agent.surface.append(controls, output, terminal);
+    const settings = section(() => t('Settings'), () => t('Key facts of your ZeroClaw setup, read from ZeroClaw itself. More settings will appear here over time.'));
+    const facts = document.createElement('dl'); facts.className = 'zeroclaw-facts'; facts.id = 'zeroclawFacts';
+    const refreshFacts = document.createElement('button'); refreshFacts.type = 'button'; refreshFacts.className = 'btn'; refreshFacts.id = 'zeroclawFactsRefresh';
+    ui(refreshFacts, 'textContent', () => t('Refresh'));
+    refreshFacts.addEventListener('click', () => void paintZeroClawFacts());
+    const factsActions = document.createElement('div'); factsActions.className = 'modules-service-actions'; factsActions.append(refreshFacts);
+    settings.surface.append(facts, factsActions);
+    zeroclaw = { status: statusLine, versions, output, terminal, facts, close };
+  }
+
+  async function paintZeroClawFacts(): Promise<void> {
+    if (!zeroclaw || typeof api.upstreamZeroClawFacts !== 'function') return;
+    const reply = await api.upstreamZeroClawFacts();
+    const list = zeroclaw.facts;
+    list.replaceChildren();
+    const add = (term: string, value: string): void => {
+      const dt = document.createElement('dt'); dt.textContent = term;
+      const dd = document.createElement('dd'); dd.textContent = value; dd.translate = false;
+      list.append(dt, dd);
+    };
+    if (!reply.ok) { add(t('Settings'), reply.error); return; }
+    const facts = reply.data;
+    if (facts.error === 'not_installed') { add(t('Settings'), t('Install and enable ZeroClaw to see its settings.')); return; }
+    if (!facts.configured) { add(t('Settings'), t('Not configured yet. Use Configure agent to create your first agent.')); return; }
+    if (facts.error) { add(t('Settings'), t('ZeroClaw did not answer; try Refresh.')); return; }
+    const none = '—';
+    add(t('Agents'), facts.agents.length ? facts.agents.map(agent => agent.alias).join(', ') : t('None yet'));
+    for (const agent of facts.agents) {
+      add(t('Agent {0}', [agent.alias]), [
+        `${t('Model provider')}: ${agent.provider ?? t('not set')}`,
+        `${t('Memory')}: ${agent.memory ?? none}`,
+        agent.enabled === false ? t('Disabled') : ''
+      ].filter(Boolean).join(' · '));
+    }
+    add(t('Runtime'), facts.runtime ?? none);
+    add(t('Gateway'), facts.gateway ?? none);
+    add(t('Cost limits'), facts.dailyLimitUsd !== null || facts.monthlyLimitUsd !== null
+      ? t('{0} per day, {1} per month', [facts.dailyLimitUsd !== null ? `$${facts.dailyLimitUsd.toFixed(2)}` : none, facts.monthlyLimitUsd !== null ? `$${facts.monthlyLimitUsd.toFixed(2)}` : none]) : none);
+  }
+
+  function paintZeroClawStatus(): void {
+    if (!zeroclaw) return;
+    const status = current.get('zeroclaw');
+    zeroclaw.status.textContent = status ? `${status.version ?? t('Not installed')} · ${status.detail}` : '';
+    const versions = rows.get('zeroclaw')?.manage?.status?.versions;
+    zeroclaw.versions.textContent = versions
+      ? `${t('Installed version')}: ${versions.installed ?? versions.unmanaged ?? t('Not installed')} · ${t('Latest release')}: ${versions.latest ?? '—'}${versions.updateAvailable ? ` · ${t('Update available')}` : ''}`
+      : '';
+  }
+
+  /** Configure agent: ZeroClaw's quickstart in a terminal inside its page (one, reused), never listed under Terminals. */
+  async function openZeroClawSetup(): Promise<void> {
+    if (!zeroclaw) return;
+    if (!current.get('zeroclaw')?.enabled) { zeroclaw.output.textContent = t('Enable this module first.'); return; }
+    let session = [...sessions.values()].find(candidate => candidate.module === 'zeroclaw' && candidate.args?.[0] === 'quickstart');
+    if (!session) {
+      const reply = await api.cliCreateSession('zeroclaw', null, 'quickstart');
+      if (!reply.ok) { zeroclaw.output.textContent = reply.error; return; }
+      session = reply.data;
+      sessions.set(session.id, session);
+    }
+    zeroclaw.output.textContent = '';
+    zeroclaw.terminal.hidden = false;
+    zeroclaw.close.hidden = false;
+    const manager = managerFor(session, zeroclaw.terminal);
+    const mount = terminalMounts.get(session.id)!;
+    mount.hidden = false;
+    manager.show(mount, true);
+  }
 
   for (const id of IDS) {
     const name = NAMES[id];
@@ -83,13 +191,6 @@ export function createCliModulesUi(api: AppApi, hooks: {
       button.textContent = action === 'install' ? 'Install / instructions' : action === 'update' ? 'Update' : 'Stop session';
       button.addEventListener('click', () => void operate(id, action)); actions.append(button);
     }
-    if (id === 'zeroclaw') {
-      // `zeroclaw quickstart` creates the first agent; the ordinary terminal is the zerocode TUI.
-      const quickstart = document.createElement('button'); quickstart.type = 'button'; quickstart.className = 'btn'; quickstart.id = 'zeroclawQuickstart';
-      ui(quickstart, 'textContent', () => t('Quickstart'));
-      quickstart.addEventListener('click', () => void createSession(id, hooks.workspace(), 'quickstart'));
-      actions.append(quickstart);
-    }
     surface.append(enableLabel, detail, actions); row.append(surface); parent.append(row);
     const manage = UPSTREAM(id) ? createUpstreamManageUi(api, id, surface, () => { void refresh(); hooks.onEngineService?.(); }) : null;
 
@@ -99,6 +200,14 @@ export function createCliModulesUi(api: AppApi, hooks: {
     const pageTitle = text('h1', name);
     pageTitle.prepend(moduleMark(id));
     content.append(pageTitle);
+    if (id === 'zeroclaw') {
+      // ZeroClaw's own area: status, Configure agent (its terminal opens here) and its settings.
+      zeroclawPage(content);
+      panel.append(content); panels.append(panel);
+      rows.set(id, { navigation, panel, row, active: activeCheck, detail, output: zeroclaw!.output, project: document.createElement('select'), manage });
+      activeCheck.addEventListener('change', () => void operate(id, activeCheck.checked ? 'enable' : 'disable'));
+      continue;
+    }
     const project = document.createElement('select'); project.className = 'btn'; project.setAttribute('aria-label', 'Workspace');
     const create = document.createElement('button'); create.className = 'btn'; create.textContent = 'Open / reconnect terminal';
     create.addEventListener('click', () => void createSession(id, project.value || hooks.workspace()));
@@ -116,7 +225,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
   // upstream buttons keep their handlers: the Projects sidebar's #newChat and the Inbox
   // layout's compose button, which the Inbox repaints. This listens before them, on the document.
   const NEW_CHAT_BUTTONS = '#newChat, [data-inbox-control="compose"]';
-  const enabledModules = (): Id[] => IDS.filter(id => current.get(id)?.enabled && !LEGACY.has(id));
+  const enabledModules = (): Id[] => IDS.filter(id => current.get(id)?.enabled && TERMINAL_MODULE(id));
   // Native providers beside ChatGPT (CLIProxy API chats) come right after it, before the terminals.
   const providerItems = (): RowMenuItem[] => hooks.newChatItems?.() ?? [];
   const hasMenu = (): boolean => enabledModules().length > 0 || providerItems().length > 0;
@@ -179,8 +288,9 @@ export function createCliModulesUi(api: AppApi, hooks: {
         if (status.legacy) row.row.hidden = !status.enabled && !status.running;
         row.detail.textContent = status.legacy ? status.detail
           : `${status.version ?? 'Not installed'}${status.upstream && status.installed && !status.managed ? ` (${t('not installed by Chat Marks')})` : ''} · ${status.running ? 'Running · ' : ''}${status.detail}`;
-        void row.manage?.refresh();
+        void row.manage?.refresh().then(() => { if (status.id === 'zeroclaw') paintZeroClawStatus(); });
       }
+      paintZeroClawStatus();
       paintNewChat();
       const catalog = await api.cliSessions();
       if (catalog.ok && Array.isArray(catalog.data)) {
@@ -254,6 +364,8 @@ export function createCliModulesUi(api: AppApi, hooks: {
     for (const button of sessionButtons.values()) button.parentElement?.remove();
     sessionButtons.clear();
     for (const session of [...sessions.values()].sort((a, b) => b.updatedAt - a.updatedAt)) {
+      // ZeroClaw's setup terminal lives in its Settings page, not under Terminals.
+      if (!TERMINAL_MODULE(session.module)) continue;
       const wrapper = document.createElement('div');
       wrapper.className = 'sidebar-row';
       const button = document.createElement('button');
@@ -323,13 +435,13 @@ export function createCliModulesUi(api: AppApi, hooks: {
       sessionButtons.set(session.id, button);
     }
   }
-  function managerFor(session: CliSession): ReturnType<typeof createWorkspaceTerminal> {
+  function managerFor(session: CliSession, parent: HTMLElement = moduleTerminal): ReturnType<typeof createWorkspaceTerminal> {
     const existing = terminalManagers.get(session.id);
     if (existing) return existing;
     const mount = document.createElement('div');
     mount.className = 'marks-cli-terminal';
     mount.hidden = true;
-    moduleTerminal.append(mount);
+    parent.append(mount);
     terminalMounts.set(session.id, mount);
     const transport: TerminalTransport = {
       create: async (attachmentId, _projectId, cols, rows) => {
@@ -350,6 +462,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
   async function createSession(moduleId: string, projectId: string | null, kind?: 'quickstart'): Promise<void> {
     const id = IDS.find(candidate => candidate === moduleId);
     if (!id || LEGACY.has(id)) return;
+    if (id === 'zeroclaw') { hooks.showTab('module-zeroclaw'); await openZeroClawSetup(); return; }
     const row = rows.get(id)!;
     if (!current.get(id)?.enabled) { row.output.textContent = 'Enable this module first.'; return; }
     row.output.textContent = 'Criando sessão CLI…';
@@ -369,6 +482,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
   async function showSession(sessionId: string): Promise<void> {
     const session = sessions.get(sessionId);
     if (!session || !current.get(session.module)?.enabled) return;
+    if (!TERMINAL_MODULE(session.module)) { hooks.showTab(`module-${session.module}`); if (session.module === 'zeroclaw') await openZeroClawSetup(); return; }
     hooks.showTab('chat');
     hooks.openChatView('cli-module');
     selectedSessionId = sessionId;
@@ -398,7 +512,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
     createSession,
     openSession,
     // The retired forks never open a terminal, so no menu lists them.
-    cliModules: (): ReadonlyArray<CliModuleSummary> => [...current.values()].filter(status => !LEGACY.has(status.id)).map(status => ({
+    cliModules: (): ReadonlyArray<CliModuleSummary> => [...current.values()].filter(status => TERMINAL_MODULE(status.id)).map(status => ({
       id: status.id,
       name: status.name,
       enabled: status.enabled
@@ -417,7 +531,8 @@ export function createCliModulesUi(api: AppApi, hooks: {
     },
     onTabShown: (name: string) => {
       const id = IDS.find(id => name === `module-${id}`);
-      if (id) { void refresh(); void setProjects(id); }
+      if (id === 'zeroclaw') { void refresh(); void paintZeroClawFacts(); }
+      else if (id) { void refresh(); void setProjects(id); }
     },
     paintNavigation: (name: string) => {
       for (const [id, row] of rows) row.navigation.classList.toggle('is-sel', name === `module-${id}`);

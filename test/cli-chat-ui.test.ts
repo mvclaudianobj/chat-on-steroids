@@ -206,3 +206,57 @@ it('shows each module\'s own icon in its Settings sub-nav item, its Modules card
     expect(doc.querySelector(`[data-panel="module-${id}"] h1 .module-mark.${expected[id]}`), id).not.toBeNull();
   }
 });
+
+it('keeps ZeroClaw out of New chat, the project New terminal list and the sidebar Terminals; its setup and settings live on its own page', async () => {
+  const status = (id: string, name: string) => ({ id, name, installed: true, enabled: true, running: false, supported: true, version: '0.8.6', detail: 'ready', upstream: id === 'zeroclaw' });
+  const showTab = vi.fn();
+  const created = vi.fn(async () => ({ ok: true as const, data: { id: 'zc-setup', module: 'zeroclaw', title: 'ZeroClaw quickstart', projectId: null, args: ['quickstart'], updatedAt: 3, createdAt: 3, cwd: '/home/u', tmuxSession: 'marks_zeroclaw_x' } }));
+  const facts = vi.fn(async () => ({ ok: true as const, data: {
+    configured: true, agents: [{ alias: 'helper', provider: 'anthropic.default', memory: 'sqlite', enabled: true }], runtime: 'native', gateway: '127.0.0.1:42617', dailyLimitUsd: 10, monthlyLimitUsd: 100
+  } }));
+  const api = {
+    cliStatus: async () => ({ ok: true as const, data: [status('claude', 'Claude'), status('zeroclaw', 'ZeroClaw')] }),
+    cliSessions: async () => ({ ok: true as const, data: [
+      { id: 'zc-old', module: 'zeroclaw', title: 'ZeroClaw 1', projectId: null, updatedAt: 2 },
+      { id: 'cl-1', module: 'claude', title: 'Claude shell', projectId: null, updatedAt: 1 }
+    ] }),
+    cliCreateSession: created,
+    cliOpen: async () => ({ ok: true as const, data: { id: 'a', cwd: '/home/u', session: 'marks_zeroclaw_x' } }),
+    cliWrite: async () => ({ ok: true as const, data: undefined }), cliResize: async () => ({ ok: true as const, data: undefined }),
+    cliDetach: async () => ({ ok: true as const, data: undefined }), cliAck: async () => ({ ok: true as const, data: undefined }), onCliEvent: () => () => undefined,
+    listProjects: async () => ({ ok: true as const, data: [] }),
+    cliAction: async () => ({ ok: true as const, data: undefined }),
+    upstreamZeroClawFacts: facts
+  } as any;
+  const ui = createCliModulesUi(api, { showTab, openChatView: () => undefined, workspace: () => null });
+  const doc = dom.window.document;
+  await vi.waitFor(() => expect(doc.querySelector('#cliModuleChats .cli-module-chat')).not.toBeNull());
+  // Sidebar Terminals: only the Claude terminal.
+  expect([...doc.querySelectorAll('#cliModuleChats .cli-module-chat-title')].map(node => node.textContent)).toEqual(['Claude shell']);
+  // The project's New terminal submenu is built from cliModules(): no ZeroClaw.
+  expect(ui.cliModules().map(module => module.id)).toEqual(['claude']);
+  // New chat: no ZeroClaw terminal item.
+  doc.getElementById('newChat')!.click();
+  const items = await vi.waitFor(() => {
+    const found = [...doc.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction);
+    expect(found.length).toBeGreaterThan(1);
+    return found;
+  });
+  expect(items).toEqual(['new-chat-chatgpt', 'new-terminal-claude']);
+  // Its page: Configure agent opens the quickstart terminal there; settings are read-only facts.
+  const page = doc.querySelector<HTMLElement>('[data-panel="module-zeroclaw"]')!;
+  expect(page.querySelector('h1 .module-mark.cm-glyph-claw')).not.toBeNull();
+  ui.onTabShown('module-zeroclaw');
+  await vi.waitFor(() => expect(page.querySelector('#zeroclawFacts')!.textContent).toContain('helper'));
+  expect(page.querySelector('#zeroclawFacts')!.textContent).toContain('127.0.0.1:42617');
+  expect(page.querySelector('#zeroclawFacts')!.textContent).toContain('$10.00');
+  (page.querySelector('#zeroclawConfigure') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(created).toHaveBeenCalledWith('zeroclaw', null, 'quickstart'));
+  await vi.waitFor(() => expect((page.querySelector('#zeroclawSetupTerminal') as HTMLElement).hidden).toBe(false));
+  expect(page.querySelector('#zeroclawSetupTerminal .marks-cli-terminal')).not.toBeNull();
+  expect([...doc.querySelectorAll('#cliModuleChats .cli-module-chat-title')].map(node => node.textContent)).toEqual(['Claude shell']);
+  // Opening a ZeroClaw session from anywhere goes to its page, never the terminal view.
+  await ui.openSession('zc-old');
+  expect(showTab).toHaveBeenLastCalledWith('module-zeroclaw');
+  expect(showTab).not.toHaveBeenCalledWith('chat');
+});

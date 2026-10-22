@@ -340,6 +340,8 @@ const api = {
   upstreamInstall: (module: import('../shared/upstream-module.js').UpstreamModuleId, mode: 'install' | 'update', version: string) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'install', module, mode, version }),
   /** OpenCode's background service: Start / Stop / Restart (with the binary this app uses). */
   upstreamService: (op: import('../shared/upstream-module.js').OpenCodeServiceAction) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'service', module: 'opencode', op }),
+  /** ZeroClaw's read-only key facts for its Settings page (no secrets). */
+  upstreamZeroClawFacts: () => call<import('../shared/upstream-module.js').ZeroClawFacts>('marksUpstream:request', { action: 'facts', module: 'zeroclaw' }),
   onUpstreamProgress: (listener: (progress: import('../shared/upstream-module.js').UpstreamInstallProgress) => void): (() => void) => {
     const wrapped = (_event: unknown, progress: import('../shared/upstream-module.js').UpstreamInstallProgress): void => listener(progress);
     ipcRenderer.on('marksUpstream:progress', wrapped);

@@ -65,6 +65,23 @@ export interface OpenCodeServiceView {
 
 export type OpenCodeServiceAction = 'start' | 'stop' | 'restart';
 
+/**
+ * Read-only key facts of the user's ZeroClaw setup for its Settings page (main/zeroclaw/settings.ts):
+ * no secret, nothing read before ZeroClaw has a configuration. The page grows with settings over time.
+ */
+export interface ZeroClawFacts {
+  /** ZeroClaw has a configuration (`~/.zeroclaw/config.toml`); false until the first Configure agent. */
+  configured: boolean;
+  agents: Array<{ alias: string; provider: string | null; memory: string | null; enabled: boolean | null }>;
+  runtime: string | null;
+  /** `host:port` of its gateway. */
+  gateway: string | null;
+  dailyLimitUsd: number | null;
+  monthlyLimitUsd: number | null;
+  /** `not_installed` | `read_failed`. */
+  error?: string;
+}
+
 export interface UpstreamModuleStatus {
   module: UpstreamModuleId;
   versions: UpstreamModuleVersions;

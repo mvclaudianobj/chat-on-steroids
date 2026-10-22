@@ -1841,8 +1841,8 @@ to end, Windows/WSL, macOS.
 
 ### Upstream modules: OpenCode and ZeroClaw
 
-`main/upstream/` (Marks-owned, IPC `marksUpstream:request` `status|install|service`, sender/frame
-checked; preload `upstreamStatus/Install/Service`, progress `marksUpstream:progress`) installs and
+`main/upstream/` (Marks-owned, IPC `marksUpstream:request` `status|install|service|facts`, sender/frame
+checked; preload `upstreamStatus/Install/Service/ZeroClawFacts`, progress `marksUpstream:progress`) installs and
 updates an upstream CLI from its official release into the user's module folder, without root,
 like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`upstream/install.ts`):
 - GitHub (`githubSource`, `github-release.ts`, shared with CLIProxyAPI; ZeroClaw): `releases/latest`
@@ -1877,11 +1877,23 @@ like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`up
   `zeroclaw-<x86_64|aarch64>-unknown-linux-<gnu|musl>.tar.gz` + `SHA256SUMS`; installs `zeroclaw`,
   `zerocode` (the TUI, which needs the daemon's exact version) and the dashboard `web/dist/`
   beside them (`<dir-of-binary>/web/dist` is one of the gateway's auto-detected locations);
-  `zerorelay` is not installed. No ZeroClaw chat engine yet (ACP over stdio is the natural one).
-  Its module terminal runs `zerocode` (bare `zeroclaw` needs a subcommand); the card's
-  "Quickstart" opens `zeroclaw quickstart` (`cliCreateSession(…, 'quickstart')`, args
-  `['quickstart']` only). `zeroclaw update` is never offered (it could update `zeroclaw` alone).
-  `~/.zeroclaw` (shared with the retired MarksClaw fork) is never touched.
+  `zerorelay` is not installed. ZeroClaw is an autonomous agent to configure, **not a chat or
+  terminal type**: it never appears in New chat, the project's New terminal submenu or the sidebar
+  Terminals (`cli-modules-ui.ts` `TERMINAL_MODULE`; test `cli-chat-ui.test.ts`). It has its own
+  Settings area instead (the `module-zeroclaw` sub-nav page, shown while the module is enabled,
+  with its claw icon), like CLIProxyAPI's page: Status (state, installed/latest version; install
+  and update stay in its Modules card), Agent ("Configure agent" opens `zeroclaw quickstart`,
+  `cliCreateSession(…, 'quickstart')`, args `['quickstart']` only, in a terminal inside the page,
+  one reused session) and Settings. **This area grows with ZeroClaw settings over time**; it starts
+  with read-only key facts (`zeroclaw/settings.ts`, IPC `marksUpstream` `facts`): agent aliases
+  (`zeroclaw agents list`) with each one's model provider, memory backend and enabled flag, the
+  runtime, the gateway address and the cost limits, each through `zeroclaw config get --json` of a
+  fixed non-secret path. Checked against 0.8.6 with a temporary HOME: `status`, `config get` and
+  `agents list` write a default `~/.zeroclaw/config.toml` (and `data/`, `shared/`) when none exists,
+  so nothing runs until ZeroClaw is configured (the page says "Not configured yet"); with a
+  configuration they read without rewriting it. `zeroclaw update` is never offered (it could
+  update `zeroclaw` alone). Apart from ZeroClaw's own reads, `~/.zeroclaw` (shared with the
+  retired MarksClaw fork) is never touched (only its `config.toml` existence is checked).
 - UI (`renderer/upstream-manage-ui.ts` in the module's card): installed version (or "not installed
   by Chat Marks" for a PATH binary), latest release, "Update available", support notes, OpenCode's
   background service (running on port / stopped, starts on first use / run by another OpenCode,

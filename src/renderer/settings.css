@@ -553,3 +553,11 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .api-chat-approval-actions button.primary { background: var(--ink); color: var(--card); border-color: var(--ink); }
 .api-chat-approval-actions button:disabled { opacity: 0.6; cursor: default; }
 .api-chat-take-back-text { margin: 0; }
+/* Chat Marks: ZeroClaw's own Settings page (its setup terminal and its read-only settings). */
+.zeroclaw-setup-terminal { display: flex; flex-direction: column; }
+.zeroclaw-setup-terminal[hidden] { display: none; }
+.zeroclaw-setup-terminal > .marks-cli-terminal { flex: 1; min-height: 0; padding: 0; border: 0; }
+.zeroclaw-setup-terminal .workspace-terminal { flex: 1; min-height: 0; overflow: hidden; }
+.zeroclaw-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; font-size: calc(13px * var(--text-scale, 1)); }
+.zeroclaw-facts dt { color: var(--muted); }
+.zeroclaw-facts dd { margin: 0; overflow-wrap: anywhere; }

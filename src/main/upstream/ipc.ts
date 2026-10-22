@@ -26,7 +26,8 @@ const module = z.enum(UPSTREAM_MODULE_IDS);
 const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status'), module, refresh: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('install'), module, mode: z.enum(['install', 'update']), version: z.string().regex(UPSTREAM_VERSION) }).strict(),
-  z.object({ action: z.literal('service'), module: z.literal('opencode'), op: z.enum(['start', 'stop', 'restart']) }).strict()
+  z.object({ action: z.literal('service'), module: z.literal('opencode'), op: z.enum(['start', 'stop', 'restart']) }).strict(),
+  z.object({ action: z.literal('facts'), module: z.literal('zeroclaw') }).strict()
 ]);
 
 export interface UpstreamIpcDeps {
@@ -130,6 +131,7 @@ export function registerUpstreamIpc(getWindow: () => BrowserWindow | null): void
       switch (input.action) {
         case 'status': return { ok: true, data: await upstreamStatus(input.module, input.refresh) };
         case 'install': return { ok: true, data: await upstreamInstall(input.module, input.mode, input.version, progress) };
+        case 'facts': return { ok: true, data: await (await import('../zeroclaw/settings.js')).zeroclawFacts() };
         case 'service': {
           await (await import('../opencode/service.js')).openCodeServiceAction(input.op);
           return { ok: true, data: await upstreamStatus('opencode') };
