@@ -44,7 +44,10 @@ const EVENT_LABELS: Record<NotificationEvent, string> = {
 };
 
 type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
-type Service = Pick<AppApi, 'notificationCenterGet' | 'notificationCenterSave' | 'notificationCenterSetCredential' | 'notificationCenterTest'>;
+type Service = Pick<AppApi,
+  'notificationCenterGet' | 'notificationCenterSave' | 'notificationCenterSetCredential' |
+  'notificationCenterTest' | 'notificationCenterExport' | 'notificationCenterImport' | 'vault'
+>;
 
 function settingLabel(title: string, detail: string, control: HTMLElement): HTMLLabelElement {
   const label = document.createElement('label');
@@ -113,8 +116,8 @@ export function installNotificationCenter(api: Service): void {
   const controls: Array<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement> = [];
   const channelStatus = new Map<NotificationChannel, HTMLElement>();
   const credentialStatus = new Map<NotificationChannel, HTMLElement>();
-  const secrets = new Map<NotificationChannel, HTMLInputElement>();
   const tests = new Map<NotificationChannel, HTMLButtonElement>();
+  const vaultHelp = new Map<NotificationChannel, HTMLElement>();
 
   function state(message: string, error = false): void {
     ui(status!, 'textContent', () => t(message));
@@ -155,8 +158,8 @@ export function installNotificationCenter(api: Service): void {
     controls.length = 0;
     channelStatus.clear();
     credentialStatus.clear();
-    secrets.clear();
     tests.clear();
+    vaultHelp.clear();
     container!.replaceChildren();
     const timing = el('div', 'notification-center-timing');
     const throttle = number('notificationThrottleMinutes', 0, 1440);
@@ -241,30 +244,63 @@ export function installNotificationCenter(api: Service): void {
 
       const secretRow = el('div', 'notification-secret-row');
       const secret = input('notificationCredential-' + channel, 'password');
-      secret.placeholder = t('Enter a new credential');
-      secrets.set(channel, secret);
-      controls.push(secret);
+      ui(secret, 'placeholder', () => t('Enter a new credential'));
+      const master = input('notificationMasterPassword-' + channel, 'password');
+      master.autocomplete = 'off';
+      controls.push(secret, master);
       const store = button('Save credential');
+      store.id = 'notificationStore-' + channel;
       controls.push(store);
-      secretRow.append(secret, store);
-      fields.append(field(spec.secret, secretRow));
+      secretRow.append(field(spec.secret, secret), field('Master password to store credential', master), store);
+      fields.append(secretRow);
       const credentialNote = el('p', 'notification-channel-note');
       credentialNote.setAttribute('role', 'status');
       credentialStatus.set(channel, credentialNote);
       section.append(credentialNote);
+      const vaultNotice = el('div', 'notification-vault-notice');
+      vaultNotice.hidden = true;
+      vaultNotice.append(el('span', '', () => t('Vault not created. Open General settings and create a vault first.')));
+      const openGeneral = button('Open General');
+      openGeneral.addEventListener('click', () => document.querySelector<HTMLButtonElement>('[data-tab="general"]')?.click());
+      vaultNotice.append(openGeneral);
+      vaultHelp.set(channel, vaultNotice);
+      section.append(vaultNotice);
       credentialState(channel);
       store.addEventListener('click', async () => {
-        if (!secret.value || busy) return;
+        if (busy) return;
+        if (!master.value) {
+          credentialNote.textContent = t('Enter the vault master password to store the credential.');
+          credentialNote.classList.add('is-error');
+          return;
+        }
+        if (!secret.value) {
+          credentialNote.textContent = t('Enter a credential before saving.');
+          credentialNote.classList.add('is-error');
+          return;
+        }
         const value = secret.value;
+        const masterPassword = master.value;
         secret.value = '';
-        await request(() => api.notificationCenterSetCredential(channel, value), view => {
+        master.value = '';
+        const successful = await request(async () => {
+          const vault = await api.vault('status');
+          if (vault.ok && vault.data && typeof vault.data === 'object' &&
+            'created' in vault.data && vault.data.created === false) {
+            vaultNotice.hidden = false;
+            return { ok: false as const, error: t('Vault not created.') };
+          }
+          return api.notificationCenterSetCredential(channel, value, masterPassword);
+        }, view => {
+          vaultNotice.hidden = true;
           credentials = view.credentials;
           credentialState(channel);
           credentialNote.textContent = t('Credential saved.');
         }, credentialNote);
+        if (!successful) credentialNote.textContent = t('Could not save credential. Verify the master password and vault in General settings.');
       });
       const actions = el('div', 'notification-channel-actions');
       const test = button('Send test');
+      test.id = 'notificationTest-' + channel;
       tests.set(channel, test);
       const result = el('p', 'notification-channel-note');
       result.setAttribute('role', 'status');
@@ -298,7 +334,36 @@ export function installNotificationCenter(api: Service): void {
       container!.append(section);
     }
     const footer = el('div', 'notification-center-footer');
+    const exports = button('Export settings');
+    const imports = button('Import settings');
+    exports.id = 'notificationExport';
+    imports.id = 'notificationImport';
+    controls.push(exports, imports);
+    exports.addEventListener('click', async () => {
+      if (busy) return;
+      state('Exporting notification settings…');
+      await request(() => api.notificationCenterExport(), exported => {
+        state(exported ? 'Notification settings exported. Credentials are not included.' : 'Export cancelled.');
+      }, status!, error => t('Could not export notification settings: {0}', [error]));
+    });
+    imports.addEventListener('click', async () => {
+      if (busy) return;
+      state('Importing notification settings…');
+      await request<NotificationCenterView | null>(async () => {
+        const result = await api.notificationCenterImport();
+        if (!result.ok) return result;
+        if (!result.data.imported) return { ok: true, data: null };
+        return api.notificationCenterGet();
+      }, view => {
+        if (!view) { state('Import cancelled.'); return; }
+        draft = clone(view.settings);
+        credentials = view.credentials;
+        build();
+        state('Settings imported. Credentials must be added again for each channel.');
+      }, status!, error => t('Could not import notification settings: {0}', [error]));
+    });
     const save = button('Save notification settings');
+    save.id = 'notificationSave';
     controls.push(save);
     save.addEventListener('click', async () => {
       if (!draft || busy) return;
@@ -314,7 +379,7 @@ export function installNotificationCenter(api: Service): void {
         for (const channel of NOTIFICATION_CHANNELS) credentialState(channel);
       });
     });
-    footer.append(save);
+    footer.append(exports, imports, save);
     container!.append(footer);
   }
   void api.notificationCenterGet().then(reply => {

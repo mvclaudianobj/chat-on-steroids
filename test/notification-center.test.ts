@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const state = vi.hoisted(() => ({ secret: 'synthetic-test-token', snapshot: null as unknown }));
-vi.mock('../src/main/secrets.js', () => ({ getSecret: vi.fn(async () => state.secret), hasSecret: vi.fn(async () => !!state.secret), setSecret: vi.fn(async (_key, value) => { state.secret = value; }) }));
+vi.mock('../src/main/notification-credentials.js', () => ({
+  notificationCredentialPresence: vi.fn(async () => ({ smtp: true, telegram: true, 'whatsapp-cloud': true, 'whatsapp-evolution': true })),
+  storeNotificationCredential: vi.fn(async (_channel, value) => { state.secret = value; }),
+  withNotificationCredential: vi.fn(async (_channel, fn) => fn(state.secret)),
+  requireNotificationReauthorization: vi.fn(async () => undefined)
+}));
 vi.mock('../src/main/durable.js', () => ({ readDurable: vi.fn(async () => state.snapshot), writeDurableNow: vi.fn(async (_key, next) => { state.snapshot = next; }) }));
 vi.mock('../src/main/notification-smtp.js', () => ({ sendSmtp: vi.fn(async () => undefined) }));
 import { dispatchNotice, notificationSettings, saveNotificationSettings, setNotificationCredential } from '../src/main/notification-center.js';
@@ -43,7 +48,7 @@ describe('notification center outbound channels', () => {
     await saveNotificationSettings(settings);
     expect(await dispatchNotice(event, { now: 800000 })).toBe(1);
     expect(vi.mocked(sendSmtp)).toHaveBeenCalledWith(expect.objectContaining({ password: 'synthetic-test-token', security: 'starttls' }));
-    await setNotificationCredential('smtp', 'replacement-synthetic');
+    await setNotificationCredential('smtp', 'replacement-synthetic', 'synthetic-master-password');
     expect(state.secret).toBe('replacement-synthetic');
     settings.channels.smtp.config.password = 'forbidden';
     expect(() => saveNotificationSettings(settings)).toThrow();

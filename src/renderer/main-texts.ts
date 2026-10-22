@@ -73,6 +73,9 @@ export function mainTexts(): Record<MainText, string> {
     'GPG encrypted files': t('GPG encrypted files'),
     'Export Brain memories': t('Export Brain memories'),
     'JSON Lines': t('JSON Lines'),
+    'Export notification settings': t('Export notification settings'),
+    'Import notification settings': t('Import notification settings'),
+    'Chat Marks notification settings': t('Chat Marks notification settings'),
   };
 }
 

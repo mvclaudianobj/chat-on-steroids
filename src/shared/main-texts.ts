@@ -70,7 +70,10 @@ export const MAIN_TEXTS = [
   'Chat Marks vault',
   'GPG encrypted files',
   'Export Brain memories',
-  'JSON Lines'
+  'JSON Lines',
+  'Export notification settings',
+  'Import notification settings',
+  'Chat Marks notification settings'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];
