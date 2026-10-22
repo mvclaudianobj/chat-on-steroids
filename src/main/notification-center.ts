@@ -1,7 +1,7 @@
 /** Outbound notification channels. The renderer never reads credentials or message excerpts. */
 import { z } from 'zod';
 import { readDurable, writeDurableNow } from './durable.js';
-import { getSecret, hasSecret, setSecret } from './secrets.js';
+import { notificationCredentialPresence, storeNotificationCredential, withNotificationCredential, requireNotificationReauthorization } from './notification-credentials.js';
 import { NOTIFICATION_CHANNELS, NOTIFICATION_EVENTS, type NotificationChannel, type NotificationEvent, type NotificationCenterSettings, type NotificationCenterView } from '../shared/notification-center.js';
 import { sendSmtp } from './notification-smtp.js';
 import { logInfo, logWarn } from './logger.js';
@@ -26,22 +26,21 @@ const defaults = (): NotificationCenterSettings => ({ channels: {
 let saved: NotificationCenterSettings | null = null;
 let loadInFlight: Promise<NotificationCenterSettings> | null = null;
 let queue: Promise<void> = Promise.resolve();
-const key = (channel: NotificationChannel): `plugin:${string}` => `plugin:marks-notify:${channel}`;
 export async function notificationSettings(): Promise<NotificationCenterSettings> {
   if (saved) return saved;
   if (loadInFlight) return loadInFlight;
   const load = (async () => {
-    const parsed = schema.safeParse(await readDurable<unknown>(STATE));
-    return saved ?? (saved = parsed.success ? parsed.data : defaults());
+    let loaded: NotificationCenterSettings;
+    try { loaded = checkSettings(await readDurable<unknown>(STATE)); }
+    catch { loaded = defaults(); }
+    return saved ?? (saved = loaded);
   })();
   loadInFlight = load;
   try { return await load; }
   finally { if (loadInFlight === load) loadInFlight = null; }
 }
 export async function notificationView(): Promise<NotificationCenterView> {
-  const credentials = {} as NotificationCenterView['credentials'];
-  for (const c of NOTIFICATION_CHANNELS) credentials[c] = await hasSecret(key(c));
-  return { settings: await notificationSettings(), credentials };
+  return { settings: await notificationSettings(), credentials: await notificationCredentialPresence() };
 }
 function checkSettings(value: unknown): NotificationCenterSettings {
   const settings = schema.parse(value);
@@ -72,11 +71,18 @@ export function saveNotificationSettings(value: unknown): Promise<NotificationCe
   queue = run.catch(() => undefined);
   return run.then(notificationView);
 }
-export async function setNotificationCredential(channel: NotificationChannel, credential: string): Promise<NotificationCenterView> {
+export async function setNotificationCredential(channel: NotificationChannel, credential: string, masterPassword: string): Promise<NotificationCenterView> {
   if (!NOTIFICATION_CHANNELS.includes(channel)) throw new Error('Unknown channel');
   if (credential.length > 4096) throw new Error('Credential too long');
-  await setSecret(key(channel), credential);
+  await storeNotificationCredential(channel, credential, masterPassword);
   return notificationView();
+}
+
+export async function importNotificationSettings(value: unknown): Promise<NotificationCenterView> {
+  const settings = checkSettings(value);
+  // Revoke old credentials before any imported active channel becomes visible.
+  await requireNotificationReauthorization();
+  return saveNotificationSettings(settings);
 }
 
 export interface OutboundNotice { event: NotificationEvent; title: string; project: string; excerpt?: string; }
@@ -143,15 +149,11 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
       logInfo(`Notification ${channel}: skipped ${notice.event} (throttled)`);
       continue;
     }
-    const secret = await getSecret(key(channel));
-    if (!secret) {
-      logWarn(`Notification ${channel}: refused ${notice.event} (credential missing)`);
-      throw new Error(`Configure the ${channel} credential first`);
-    }
     const values = { title: notice.title.slice(0, 180), project: notice.project.slice(0, 160), event: notice.event, excerpt: choice.includeExcerpt ? (notice.excerpt ?? '').slice(0, 160) : '' };
     const title = fill(choice.titleTemplate, values);
     const body = fill(choice.bodyTemplate, values);
     const cfg = choice.config;
+    await withNotificationCredential(channel, async secret => {
     if (channel === 'smtp') {
       if (!cfg.host || !cfg.from) throw new Error('Configure SMTP host and sender first');
       for (const to of choice.destinations) {
@@ -187,6 +189,7 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
         await postJson(url.toString(), { apikey: secret }, { number, text: `${title}\n${body}` }, fetcher); delivered++;
       }
     }
+    });
     if (!options.test && delivered) {
       lastSent.set(fingerprint, now);
       counts.set(channel, { at: bucket && now - bucket.at < 3600000 ? bucket.at : now, count: (bucket && now - bucket.at < 3600000 ? bucket.count : 0) + choice.destinations.length });

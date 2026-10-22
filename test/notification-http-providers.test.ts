@@ -5,10 +5,11 @@ vi.mock('../src/main/durable.js', () => ({
   readDurable: vi.fn(async () => null),
   writeDurableNow: vi.fn(async () => undefined)
 }));
-vi.mock('../src/main/secrets.js', () => ({
-  getSecret: vi.fn(async () => 'synthetic-local-only-token'),
-  hasSecret: vi.fn(async () => true),
-  setSecret: vi.fn(async () => undefined)
+vi.mock('../src/main/notification-credentials.js', () => ({
+  notificationCredentialPresence: vi.fn(async () => ({ smtp: true, telegram: true, 'whatsapp-cloud': true, 'whatsapp-evolution': true })),
+  storeNotificationCredential: vi.fn(),
+  withNotificationCredential: vi.fn(async (_channel, fn) => fn('synthetic-local-only-token')),
+  requireNotificationReauthorization: vi.fn(async () => undefined)
 }));
 vi.mock('../src/main/notification-smtp.js', () => ({ sendSmtp: vi.fn() }));
 

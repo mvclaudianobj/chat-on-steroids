@@ -6,8 +6,9 @@ import { NOTIFICATION_CHANNELS, NOTIFICATION_EVENTS } from '../src/shared/notifi
 import type { NotificationCenterView } from '../src/shared/notification-center.js';
 
 const ipcHandlers = vi.hoisted(() => new Map<string, (
-  event: { sender: { isDestroyed(): boolean } }, payload: unknown
+  event: { sender: { isDestroyed(): boolean }; senderFrame: object }, payload: unknown
 ) => Promise<unknown>>());
+const files = vi.hoisted(() => ({ exportFile: '', importFile: '' }));
 
 // Run the real secrets.ts file lifecycle against an isolated test cipher, never the host keyring.
 // The cipher is authenticated and opaque; this verifies what is written without storing test
@@ -19,8 +20,12 @@ vi.mock('electron', async () => {
   return {
     ipcMain: {
       handle: (channel: string, handler: (
-        event: { sender: { isDestroyed(): boolean } }, payload: unknown
+        event: { sender: { isDestroyed(): boolean }; senderFrame: object }, payload: unknown
       ) => Promise<unknown>) => { ipcHandlers.set(channel, handler); }
+    },
+    dialog: {
+      showOpenDialog: vi.fn(async () => ({ canceled: !files.importFile, filePaths: files.importFile ? [files.importFile] : [] })),
+      showSaveDialog: vi.fn(async () => ({ canceled: !files.exportFile, filePath: files.exportFile || undefined }))
     },
     safeStorage: {
       isAsyncEncryptionAvailable: async () => true,
@@ -54,8 +59,10 @@ async function boot() {
   durable.initDurableStore(directory);
   const secrets = await import('../src/main/secrets.js');
   secrets.initSecretsPath(directory);
+  const vault = await import('../src/main/marks-vault.js');
+  vault.initMarksVault(directory);
   const center = await import('../src/main/notification-center.js');
-  return { durable, secrets, center };
+  return { durable, secrets, vault, center };
 }
 
 function expectSafeDefaults(view: NotificationCenterView): void {
@@ -75,6 +82,7 @@ function expectSafeDefaults(view: NotificationCenterView): void {
 beforeEach(async () => {
   directory = await fs.mkdtemp(path.join(tmpdir(), 'marks-notify-persistence-'));
   ipcHandlers.clear();
+  files.exportFile = ''; files.importFile = '';
 });
 
 afterEach(async () => {
@@ -125,21 +133,23 @@ describe('notification center persistent state', () => {
     expect((await second.center.notificationView()).credentials.telegram).toBe(false);
   });
 
-  it('stores a credential only in secrets.bin and returns only its presence over IPC', async () => {
-    const { center, secrets } = await boot();
+  it('stores a credential in encrypted Vault K, never in settings/secrets.bin or IPC', async () => {
+    const { center, vault } = await boot();
+    const masterPassword = 'synthetic-only-master-password';
+    await vault.createVault(masterPassword);
     const settings = structuredClone(await center.notificationSettings());
     settings.channels.telegram.destinations = ['synthetic-chat'];
     await center.saveNotificationSettings(settings);
     const durableBefore = await fs.readFile(settingsFile(), 'utf8');
 
-    const sender = { isDestroyed: () => false };
+    const sender = { isDestroyed: () => false, mainFrame: {} };
     const { registerNotificationCenterIpc } = await import('../src/main/notification-ipc.js');
-    registerNotificationCenterIpc(() => ({ webContents: sender }) as never);
+    registerNotificationCenterIpc(() => ({ webContents: sender, isDestroyed: () => false }) as never);
     const invoke = ipcHandlers.get('marksNotify:request');
     expect(invoke).toBeDefined();
 
     const credential = 'synthetic-credential-never-in-state-or-ipc';
-    const reply = await invoke!({ sender }, { action: 'credential', channel: 'telegram', credential });
+    const reply = await invoke!({ sender, senderFrame: sender.mainFrame }, { action: 'credential', channel: 'telegram', credential, masterPassword });
     expect(reply).toMatchObject({ ok: true, data: { credentials: { telegram: true } } });
     expect(JSON.stringify(reply)).not.toContain(credential);
     expect(await fs.readFile(settingsFile(), 'utf8')).toBe(durableBefore);
@@ -147,17 +157,76 @@ describe('notification center persistent state', () => {
 
     const blob = await fs.readFile(path.join(directory, 'secrets.bin'));
     expect(blob.includes(Buffer.from(credential))).toBe(false);
-    expect(await secrets.getSecret('plugin:marks-notify:telegram')).toBe(credential);
+    const encryptedVault = await fs.readFile(path.join(directory, 'marks-vault.json'));
+    expect(encryptedVault.includes(Buffer.from(credential))).toBe(false);
+    const credentials = await vault.listVault();
+    expect(credentials).toContainEqual(expect.objectContaining({ name: 'notification/telegram' }));
+    await vault.useVault('notification/telegram', async entry => { expect(entry.value).toBe(credential); return 'used'; });
 
-    const getReply = await invoke!({ sender }, { action: 'get' });
+    const getReply = await invoke!({ sender, senderFrame: sender.mainFrame }, { action: 'get' });
     expect(JSON.stringify(getReply)).not.toContain(credential);
     expect(getReply).toMatchObject({ ok: true, data: { credentials: { telegram: true } } });
 
     const restarted = await boot();
-    expect(await restarted.secrets.getSecret('plugin:marks-notify:telegram')).toBe(credential);
+    await restarted.vault.useVault('notification/telegram', async entry => { expect(entry.value).toBe(credential); return 'used'; });
     const restartedView = await restarted.center.notificationView();
     expect(restartedView.credentials.telegram).toBe(true);
     expect(JSON.stringify(restartedView)).not.toContain(credential);
     expect(await fs.readFile(settingsFile(), 'utf8')).toBe(durableBefore);
+  });
+
+  it('exports only settings and requires credentials again after importing without a vault', async () => {
+    const { center, vault } = await boot();
+    const masterPassword = 'synthetic-only-master-password';
+    await vault.createVault(masterPassword);
+    const initial = structuredClone(await center.notificationSettings());
+    initial.channels.telegram.enabled = true;
+    initial.channels.telegram.events['turn-completed'] = true;
+    initial.channels.telegram.destinations = ['synthetic-chat-007'];
+    await center.saveNotificationSettings(initial);
+    const sender = { isDestroyed: () => false, mainFrame: {} };
+    const { registerNotificationCenterIpc } = await import('../src/main/notification-ipc.js');
+    registerNotificationCenterIpc(() => ({ webContents: sender, isDestroyed: () => false }) as never);
+    const invoke = (action: unknown) => ipcHandlers.get('marksNotify:request')!({ sender, senderFrame: sender.mainFrame }, action);
+    const credential = 'synthetic-only-credential-do-not-export';
+    expect(await invoke({ action: 'credential', channel: 'telegram', credential, masterPassword })).toMatchObject({ ok: true });
+    files.exportFile = path.join(directory, 'notification-export.json');
+    expect(await invoke({ action: 'export' })).toEqual({ ok: true, data: true });
+    const raw = await fs.readFile(files.exportFile, 'utf8');
+    const exported = JSON.parse(raw);
+    expect(exported.format).toBe('chat-marks-notification-settings');
+    expect(exported.version).toBe(1);
+    expect(exported.settings.channels.telegram.destinations).toEqual(['synthetic-chat-007']);
+    expect(raw).not.toContain(credential);
+    expect(raw).not.toContain(masterPassword);
+    expect(raw).not.toContain('notification/telegram');
+    const changed = structuredClone(await center.notificationSettings());
+    changed.channels.telegram.enabled = false;
+    changed.channels.telegram.destinations = [];
+    await center.saveNotificationSettings(changed);
+    files.importFile = files.exportFile;
+    expect(await invoke({ action: 'import' })).toEqual({ ok: true, data: { imported: true } });
+    const view = await center.notificationView();
+    expect(view.settings).toEqual(initial);
+    expect(view.credentials.telegram).toBe(false);
+    // The old encrypted Vault K entry remains intact, but the imported configuration cannot reuse it.
+    expect((await vault.listVault()).some(entry => entry.name === 'notification/telegram')).toBe(true);
+    await expect(center.dispatchNotice({ event: 'turn-completed', title: 'Synthetic', project: 'test' }, { channel: 'telegram', test: true }))
+      .rejects.toThrow(/must be saved/);
+    expect(await invoke({ action: 'credential', channel: 'telegram', credential: 'new-synthetic-token', masterPassword })).toMatchObject({ ok: true, data: { credentials: { telegram: true } } });
+  });
+
+  it('rejects malformed imported files without changing settings', async () => {
+    const { center } = await boot();
+    const original = structuredClone(await center.notificationSettings());
+    files.importFile = path.join(directory, 'bad-notification-settings.json');
+    await fs.writeFile(files.importFile, JSON.stringify({ format: 'chat-marks-notification-settings', version: 1, settings: { channels: { telegram: { enabled: true, credential: 'bad-secret' } } } }), 'utf8');
+    const sender = { isDestroyed: () => false, mainFrame: {} };
+    const { registerNotificationCenterIpc } = await import('../src/main/notification-ipc.js');
+    registerNotificationCenterIpc(() => ({ webContents: sender, isDestroyed: () => false }) as never);
+    const reply = await ipcHandlers.get('marksNotify:request')!({ sender, senderFrame: sender.mainFrame }, { action: 'import' });
+    expect(reply).toMatchObject({ ok: false });
+    expect(JSON.stringify(reply)).not.toContain('bad-secret');
+    expect(await center.notificationSettings()).toEqual(original);
   });
 });

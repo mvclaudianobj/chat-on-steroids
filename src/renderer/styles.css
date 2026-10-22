@@ -3814,15 +3814,21 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .notification-channel-events .setting { min-height: 44px; padding: 9px 0; }
 .notification-channel-events .setting + .setting { border-top: 0; }
 .notification-channel-events .setting-text em:empty { display: none; }
-.notification-secret-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.notification-secret-row input { flex: 1 1 200px; }
-.notification-secret-row .btn { flex: 0 0 auto; min-height: 36px; }
+.notification-channel-fields > .notification-secret-row { grid-column: 1 / -1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto; gap: 12px; align-items: end; }
+.notification-secret-row .btn { min-height: 36px; }
+.notification-vault-notice:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 12px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
+.notification-vault-notice .btn { min-height: 34px; }
 .notification-channel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding-top: 16px; }
-.notification-center-footer { display: flex; justify-content: flex-end; padding: 16px 0; border-top: 1px solid var(--line); }
+.notification-center-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 16px 0; border-top: 1px solid var(--line); }
 .notification-center-footer .btn { min-height: 38px; }
 .notification-center :is(button, input, textarea, select):focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 900px) {
+  .notification-channel-fields > .notification-secret-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .notification-secret-row > .btn { grid-column: 1 / -1; justify-self: start; }
+}
 @media (max-width: 680px) {
   .notification-center-timing, .notification-channel-fields, .notification-channel-events { grid-template-columns: minmax(0, 1fr); }
+  .notification-channel-fields > .notification-secret-row { grid-template-columns: minmax(0, 1fr); }
 }
 .setting:has(> input[type='checkbox']:disabled) .setting-text { opacity: .6; }
 .setting-timing { margin: -4px 0 8px; padding: 0 0 10px; border-bottom: 1px solid var(--line); color: var(--faint); font-size: calc(11px * var(--text-scale, 1)); }
