@@ -131,27 +131,28 @@ it('never uses inherited Prime project after the managed worker broker history w
   expect(project).not.toHaveBeenCalled();
 });
 
-it('blocks a worker relative write and command after its checked-out directory is replaced', async () => {
+it('blocks a worker relative write and command after its checkout lease is revoked', async () => {
   swarm.managed = true;
   project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
   const parent = path.join(base, 'swapped-owner-test');
   const original = path.join(parent, 'owned');
-  const relocated = path.join(parent, 'old-worktree');
   await fs.mkdir(original, { recursive: true });
-  const identity = await fs.stat(original);
   const lease = { workspace: { virtual: '/work/swapped-owner-test/owned', real: original } };
   leaseLookup.mockReturnValue(lease);
-  // Simulate the manager's checked inode lease. The real validator additionally checks the
-  // marker, Git common-dir, branch and approved root; this tests that the kernel awaits it.
-  leaseValidate.mockImplementation(async current => {
-    const now = await fs.stat(current.workspace.real);
-    if (now.ino !== identity.ino || now.dev !== identity.dev) throw new Error('WORKTREE_PATH_CHANGED');
-    return current;
-  });
-  await fs.rename(original, relocated);
-  await fs.mkdir(original);
   const notes = path.join(original, 'notes.txt');
   await fs.writeFile(notes, 'USER-OWNED NOTES - KEEP');
+  // This kernel test proves that each privileged boundary awaits the authoritative
+  // lease validator. The manager's separate tests exercise actual inode replacement,
+  // marker, Git common-dir, branch and approved-root checks on the filesystem.
+  // Do not rename an open temporary directory here: on Windows this can fail with
+  // EPERM (antivirus/runner file handles) before the kernel ever runs the guard.
+  let revoked = false;
+  leaseValidate.mockImplementation(async current => {
+    if (revoked) throw new Error('WORKTREE_PATH_CHANGED');
+    return current;
+  });
+  expect((await workerRun('managed', () => resolveIn(roots(), 'notes.txt'))).real).toBe(notes);
+  revoked = true;
   await expect(workerRun('managed', async () => {
     const target = await resolveIn(roots(), 'notes.txt', { allowMissing: true });
     await fs.writeFile(target.real, 'UNAUTHORIZED');
@@ -159,7 +160,7 @@ it('blocks a worker relative write and command after its checked-out directory i
   await expect(workerRun('managed', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined)))
     .rejects.toThrow(/WORKTREE_PATH_CHANGED/);
   expect(await fs.readFile(notes, 'utf8')).toBe('USER-OWNED NOTES - KEEP');
-  expect(leaseValidate).toHaveBeenCalledTimes(2);
+  expect(leaseValidate).toHaveBeenCalledTimes(3);
 });
 
 // 2026-10-21 (VM): while one chat had a sub-agent run, every other chat outside a project had its
