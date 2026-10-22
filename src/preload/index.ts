@@ -111,6 +111,7 @@ export interface SessionDetail {
 }
 
 const api = {
+  company: (request: import('../main/company-ipc.js').CompanyIpcRequest) => call<import('../shared/company.js').CompanySnapshot>('marksCompany:request', request),
   notificationCenterGet: () => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'get' }),
   notificationCenterSave: (settings: import('../shared/notification-center.js').NotificationCenterSettings) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'save', settings }),
   notificationCenterSetCredential: (channel: import('../shared/notification-center.js').NotificationChannel, credential: string) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'credential', channel, credential }),
