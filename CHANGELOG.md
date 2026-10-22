@@ -18,8 +18,12 @@ the app refuses the extension and asks you to reload the matching copy.
 
 ### Chat Marks
 
-<!-- Placeholder: Chat Marks features merged after this community integration (Claude/Codex/OpenCode engines, icons, ZeroClaw, Continue fix, etc.) are listed here before release. -->
-- _To be completed with the Chat Marks features of this revision._
+- **Chats com motores próprios:** Codex, Claude Code, MarksCode e OpenCode 2.x integrados à interface de conversas, com projetos, sessões e ferramentas locais sujeitos às permissões existentes.
+- **ZeroClaw nas Configurações:** uma área própria para o módulo, separada das entradas de terminal dos outros motores.
+- **CLIProxy e identidade Marks:** acesso ao CLIProxy nos chats e módulos; ícones identificam os motores nas Configurações e no histórico das ferramentas.
+- **Consulta de versão OpenCode:** se o registro npm demorar a responder, a consulta não bloqueia o uso do módulo.
+- **Exclusividades preservadas:** login MarksPanel de sete dias, mascotes, ícones `icon_marks.png`, Skills/AI Hero e Marks Agency, atualizador do fork e sessões existentes.
+- **Plataformas:** instaladores Windows e Linux; alvos macOS permanecem pausados nesta revisão.
 
 ## [2.1.44] — Pictures with /image, keyboard shortcuts, and a quicker message after Stop
 
