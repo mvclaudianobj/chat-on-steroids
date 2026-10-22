@@ -3019,6 +3019,8 @@
   "Agents": "Tác tử",
   "An autonomous agent you configure here. It is not a chat or a terminal type.": "Một tác tử tự động bạn cấu hình tại đây. Nó không phải loại trò chuyện hay terminal.",
   "Close setup view": "Đóng khung thiết lập",
+  "Manage in Settings > Modules": "Quản lý trong Cài đặt > Mô-đun",
+  "Setup ended. Its last output stays above; Configure agent starts it again.": "Quá trình thiết lập đã kết thúc. Kết quả cuối vẫn ở phía trên; Cấu hình tác tử sẽ bắt đầu lại.",
   "Configure agent": "Cấu hình tác tử",
   "Cost limits": "Giới hạn chi phí",
   "Enable this module first.": "Hãy bật mô-đun này trước.",

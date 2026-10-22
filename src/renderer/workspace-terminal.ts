@@ -68,11 +68,16 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     for (const tab of tabs.values()) tab.term.options.theme = theme;
   });
   let project: LocalProject | null = null, selected: string | null = null, open = false;
+  /**
+   * The size main is asked for, within what it accepts (2–500 × 2–200): a terminal fitted into a
+   * pane that has no height yet has one row, and main refuses that open before anything starts.
+   */
+  const size = (term: Terminal): [number, number] => [Math.max(2, Math.min(500, term.cols)), Math.max(2, Math.min(200, term.rows))];
   const fit = (): void => {
     const tab = selected ? tabs.get(selected) : null;
     if (!tab || !open || !tab.node.getBoundingClientRect().height) return;
     tab.fit.fit();
-    if (tab.ready && !tab.exited) void transport.resize(tab.id, Math.min(500, tab.term.cols), Math.min(200, tab.term.rows));
+    if (tab.ready && !tab.exited) void transport.resize(tab.id, ...size(tab.term));
   };
   const setOpen = (value: boolean): void => {
     open = value; panel.hidden = !value;
@@ -144,7 +149,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       return true;
     });
     void (async () => {
-      const result = await transport.create(id, scope?.id ?? null, Math.min(500, term.cols), Math.min(200, term.rows));
+      const result = await transport.create(id, scope?.id ?? null, ...size(term));
       if (!tabs.has(id)) { void transport.close(id); return; }
       if (!result.ok) { tab.exited = true; term.writeln(`\r\n${result.error}`); }
       else { tab.ready = true; tab.title = scope ? `${scope.name} · ${result.data.shell}` : result.data.shell; node.title = result.data.cwd; }

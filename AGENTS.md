@@ -1455,8 +1455,8 @@ themes alike): line SVGs on Phosphor's 256 grid with its 16-unit round stroke, *
 own simple logo when its licence allows it** (OpenCode: `packages/identity/mark.svg`, MIT, the
 frame plus its inner square at 40% coverage). Never a company's brand logo or a fixed colour. The
 ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark). Every
-module's management entry (the Settings sub-nav item, its Modules card heading and its page heading)
-shows the module's own icon (`chat-types.ts` `moduleIcon`/`moduleMark`: OpenCode mark, Codex
+module's management entry (the Settings sub-nav item, for ZeroClaw its primary sidebar item, its
+Modules card heading and its page heading) shows the module's own icon (`chat-types.ts` `moduleIcon`/`moduleMark`: OpenCode mark, Codex
 hexagon, Claude spark, ZeroClaw and the retired MarksClaw claw, CLIProxyAPI plug; test
 `chat-types.test.ts`, `cli-chat-ui.test.ts`). Icons are decorative (`aria-hidden`); the title or engine name stays
 the text. The sidebar learns an API chat's engine from `SessionSummary.engine`, a read-time
@@ -1883,11 +1883,18 @@ like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`up
   `zerorelay` is not installed. ZeroClaw is an autonomous agent to configure, **not a chat or
   terminal type**: it never appears in New chat, the project's New terminal submenu or the sidebar
   Terminals (`cli-modules-ui.ts` `TERMINAL_MODULE`; test `cli-chat-ui.test.ts`). It has its own
-  Settings area instead (the `module-zeroclaw` sub-nav page, shown while the module is enabled,
-  with its claw icon), like CLIProxyAPI's page: Status (state, installed/latest version; install
-  and update stay in its Modules card), Agent ("Configure agent" opens `zeroclaw quickstart`,
-  `cliCreateSession(…, 'quickstart')`, args `['quickstart']` only, in a terminal inside the page,
-  one reused session) and Settings. **This area grows with ZeroClaw settings over time**; it starts
+  page instead: the primary sidebar item **ZeroClaw** right below Pets (`#sidebarZeroClaw`,
+  `data-sidebar-page="zeroclaw"`, claw mark, shown only while the module is enabled) opens the
+  `zeroclaw` main view (`data-panel="zeroclaw"`, a `plugins-panel` beside Plugins/Skills/Pets;
+  `main.ts` `showTab` counts it as a library page; the old `module-zeroclaw` Settings sub-page is
+  gone and `normalizeTab` maps that name to it, or to Settings > Modules while disabled; disabling
+  the module while the page is open goes back to the chat). Its Modules card keeps install and
+  update and links to the page ("Open ZeroClaw"); the page links back ("Manage in Settings >
+  Modules"). Sections: Status (state, installed/latest version), Agent ("Configure agent" opens
+  `zeroclaw quickstart`, `cliCreateSession(…, 'quickstart')`, args `['quickstart']` only, in a
+  terminal inside the page, one reused session; a setup that ended is started again, one still
+  running is reattached; when it ends the page says so and the terminal keeps its last output) and
+  Settings. **This area grows with ZeroClaw settings over time**; it starts
   with read-only key facts (`zeroclaw/settings.ts`, IPC `marksUpstream` `facts`): agent aliases
   (`zeroclaw agents list`) with each one's model provider, memory backend and enabled flag, the
   runtime, the gateway address and the cost limits, each through `zeroclaw config get --json` of a
@@ -1896,7 +1903,24 @@ like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`up
   so nothing runs until ZeroClaw is configured (the page says "Not configured yet"); with a
   configuration they read without rewriting it. `zeroclaw update` is never offered (it could
   update `zeroclaw` alone). Apart from ZeroClaw's own reads, `~/.zeroclaw` (shared with the
-  retired MarksClaw fork) is never touched (only its `config.toml` existence is checked).
+  retired MarksClaw fork) is never touched (only its `config.toml` existence is checked), with one
+  exception below.
+- ZeroClaw terminals (`cli-modules.ts` `ZEROCLAW_TERMINAL_SCRIPT`, quickstart and `zerocode`):
+  `sh -c '<script>' marks-cli <bin> [quickstart]` runs ZeroClaw under `umask 077`, first removes
+  only the group/other write bits of `~/.zeroclaw` and `~/.zeroclaw/data` when each is a real
+  folder owned by the user (never through a link), and after ZeroClaw exits keeps the pane open
+  with its last output and `[<bin> exited with status N. Press Enter to close.]`. Found with 0.8.6
+  as the user (temporary HOME, tmux attached through node-pty like `cliOpen`): ZeroClaw creates
+  those folders with the session umask (002 → 775) and its daemon then refuses them ("config
+  lifecycle directory …/data is writable by other users (mode 775)"), so `zerocode` exited before
+  drawing and tmux's alternate screen took its error with it. The facts reads (`settings.ts`) run
+  under the same umask. `zeroclaw quickstart` itself drew fine in tmux.
+- "Configure agent showed nothing" (2.1.44.1): the setup terminal's mount was a block, so the
+  terminal body was 0 px high, xterm fitted 1 row and `cliOpen` asked for `rows: 1`, which the IPC
+  schema (2–200) refuses before anything starts (no tmux session, no `~/.zeroclaw/config.toml`);
+  the refusal was written into the 0 px terminal. Fixed in `settings.css` (the mount is a flex
+  column) and `workspace-terminal.ts` (sizes sent to main are clamped to 2–500 × 2–200). Proof:
+  `cli-chat-ui.test.ts`, `cli-modules.test.ts` (launcher argv, the script with a real `sh`).
 - UI (`renderer/upstream-manage-ui.ts` in the module's card): installed version (or "not installed
   by Chat Marks" for a PATH binary), latest release, "Update available", support notes, OpenCode's
   background service (running on port / stopped, starts on first use / run by another OpenCode,

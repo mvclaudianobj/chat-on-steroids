@@ -3019,6 +3019,8 @@
   "Agents": "에이전트",
   "An autonomous agent you configure here. It is not a chat or a terminal type.": "여기에서 설정하는 자율 에이전트입니다. 채팅이나 터미널 유형이 아닙니다.",
   "Close setup view": "설정 화면 닫기",
+  "Manage in Settings > Modules": "설정 > 모듈에서 관리",
+  "Setup ended. Its last output stays above; Configure agent starts it again.": "설정이 종료되었습니다. 마지막 출력은 위에 남아 있으며, 에이전트 설정으로 다시 시작할 수 있습니다.",
   "Configure agent": "에이전트 설정",
   "Cost limits": "비용 한도",
   "Enable this module first.": "먼저 이 모듈을 활성화하세요.",

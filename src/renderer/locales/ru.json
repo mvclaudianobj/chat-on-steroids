@@ -3154,6 +3154,8 @@
   "Agents": "Агенты",
   "An autonomous agent you configure here. It is not a chat or a terminal type.": "Автономный агент, которого вы настраиваете здесь. Это не тип чата и не терминал.",
   "Close setup view": "Закрыть окно настройки",
+  "Manage in Settings > Modules": "Управлять в Настройки > Модули",
+  "Setup ended. Its last output stays above; Configure agent starts it again.": "Настройка завершена. Её последний вывод остаётся выше; «Настроить агента» запустит её снова.",
   "Configure agent": "Настроить агента",
   "Cost limits": "Лимиты расходов",
   "Enable this module first.": "Сначала включите этот модуль.",

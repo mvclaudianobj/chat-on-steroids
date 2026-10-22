@@ -248,7 +248,8 @@ function showTab(name: string): void {
   name = marksModulesUi.normalizeTab(name);
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
-  const library = name === 'plugins' || name === 'skills' || name === 'pets';
+  // Chat Marks: ZeroClaw's page is a main view beside them, opened from the sidebar.
+  const library = name === 'plugins' || name === 'skills' || name === 'pets' || name === 'zeroclaw';
   const settings = name !== 'chat' && !library;
   // Opening Settings asks whether "Up to date" is still true (the check itself waits ten minutes).
   if (settings && document.querySelector<HTMLElement>('.app')!.dataset.screen !== 'settings') void api.refreshUpdate();

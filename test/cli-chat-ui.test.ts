@@ -3,13 +3,13 @@ import { JSDOM } from 'jsdom';
 import { createCliModulesUi } from '../src/renderer/cli-modules-ui.js';
 
 const dom = new JSDOM(`<!doctype html>
-  <div class="app"><div id="sidebarPrimary"><button id="newChat" type="button">New chat</button></div><details id="chatsSection"></details>
+  <div class="app"><div id="sidebarPrimary"><button id="newChat" type="button">New chat</button><button id="sidebarPets" data-sidebar-page="pets" type="button">Pets</button></div><details id="chatsSection"></details>
   <details id="cliModuleChats"><summary id="cliModuleChatsHeading">Terminals</summary><p id="cliModuleChatsEmpty">No terminal sessions yet.</p></details>
   <div id="chatBody"><div class="view" data-view="timeline"></div></div>
   <div id="composer"></div><div id="composerDock"></div><div class="subhead"></div>
   <nav><button id="moduleCliNav"></button></nav>
   <div data-panel="modules"><div class="appearance-content"></div></div>
-  <div data-panel="modules"></div></div>`, { url: 'http://localhost' });
+  <div data-panel="modules"></div><main id="libraryPanels"><section data-panel="pets"></section></main></div>`, { url: 'http://localhost' });
 const bodyMarkup = dom.window.document.body.innerHTML;
 const oldDocument = globalThis.document;
 const oldWindow = globalThis.window;
@@ -21,6 +21,7 @@ beforeEach(() => {
   dom.window.document.body.innerHTML = bodyMarkup;
   dom.window.matchMedia = (() => ({ matches: false, media: '', onchange: null, addListener() {}, removeListener() {}, addEventListener() {}, removeEventListener() {}, dispatchEvent: () => false })) as typeof dom.window.matchMedia;
   dom.window.requestAnimationFrame = callback => dom.window.setTimeout(() => callback(Date.now()), 0);
+  dom.window.cancelAnimationFrame = handle => dom.window.clearTimeout(handle);
   Object.assign(dom.window, { getComputedStyle: dom.window.getComputedStyle.bind(dom.window) });
   Object.assign(globalThis, {
     document: dom.window.document,
@@ -183,7 +184,7 @@ it('keeps the Claude terminal module and the Claude Code engine apart when both 
   expect(engineChat).toHaveBeenCalledTimes(1);
 });
 
-it('shows each module\'s own icon in its Settings sub-nav item, its Modules card and its page heading', async () => {
+it('shows each module\'s own icon in its Settings sub-nav item (ZeroClaw: its sidebar item), its Modules card and its page heading', async () => {
   const modules = ['opencode', 'codex', 'claude', 'zeroclaw'];
   const api = {
     cliStatus: async () => ({ ok: true as const, data: modules.map(id => ({ id, name: id, installed: true, enabled: true, running: false, supported: true, version: '1', detail: 'ready' })) }),
@@ -195,7 +196,17 @@ it('shows each module\'s own icon in its Settings sub-nav item, its Modules card
   const doc = dom.window.document;
   await vi.waitFor(() => expect(doc.querySelector<HTMLElement>('[data-module-page="module-opencode"]')?.hidden).toBe(false));
   const expected: Record<string, string> = { opencode: 'cm-glyph-opencode', codex: 'cm-glyph-codex', claude: 'cm-glyph-spark', zeroclaw: 'cm-glyph-claw' };
+  // ZeroClaw has no Settings sub-page: its page is a main view opened from the sidebar.
+  expect(doc.querySelector('[data-module-page="module-zeroclaw"]')).toBeNull();
+  expect(doc.querySelector('[data-panel="module-zeroclaw"]')).toBeNull();
   for (const id of modules) {
+    if (id === 'zeroclaw') {
+      const item = doc.getElementById('sidebarZeroClaw')!;
+      expect(item.querySelector('.module-mark')?.classList.contains(expected[id]!)).toBe(true);
+      expect(doc.querySelector(`[data-cli-module="zeroclaw"] h2 .module-mark.${expected[id]}`)).not.toBeNull();
+      expect(doc.querySelector(`[data-panel="zeroclaw"] h1 .module-mark.${expected[id]}`)).not.toBeNull();
+      continue;
+    }
     const nav = doc.querySelector<HTMLElement>(`[data-module-page="module-${id}"]`)!;
     const mark = nav.querySelector<HTMLElement>('.module-mark')!;
     expect(mark.dataset.module, id).toBe(id);
@@ -208,6 +219,8 @@ it('shows each module\'s own icon in its Settings sub-nav item, its Modules card
 });
 
 it('keeps ZeroClaw out of New chat, the project New terminal list and the sidebar Terminals; its setup and settings live on its own page', async () => {
+  let emitCli: ((event: { id: string; data?: string; exitCode?: number }) => void) | null = null;
+  const opened = vi.fn(async (_session: string, attachment: string, cols: number, rows: number) => ({ ok: true as const, data: { id: attachment, cwd: '/home/u', session: `marks_zeroclaw_x:${cols}x${rows}` } }));
   const status = (id: string, name: string) => ({ id, name, installed: true, enabled: true, running: false, supported: true, version: '0.8.6', detail: 'ready', upstream: id === 'zeroclaw' });
   const showTab = vi.fn();
   const created = vi.fn(async () => ({ ok: true as const, data: { id: 'zc-setup', module: 'zeroclaw', title: 'ZeroClaw quickstart', projectId: null, args: ['quickstart'], updatedAt: 3, createdAt: 3, cwd: '/home/u', tmuxSession: 'marks_zeroclaw_x' } }));
@@ -221,9 +234,10 @@ it('keeps ZeroClaw out of New chat, the project New terminal list and the sideba
       { id: 'cl-1', module: 'claude', title: 'Claude shell', projectId: null, updatedAt: 1 }
     ] }),
     cliCreateSession: created,
-    cliOpen: async () => ({ ok: true as const, data: { id: 'a', cwd: '/home/u', session: 'marks_zeroclaw_x' } }),
+    cliOpen: opened,
     cliWrite: async () => ({ ok: true as const, data: undefined }), cliResize: async () => ({ ok: true as const, data: undefined }),
-    cliDetach: async () => ({ ok: true as const, data: undefined }), cliAck: async () => ({ ok: true as const, data: undefined }), onCliEvent: () => () => undefined,
+    cliDetach: async () => ({ ok: true as const, data: undefined }), cliAck: async () => ({ ok: true as const, data: undefined }),
+    onCliEvent: (listener: typeof emitCli) => { emitCli = listener; return () => undefined; },
     listProjects: async () => ({ ok: true as const, data: [] }),
     cliAction: async () => ({ ok: true as const, data: undefined }),
     upstreamZeroClawFacts: facts
@@ -243,10 +257,27 @@ it('keeps ZeroClaw out of New chat, the project New terminal list and the sideba
     return found;
   });
   expect(items).toEqual(['new-chat-chatgpt', 'new-terminal-claude']);
-  // Its page: Configure agent opens the quickstart terminal there; settings are read-only facts.
-  const page = doc.querySelector<HTMLElement>('[data-panel="module-zeroclaw"]')!;
+  // Its sidebar item sits right below Pets, shown while the module is enabled, and opens its page.
+  const item = doc.getElementById('sidebarZeroClaw')!;
+  expect(doc.getElementById('sidebarPets')!.nextElementSibling).toBe(item);
+  expect(item.hidden).toBe(false);
+  expect(item.dataset.sidebarPage).toBe('zeroclaw');
+  expect(item.querySelector('.module-mark.cm-glyph-claw')).not.toBeNull();
+  item.click();
+  expect(showTab).toHaveBeenLastCalledWith('zeroclaw');
+  // The page is a main view beside Pets; the old Settings sub-page name leads to it.
+  const page = doc.querySelector<HTMLElement>('[data-panel="zeroclaw"]')!;
+  expect(page.parentElement!.id).toBe('libraryPanels');
+  expect(page.classList.contains('plugins-panel')).toBe(true);
   expect(page.querySelector('h1 .module-mark.cm-glyph-claw')).not.toBeNull();
-  ui.onTabShown('module-zeroclaw');
+  expect(ui.normalizeTab('module-zeroclaw')).toBe('zeroclaw');
+  expect(ui.normalizeTab('zeroclaw')).toBe('zeroclaw');
+  // The Modules card keeps install and update and links to the page.
+  (doc.querySelector('[data-cli-module="zeroclaw"] #zeroclawOpenPage') as HTMLButtonElement).click();
+  expect(showTab).toHaveBeenLastCalledWith('zeroclaw');
+  (page.querySelector('#zeroclawManageModule') as HTMLButtonElement).click();
+  expect(showTab).toHaveBeenLastCalledWith('modules');
+  ui.onTabShown('zeroclaw');
   await vi.waitFor(() => expect(page.querySelector('#zeroclawFacts')!.textContent).toContain('helper'));
   expect(page.querySelector('#zeroclawFacts')!.textContent).toContain('127.0.0.1:42617');
   expect(page.querySelector('#zeroclawFacts')!.textContent).toContain('$10.00');
@@ -254,9 +285,45 @@ it('keeps ZeroClaw out of New chat, the project New terminal list and the sideba
   await vi.waitFor(() => expect(created).toHaveBeenCalledWith('zeroclaw', null, 'quickstart'));
   await vi.waitFor(() => expect((page.querySelector('#zeroclawSetupTerminal') as HTMLElement).hidden).toBe(false));
   expect(page.querySelector('#zeroclawSetupTerminal .marks-cli-terminal')).not.toBeNull();
+  // Main accepts 2-500 columns and 2-200 rows: a pane without height yet must not ask for 1 row.
+  await vi.waitFor(() => expect(opened).toHaveBeenCalledTimes(1));
+  const [, attachment, cols, rows] = opened.mock.calls[0]!;
+  expect(cols).toBeGreaterThanOrEqual(2);
+  expect(rows).toBeGreaterThanOrEqual(2);
+  // ZeroClaw exits: the page says so, the terminal keeps its output, and Configure agent starts it again.
+  emitCli!({ id: attachment, data: '[zeroclaw exited with status 1. Press Enter to close.]' });
+  emitCli!({ id: attachment, exitCode: 1 });
+  await vi.waitFor(() => expect(page.querySelector('#zeroclawConfigureStatus')!.textContent).toContain('Setup ended'));
+  (page.querySelector('#zeroclawConfigure') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(opened).toHaveBeenCalledTimes(2));
+  expect(page.querySelector('#zeroclawConfigureStatus')!.textContent).toBe('');
   expect([...doc.querySelectorAll('#cliModuleChats .cli-module-chat-title')].map(node => node.textContent)).toEqual(['Claude shell']);
   // Opening a ZeroClaw session from anywhere goes to its page, never the terminal view.
   await ui.openSession('zc-old');
-  expect(showTab).toHaveBeenLastCalledWith('module-zeroclaw');
+  expect(showTab).toHaveBeenLastCalledWith('zeroclaw');
   expect(showTab).not.toHaveBeenCalledWith('chat');
+});
+
+it('hides the ZeroClaw sidebar item while its module is disabled and sends its page to Settings > Modules', async () => {
+  const api = {
+    cliStatus: async () => ({ ok: true as const, data: [{ id: 'zeroclaw', name: 'ZeroClaw', installed: true, enabled: false, running: false, supported: true, version: '0.8.6', detail: 'ready', upstream: true }] }),
+    cliSessions: async () => ({ ok: true as const, data: [] }),
+    listProjects: async () => ({ ok: true as const, data: [] }),
+    cliAction: async () => ({ ok: true as const, data: undefined })
+  } as any;
+  const ui = createCliModulesUi(api, { showTab: () => undefined, openChatView: () => undefined, workspace: () => null });
+  const doc = dom.window.document;
+  await vi.waitFor(() => expect(doc.querySelector<HTMLInputElement>('[data-cli-module="zeroclaw"] input[type="checkbox"]')!.checked).toBe(false));
+  expect(doc.getElementById('sidebarZeroClaw')!.hidden).toBe(true);
+  expect(doc.getElementById('zeroclawOpenPage')!.hidden).toBe(true);
+  expect(ui.normalizeTab('zeroclaw')).toBe('modules');
+  expect(ui.normalizeTab('module-zeroclaw')).toBe('modules');
+});
+
+it('lays the ZeroClaw setup terminal out so it has a height (it was 0 px and fitted one row)', async () => {
+  const { readFileSync } = await import('node:fs');
+  const css = readFileSync('src/renderer/settings.css', 'utf8');
+  const rule = css.match(/\.zeroclaw-setup-terminal > \.marks-cli-terminal \{([^}]*)\}/)?.[1] ?? '';
+  expect(rule).toContain('display: flex');
+  expect(rule).toContain('flex: 1');
 });

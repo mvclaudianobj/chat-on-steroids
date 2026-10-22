@@ -44,9 +44,12 @@ const defaultHost: ZeroClawHost = {
   async run(binary, args, windows) {
     const env: NodeJS.ProcessEnv = { ...process.env, LANG: 'C', NO_COLOR: '1' };
     delete env.ELECTRON_RUN_AS_NODE;
+    // Under umask 077, like its terminals: a folder ZeroClaw creates while reading must not be
+    // group-writable, or its daemon refuses it later (cli-modules `ZEROCLAW_TERMINAL_SCRIPT`).
+    const argv = ['-c', 'umask 077; exec "$@"', 'marks-zeroclaw', binary, ...args];
     const { stdout } = windows
-      ? await run('wsl.exe', ['--exec', binary, ...args], { timeout: 15_000, maxBuffer: 256 * 1024, windowsHide: true })
-      : await run(binary, args, { env, timeout: 15_000, maxBuffer: 256 * 1024 });
+      ? await run('wsl.exe', ['--exec', 'sh', ...argv], { timeout: 15_000, maxBuffer: 256 * 1024, windowsHide: true })
+      : await run('sh', argv, { env, timeout: 15_000, maxBuffer: 256 * 1024 });
     return String(stdout);
   }
 };

@@ -3109,6 +3109,8 @@
   "Agents": "Agents",
   "An autonomous agent you configure here. It is not a chat or a terminal type.": "Un agent autonome que vous configurez ici. Ce n’est ni un type de conversation ni un terminal.",
   "Close setup view": "Fermer la vue de configuration",
+  "Manage in Settings > Modules": "Gérer dans Réglages > Modules",
+  "Setup ended. Its last output stays above; Configure agent starts it again.": "La configuration est terminée. Sa dernière sortie reste affichée ci-dessus ; Configurer l’agent la relance.",
   "Configure agent": "Configurer l’agent",
   "Cost limits": "Plafonds de coût",
   "Enable this module first.": "Activez d’abord ce module.",

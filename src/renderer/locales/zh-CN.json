@@ -3019,6 +3019,8 @@
   "Agents": "智能体",
   "An autonomous agent you configure here. It is not a chat or a terminal type.": "在这里配置的自主智能体。它不是聊天或终端类型。",
   "Close setup view": "关闭设置视图",
+  "Manage in Settings > Modules": "在 设置 > 模块 中管理",
+  "Setup ended. Its last output stays above; Configure agent starts it again.": "设置已结束。最后的输出保留在上方；“配置智能体”会重新开始。",
   "Configure agent": "配置智能体",
   "Cost limits": "费用上限",
   "Enable this module first.": "请先启用此模块。",

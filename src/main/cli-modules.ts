@@ -104,6 +104,18 @@ const ABSOLUTE_DIR = /^\/[^\u0000-\u001f]{0,900}$/;
  * and updates it. The TUI reads the background service's URL and password itself.
  */
 export const OPENCODE_TERMINAL_SCRIPT = 'OPENCODE_DISABLE_AUTOUPDATE=1 exec "$@"';
+/**
+ * Every ZeroClaw terminal (`zeroclaw quickstart`, the `zerocode` TUI). ZeroClaw creates
+ * `~/.zeroclaw` and its `data/` with the user's umask, then its daemon refuses a `data/` that group
+ * or others can write ("config lifecycle directory … is writable by other users (mode 775)", 0.8.6
+ * under the usual umask 002), so `zerocode` exited before drawing. The script runs ZeroClaw under
+ * umask 077, removes only the group/other write bits of those two folders when they are real
+ * folders owned by the user (never through a link), and keeps the pane open after ZeroClaw exits,
+ * with its last output and exit status, until Enter.
+ */
+export const ZEROCLAW_TERMINAL_SCRIPT = 'umask 077; '
+  + 'for d in "$HOME/.zeroclaw" "$HOME/.zeroclaw/data"; do if [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ]; then chmod go-w "$d"; fi; done; '
+  + '"$@"; status=$?; printf \'\\n[%s exited with status %s. Press Enter to close.]\\n\' "${1##*/}" "$status"; read -r _; exit "$status"';
 /** The only argument shapes an engine terminal may carry, per module. */
 const validEngineArgs = (module: CliId, args: unknown): args is string[] => {
   if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) return false;
@@ -653,7 +665,7 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
 /**
  * The tmux command of a module terminal, argv only: `sh -c 'exec "$@"' marks-cli <bin> <args>`;
  * OpenCode's with its self-update off (`OPENCODE_TERMINAL_SCRIPT`); ZeroClaw runs its `zerocode`
- * TUI (or `zeroclaw quickstart`).
+ * TUI (or `zeroclaw quickstart`) through `ZEROCLAW_TERMINAL_SCRIPT`.
  */
 async function terminalCommand(id: CliId, bin: string, session: Readonly<CliSession>): Promise<string[]> {
   const script = id === 'opencode' ? OPENCODE_TERMINAL_SCRIPT : 'exec "$@"';
@@ -663,8 +675,8 @@ async function terminalCommand(id: CliId, bin: string, session: Readonly<CliSess
   }
   const terminalBin = manifest[id].terminalBin;
   if (terminalBin) {
-    if (validTerminalArgs(id, session.args)) return ['sh', '-c', 'exec "$@"', 'marks-cli', bin, ...session.args!];
-    return ['sh', '-c', 'exec "$@"', 'marks-cli', `${bin.slice(0, bin.lastIndexOf('/') + 1)}${terminalBin}`];
+    if (validTerminalArgs(id, session.args)) return ['sh', '-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', bin, ...session.args!];
+    return ['sh', '-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', `${bin.slice(0, bin.lastIndexOf('/') + 1)}${terminalBin}`];
   }
   return ['sh', '-c', script, 'marks-cli', bin];
 }
