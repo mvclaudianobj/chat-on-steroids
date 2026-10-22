@@ -37,9 +37,10 @@ import { promisify } from 'node:util';
 import { z } from 'zod';
 import { logInfo, logWarn } from '../logger.js';
 import { redactCredentialText } from '../redaction.js';
+import { codexBrainMcpLaunch, noteBrainEngineToolCall } from '../brain/engine-mcp.js';
 import { notifyChanged } from '../session/recorder.js';
 import { bindSessionProject, createSession, getSession, readEvents } from '../session/store.js';
-import { AGENT_ENGINE_LABELS } from '../../shared/agent-engine.js';
+import { AGENT_ENGINE_LABELS, AGENT_ENGINE_ROUTES, DEFAULT_AGENT_ENGINE_ROUTE, type AgentEngineRoute } from '../../shared/agent-engine.js';
 import {
   API_CHAT_APPROVAL_MODES, API_CONVERSATION_PREFIX, isApiConversationId, type ApiChatApprovalDecision, type ApiChatModel, type ApiChatView
 } from '../../shared/api-chat.js';
@@ -53,10 +54,14 @@ import {
 } from './codex-protocol.js';
 import { connectWebSocket, JsonRpcPeer, type JsonRpcId } from './jsonrpc.js';
 import type { WebSocket } from 'ws';
-import { engineOf, chatRecords, storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
+import { engineOf, chatRecords, routeOf, storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
+import {
+  chatRoutes, codexRouteOverrides, detectCodexRouter, effectiveRoute, refreshRouterAvailability, registerRoutedTurnProbe, ROUTER_LABEL,
+  ROUTER_UNAVAILABLE_TEXT, routerUsable, type CodexRouterDetection
+} from './router.js';
 import { TurnProjector, storeProjectorSink, type ProjectorSink } from './projector.js';
 import { claimTurnRecovery, closeInterruptedTurn } from './recovery.js';
-import type { AgentEngine, EngineEvent, EngineFileChange, EngineModelQuery, EngineTerminal } from './types.js';
+import type { AgentEngine, EngineCreateOptions, EngineEvent, EngineFileChange, EngineModelQuery, EngineTerminal } from './types.js';
 
 const LABEL = AGENT_ENGINE_LABELS.codex;
 const MAX_INPUT_CHARS = 100_000;
@@ -69,6 +74,7 @@ const modelId = z.string().min(1).max(200);
 export const CODEX_NOT_SIGNED_IN = 'Codex is not signed in. Run `codex login` in a terminal, then try again.';
 export const CODEX_SERVER_STOPPED = 'The Codex app-server stopped unexpectedly';
 const LOCAL_FOLDER_ONLY = 'Codex chats need a project folder on this computer';
+export const CODEX_ROUTE_WHILE_RUNNING = 'Wait for the answer to finish before changing the route.';
 
 // ---------------------------------------------------------------- host (processes and paths)
 
@@ -86,8 +92,14 @@ export interface CodexHost {
   runtime(): Promise<{ ok: true; runtime: CodexRuntime } | { ok: false; detail: string }>;
   /** `codex <args>` output (the version check). */
   run(runtime: CodexRuntime, args: string[]): Promise<string>;
-  /** Starts the shared app-server when needed and a connected JSON-RPC client process. */
-  open(runtime: CodexRuntime): Promise<CodexProcesses>;
+  /**
+   * Starts the route's shared app-server when needed and a connected JSON-RPC client process. One
+   * server per route (router.ts): `direct` with the overrides that neutralize a detected router,
+   * `router` as the user configured Codex; each has its own socket.
+   */
+  open(runtime: CodexRuntime, route: AgentEngineRoute): Promise<CodexProcesses>;
+  /** The user's Claude Code Router setup for Codex (router.ts); read when a server starts and per status. */
+  routing?(): CodexRouterDetection;
   /** The chat's working folder as Codex sees it: the canonical local project root, else home. */
   workspace(projectId: string | null, runtime: CodexRuntime): Promise<string>;
   appVersion(): Promise<string>;
@@ -95,8 +107,8 @@ export interface CodexHost {
   onShutdown?(listener: () => void): void;
   /** The chat's durable module terminal (cli-modules `cliEngineTerminal('codex', …)`). */
   openTerminal?(chat: { sessionId: string; projectId: string | null; args: string[]; title: string }): Promise<{ id: string }>;
-  /** Runs before a Codex chat terminal attaches (from the chat or the sidebar): the server must run. */
-  onTerminalOpen?(listener: () => Promise<void>): void;
+  /** Runs before a Codex chat terminal attaches (from the chat or the sidebar): that chat's route server must run. */
+  onTerminalOpen?(listener: (chatSessionId: string | null) => Promise<void>): void;
 }
 
 const run = promisify(execFile);
@@ -112,31 +124,34 @@ const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(r
 
 /** The real host: cli-modules resolution, a private socket directory, Electron's quit. */
 export function defaultCodexHost(): CodexHost {
-  let socketPath: string | null = null;
+  const sockets = new Map<AgentEngineRoute, string>();
   const electron = async () => (await import('electron')).app;
   const modules = () => import('../cli-modules.js');
   const exec = (runtime: CodexRuntime, args: string[]): [string, string[]] =>
     runtime.windows ? ['wsl.exe', ['--exec', runtime.binary, ...args]] : [runtime.binary, args];
 
-  async function socketFor(runtime: CodexRuntime): Promise<string> {
-    if (socketPath) return socketPath;
+  /** `<hash>.sock` for the direct route (the one server there was before routes), `<hash>-router.sock` for the router's. */
+  async function socketFor(runtime: CodexRuntime, route: AgentEngineRoute): Promise<string> {
+    const known = sockets.get(route);
+    if (known) return known;
     const app = await electron();
     const hash = createHash('sha256').update(app.getPath('userData')).digest('hex').slice(0, 16);
+    const name = `${hash}${route === 'router' ? '-router' : ''}.sock`;
     if (runtime.windows) {
       const dir = `${await (await modules()).cliWslHome()}/.cache/chat-marks-codex`;
       await run('wsl.exe', ['--exec', '/bin/sh', '-c', 'mkdir -p -m 700 "$1" && chmod 700 "$1"', 'sh', dir], { timeout: 8_000 });
-      socketPath = `${dir}/${hash}.sock`;
-      return socketPath;
+      sockets.set(route, `${dir}/${name}`);
+      return sockets.get(route)!;
     }
     let dir = path.join(app.getPath('userData'), 'codex');
     // A unix socket path is limited to ~104 bytes; a long profile path falls back to a private tmp dir.
-    if (Buffer.byteLength(path.join(dir, `${hash}.sock`)) > 100) dir = path.join(os.tmpdir(), `chat-marks-codex-${process.getuid?.() ?? 'user'}`);
+    if (Buffer.byteLength(path.join(dir, `${hash}-router.sock`)) > 100) dir = path.join(os.tmpdir(), `chat-marks-codex-${process.getuid?.() ?? 'user'}`);
     await fs.mkdir(dir, { recursive: true, mode: 0o700 });
     const stat = await fs.lstat(dir);
     if (!stat.isDirectory() || stat.isSymbolicLink() || (process.getuid && stat.uid !== process.getuid())) throw new Error('The Codex socket folder is not private');
     await fs.chmod(dir, 0o700);
-    socketPath = path.join(dir, `${hash}.sock`);
-    return socketPath;
+    sockets.set(route, path.join(dir, name));
+    return sockets.get(route)!;
   }
 
   /** A server left by a crashed instance of this profile: stopped only when it is ours. */
@@ -178,14 +193,19 @@ export function defaultCodexHost(): CodexHost {
       const { stdout, stderr } = await run(file, argv, { timeout: 8_000, maxBuffer: 16_384, env: await childEnvironment() });
       return `${stdout || stderr}`.trim().slice(0, 200);
     },
-    open: async runtime => {
-      const socket = await socketFor(runtime);
+    routing: () => detectCodexRouter(),
+    open: async (runtime, route) => {
+      const socket = await socketFor(runtime, route);
       const env = await childEnvironment();
       const home = (await electron()).getPath('home');
       if (!runtime.windows) await stopOrphan(socket);
       else await run('wsl.exe', ['--exec', 'rm', '-f', socket], { timeout: 8_000 }).catch(() => undefined);
-      const [serverFile, serverArgs] = exec(runtime, codexServerArgv(socket));
-      const server = spawn(serverFile, serverArgs, { cwd: home, env, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+      // Windows: Codex runs in WSL, whose config.toml is not read here, so no router is detected.
+      const overrides = runtime.windows ? [] : codexRouteOverrides(route, detectCodexRouter());
+      // Chat Marks: the Brain MCP server (H1c); its bearer token only in the server's environment.
+      const brain = await codexBrainMcpLaunch(runtime.windows);
+      const [serverFile, serverArgs] = exec(runtime, codexServerArgv(socket, overrides, brain?.args));
+      const server = spawn(serverFile, serverArgs, { cwd: home, env: { ...env, ...brain?.env }, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
       if (!runtime.windows && server.pid) await fs.writeFile(`${socket}.pid`, String(server.pid), { mode: 0o600 }).catch(() => undefined);
       try {
         await waitForSocket(runtime, socket, server);
@@ -217,7 +237,7 @@ export function defaultCodexHost(): CodexHost {
     },
     openTerminal: async chat => (await modules()).cliEngineTerminal('codex', chat),
     onTerminalOpen: listener => {
-      void modules().then(({ registerCliEngineOpenHook }) => registerCliEngineOpenHook('codex', () => listener())).catch(() => undefined);
+      void modules().then(({ registerCliEngineOpenHook }) => registerCliEngineOpenHook('codex', session => listener(session.engineChat ?? null))).catch(() => undefined);
     },
     onShutdown: listener => {
       void electron().then(app => { app?.on?.('will-quit', listener); }).catch(() => undefined);
@@ -229,6 +249,8 @@ export function defaultCodexHost(): CodexHost {
 // ---------------------------------------------------------------- connection
 
 interface Connection {
+  /** The route this server runs (router.ts); a thread belongs to the server it was started on. */
+  route: AgentEngineRoute;
   peer: JsonRpcPeer;
   processes: CodexProcesses;
   version: string;
@@ -239,6 +261,10 @@ interface Connection {
 
 interface CodexTurn {
   sessionId: string;
+  /** The turn runs through Claude Code Router (the CCR module restarts the router only when none does). */
+  routed: boolean;
+  /** The server the turn runs on: its approvals and interrupt go to that peer. */
+  connection: Connection | null;
   threadId: string;
   appTurnId: string;
   codexTurnId: string | null;
@@ -272,26 +298,51 @@ export interface CodexEngine extends AgentEngine {
 export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine {
   const host = options.host ?? defaultCodexHost();
   const sinkFor = options.sink ?? storeProjectorSink;
-  let connecting: Promise<Connection> | null = null;
-  let current: Connection | null = null;
-  let statusCache: { at: number; value: { available: boolean; detail: string } } | null = null;
-  let modelsCache: { at: number; rows: Array<ApiChatModel & { isDefault: boolean }> } | null = null;
+  /** One shared server per route (router.ts), each with its own models. */
+  interface RouteState {
+    connecting: Promise<Connection> | null;
+    current: Connection | null;
+    modelsCache: { at: number; rows: Array<ApiChatModel & { isDefault: boolean }> } | null;
+    lastSocket: string | null;
+  }
+  const routes = new Map<AgentEngineRoute, RouteState>(AGENT_ENGINE_ROUTES.map(route => [route, { connecting: null, current: null, modelsCache: null, lastSocket: null }]));
+  const stateOf = (route: AgentEngineRoute): RouteState => routes.get(route)!;
+  let statusCache: { at: number; value: { available: boolean; detail: string; router: boolean }; unavailable: string | null } | null = null;
   let recovery: Promise<void> | null = null;
   const running = new Map<string, CodexTurn>();
   const byThread = new Map<string, CodexTurn>();
 
   let shutdownHooked = false;
   let terminalHooked = false;
-  let lastSocket: string | null = null;
+
+  const routing = (): CodexRouterDetection => {
+    try { return host.routing?.() ?? { detected: false, provider: null, directOverrides: [] }; } catch { return { detected: false, provider: null, directOverrides: [] }; }
+  };
+  /** The server a route runs on now: without a usable router both routes are the same server. */
+  const serverRoute = (route: AgentEngineRoute): AgentEngineRoute => effectiveRoute(route, routing());
+  /**
+   * The server a route's threads belong to: with a router configured (even one that is not
+   * answering now) `router` threads carry CCR's provider and never move to the direct server.
+   */
+  const homeRoute = (route: AgentEngineRoute): AgentEngineRoute => routing().detected ? route : 'direct';
+  /** A chat stored on `router` while the router is configured but unavailable: Codex cannot fall back (its thread keeps CCR's provider). */
+  const routerRefusal = (route: AgentEngineRoute): string | null => {
+    const detection = routing();
+    return route === 'router' && detection.detected && detection.unavailable
+      ? `${ROUTER_UNAVAILABLE_TEXT[detection.unavailable]} Or switch this chat to "CLI account (direct)"; Codex then starts a new thread.` : null;
+  };
+  registerRoutedTurnProbe(() => [...running.values()].some(turn => turn.routed));
 
   function shutdown(): void {
-    const connection = current;
-    current = null;
-    connecting = null;
     statusCache = null;
-    if (!connection) return;
-    connection.peer.close(new Error(CODEX_SERVER_STOPPED));
-    killProcesses(connection.processes);
+    for (const state of routes.values()) {
+      const connection = state.current;
+      state.current = null;
+      state.connecting = null;
+      if (!connection) continue;
+      connection.peer.close(new Error(CODEX_SERVER_STOPPED));
+      killProcesses(connection.processes);
+    }
   }
 
   function killProcesses(processes: CodexProcesses): void {
@@ -304,10 +355,13 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
   }
 
   function lost(connection: Connection, reason: Error): void {
-    if (current === connection) { current = null; connecting = null; statusCache = null; }
+    const state = stateOf(connection.route);
+    if (state.current === connection) { state.current = null; state.connecting = null; statusCache = null; }
     killProcesses(connection.processes);
     if (reason.message !== CODEX_SERVER_STOPPED) logWarn(`Codex app-server connection closed: ${reason.message.slice(0, 200)}`);
     for (const turn of [...running.values()]) {
+      // Only the turns of that server; the other route's server keeps running its own.
+      if (turn.connection && turn.connection !== connection) continue;
       void turn.projector.apply({ type: 'error', message: CODEX_SERVER_STOPPED, fatal: true });
       void finish(turn, 'failed');
     }
@@ -319,14 +373,16 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     return resolved.runtime;
   }
 
-  function connection(): Promise<Connection> {
-    if (current && !current.peer.closed) return Promise.resolve(current);
-    connecting ??= (async () => {
+  function connection(route: AgentEngineRoute = DEFAULT_AGENT_ENGINE_ROUTE): Promise<Connection> {
+    const server = serverRoute(route);
+    const state = stateOf(server);
+    if (state.current && !state.current.peer.closed) return Promise.resolve(state.current);
+    state.connecting ??= (async () => {
       if (!shutdownHooked) { shutdownHooked = true; host.onShutdown?.(() => shutdown()); }
       const runtime = await runtimeOrThrow();
       const version = checkCodexVersion(await host.run(runtime, ['--version']).catch(() => null));
       if (!version.ok) throw new Error(version.detail);
-      const processes = await host.open(runtime);
+      const processes = await host.open(runtime, server);
       let stderr = '';
       const peerHolder: { peer?: JsonRpcPeer } = {};
       const holder: { connection?: Connection } = {};
@@ -358,7 +414,7 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
         onClose: reason => { if (holder.connection) lost(holder.connection, reason); else killProcesses(processes); }
       });
       peerHolder.peer = peer;
-      const connection: Connection = { peer, processes, version: version.version, warning: version.warning, loaded: new Set() };
+      const connection: Connection = { route: server, peer, processes, version: version.version, warning: version.warning, loaded: new Set() };
       holder.connection = connection;
       try {
         await peer.request('initialize', codexInitializeParams(await host.appVersion()), { timeoutMs: 20_000 });
@@ -366,11 +422,11 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
       } catch (error) {
         throw failed(error);
       }
-      current = connection;
-      lastSocket = processes.socket;
+      state.current = connection;
+      state.lastSocket = processes.socket;
       return connection;
-    })().finally(() => { connecting = null; });
-    return connecting;
+    })().finally(() => { state.connecting = null; });
+    return state.connecting;
   }
 
   // ---------------------------------------------------------------- server messages
@@ -402,6 +458,8 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
       case 'item/started': {
         const item = value.item as Record<string, unknown>;
         if (item?.type === 'fileChange' && typeof item.id === 'string') turn.files.set(item.id, codexFileChanges(item.changes));
+        // Chat Marks: attributes a Brain save on the shared app-server to this chat.
+        if (item?.type === 'mcpToolCall') noteBrainEngineToolCall('codex', turn.sessionId, `${item.server}/${item.tool}`, item.arguments);
         apply(turn, item ? codexItemStarted(item) : []);
         return;
       }
@@ -484,12 +542,12 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     const decision = codexApprovalDecision(outcome);
     if (!decision) return;
     turn.bindings.delete(key);
-    const peer = current?.peer;
+    const peer = turn.connection?.peer;
     if (peer && !peer.closed) safe(() => peer.respond(binding.rpcId, { decision }));
   }
 
   function interrupt(turn: CodexTurn): void {
-    const peer = current?.peer;
+    const peer = turn.connection?.peer;
     if (!peer || !turn.codexTurnId) return;
     void peer.request('turn/interrupt', { threadId: turn.threadId, turnId: turn.codexTurnId }, { timeoutMs: 10_000 })
       .catch(error => logWarn(`Codex chat ${turn.sessionId}: interrupt failed: ${(error as Error).message}`));
@@ -517,11 +575,13 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
   }
 
   async function view(sessionId: string): Promise<ApiChatView> {
+    await refreshRouterAvailability();
     const session = await codexSession(sessionId);
     const turn = running.get(session.id);
     return {
       sessionId: session.id, conversationId: session.conversationId, engine: 'codex', model: session.record.model,
-      effort: session.record.effort, running: !!turn, approval: session.record.approval ?? 'ask', pending: turn?.gate.view() ?? null
+      effort: session.record.effort, running: !!turn, approval: session.record.approval ?? 'ask', pending: turn?.gate.view() ?? null,
+      route: routeOf(session.record), ...chatRoutes(routeOf(session.record), routing())
     };
   }
 
@@ -534,9 +594,11 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     return threadId;
   }
 
+  /** `model/list` of the route's own server: the router's models, or the account's (direct). */
   async function models(query: EngineModelQuery): Promise<{ models: ApiChatModel[]; total: number }> {
-    if (query.refresh || !modelsCache || Date.now() - modelsCache.at > MODELS_TTL_MS) {
-      const connection = await connection_();
+    const state = stateOf(serverRoute(query.route ?? DEFAULT_AGENT_ENGINE_ROUTE));
+    if (query.refresh || !state.modelsCache || Date.now() - state.modelsCache.at > MODELS_TTL_MS) {
+      const connection = await connection_(query.route ?? DEFAULT_AGENT_ENGINE_ROUTE);
       const rows: Array<ApiChatModel & { isDefault: boolean }> = [];
       let cursor: string | null = null;
       for (let page = 0; page < 5; page++) {
@@ -548,49 +610,66 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
         cursor = typeof listed?.nextCursor === 'string' && listed.nextCursor ? listed.nextCursor : null;
         if (!cursor) break;
       }
-      modelsCache = { at: Date.now(), rows };
+      state.modelsCache = { at: Date.now(), rows };
     }
     if (query.modality && query.modality !== 'chat') return { models: [], total: 0 };
     const needle = query.query?.trim().toLowerCase() ?? '';
-    const matched = modelsCache.rows.filter(row => !needle || row.id.toLowerCase().includes(needle) || row.label?.toLowerCase().includes(needle));
+    const matched = state.modelsCache.rows.filter(row => !needle || row.id.toLowerCase().includes(needle) || row.label?.toLowerCase().includes(needle));
     const offset = query.offset ?? 0;
     const limit = query.limit ?? 50;
     return { models: matched.slice(offset, offset + limit).map(({ isDefault: _default, ...row }) => { void _default; return { ...row, efforts: [...(row.efforts ?? [])] }; }), total: matched.length };
   }
   const connection_ = connection;
 
-  async function status(): Promise<{ available: boolean; detail: string }> {
-    if (statusCache && Date.now() - statusCache.at < STATUS_TTL_MS) return statusCache.value;
+  /**
+   * The direct server's account decides (the CLI's own login). With a Claude Code Router detected
+   * the engine stays available without one (its chats can use the router route) and says so.
+   */
+  async function status(): Promise<{ available: boolean; detail: string; router: boolean }> {
+    await refreshRouterAvailability();
+    const detection = routing();
+    // A cached answer is reused only while the router's availability is what it said.
+    if (statusCache && Date.now() - statusCache.at < STATUS_TTL_MS && statusCache.unavailable === (detection.unavailable ?? null)) return statusCache.value;
+    const router = routerUsable(detection);
+    const routerNote = detection.detected && detection.unavailable ? ` · ${ROUTER_UNAVAILABLE_TEXT[detection.unavailable]}` : '';
     const value = await (async () => {
       const resolved = await host.runtime();
-      if (!resolved.ok) return { available: false, detail: resolved.detail };
+      if (!resolved.ok) return { available: false, detail: resolved.detail, router };
       const version = checkCodexVersion(await host.run(resolved.runtime, ['--version']).catch(() => null));
-      if (!version.ok) return { available: false, detail: version.detail };
+      if (!version.ok) return { available: false, detail: version.detail, router };
+      const tail = `${router ? ` · ${ROUTER_LABEL} detected` : routerNote}${version.warning ? ` · ${version.warning}` : ''}`;
       try {
-        const connection = await connection_();
+        const connection = await connection_('direct');
         const account = await connection.peer.request<{ account?: { type?: unknown } | null; requiresOpenaiAuth?: unknown }>('account/read', { refreshToken: false }, { timeoutMs: 15_000 });
-        if (!account?.account && account?.requiresOpenaiAuth !== false) return { available: false, detail: CODEX_NOT_SIGNED_IN };
+        if (!account?.account && account?.requiresOpenaiAuth !== false) {
+          return router ? { available: true, detail: `Codex ${version.version} · direct: not signed in${tail}`, router } : { available: false, detail: `${CODEX_NOT_SIGNED_IN}${routerNote}`, router };
+        }
         const kind = typeof account.account?.type === 'string' ? account.account.type : 'provider';
-        return { available: true, detail: `Codex ${version.version} · ${kind}${version.warning ? ` · ${version.warning}` : ''}` };
+        return { available: true, detail: `Codex ${version.version} · ${router ? 'direct: ' : ''}${kind}${tail}`, router };
       } catch (error) {
-        return { available: false, detail: (error as Error).message.slice(0, 200) };
+        return { available: false, detail: (error as Error).message.slice(0, 200), router };
       }
     })();
-    statusCache = { at: Date.now(), value };
+    statusCache = { at: Date.now(), value, unavailable: detection.unavailable ?? null };
     return value;
   }
 
-  async function create(input: { projectId: string | null; model?: string }): Promise<ApiChatView> {
+  async function create(input: EngineCreateOptions): Promise<ApiChatView> {
     await recover();
+    const route = z.enum(AGENT_ENGINE_ROUTES).parse(input.route ?? DEFAULT_AGENT_ENGINE_ROUTE);
+    await refreshRouterAvailability();
+    const refused = routerRefusal(route);
+    if (refused) throw new Error(refused);
     const runtime = await runtimeOrThrow();
     const cwd = await host.workspace(input.projectId, runtime);
-    const connection = await connection_();
+    const connection = await connection_(route);
     let model = input.model ? modelId.parse(input.model) : null;
-    if (!model) model = (await models({ limit: 200 }).then(() => modelsCache?.rows.find(row => row.isDefault)?.id ?? null).catch(() => null));
+    // The route's own default: the router's model through the router, the account's directly.
+    if (!model) model = (await models({ limit: 200, route }).then(() => stateOf(serverRoute(route)).modelsCache?.rows.find(row => row.isDefault)?.id ?? null).catch(() => null));
     const threadId = await startThread(connection, { model, cwd, approval: 'ask' });
     const summary = await createSession({ title: `New ${LABEL} chat`, titleSource: 'fallback', conversationId: `${API_CONVERSATION_PREFIX}${randomUUID()}` });
     if (input.projectId) await bindSessionProject(summary.id, input.projectId);
-    await updateChatRecord(summary.id, () => ({ engine: 'codex', backendSessionId: threadId, model, effort: null, approval: 'ask' }));
+    await updateChatRecord(summary.id, () => ({ engine: 'codex', backendSessionId: threadId, model, effort: null, approval: 'ask', route }));
     notifyChanged(summary.id);
     return view(summary.id);
   }
@@ -621,6 +700,9 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     if (!text.trim() || text.length > MAX_INPUT_CHARS) throw new Error('Write a message of up to 100,000 characters');
     const session = await codexSession(sessionId);
     if (running.has(session.id)) throw new Error('This chat is still answering');
+    await refreshRouterAvailability();
+    const refused = routerRefusal(routeOf(session.record));
+    if (refused) throw new Error(refused);
     const appTurnId = `api-${randomUUID()}`;
     let settle!: (outcome: TurnOutcome) => void;
     const done = new Promise<TurnOutcome>(resolve => { settle = resolve; });
@@ -632,7 +714,7 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
       ...(options.streamWriteMs !== undefined ? { streamWriteMs: options.streamWriteMs } : {})
     });
     const placeholder: CodexTurn = {
-      sessionId: session.id, threadId: '', appTurnId, codexTurnId: null, projector, gate, bindings: new Map(), files: new Map(),
+      sessionId: session.id, routed: serverRoute(routeOf(session.record)) === 'router', connection: null, threadId: '', appTurnId, codexTurnId: null, projector, gate, bindings: new Map(), files: new Map(),
       stopping: false, stopTimer: null, sawFatal: false, usageBase: null, done, settle
     };
     holder.turn = placeholder;
@@ -642,14 +724,15 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     try {
       const runtime = await runtimeOrThrow();
       const cwd = await host.workspace(session.projectId, runtime);
-      const connection = await connection_();
+      const connection = await connection_(routeOf(session.record));
+      placeholder.connection = connection;
       const threadId = await threadOf(connection, session, cwd);
       placeholder.threadId = threadId;
       if (byThread.has(threadId)) throw new Error('This chat is still answering');
       byThread.set(threadId, placeholder);
       const record = (await storedChatRecord(session.id)) ?? session.record;
       const model = record.model;
-      const row = modelsCache?.rows.find(candidate => candidate.id === model);
+      const row = stateOf(connection.route).modelsCache?.rows.find(candidate => candidate.id === model);
       await projector.start(text);
       started = true;
       if (placeholder.stopping) { await finish(placeholder, 'stopped'); return { turnId: appTurnId }; }
@@ -694,14 +777,39 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     return true;
   }
 
-  async function setChatSettings(sessionId: string, patch: { model?: string; effort?: ChatRecord['effort']; approval?: ChatRecord['approval'] }): Promise<ApiChatView> {
+  /**
+   * A route change between turns moves the chat to the other route's server. A Codex thread keeps
+   * the provider it was started with (`Thread.modelProvider`) and its history holds that
+   * provider's items, so it does not move across providers: the chat forgets its thread and the
+   * next send starts a new one there (the renderer says so; the chat's own history stays).
+   */
+  async function setChatSettings(sessionId: string, patch: { model?: string; effort?: ChatRecord['effort']; approval?: ChatRecord['approval']; route?: AgentEngineRoute }): Promise<ApiChatView> {
     const session = await codexSession(sessionId);
-    await updateChatRecord(session.id, record => ({
-      ...(record ?? session.record),
-      ...(patch.model !== undefined ? { model: modelId.parse(patch.model) } : {}),
-      ...(patch.effort !== undefined ? { effort: patch.effort } : {}),
-      ...(patch.approval !== undefined ? { approval: z.enum(API_CHAT_APPROVAL_MODES).parse(patch.approval) } : {})
-    }));
+    const route = patch.route === undefined ? undefined : z.enum(AGENT_ENGINE_ROUTES).parse(patch.route);
+    const moves = route !== undefined && homeRoute(route) !== homeRoute(routeOf(session.record));
+    if (route !== undefined && route !== routeOf(session.record) && running.has(session.id)) throw new Error(CODEX_ROUTE_WHILE_RUNNING);
+    if (route === 'router' && route !== routeOf(session.record)) {
+      await refreshRouterAvailability();
+      const refused = routerRefusal(route);
+      if (refused) throw new Error(refused);
+    }
+    // The other route lists other models: a model it lacks gives way to that route's default.
+    let model: string | null | undefined;
+    if (moves && route && patch.model === undefined && serverRoute(route) === route) {
+      const rows = await models({ limit: 200, route }).then(() => stateOf(serverRoute(route)).modelsCache?.rows ?? [], () => null);
+      if (rows && !rows.some(row => row.id === session.record.model)) model = rows.find(row => row.isDefault)?.id ?? null;
+    }
+    await updateChatRecord(session.id, record => {
+      const base = { ...(record ?? session.record) };
+      if (moves) delete base.backendSessionId;
+      return {
+        ...base,
+        ...(patch.model !== undefined ? { model: modelId.parse(patch.model) } : model !== undefined ? { model } : {}),
+        ...(patch.effort !== undefined ? { effort: patch.effort } : {}),
+        ...(patch.approval !== undefined ? { approval: z.enum(API_CHAT_APPROVAL_MODES).parse(patch.approval) } : {}),
+        ...(route !== undefined ? { route } : {})
+      };
+    });
     return view(session.id);
   }
 
@@ -736,7 +844,7 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
             const session = await getSession(sessionId);
             const runtime = await runtimeOrThrow();
             const cwd = await host.workspace(session?.projectId ?? null, runtime);
-            const connection = await connection_();
+            const connection = await connection_(routeOf(record));
             const result = await connection.peer.request<{ thread?: { turns?: Array<{ id?: unknown; status?: unknown }> } }>('thread/resume',
               codexThreadResumeParams({ threadId, cwd, approval: record.approval ?? 'ask' }), { timeoutMs: 30_000 });
             connection.loaded.add(threadId);
@@ -762,15 +870,19 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
   }
 
   /** The live terminal's argv once the server's socket is known (it is fixed per profile). */
-  function terminal(chat: { backendSessionId: string | null }): EngineTerminal | null {
-    const socket = current?.processes.socket ?? lastSocket;
+  function terminal(chat: { backendSessionId: string | null; route?: AgentEngineRoute }): EngineTerminal | null {
+    const state = stateOf(serverRoute(chat.route ?? 'router'));
+    const socket = state.current?.processes.socket ?? state.lastSocket;
     return chat.backendSessionId && socket ? { argv: codexTerminalArgv(chat.backendSessionId, socket), mode: 'live' } : null;
   }
 
   function hookTerminals(): void {
     if (terminalHooked) return;
     terminalHooked = true;
-    host.onTerminalOpen?.(async () => { await connection_(); });
+    host.onTerminalOpen?.(async chatSessionId => {
+      const record = chatSessionId ? await storedChatRecord(chatSessionId) : undefined;
+      await connection_(record && engineOf(record) === 'codex' ? routeOf(record) : DEFAULT_AGENT_ENGINE_ROUTE);
+    });
   }
 
   /**
@@ -783,7 +895,7 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     if (!host.openTerminal) throw new Error('Terminals are not available');
     const threadId = session.record.backendSessionId;
     if (!threadId) throw new Error('This chat has no engine session yet');
-    const connection = await connection_();
+    const connection = await connection_(routeOf(session.record));
     const chat = await getSession(session.id);
     const opened = await host.openTerminal({
       sessionId: session.id, projectId: session.projectId, args: codexTerminalArgv(threadId, connection.processes.socket),

@@ -19,6 +19,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { queueOutboundNotice } from './notification-center.js';
 
 /** Hidden idle tabs poll every 30 s; two missed polls end the episode. */
 export const APPROVAL_FRESH_MS = 75_000;
@@ -40,7 +41,8 @@ interface ApprovalAnswer { token: string; cardId: string; choice: ApprovalChoice
 
 export interface ApprovalWaitDeps {
   record(sessionId: string, progressId: string, text: string, anchor?: { seq: number; time: number }): Promise<{ seq: number; time: number } | null>;
-  notify(sessionId: string): void;
+  /** One desktop notice; `false` means none was shown (the window had focus), so a later poll tries again. */
+  notify(sessionId: string): boolean | void;
   log(message: string): void;
   /** A chat started or stopped waiting, so the session list's `approval` changed. */
   changed?(): void;
@@ -55,6 +57,8 @@ interface Wait {
   since: number;
   seenAt: number;
   noticed: boolean;
+  /** Chat Marks: the Notification center was told of this wait (once, unlike the desktop notice). */
+  outboundNoticed?: boolean;
   progressId: string;
   sessionId: string | null;
   row: Promise<{ seq: number; time: number } | null> | null;
@@ -102,14 +106,20 @@ export async function noteApprovalCard(
     if (wait.stale) clearTimeout(wait.stale);
     deps.log(`bridge: ${conversationId} no longer shows ChatGPT's tool approval card`);
     try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
+    // Kept before anything is awaited: the redrawn card's poll can come while the row is still
+    // being written, and must find this episode rather than start a new one with a new notice.
+    const gone = waiting ? null : { wait, at: now, anchor: null as { seq: number; time: number } | null };
+    if (gone) {
+      for (const [id, entry] of answered) if (now - entry.at >= APPROVAL_GONE_MS) answered.delete(id);
+      answered.set(conversationId, gone);
+    }
     // Only an answer seen on the page itself rewrites the row; a page that stopped reporting
     // says nothing about the card.
-    const anchor = waiting ? null : await wait.row;
-    if (anchor && wait.sessionId) await deps.record(wait.sessionId, wait.progressId, APPROVAL_ANSWERED_TEXT, anchor).catch(() => null);
-    if (!waiting) {
-      for (const [id, entry] of answered) if (now - entry.at >= APPROVAL_GONE_MS) answered.delete(id);
-      answered.set(conversationId, { wait, at: now, anchor });
-    }
+    const anchor = gone ? await wait.row : null;
+    if (gone) gone.anchor = anchor;
+    // Redrawn meanwhile: the episode goes on, and its row must keep saying waiting.
+    if (anchor && wait.sessionId && waits.get(conversationId) !== wait)
+      await deps.record(wait.sessionId, wait.progressId, APPROVAL_ANSWERED_TEXT, anchor).catch(() => null);
     wait = undefined;
   }
   if (!waiting) return;
@@ -170,8 +180,14 @@ export async function noteApprovalCard(
     await current.row;
   }
   if (wait.sessionId && !wait.noticed && now - wait.since >= APPROVAL_NOTICE_GRACE_MS) {
-    wait.noticed = true;
-    try { deps.notify(wait.sessionId); } catch { /* The row still says it. */ }
+    // A notice the desktop did not show (the app's window had focus, perhaps on another chat) is
+    // tried again on a later poll, so leaving the window still tells the person.
+    try { wait.noticed = deps.notify(wait.sessionId) !== false; } catch { wait.noticed = true; /* The row still says it. */ }
+    // Chat Marks: the outbound channels (Notification center) hear of each wait once, retries or not.
+    if (!wait.outboundNoticed) {
+      wait.outboundNoticed = true;
+      void queueOutboundNotice({ event: 'approval-pending', title: 'Approval pending', project: 'Chat Marks' }).catch(() => undefined);
+    }
   }
 }
 

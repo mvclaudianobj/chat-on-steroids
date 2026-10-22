@@ -38,6 +38,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-engine-markscode': 'cm:code',
   'i-engine-opencode': 'cm:opencode',
   'i-module-zeroclaw': 'cm:claw',
+  'i-module-ccr': 'cm:ccr',
   'i-dock-restore': 'corners-in',
   'i-export': 'download-simple',
   'i-eye': 'eye',

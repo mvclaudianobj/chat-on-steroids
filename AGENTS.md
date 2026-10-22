@@ -270,6 +270,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | --- | --- | --- |
 | Permissions and settings | `config.ts` / `config.json` | Validate every load/save; enforce effective current capabilities at use. |
 | Credentials | `secrets.ts` / encrypted `secrets.bin`; plugin OAuth's encrypted installation store | Main process only; publish updated cache after the encrypted write. |
+| Named password vault | `marks-vault.ts` / authenticated `marks-vault.json`; random vault key protected by OS `secrets.bin` and independently wrapped with the master password | Admin requires master password; daily operation uses OS safeStorage. Fixed-origin `vault_use` needs exact chat authority and explicit approval (once or until app exits). `marks-vault-ipc.ts` is a guarded main-frame-only admin interface; `marks-vault-redaction.ts` keeps decrypted values in main memory for synchronous masking of logs and MCP/tool history. Neither renderer state nor model-facing tools return vault values. |
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
 | Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; new owners are written before browser ACK. Startup trusts a complete ledger and scans history only to migrate an older one. |
 | Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
@@ -1454,10 +1455,13 @@ drawn by icons.css `.cm-glyph-*`, painted in `currentColor` through a CSS mask (
 themes alike): line SVGs on Phosphor's 256 grid with its 16-unit round stroke, **or a project's
 own simple logo when its licence allows it** (OpenCode: `packages/identity/mark.svg`, MIT, the
 frame plus its inner square at 40% coverage). Never a company's brand logo or a fixed colour. The
-ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark). Every
-module's management entry (the Settings sub-nav item, its Modules card heading and its page heading)
-shows the module's own icon (`chat-types.ts` `moduleIcon`/`moduleMark`: OpenCode mark, Codex
-hexagon, Claude spark, ZeroClaw and the retired MarksClaw claw, CLIProxyAPI plug; test
+ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark); the
+Claude Code Router card a line router (`cm:ccr`, `i-module-ccr`: three lines joining a router and
+leaving as one arrow, drawn after its MIT app icon, which is a coloured raster and not usable as a
+mark; not `cm:route*`, the retired CLIProxy drawing the test keeps out). Every
+module's management entry (the Settings sub-nav item, for ZeroClaw its primary sidebar item, its
+Modules card heading and its page heading) shows the module's own icon (`chat-types.ts` `moduleIcon`/`moduleMark`: OpenCode mark, Codex
+hexagon, Claude spark, ZeroClaw and the retired MarksClaw claw, CLIProxyAPI plug, Claude Code Router its router; test
 `chat-types.test.ts`, `cli-chat-ui.test.ts`). Icons are decorative (`aria-hidden`); the title or engine name stays
 the text. The sidebar learns an API chat's engine from `SessionSummary.engine`, a read-time
 projection of the ledger (`agent-engine/ledger.ts` `withChatEngines`, applied by IPC
@@ -1589,7 +1593,9 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   `source: 'mcp'` rows, so the row is placed by its turnId. Written once, it needs no revision
   and the session's tool count stays exact.
 - Codex engine (F, `codex.ts`, `codex-protocol.ts`, `jsonrpc.ts`; codex-cli 0.163, experimental
-  app-server protocol). Process model: ONE shared app-server per app instance, started lazily:
+  app-server protocol). Process model: ONE shared app-server per route (see Routes below) per app
+  instance, started lazily (direct `<hash>.sock`, router `<hash>-router.sock`; without a detected
+  router both routes use the direct one):
   `codex app-server -c approval_policy="on-request" -c sandbox_mode="workspace-write"
   -c approvals_reviewer="user" --listen unix://<userData>/codex/<sha256(userData)[:16]>.sock`
   (0700 dir, owner/symlink checked; tmp fallback when the path exceeds ~100 bytes; pidfile so a
@@ -1608,10 +1614,13 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   - `status()`: cli-modules gates (`cliEngineRuntime`: command capability, module enabled, binary
     from userData/modules, node_modules/.bin, `which`), `codex --version` gate (other major or
     older minor refused; newer minor available with a warning), `account/read` (no account and
-    `requiresOpenaiAuth` → unavailable "Codex is not signed in…"; login stays the user's). 30 s cache.
-  - `models()`: `model/list` (paged, 5 min cache) → rows with `label`, Codex's own `efforts` and
-    `defaultEffort`; the renderer disables the efforts a model lacks; an unsupported chat effort
-    is omitted from `turn/start`.
+    `requiresOpenaiAuth` → unavailable "Codex is not signed in…"; login stays the user's), asked of
+    the direct server; with a router detected the engine stays available without a direct account
+    and the detail says `direct: <account|not signed in> · Claude Code Router detected`. 30 s cache.
+  - `models({route})`: `model/list` of that route's server (paged, 5 min cache per route) → rows
+    with `label` (shown `GPT-6.1-Sol (gpt-6.1-sol)`), Codex's own `efforts` and `defaultEffort`;
+    the renderer disables the efforts a model lacks; an unsupported chat effort is omitted from
+    `turn/start`. `create` takes the route's default model.
   - `create`: `thread/start {model, cwd, approvalPolicy, approvalsReviewer:"user",
     sandbox:"workspace-write", ephemeral:false}` first (cwd = canonical local project root, else
     home; a server project is refused), then the `cosapi-` session and the ledger record
@@ -1653,16 +1662,24 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   `handover`); New chat and the project menus offer it once `status()` is available: Claude
   module active and Command on (cli-modules `cliChatRuntime`: binary, canonical cwd, `wsl.exe
   --cd … --exec` on Windows), `--version` answers and `claude auth status --json` does not say
-  `loggedIn:false` (cached 60 s; an auth-looking failure clears the cache). `models()` lists the
-  aliases `fable, opus, sonnet, haiku` plus every model a `system/init` reported; effort is the
-  shared `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
+  `loggedIn:false` (cached 60 s; an auth-looking failure clears the cache). `models({route})` is the
+  CLI's own catalog of that route: the `initialize` control answer of a probe process (`-p
+  --input-format stream-json --output-format stream-json --verbose --no-session-persistence
+  --strict-mcp-config --settings <route settings>`, sent `initialize` only and killed once it
+  answers: no prompt, no session file, no MCP server; cached 5 min per route). Each entry is
+  `{value, resolvedModel, displayName, supportedEffortLevels}` (2.1.306); the row is the alias with
+  its concrete model as label (`opus (claude-opus-5-5)`), `default` is left out (a chat without a
+  model), and models a `system/init` reported are appended; the bare aliases `fable, opus, sonnet,
+  haiku` only when the probe fails. The same answer's `account` (`tokenSource`/`apiKeySource`
+  `none` = no credential) is the direct route's sign-in check. Effort is the shared
+  `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
   `backendSessionId` (no strict-mode trust: its tools never touch the MCP kernel).
   One long-lived process per chat, spawned on send in the canonical project folder (home without
   a project) with `CLAUDECODE`/`ELECTRON_RUN_AS_NODE` removed and
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 CLAUDE_CODE_DISABLE_CRON=1` set: `-p --input-format stream-json
   --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio
-  --permission-mode <default|manual> --settings {"permissions":{"disableBypassPermissionsMode":"disable"}}
-  --disallowedTools ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
+  --permission-mode <default|manual> --settings <route settings: {"permissions":{"disableBypassPermissionsMode":"disable"}},
+  or router.ts CLAUDE_DIRECT_SETTINGS for a direct chat with a router detected> --disallowedTools ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
   it without `default` (2.1.306 renamed the choice). Never a bypass flag or mode; a `system/init`
   reporting `bypassPermissions` kills the process and fails the turn. User/project/local settings
   still load (auth helpers, env, MCP and the user's own rules keep working, and the terminal
@@ -1730,7 +1747,8 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   shows the module terminal by id (`cli-modules-ui` `openSession`: reload, show).
   cli-modules `cliEngineTerminal(module, {sessionId, projectId, args, title})` keeps one durable
   session per chat (`engineChat` + `args`, reused with new args); args are validated per module
-  (Claude: `--resume|--session-id <uuid>`; Codex: `resume <thread> --remote unix:///<abs>.sock`;
+  (Claude: `[--settings <exactly CLAUDE_DIRECT_SETTINGS>] --resume|--session-id <uuid>`, the
+  settings for a direct chat with a router detected; Codex: `resume <thread> --remote unix:///<abs>.sock`;
   OpenCode: `-s ses_<id> <abs cwd>`; anything else refused, also when a
   stored session is loaded). tmux starts
   `sh -c 'exec "$@"' marks-cli <bin> <args>`; every OpenCode terminal (engine or plain) runs
@@ -1742,10 +1760,77 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   every OpenCode terminal, also a plain one, and starts the background service with the app's
   binary and environment, so the TUI joins it instead of starting its own). A TUI reconnects by
   itself after a service restart (checked live). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
+- **Routes: direct CLI account or Claude Code Router (`router.ts`).** Claude Code Router (CCR, a
+  third-party proxy on `127.0.0.1:3456`) configures itself into the user's own CLI files
+  (`~/.claude/settings.json` `env` `ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL`/… plus `apiKeyHelper`;
+  `~/.codex/config.toml` `model_provider = "claude-code-router"`, its provider table and its own
+  `model_catalog_json`), so every Codex and Claude Code process talks to the router, never to the
+  account the CLI is signed in with. A Codex or Claude Code chat therefore has a route (ledger
+  `route`, `shared/agent-engine.ts` `AgentEngineRoute`): `direct` (default for new chats: the
+  CLI's own account) or `router` (the CLI exactly as configured; a record without `route` is
+  `router`, as every chat ran before routes). Detection reads only those two files (plus the
+  inherited `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`/`CODEX_HOME` and the existence of CCR's
+  `settings.json.ccr-original`): Claude — a loopback base URL with CCR's port 3456, that backup or a
+  `CCR_` variable; Codex — the top-level provider is CCR's (id, table `name` or its managed-block
+  marker). A remote gateway or another custom provider is the user's own setup and never
+  overridden; without a detected router both routes are the same unmodified process
+  (`effectiveRoute`) and no choice is shown. Windows (CLIs inside WSL) detects nothing (untested).
+  **Router availability** (main/ccr, below): a router configured in those files but whose program is
+  not installed (`not_installed`) or whose gateway does not answer `/health` (`stopped`) is not
+  usable: the detection carries `unavailable` (registered by the CCR module through
+  `registerRouterAvailability`, cached 5 s, re-checked by `refreshRouterAvailability` before every
+  engine status, view, create, route change and send; without a registered provider nothing
+  changes). Then `effectiveRoute` is `direct` for both routes and the direct overrides apply to both
+  (the CLI never tries the dead router address); `chatRoutes(stored, detection)` offers both routes
+  only while the router is usable, none without a configured router, and `['direct']` plus
+  `routeNotice` (`not_installed` | `stopped`) for a chat stored on `router`, so it can move away.
+  Claude Code falls back: the same session runs with the direct settings (refused with both reasons
+  when the CLI has no account of its own). Codex cannot (a router thread keeps CCR's provider): the
+  send is refused before anything is recorded (`ROUTER_UNAVAILABLE_TEXT` + "Or switch this chat to
+  "CLI account (direct)"; Codex then starts a new thread."), and moving to direct always forgets the
+  thread (`homeRoute`). Choosing the router (a new router chat, a route change to it) is refused with
+  the same text while it is unavailable. Engine status says it (`· Claude Code Router is not
+  installed. Install it from Settings > Modules > Claude Code Router.`; `router: false`). The
+  renderer shows `routeNotice` as a row of the composer dock (`#apiChatRouteNotice`, translated by
+  code) and keeps the stored router choice visible in the route select. On a fresh machine without
+  CCR nothing is detected, no route select appears and every chat runs as before.
+  Direct overrides apply only to the processes the app starts; the user's files are never
+  written. Claude Code: precedence is flag `--settings` > local > project > user settings, and a
+  settings `env` beats the process environment, so the direct process gets `CLAUDE_DIRECT_SETTINGS`
+  (the hardening plus every router variable `CLAUDE_ROUTER_ENV_KEYS` set to `""` and `apiKeyHelper:
+  ""`). Checked live against 2.1.306: `""` reads as unset (`[gatewayDiscovery] skipped:
+  ANTHROPIC_BASE_URL is unset`, model `claude-opus-5-5`, `tokenSource: none` without a login of its
+  own, even with the router URL inherited), while `null` fails validation and Claude Code silently
+  drops the whole `--settings` layer. `claude auth status` reads the user's settings and has no
+  `--settings`, so it answers for the router route only; the direct account comes from the
+  probe's `initialize` answer. A direct send without one is refused before anything is recorded
+  ("Claude Code has no account of its own for direct chats. Run "claude auth login"…"). Codex: the
+  direct server adds `-c model_provider="openai"` (the built-in provider: `account/read` then
+  reports the ChatGPT login) and, when CCR replaced the catalog, `-c model_catalog_json="<CODEX_HOME>/
+  models_cache.json"` (Codex's own cached catalog of the account; an empty value is a directory
+  error, and a key cannot be unset with `-c`); `codexServerArgv` accepts only those two shapes.
+  Other user overrides (e.g. an `openai_base_url` of another local bridge) stay as configured.
+  Route change (IPC `setChatSettings {route}`, refused while a turn runs, Codex/Claude only):
+  Claude Code keeps its session (same session file; the next send resumes it with the other
+  route's settings; a direct `--resume` of a router-made session loads, checked live); Codex
+  threads keep the provider they started with (`Thread.modelProvider`) and their history holds
+  that provider's items, so the chat forgets its thread and the next send starts a new one on the
+  other route's server (the renderer says so; the chat's own history stays). A model the other
+  route does not list gives way to its default (Codex) or the CLI's default (Claude, `null`).
+  The hand-over Claude terminal of a direct chat runs `--settings <direct> --resume <uuid>`; a
+  Codex live terminal attaches to the server of the chat's route. Renderer: the composer's route
+  select (`apiChatComposerRoute`: "CLI account (direct)" / "Via Claude Code Router") shows only
+  when the view lists both `routes`; the model list is that route's, grouped under the route's
+  name; the header reads `Codex · GPT-6.1-Sol (gpt-6.1-sol) · direct` or `… · via Claude Code
+  Router`. `AgentEngineInfo.router` and the status detail say when a router is detected.
 Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
 `test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,
-turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over),
+turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over; routes:
+direct settings, catalog per route with concrete models, direct sign-in refusal, route change on
+the same session), `test/agent-engine-router.test.ts` (detection with synthetic CCR files in a
+temporary HOME, negative cases, direct overrides), `test/agent-engine-codex.test.ts` (one fake
+app-server per route: overrides, models per route, new thread after a route change),
 `test/cli-modules.test.ts` (engine terminal args, open hook, attached/external state, take-back end),
 `test/api-chat-ui.test.ts` (offered engines, unavailable ones disabled with their reason, hidden ones
 absent; the terminal button; the take-back offer), `test/cli-chat-ui.test.ts` and
@@ -1883,11 +1968,18 @@ like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`up
   `zerorelay` is not installed. ZeroClaw is an autonomous agent to configure, **not a chat or
   terminal type**: it never appears in New chat, the project's New terminal submenu or the sidebar
   Terminals (`cli-modules-ui.ts` `TERMINAL_MODULE`; test `cli-chat-ui.test.ts`). It has its own
-  Settings area instead (the `module-zeroclaw` sub-nav page, shown while the module is enabled,
-  with its claw icon), like CLIProxyAPI's page: Status (state, installed/latest version; install
-  and update stay in its Modules card), Agent ("Configure agent" opens `zeroclaw quickstart`,
-  `cliCreateSession(…, 'quickstart')`, args `['quickstart']` only, in a terminal inside the page,
-  one reused session) and Settings. **This area grows with ZeroClaw settings over time**; it starts
+  page instead: the primary sidebar item **ZeroClaw** right below Pets (`#sidebarZeroClaw`,
+  `data-sidebar-page="zeroclaw"`, claw mark, shown only while the module is enabled) opens the
+  `zeroclaw` main view (`data-panel="zeroclaw"`, a `plugins-panel` beside Plugins/Skills/Pets;
+  `main.ts` `showTab` counts it as a library page; the old `module-zeroclaw` Settings sub-page is
+  gone and `normalizeTab` maps that name to it, or to Settings > Modules while disabled; disabling
+  the module while the page is open goes back to the chat). Its Modules card keeps install and
+  update and links to the page ("Open ZeroClaw"); the page links back ("Manage in Settings >
+  Modules"). Sections: Status (state, installed/latest version), Agent ("Configure agent" opens
+  `zeroclaw quickstart`, `cliCreateSession(…, 'quickstart')`, args `['quickstart']` only, in a
+  terminal inside the page, one reused session; a setup that ended is started again, one still
+  running is reattached; when it ends the page says so and the terminal keeps its last output) and
+  Settings. **This area grows with ZeroClaw settings over time**; it starts
   with read-only key facts (`zeroclaw/settings.ts`, IPC `marksUpstream` `facts`): agent aliases
   (`zeroclaw agents list`) with each one's model provider, memory backend and enabled flag, the
   runtime, the gateway address and the cost limits, each through `zeroclaw config get --json` of a
@@ -1896,7 +1988,24 @@ like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`up
   so nothing runs until ZeroClaw is configured (the page says "Not configured yet"); with a
   configuration they read without rewriting it. `zeroclaw update` is never offered (it could
   update `zeroclaw` alone). Apart from ZeroClaw's own reads, `~/.zeroclaw` (shared with the
-  retired MarksClaw fork) is never touched (only its `config.toml` existence is checked).
+  retired MarksClaw fork) is never touched (only its `config.toml` existence is checked), with one
+  exception below.
+- ZeroClaw terminals (`cli-modules.ts` `ZEROCLAW_TERMINAL_SCRIPT`, quickstart and `zerocode`):
+  `sh -c '<script>' marks-cli <bin> [quickstart]` runs ZeroClaw under `umask 077`, first removes
+  only the group/other write bits of `~/.zeroclaw` and `~/.zeroclaw/data` when each is a real
+  folder owned by the user (never through a link), and after ZeroClaw exits keeps the pane open
+  with its last output and `[<bin> exited with status N. Press Enter to close.]`. Found with 0.8.6
+  as the user (temporary HOME, tmux attached through node-pty like `cliOpen`): ZeroClaw creates
+  those folders with the session umask (002 → 775) and its daemon then refuses them ("config
+  lifecycle directory …/data is writable by other users (mode 775)"), so `zerocode` exited before
+  drawing and tmux's alternate screen took its error with it. The facts reads (`settings.ts`) run
+  under the same umask. `zeroclaw quickstart` itself drew fine in tmux.
+- "Configure agent showed nothing" (2.1.44.1): the setup terminal's mount was a block, so the
+  terminal body was 0 px high, xterm fitted 1 row and `cliOpen` asked for `rows: 1`, which the IPC
+  schema (2–200) refuses before anything starts (no tmux session, no `~/.zeroclaw/config.toml`);
+  the refusal was written into the 0 px terminal. Fixed in `settings.css` (the mount is a flex
+  column) and `workspace-terminal.ts` (sizes sent to main are clamped to 2–500 × 2–200). Proof:
+  `cli-chat-ui.test.ts`, `cli-modules.test.ts` (launcher argv, the script with a real `sh`).
 - UI (`renderer/upstream-manage-ui.ts` in the module's card): installed version (or "not installed
   by Chat Marks" for a PATH binary), latest release, "Update available", support notes, OpenCode's
   background service (running on port / stopped, starts on first use / run by another OpenCode,
@@ -1910,6 +2019,82 @@ linked member, non-ELF, wrong version); GitHub digest/SHA256SUMS, redirect hosts
 swap, with real `tar` archives). Installed through this code from the real sources on Linux
 (OpenCode 2.1.2 from npm, integrity-verified, `opencode v2.1.2`; ZeroClaw 0.8.6, `zeroclaw 0.8.6
 (c473221)`, `zerocode 0.8.6`).
+
+### Claude Code Router module (`ccr`)
+
+`main/ccr/` (Marks-owned; IPC `marksCcr:request` `status|install|service|openUi`, sender/frame
+checked; preload `ccrStatus/Install/Service/OpenUi`, progress `marksCcr:progress`) manages Claude Code
+Router (`@musistudio/claude-code-router`, MIT, `musistudio/claude-code-router`; checked against
+3.1.3), the gateway behind the "Via Claude Code Router" route. It is a module card in Settings >
+Modules (`renderer/ccr-manage-ui.ts`, created by `marks-modules-ui.ts` after the CLI modules), not a
+chat or terminal type, with no activation toggle: the route needs it installed and configured.
+- Copies (`service.ts`): Chat Marks' own copy is an npm prefix `<userData>/modules/ccr/versions/
+  v<x.y.z>-<8 hex>/`, the one in use named by `<userData>/modules/ccr/current` (replaced by rename),
+  plus the launcher `<userData>/modules/ccr/bin/ccr` (`exec <node> <cli.js> "$@"`); it takes
+  precedence over PATH. A new version is a new folder, so a running daemon keeps its files; an older
+  folder is removed only when no daemon runs from it (`pruneVersions`, by the process list). A copy
+  the user installed (the `ccr` on PATH, else `~/.local/bin`, `~/.npm-global/bin`, `~/.volta/bin`,
+  `/usr/local/bin`, `/usr/bin`) must resolve to this package's `dist/main/cli.js` (its package.json
+  name, x.y.z version and `bin.ccr`); it is shown as "Using installed <path> <version>" (home as `~`)
+  and used as it is. It can be updated in place only after confirmation and only when its npm
+  prefix (`<prefix>/lib/node_modules/…`) and package folder are writable by the user (never with
+  administrator rights; otherwise `external_not_writable`), and "Install a copy managed by Chat Marks"
+  is offered beside it.
+- Install/update (`release.ts`): CCR is a Node.js program (`engines.node >=22`) with runtime
+  dependencies, one native (`better-sqlite3`, its config store): 3.1.3 pulls 101 packages, ~110 MB.
+  So the system's own Node.js (>= the `engines` major, else `node_too_old`) and npm do the tree,
+  under these rules: the main tarball comes from the registry through `npm-release.ts` (registry
+  only, no redirect, canonical URL, latest must still be the confirmed version: `version_changed`)
+  and is used only after its SHA-512 equals `dist.integrity`; `npm install --prefix=<stage>/app
+  --ignore-scripts --omit=dev --no-save --registry=https://registry.npmjs.org/ --userconfig=<empty>
+  --no-audit --no-fund -- <verified package.tgz>` (no package runs a script; `npm_config_*` and the
+  app's Electron variables are removed from its environment); then `npm rebuild -- better-sqlite3`
+  only (`NATIVE_PACKAGES`: its `prebuild-install || node-gyp rebuild` fetches the prebuilt binding
+  from better-sqlite3's own GitHub releases); the installed package must report exactly the version
+  and the binding must open a memory database (`node -e`) before the folder is renamed into
+  `versions/`. Stage `<module>/.stage-<uuid>` (0700) is removed in every case. The gate:
+  `ccrSupport` 3.x (`ok`, `newer` above 3.1.3), anything else `unsupported` (never offered).
+  Errors: `node_missing`, `node_too_old`, `npm_missing`, `npm_failed`, `version_mismatch`,
+  `native_failed`, `checksum_mismatch`, `version_changed`, `unsupported_version`, … (translated in
+  the card).
+- Service: `node <cli.js> start --daemon --no-open` (it starts `cli.js serve --daemon-child` for the
+  web UI and a gateway child, then exits; its stdout names the web UI with its token, so it is
+  never logged or returned) and `node <cli.js> stop` (stops the daemon `~/.claude-code-router/
+  service.json` names), with the copy in use; Restart = stop, wait for the gateway to go, start,
+  wait for `/health`. State = the gateway's own `GET http://<host>:<port>/health` (200 JSON with a
+  `status`; checked: `{"runtimeId":…,"status":"ok",…}` on 3456; the web UI port answers 404 there),
+  plus `ps -eo pid=,args=` for which copy the daemon came from. The gateway address is read,
+  read-only, from CCR's store `~/.claude-code-router/config.sqlite` (`node:sqlite` with
+  `readOnly`, `app_config` row `default`, only `gateway.host`/`gateway.port`, else `HOST`/`PORT`),
+  else from the user's CLI files' loopback router URL (`routerAddressFromCliFiles`), else
+  127.0.0.1:3456. "Open router UI" opens the `url` CCR registered in `service.json` (only an http
+  loopback URL of a live pid) with `shell.openExternal`; the address never reaches the renderer.
+- No downtime: after an install or update the router restarts with the copy in use only when no
+  routed Codex/Claude Code turn runs (`routedTurnsRunning`, probes registered by both engines), else
+  `restartPending` (checked every 5 s); a stopped router stays stopped. Stop and Restart are
+  confirmed, saying when routed chats are answering.
+- The user's files: the module never writes `~/.claude/settings.json`, `~/.codex/config.toml` or
+  anything in `~/.claude-code-router` (CCR edits those itself), and never prints or copies a key or
+  token. `configured` = the router detection of those files (Claude Code, Codex).
+- Card: state (Running / Stopped / Not installed), installed version (managed / "Using installed"),
+  latest release with "Update available", router address and which copy runs it, restart pending,
+  which CLIs it is configured for (or how to configure them in the router UI), notes (newer/
+  unsupported version, why it cannot install), one confirmed Install/Update button naming the npm
+  registry, Start / Stop / Restart router, Open router UI. Linux only (`unsupported_platform`
+  elsewhere; the routes detect nothing on Windows).
+Proof: `test/ccr-module.test.ts` (version gate, registry-only metadata, moved latest, integrity
+mismatch, npm/service argv, install into a version folder with launcher and pointer, refusals before
+npm, failures keeping the old copy, an installed copy shown and updated in place, daemon process
+parsing, `/health`, the config store read-only with synthetic keys, web UI URL checks, start/stop
+through the CLI, restart only without routed turns, fresh machine, configured-but-missing/stopped
+fallback), `test/ccr-manage-ui.test.ts` (card states), `test/agent-engine-claude.test.ts` and
+`test/agent-engine-codex.test.ts` (fallback/refusal with an unavailable router), `test/api-chat-ui.test.ts`
+(route notice). Checked live as the user (2026-10-22): the installed 3.1.3 (`~/.local`) was found,
+running from that copy on 127.0.0.1:3456 (port read from its store), configured for Claude Code and
+Codex, read-only; an install of 3.1.3 through this code into a temporary prefix and HOME (integrity
+verified, 92 top-level entries, 110 MB, better-sqlite3 built, 21 s with a cold npm cache) whose
+launcher answered `--help` and whose `start --daemon --no-open --port 3497` / `stop` ran in that
+temporary HOME without touching the user's running router.
 
 ### CLIProxyAPI module management
 
@@ -2274,6 +2459,19 @@ the page carries each token out once and reports `approvalResult` (`clicked`, `c
 `unavailable`) on its next poll. A new card drops an unsent answer; one nobody took within 30 s is
 `expired`. A standing card polls at the active cadence (2 s) even in a hidden tab.
 `sessions:approvalCard { id }` gives the panel the card and the last answer's outcome.
+
+A card waiting in a chat that is not on screen is named in the window's notices
+(`#approvalNotice`, renderer `paintApprovalNotice`): one line per waiting chat, "worker-1 waits for
+your approval" for a worker of the open chat (its parent's title added otherwise, a chat's own title
+for any other chat), the open chat's workers first, each with Open (shows the Chat page and that chat)
+and the same `approvalCardPanel` Deny / Allow once. Lines are kept by session id, so a repaint never
+re-reads a card or drops an answer being sent; the open chat's own card stays in its timeline only.
+Off the Chat page the catalog is not reread, so a `session:changed` there reads only the waiting set
+(`scheduleApprovalRead`). The desktop notice is retried on later polls while the notifier returns
+`false` (the window had focus), so leaving the window still tells the person. A poll that sees the
+card go keeps the episode as answered before it awaits anything, and writes "answered" only when no
+redraw took the episode back meanwhile (live 2.1.44.1, 2026-10-22: two workers of the open prime
+waited 85 minutes while the window had focus and only a folded dot said so).
 
 At ordinary silence recovery, a never-offered immediate correction takes priority over generated
 Goal/Loop work and is sent as a normal native user message. Include at most the next eligible
@@ -2744,7 +2942,133 @@ or reloading attachment previews. Old history gains badges when natively reobser
 
 Continuous recording serves the local transcript, exact identity and continuation infrastructure.
 There is no model-facing session lookup tool. `update_plan` remains recording-backed; historical
-lookup tool calls remain displayable in existing transcripts.
+lookup tool calls remain displayable in existing transcripts. Chat Marks Brain (H1a) is a
+separate, user-curated local memory store: it does not read the session archive or expose a
+general session-history lookup. H2 searches staged copies of old MarksCode/OpenCode/MarksClaw
+history for the user only; no model tool reads it.
+
+### Chat Marks Brain (H1a)
+
+`src/main/brain/store.ts` owns `<userData>/brain/brain.sqlite` with SQLite WAL and FTS5;
+`src/main/brain/settings.ts` owns `state/marks-brain-settings.json`. Neither owns Chat Marks
+session history, MarksCode/MarksClaw data or a remote synchronization stream. Memory writes
+are serialized, deduplicated by normalized content hash, and redact credential shapes and
+values loaded from the K vault before storage. A damaged existing database fails closed and
+is retained for deliberate recovery; its default file mode is 0600. The database is local
+even when no model-facing Brain tools have been enabled.
+
+Brain tools default Off separately for native ChatGPT Core and CLIProxy API chats.
+`memory_search` returns bounded, untrusted background context, never instructions;
+`memory_save` requires a proven exact local session, edit permission and a non-read-only
+context, then human approval by default. Native chats use an ephemeral exact-chat pending
+approval, and API chats reuse the existing per-turn approval gate. Validate the exact
+session and active capability after approval before writing. The settings page and the
+explicit `/remember` command are user-authored saves; `/recall` inserts a bounded
+`<memory-context>` draft without sending it. The `marksBrain:request` IPC is a fixed,
+Zod-validated action list guarded to the main window/frame. Its preload is not a generic
+filesystem bridge. Keep the few Core/API registration hooks marked `Chat Marks:`.
+
+### Chat Marks Brain (H1b sources)
+
+`src/main/brain/recall.ts` owns combined recall and remote sync; `providers/` holds one module
+per optional source: `ai-memory.ts` (remote MCP, minimal streamable-HTTP JSON-RPC client:
+initialize, tools/list, then `memory_query` / `memory_write_page`), `openviking.ts`
+(`/api/v1/system/status`, `/api/v1/search/find`) and `marks-remote.ts` (`/health`,
+`/memories/human/recall`, `/memories/human`, `/memories/{id}/delete`). Every provider is Off by
+default in `settings.providers`, has its own timeout and error, and is reported in Doctor/Sources.
+Nothing leaves the machine unless a provider is enabled *and* `remoteRecall` (query text) or
+`remoteSync` (saved memories) is on; queries and synced content are redacted first and imported
+memories never sync. Results are merged round-robin, de-duplicated by remote id/content hash,
+budgeted and labelled with their source in `/recall` and `memory_search`.
+
+Credentials come only from K vault entries bound to the provider's exact origin
+(`brain.ai-memory`, `brain.openviking`, `brain.marks-memories`); a missing key sends nothing.
+"Import from MarksCode" copies the one needed value (ai-memory Authorization header, Marks
+`memories_api_key`) into the vault after the user clicks and enters the master password; no value
+reaches the renderer or logs. Plain HTTP is allowed only on loopback or, for the Marks API, behind
+its explicit `insecureHttp` acknowledgement; the vault accepts an `http:` origin only with an
+entry-level `insecureHttp` flag, and model-facing `vault_use` refuses such entries. Markspanel
+bearer auth uses the main-only `markspanelBrainSession()`. Brain logs one `brain: …` line per save,
+recall, held approval and provider error, never content. Settings patches merge only sent keys
+(Zod 4 `partial()` fills defaults). ai-memory is a Brain provider, not a Plugins catalog entry:
+the curated catalog requires OAuth remotes and reviewed license inventory.
+
+H1b has no engine MCP, automatic prompt injection or MarksCode/MarksClaw archive import. Those
+are separate H phases.
+H1a has no remote Marks API, OpenViking or MarksCode/MarksClaw archive import. Those are
+later separately approved H phases.
+
+### Chat Marks Brain for agent engines (H1c)
+
+`src/main/brain/engine-mcp.ts` owns a local-only MCP route `http://127.0.0.1:<port>/mcp/brain/<secret>`
+exposing only `memory_search` and `memory_save`, Off unless `enginesEnabled`. It is its own lazily
+started loopback listener, not a path on the connector listener: that one runs only while
+ChatGPT is connected, moves port on reconnect and its origin may be published by a user's tunnel.
+Nothing hands this URL to a tunnel; the route answers 404 off its secret path, refuses a non-loopback
+Host, any Origin and forwarding headers, and needs `Authorization: Bearer <token>` (401 otherwise).
+Claude Code (one process per chat) gets a per-chat token in a 0600 `--mcp-config` file under
+`userData/brain/engine-mcp/` (0700, emptied at startup and quit) plus `--allowedTools` for the two
+tools; never `--strict-mcp-config`, so the user's own MCP servers keep loading. A changed switch
+restarts an idle host. Codex (one shared app-server) gets `-c mcp_servers.chat_marks_brain.url=…`,
+`.bearer_token_env_var="CHAT_MARKS_BRAIN_TOKEN"` and `.default_tools_approval_mode="approve"` after
+the safe overrides, the token only in the server's environment, rotated per app-server launch; a
+switch change applies at the next app-server start. OpenCode 2.1.x gets the server at runtime per
+chat location through `PUT /api/experimental/mcp/chat-marks-brain` (live on 2.1.2: no config file
+is written, a service restart forgets it), removed on quit or when the switch is off; TUI sessions
+in that location see it too. Codex and OpenCode tokens name only the engine: a save is attributed
+to the one chat whose own turn reported the same Brain call with the same arguments (`mcpToolCall`
+item, `session.tool.called`); unmatched or ambiguous saves are refused. Saves take the H1a approval,
+then re-check the chat and switch before writing with `{source:'chat', sessionId, engine}`.
+Windows/WSL engines are not wired (another loopback). Engine rows show `mcp:chat-marks-brain/<tool>`
+whichever engine spelled it (`brain/engine-names.ts`, `tool-row.ts`).
+
+`src/main/brain/context.ts` is optional automatic context (`autoInject`, Off): a `<memory-context>`
+block framed as data, at most 3,000 characters, local memories only. API chats add it to the system
+message each turn; ChatGPT gets it only in the opening message's COS_CONTEXT (`brainContext` scope
+in `prepareSessionPrompt`), so it counts against the 96k ceiling, is frozen in `deliveryText` and is
+dropped rather than failing when it does not fit. Follow-ups, workers and engines get none.
+H1a has no remote Marks API, OpenViking, engine MCP or automatic prompt injection.
+Those are later separately approved H phases.
+
+### Chat Marks Brain H2: old-history search and selective import
+
+`src/main/brain/import/` (actions `import.*`, `history.*`, `archive.*` of `marksBrain:request`,
+list in `shared/brain-import-actions.ts`; push `marksBrain:progress`, preload `onBrainProgress`;
+UI `renderer/brain-import-ui.ts`, mounted once from `main.ts` into `#brainImport`) imports
+MarksCode/OpenCode/MarksClaw history SELECTIVELY. Nothing is imported in bulk; every write
+carries `confirmed: true` from the user's click and is refused without it.
+- Originals are never opened by the app. All reads go through staged copies in
+  `~/.local/state/chat-marks/brain-import/staging/<uuid>/` (0700, `manifest.json` with each
+  source's sha256/size/mtime before and after; `unchanged` false = it moved during the copy).
+- Root sources (`sources.ts` `ADMIN_SOURCES`: root `markscode.db`, `opencode.db`,
+  `markscode-11510/-143/-1227_7.db`, `memory/*.jsonl`, legacy `storage/{session,message,part,project}`)
+  are copied by ONE `pkexec /bin/sh -c ADMIN_EXPORT_SCRIPT chat-marks-brain-export <uuid>`
+  (`admin-export.ts`, CLIProxy precedent). The constant script has no single quote (the same
+  text is offered for `sudo /bin/sh -c '…'`), takes the owner from `PKEXEC_UID`/`SUDO_UID`
+  (never 0), checks free space (2x the source sizes), opens originals only with
+  `sqlite3 -readonly` / `mode=ro&immutable=1` (a non-empty WAL: db+wal+shm are copied first and
+  only the copy is opened), creates only `session_v2`, `session_message`, `project` and v1
+  `session/message/part` for ids missing from v2 (`filteredCopyStatements` is the Node twin),
+  never `credential`/`account`/`kv`/`auth.json`, then `chown -R` to the requester.
+  `user-export.ts` does the same in-process for sources the user can read (`opencode.db` of the
+  running 2.0.25 service, MarksClaw `sessions.db` whose data is only in the WAL): db+wal+shm copied
+  together (3 tries while hashes move), only the private copy opened.
+- `indexer.ts` `buildIndex` builds `<staging>/index.sqlite` (FTS5) in a `worker_threads` worker
+  (`worker.ts` runs its source text; keep it self-contained). Cursor `(time,id)` per source/pass
+  committed with each batch: cancel/quit resumes. Dedupe by `opencode:<ses_id>` across databases
+  (v2 > v1 > legacy JSON, then more messages, then newer); sub-agent sessions fold under the parent
+  in search and are listed as children in the viewer.
+- `search.ts`/`reader.ts`: AND-of-quoted-terms FTS over every staged index and the archive;
+  reading is bounded (64k chars/message, 2k/tool output, 5 MB and 5,000 messages/conversation) and
+  redacted (`redactSecretText` + vault values).
+- Imports: "Save as memory" = text the user wrote/selected, `brainSave` with provenance
+  `import`; "Keep in archive" = `<userData>/brain/archive.sqlite` (0600, FTS, separate from
+  `brain.sqlite`, 4 GB limit, idempotent by key); "Open as read-only chat" (`materialize.ts`) =
+  a `cosapi-` session with ledger engine `markscode` (retired, view-only), reusing an existing
+  chat with the same `backendSessionId`; hybrid memories: preview with checkboxes, only selected
+  items saved, dedupe by content hash and (file, source_id). "Delete copy" removes only a staged
+  folder. Proof: `test/brain-import.test.ts` (synthetic v1/v2/mixed, credential tables, WAL-only
+  MarksClaw, legacy JSON, hybrid JSONL; originals hashed before/after).
 
 Desktop session lists use stable `(updatedAt,id)` pagination. Each session selection loads a
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;
@@ -4704,6 +5028,30 @@ alone picks its glyph; static markup names the glyph class. `--ico` sizes the la
 `--glyph` the drawing, which stays 17px in compact controls except carets and small dismiss
 marks. Do not add hand-drawn SVG icons; the sprite keeps only the product mark.
 `test/icon-font.test.ts` checks names, package codepoints and stray SVG.
+
+Chat Marks' outbound **Notification Center** (`renderer/notification-center.ts`,
+`main/notification-{center,ipc,events,smtp}.ts`, `shared/notification-center.ts`)
+is an optional settings surface under General, independent of native desktop notices.
+The four channels (SMTP, Telegram, Meta WhatsApp Cloud and Evolution API) are disabled
+by default. The main process exclusively owns delivery and credentials: validated
+non-secret channel settings live in the `marks-notification-center` durable record;
+provider credentials live in the existing OS-protected secret store at
+`plugin:marks-notify:<channel>` and **never** return through IPC. The authenticated
+`marksNotify:request` IPC supports `get`, `save`, `credential` (write-only), and
+`test`; preload exposes `notificationCenterGet`, `notificationCenterSave`,
+`notificationCenterSetCredential` and `notificationCenterTest` with typed replies.
+Renderer gets only Boolean credential-presence flags. Saved data is schema-validated;
+a missing/invalid record resolves to off-by-default settings, not a network send.
+The session ledger owns turn outcomes, approval-wait owns pending human decisions,
+and the version owners report availability; notifications only observe those events
+and never answer a permission prompt or start an update. Per-event throttling,
+per-channel hourly limits, bounded batch windows, opt-in excerpts, HTTPS/TLS
+enforcement and restricted template substitution belong to the main process.
+`test/notification-center.test.ts`, `test/notification-smtp.test.ts` and
+`scripts/verify-notification-center.cjs` exercise fake transports and real Electron
+UI without genuine third-party credentials. Real-provider delivery still requires
+separate manual homologation; no automatic migration into the later Marks Vault K
+is assumed until its approved storage/use contract is integrated.
 
 `renderer/pet-machine.ts` owns the optional Tur Tur Sahur companion's gesture,
 animation and autonomous-action state. `renderer/pet.ts` projects it with Pointer

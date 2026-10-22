@@ -42,7 +42,7 @@ beforeAll(async () => {
 
 it('finds settings on every settings page by name, description and section, never a row its page hides', () => {
   const entries = collectSettings(document);
-  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'usage', 'setup', 'settings', 'modules', 'appearance']));
+  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'usage', 'setup', 'settings', 'modules', 'appearance', 'brain']));
   const [finish] = searchSettings(entries, '  SESSION FINISH  ', 'en');
   expect([finish!.title, finish!.page, finish!.section, finish!.tab]).toEqual(['Session finish', 'Agents & automation', 'Keep the turn open', 'settings']);
   expect(finish!.target.contains(document.getElementById('finishTool'))).toBe(true);
