@@ -2,7 +2,7 @@ import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { z } from 'zod';
 import { createVault, vaultStatus, listVault, putVault, removeVault, revealVault, changeVaultPassword, recoverVault, importVault, exportVault, importEntries } from './marks-vault.js';
 import { decryptGpgVault } from './marks-vault-gpg.js';
-import { decideVaultApproval, vaultApprovals } from './marks-vault-approval.js';
+import { decideVaultApproval, onVaultApprovalsChanged, vaultApprovals } from './marks-vault-approval.js';
 import { logWarn } from './logger.js';
 import { dialogLabel, mainText } from './main-texts.js';
 
@@ -52,6 +52,12 @@ export function registerVaultIpc(getWindow: () => BrowserWindow | null): void {
     return selection.canceled || !selection.filePaths[0] ? 0 : importEntries(await decryptGpgVault(selection.filePaths[0], data.gpgPassword), data.password);
   });
   register('pending', async () => vaultApprovals());
+  // A held chat request reaches the window at once (no renderer polling); only the count of the
+  // change is implied, the window reads the list itself through the guarded `pending` call.
+  onVaultApprovalsChanged(() => {
+    const window = getWindow();
+    if (window && !window.isDestroyed()) window.webContents.send('vault:pending-changed');
+  });
   register('decide', async raw => {
     const data = z.object({ id: z.string().uuid(), choice: z.enum(['once', 'session', 'deny']) }).strict().parse(raw);
     return decideVaultApproval(data.id, data.choice);
