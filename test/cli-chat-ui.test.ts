@@ -182,3 +182,27 @@ it('keeps the Claude terminal module and the Claude Code engine apart when both 
   await vi.waitFor(() => expect(createSession).toHaveBeenCalledWith('claude', 'project-1'));
   expect(engineChat).toHaveBeenCalledTimes(1);
 });
+
+it('shows each module\'s own icon in its Settings sub-nav item, its Modules card and its page heading', async () => {
+  const modules = ['opencode', 'codex', 'claude', 'zeroclaw'];
+  const api = {
+    cliStatus: async () => ({ ok: true as const, data: modules.map(id => ({ id, name: id, installed: true, enabled: true, running: false, supported: true, version: '1', detail: 'ready' })) }),
+    cliSessions: async () => ({ ok: true as const, data: [] }),
+    listProjects: async () => ({ ok: true as const, data: [] }),
+    cliAction: async () => ({ ok: true as const, data: undefined })
+  } as any;
+  createCliModulesUi(api, { showTab: () => undefined, openChatView: () => undefined, workspace: () => null });
+  const doc = dom.window.document;
+  await vi.waitFor(() => expect(doc.querySelector<HTMLElement>('[data-module-page="module-opencode"]')?.hidden).toBe(false));
+  const expected: Record<string, string> = { opencode: 'cm-glyph-opencode', codex: 'cm-glyph-codex', claude: 'cm-glyph-spark', zeroclaw: 'cm-glyph-claw' };
+  for (const id of modules) {
+    const nav = doc.querySelector<HTMLElement>(`[data-module-page="module-${id}"]`)!;
+    const mark = nav.querySelector<HTMLElement>('.module-mark')!;
+    expect(mark.dataset.module, id).toBe(id);
+    expect(mark.classList.contains(expected[id]!), id).toBe(true);
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(nav.getAttribute('aria-label')).toBe({ opencode: 'OpenCode', codex: 'Codex', claude: 'Claude', zeroclaw: 'ZeroClaw' }[id]);
+    expect(doc.querySelector(`[data-cli-module="${id}"] h2 .module-mark.${expected[id]}`), id).not.toBeNull();
+    expect(doc.querySelector(`[data-panel="module-${id}"] h1 .module-mark.${expected[id]}`), id).not.toBeNull();
+  }
+});

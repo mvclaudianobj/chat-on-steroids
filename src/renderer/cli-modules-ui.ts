@@ -3,8 +3,7 @@ import type { CliSession } from '../main/cli-modules.js';
 import { createWorkspaceTerminal, type TerminalTransport } from './workspace-terminal.js';
 import { openRowMenu, type RowMenuItem } from './row-menu.js';
 import { t, ui } from './i18n.js';
-import { chatTypeIcon, chatTypeMark } from './chat-types.js';
-import { icon } from './dom.js';
+import { chatTypeIcon, chatTypeMark, moduleMark } from './chat-types.js';
 import { createUpstreamManageUi, type UpstreamManageUi } from './upstream-manage-ui.js';
 import type { CliModuleStatus } from '../main/cli-modules.js';
 
@@ -59,15 +58,16 @@ export function createCliModulesUi(api: AppApi, hooks: {
     const name = NAMES[id];
     const navigation = document.createElement('button');
     navigation.type = 'button'; navigation.className = 'modules-subnav'; navigation.dataset.modulePage = `module-${id}`;
-    navigation.textContent = name; navigation.hidden = true;
+    navigation.setAttribute('aria-label', name); navigation.translate = false;
+    // Every module's management entry shows its own icon, like CLIProxyAPI's plug.
+    navigation.append(moduleMark(id), text('span', name)); navigation.hidden = true;
     tabs.insertBefore(navigation, nav.nextSibling);
     const row = document.createElement('section'); row.className = 'appearance-section';
     row.dataset.cliModule = id;
     // Retired forks stay out of sight unless still active or running (refresh below).
     row.hidden = LEGACY.has(id);
     const title = text('h2', name);
-    if (id === 'opencode') title.prepend(chatTypeMark('opencode', 'module-mark'));
-    if (id === 'zeroclaw') title.prepend(icon('i-module-zeroclaw', 'ico chat-type-icon module-mark'));
+    title.prepend(moduleMark(id));
     row.append(title);
     const surface = document.createElement('div'); surface.className = 'settings-surface modules-service';
     const enableLabel = document.createElement('label'); enableLabel.className = 'setting modules-toggle';
@@ -96,7 +96,9 @@ export function createCliModulesUi(api: AppApi, hooks: {
     const panel = document.createElement('section'); panel.className = 'panel appearance-panel modules-panel scroll';
     panel.dataset.panel = `module-${id}`;
     const content = document.createElement('div'); content.className = 'appearance-content settings-page-content';
-    content.append(text('h1', name));
+    const pageTitle = text('h1', name);
+    pageTitle.prepend(moduleMark(id));
+    content.append(pageTitle);
     const project = document.createElement('select'); project.className = 'btn'; project.setAttribute('aria-label', 'Workspace');
     const create = document.createElement('button'); create.className = 'btn'; create.textContent = 'Open / reconnect terminal';
     create.addEventListener('click', () => void createSession(id, project.value || hooks.workspace()));

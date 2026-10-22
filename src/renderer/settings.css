@@ -73,7 +73,9 @@
    its header, at the size of the row's other marks and in their quiet colour. */
 .api-chat-label > .chat-type-icon { --ico: 14px; --glyph: 14px; }
 /* A module card heading leads with its project mark (OpenCode) or line icon (ZeroClaw). */
-h2 > .ico.cm-glyph.module-mark { width: 18px; height: 18px; margin: 0 8px 0 0; vertical-align: -2px; }
+h1 > .ico.module-mark, h2 > .ico.module-mark { width: 18px; height: 18px; margin: 0 8px 0 0; vertical-align: -2px; }
+h1 > .ico.module-mark { width: 22px; height: 22px; vertical-align: -3px; }
+.app[data-screen='settings'] #tabs .modules-subnav > .ico.module-mark { --ico: 16px; --glyph: 16px; }
 .chat-head > .chat-head-type { --ico: 15px; --glyph: 15px; flex: none; color: var(--soft); }
 .sess-top > .sess-type { --ico: 15px; --glyph: 15px; color: var(--faint); }
 .sess:is(:hover, .is-pointed, .is-sel) .sess-top > .sess-type { color: var(--soft); }

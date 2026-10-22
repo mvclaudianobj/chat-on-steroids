@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
 import { afterAll, beforeAll, expect, it } from 'vitest';
 import { AGENT_ENGINE_IDS } from '../src/shared/agent-engine.js';
-import { chatTypeIcon, chatTypeMark, chatTypeOf, type ChatType } from '../src/renderer/chat-types.js';
+import { chatTypeIcon, chatTypeMark, chatTypeOf, moduleIcon, moduleMark, type ChatType } from '../src/renderer/chat-types.js';
 
 const read = (path: string) => readFileSync(new URL(path, import.meta.url), 'utf8');
 const vocabulary = new Map([...read('../src/renderer/dom.ts').matchAll(/'(i-[a-z0-9-]+)': '([^']+)'/g)].map(match => [match[1]!, match[2]!]));
@@ -15,12 +15,15 @@ afterAll(() => { Object.assign(globalThis, { document: old }); });
 
 /** Engines drawn with their project's own simple mark (licence permitting) instead of a line drawing. */
 const PROJECT_MARKS = new Set(['opencode']);
+/** Engines drawn with the Phosphor glyph their Settings entry already shows. */
+const PHOSPHOR = new Map([['cliproxy', 'plug']]);
 
 it('gives every registered engine its own icon: a Chat Marks line glyph, or its project\'s own simple mark', () => {
   const icons = AGENT_ENGINE_IDS.map(chatTypeIcon);
   expect(new Set(icons).size).toBe(AGENT_ENGINE_IDS.length);
   for (const [index, id] of AGENT_ENGINE_IDS.entries()) {
     const glyph = vocabulary.get(icons[index]!);
+    if (PHOSPHOR.has(id)) { expect(glyph, id).toBe(PHOSPHOR.get(id)); continue; }
     expect(glyph, id).toMatch(/^cm:[a-z]+$/);
     // A line drawing in the shared stroke, painted through a mask in currentColor (no fixed colour).
     const rule = new RegExp(String.raw`\.cm-glyph-${glyph!.slice(3)} \{[^}]*mask-image: url\("data:image/svg\+xml,([^"]+)"\)`).exec(iconsCss);
@@ -59,4 +62,30 @@ it('marks the icon decorative, so the chat\'s title or engine name stays its lab
   expect(mark.textContent).toBe('');
   expect(mark.dataset.chatType).toBe('codex');
   expect(mark.className).toBe('ico chat-type-icon sess-type cm-glyph cm-glyph-codex');
+});
+
+it('draws CLIProxy with the plug everywhere, and every module\'s management entry with its own icon', () => {
+  expect(chatTypeIcon('cliproxy')).toBe('i-plug');
+  expect(vocabulary.get('i-plug')).toBe('plug');
+  // The routing-arrows drawing CLIProxy used before is gone.
+  expect(iconsCss).not.toContain('.cm-glyph-route');
+  expect([...vocabulary.values()]).not.toContain('cm:route');
+  // Settings: the CLIProxyAPI sub-nav item, its card and its page heading show the plug.
+  const html = read('../src/renderer/index.html');
+  for (const id of ['moduleCliNav', 'cliProxyTitle', 'moduleCliPageTitle']) {
+    expect(new RegExp(`id="${id}"[^>]*>\\s*<i class="ico ph ph-plug[^"]*"`).test(html), id).toBe(true);
+  }
+  // The modules' own entries use the same drawing as their chats; ZeroClaw and MarksClaw the claw.
+  expect(moduleIcon('opencode')).toBe(chatTypeIcon('opencode'));
+  expect(moduleIcon('codex')).toBe(chatTypeIcon('codex'));
+  expect(moduleIcon('claude')).toBe(chatTypeIcon('claude'));
+  expect(moduleIcon('markscode')).toBe(chatTypeIcon('markscode'));
+  expect(moduleIcon('cliproxy')).toBe('i-plug');
+  expect(moduleIcon('zeroclaw')).toBe('i-module-zeroclaw');
+  expect(moduleIcon('marksclaw')).toBe('i-module-zeroclaw');
+  expect(vocabulary.get('i-module-zeroclaw')).toBe('cm:claw');
+  const mark = moduleMark('zeroclaw');
+  expect(mark.getAttribute('aria-hidden')).toBe('true');
+  expect(mark.className).toContain('cm-glyph-claw');
+  expect(mark.dataset.module).toBe('zeroclaw');
 });

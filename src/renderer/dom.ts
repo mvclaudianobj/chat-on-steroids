@@ -34,7 +34,6 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-copy': 'copy',
   'i-dock-expand': 'corners-out',
   'i-engine-claude': 'cm:spark',
-  'i-engine-cliproxy': 'cm:route',
   'i-engine-codex': 'cm:codex',
   'i-engine-markscode': 'cm:code',
   'i-engine-opencode': 'cm:opencode',

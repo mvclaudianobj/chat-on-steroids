@@ -18,9 +18,10 @@ export type ChatType = 'chatgpt' | 'terminal' | 'api' | AgentEngineId;
 /**
  * One drawing per engine (icons.css `.cm-glyph-*`): a line drawing, or the project's own simple
  * mark when its licence allows it (OpenCode's MIT `mark.svg`); never a company's brand logo.
+ * CLIProxy is the plug its Settings item has always shown (Phosphor `plug`), wherever it appears.
  */
 const ENGINE_ICONS: Readonly<Record<AgentEngineId, string>> = {
-  cliproxy: 'i-engine-cliproxy',
+  cliproxy: 'i-plug',
   opencode: 'i-engine-opencode',
   markscode: 'i-engine-markscode',
   codex: 'i-engine-codex',
@@ -42,6 +43,24 @@ export function chatTypeIcon(type: ChatType): string {
 export function chatTypeOf(summary: { conversationId: string | null; engine?: AgentEngineId }): ChatType | null {
   if (isApiConversationId(summary.conversationId)) return summary.engine ?? 'api';
   return summary.conversationId ? 'chatgpt' : null;
+}
+
+/**
+ * A module's own icon in its management entries (the Settings sub-nav item, the Modules card and
+ * its page heading): the same drawing its chats and engine use. ZeroClaw (and the retired
+ * MarksClaw fork) draw the claw; CLIProxyAPI the plug.
+ */
+export type ManagedModuleId = 'cliproxy' | 'opencode' | 'codex' | 'claude' | 'zeroclaw' | 'markscode' | 'marksclaw';
+export function moduleIcon(id: ManagedModuleId): string {
+  if (id === 'zeroclaw' || id === 'marksclaw') return 'i-module-zeroclaw';
+  return ENGINE_ICONS[id];
+}
+
+/** The decorative icon element of a module's management entry. */
+export function moduleMark(id: ManagedModuleId, className = 'module-mark'): HTMLElement {
+  const node = icon(moduleIcon(id), `ico chat-type-icon ${className}`);
+  node.dataset.module = id;
+  return node;
 }
 
 /** The decorative icon element of a chat type. */

@@ -434,8 +434,8 @@ it('shows each chat type icon in New chat, the project menu, the Terminals list 
   const cli = createCliModulesUi(api, { showTab: vi.fn(), openChatView: () => undefined, workspace: () => null, newChatItems: chats.newChatItems });
   repaint = cli.repaintNewChat;
   await vi.waitFor(() => expect(chats.newChatItems()).toHaveLength(4));
-  expect(chats.newChatItems().map(item => item.icon)).toEqual(['i-engine-cliproxy', 'i-engine-opencode', 'i-engine-codex', 'i-engine-claude']);
-  expect(chats.projectChatItems('p').map(item => item.icon)).toEqual(['i-engine-cliproxy', 'i-engine-opencode', 'i-engine-codex', 'i-engine-claude']);
+  expect(chats.newChatItems().map(item => item.icon)).toEqual(['i-plug', 'i-engine-opencode', 'i-engine-codex', 'i-engine-claude']);
+  expect(chats.projectChatItems('p').map(item => item.icon)).toEqual(['i-plug', 'i-engine-opencode', 'i-engine-codex', 'i-engine-claude']);
   $('newChat').click();
   const chatgpt = await vi.waitFor(() => {
     const item = dom.window.document.querySelector<HTMLElement>('[data-row-action="new-chat-chatgpt"]');

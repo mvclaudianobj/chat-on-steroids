@@ -1443,14 +1443,19 @@ the engine label; a ChatGPT chat's fox before `#chatTitle`). One owner, `rendere
 `chatTypeIcon(type)` keyed by `chatgpt | terminal | api | <engine id>` (a `Record<AgentEngineId, …>`,
 so a new engine does not compile without its icon), `chatTypeOf(summary)` and `chatTypeMark`.
 Designs: ChatGPT = the app's fox (`browser-icons/cos.png` as a monochrome mask), terminal =
-`i-terminal`, Codex = a line hexagon around `>_`, Claude Code = a line spark, CLIProxy = one route
-splitting in two, OpenCode = the project's own mark, MarksCode (retired, read-only chats) = `</>`;
-`api` (a record this version cannot read) = `i-chat`. They are `cm:` entries in `dom.ts` ICONS
+`i-terminal`, Codex = a line hexagon around `>_`, Claude Code = a line spark, CLIProxy = Phosphor's
+`plug` (`i-plug`, the glyph its Settings item always had; the same everywhere CLIProxy appears),
+OpenCode = the project's own mark, MarksCode (retired, read-only chats) = `</>`;
+`api` (a record this version cannot read) = `i-chat`. The others are `cm:` entries in `dom.ts` ICONS
 drawn by icons.css `.cm-glyph-*`, painted in `currentColor` through a CSS mask (light and dark
 themes alike): line SVGs on Phosphor's 256 grid with its 16-unit round stroke, **or a project's
 own simple logo when its licence allows it** (OpenCode: `packages/identity/mark.svg`, MIT, the
 frame plus its inner square at 40% coverage). Never a company's brand logo or a fixed colour. The
-ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark). Icons are decorative (`aria-hidden`); the title or engine name stays
+ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark). Every
+module's management entry (the Settings sub-nav item, its Modules card heading and its page heading)
+shows the module's own icon (`chat-types.ts` `moduleIcon`/`moduleMark`: OpenCode mark, Codex
+hexagon, Claude spark, ZeroClaw and the retired MarksClaw claw, CLIProxyAPI plug; test
+`chat-types.test.ts`, `cli-chat-ui.test.ts`). Icons are decorative (`aria-hidden`); the title or engine name stays
 the text. The sidebar learns an API chat's engine from `SessionSummary.engine`, a read-time
 projection of the ledger (`agent-engine/ledger.ts` `withChatEngines`, applied by IPC
 `sessions:list` and `sessions:events`; never stored). Proof: `test/chat-types.test.ts` (every
