@@ -20,6 +20,8 @@ export interface RowMenuItem {
   icon?: string;
   /** A longer explanation, as the item's tooltip. */
   title?: () => string;
+  /** A second, smaller line under the label, e.g. why a disabled item cannot be used now. */
+  detail?: () => string;
   danger?: boolean;
   /** A choice among several (menuitemradio): whether it is the current one. */
   checked?: boolean;
@@ -195,7 +197,11 @@ function itemButton(item: RowMenuItem, menu: HTMLElement, depth: number): HTMLBu
   } else if (item.icon) button.append(icon(item.icon));
   else button.append(el('span', 'row-menu-gap'));
   const text = el('span', 'row-menu-label', item.label);
-  button.append(text);
+  if (item.detail) {
+    const lines = el('span', 'row-menu-lines');
+    lines.append(text, el('span', 'row-menu-detail', item.detail));
+    button.append(lines);
+  } else button.append(text);
   if (item.hint) {
     const hint = item.hint;
     const value = el('span', 'row-menu-hint', hint);

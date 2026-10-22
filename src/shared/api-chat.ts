@@ -56,6 +56,11 @@ export interface ApiChatModel {
   favorite: boolean;
   recent: boolean;
   availability: ApiModelAvailability | null;
+  /** A CLI engine's display name for the model, when it has one (Codex `displayName`). */
+  label?: string;
+  /** A CLI engine's own reasoning efforts for this model, as it lists them (Codex `supportedReasoningEfforts`). */
+  efforts?: string[];
+  defaultEffort?: string;
 }
 
 export interface ApiChatSettings {

@@ -7,7 +7,7 @@ import { createInterface } from 'node:readline';
 const log = (entry) => { if (process.env.FAKE_CLAUDE_LOG) appendFileSync(process.env.FAKE_CLAUDE_LOG, `${JSON.stringify({ pid: process.pid, ...entry })}\n`); };
 const out = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 const argv = process.argv.slice(2);
-log({ argv, cwd: process.cwd() });
+log({ argv, cwd: process.cwd(), background: process.env.CLAUDE_CODE_DISABLE_BACKGROUND_TASKS ?? null, cron: process.env.CLAUDE_CODE_DISABLE_CRON ?? null });
 
 const flag = (name) => argv.find(item => item.startsWith(`${name}=`))?.slice(name.length + 1) ?? null;
 const sessionId = flag('--resume') ?? flag('--session-id');
@@ -54,6 +54,17 @@ async function play(text) {
     toolResult('toolu_read', '# App');
     delta('Fixed.');
     assistant([{ type: 'text', text: 'Fixed the sign.' }]);
+    result();
+    return;
+  }
+  if (text === 'agent') {
+    // Claude Code's Agent result: the hand-back frame, the indented report, then the id and usage trailer.
+    assistant([{ type: 'tool_use', id: 'toolu_agent', name: 'Agent', input: { description: 'Map the tests', prompt: 'List the test files.', subagent_type: 'Explore' } }]);
+    toolResult('toolu_agent', [
+      { type: 'text', text: '[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:\n  Found 2 test files:\n  - test/a.test.ts\n  - test/b.test.ts' },
+      { type: 'text', text: 'agentId: a0b1c2d3e4f5 (internal ID - do not mention to user.)\n<usage>total_tokens: 900\ntool_uses: 3\nduration_ms: 4200</usage>' }
+    ]);
+    assistant([{ type: 'text', text: 'There are two test files.' }]);
     result();
     return;
   }

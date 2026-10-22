@@ -15428,7 +15428,7 @@ describe('the Compact & resume control', () => {
     const label = live.document.querySelector('.clf-blocked') as HTMLElement;
     expect(label.hidden).toBe(false);
     expect(label.textContent).toBe('Chat blocked');
-    expect(label.getAttribute('data-clf-tip')).toMatch(/hover this chat in the sessions list and press its block symbol/);
+    expect(label.getAttribute('data-clf-tip')).toMatch(/open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”/);
 
     // Released in the app: the next poll takes the word away.
     blocked = '';
@@ -24202,8 +24202,14 @@ describe('archiving a retired worker chat', () => {
         body: JSON.stringify({ is_archived: true }) }
     ]);
 
+    // Restoring it before its worker is woken (#1701) is the same request, the other way round.
+    calls.length = 0;
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat, archive: false })).toEqual({ outcome: 'unarchived' });
+    expect(calls[1]).toMatchObject({ url: `https://chatgpt.com/backend-api/conversation/${chat}`, method: 'PATCH', body: JSON.stringify({ is_archived: false }) });
+
     patchStatus = 429;
     expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat })).toEqual({ outcome: 'failed' });
+    expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: chat, archive: false })).toEqual({ outcome: 'failed' });
     calls.length = 0;
     expect(await live.runtimeMessage({ type: 'clf-archive-chat', conversationId: '../conversations' })).toEqual({ outcome: 'failed' });
     expect(calls).toEqual([]);

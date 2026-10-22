@@ -17,6 +17,8 @@ const codepoints = (css: string, family: string) => new Map([...css.matchAll(
 function drawnGlyphs(): Set<string> {
   const glyphs = new Set<string>();
   for (const value of vocabulary.values()) {
+    // Chat Marks drawings (`cm:`) are CSS masks, not font glyphs (test/chat-types.test.ts).
+    if (value.startsWith('cm:')) continue;
     glyphs.add(value.startsWith('fill:') ? `ph-fill:${value.slice(5)}` : `ph:${value.split(' ')[0]}`);
   }
   // Every page, not only the main window: the CoS browser's toolbar and sign-in card draw glyphs

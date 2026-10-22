@@ -3,13 +3,14 @@
  * only. Chat actions go through the agent-engine registry: a new chat names its engine
  * (default `cliproxy`), every other chat action is routed by the chat's ledger record.
  */
-import { ipcMain, type BrowserWindow } from 'electron';
+import { app, ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { markspanelAccessBlocked } from '../markspanel-auth.js';
 import { logWarn } from '../logger.js';
 import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS } from '../../shared/api-chat.js';
 import { AGENT_ENGINE_IDS, DEFAULT_AGENT_ENGINE } from '../../shared/agent-engine.js';
 import { agentEngine, createAgentChat, engineForChat, listAgentEngines, recoverAgentEngines } from '../agent-engine/registry.js';
+import { shutdownOpenCodeEngine } from '../agent-engine/opencode.js';
 import { ApiChatHttpError, streamCompletion } from './client.js';
 import { MAX_API_CHAT_INPUT_CHARS } from './executor.js';
 import {
@@ -39,10 +40,12 @@ const request = z.discriminatedUnion('action', [
   }).strict(),
   z.object({ action: z.literal('test'), model: modelId.optional() }).strict(),
   z.object({ action: z.literal('createChat'), projectId: z.string().uuid().nullable().optional(), model: modelId.optional(), engine: engine.optional() }).strict(),
-  z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS) }).strict(),
+  // `takeBackTerminal`: the user chose "Close the terminal and continue here" (Claude Code hand-over).
+  z.object({ action: z.literal('send'), sessionId, text: z.string().min(1).max(MAX_API_CHAT_INPUT_CHARS), takeBackTerminal: z.literal(true).optional() }).strict(),
   z.object({ action: z.literal('stop'), sessionId }).strict(),
   z.object({ action: z.literal('chatSettings'), sessionId }).strict(),
-  // Agent engines: open the chat's backend session in its module terminal (Claude Code hands over).
+  // Agent engines: open the chat's backend session in its module terminal (Codex and OpenCode
+  // attach live, Claude Code hands over).
   z.object({ action: z.literal('terminal'), sessionId }).strict(),
   z.object({
     action: z.literal('setChatSettings'), sessionId, model: modelId.optional(), effort: z.enum(API_CHAT_EFFORTS).nullable().optional(),
@@ -94,7 +97,11 @@ export async function chatAction(input: z.infer<typeof request>): Promise<unknow
     }
     case 'createChat': return createAgentChat(input.engine ?? DEFAULT_AGENT_ENGINE, { projectId: input.projectId ?? null, ...(input.model ? { model: input.model } : {}) });
     // The turn streams on in main; the renderer follows it through session change notices.
-    case 'send': return { turnId: (await (await engineForChat(input.sessionId)).send(input.sessionId, input.text)).turnId };
+    case 'send': {
+      const owner = await engineForChat(input.sessionId);
+      const sent = input.takeBackTerminal ? await owner.send(input.sessionId, input.text, { takeBackTerminal: true }) : await owner.send(input.sessionId, input.text);
+      return { turnId: sent.turnId };
+    }
     case 'stop': return { stopped: await (await engineForChat(input.sessionId)).stop(input.sessionId) };
     case 'chatSettings': return (await engineForChat(input.sessionId)).view(input.sessionId);
     case 'terminal': {
@@ -117,6 +124,8 @@ export const parseApiChatRequest = (payload: unknown): z.infer<typeof request> =
 export function registerApiChatIpc(getWindow: () => BrowserWindow | null): void {
   // Turns the previous run left open are closed as interrupted before any new one starts.
   void recoverAgentEngines().catch(error => logWarn(`API chat recovery failed: ${(error as Error).message}`));
+  // Quit closes OpenCode event streams; its background service keeps running (opencode/service.ts).
+  app.on('before-quit', shutdownOpenCodeEngine);
   ipcMain.handle('marksApiChat:request', async (event, payload: unknown) => {
     try {
       if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');

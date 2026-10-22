@@ -2,6 +2,7 @@ import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from
 import { completedDilText } from '../shared/dil-tables.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
+import { initChatCycle } from './chat-cycle.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { showMarksProjectDockPicker } from './marks-project-dock.js';
@@ -11,7 +12,7 @@ import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
-import { AGENT_STATE_WORDS, createAgentPanel, workerName } from './agent-panel.js';
+import { AGENT_STATE_WORDS, createAgentPanel, workerName, workerSlotLimit } from './agent-panel.js';
 import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
@@ -30,7 +31,7 @@ import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
 import { chatErrorPresentation, duplicateChatErrors } from './chat-error.js';
 import { renderRecoveryCountdowns } from './recovery.js';
-import type { RecoveryCountdown } from '../shared/recovery.js';
+import { CUSTOM_CONTINUE_MAX_CHARS, type RecoveryCountdown } from '../shared/recovery.js';
 import { communicationTitle, foldAgentCommunication, participatingWorkers, workerAvatar } from './agent-communication.js';
 import { structureTimeline, type RoundPart } from './timeline-rounds.js';
 import type { TurnTrace } from '../shared/turn-trace.js';
@@ -38,6 +39,7 @@ import { initContextMeter, paintContextMeter } from './context-meter.js';
 import { installComposerDockMotion, installComposerHeightMotion } from './composer-motion.js';
 import { sanitizeHtmlTree } from './sanitize-html.js';
 import { drawMath, mathExtensions, separateDisplayMath, type MathSlots } from './math.js';
+import { installFormulaMenu } from './formula-menu.js';
 import { DEFAULT_HELPER_CHAT_MODEL, isAstraModel } from '../shared/chat-models.js';
 import { supportsFinishAutomation } from '../shared/finish.js';
 import { answerAnchors, messageAnswerAnchors } from '../shared/markdown-export.js';
@@ -84,6 +86,8 @@ import {
 import { chronological, positionOf, residenceOf } from '../shared/chronology.js';
 import { recentChatActivity, sessionWorkingAt, workerReportedFinish } from '../shared/session-activity.js';
 import { isApiConversationId } from '../shared/api-chat.js'; // Chat Marks: API chats (renderer/api-chat-ui.ts)
+import { AGENT_ENGINE_LABELS, type AgentEngineId } from '../shared/agent-engine.js'; // Chat Marks: engine tool rows name their engine
+import { chatTypeIcon, chatTypeMark, chatTypeOf } from './chat-types.js'; // Chat Marks: chat type icons
 import {
   DEFAULT_GOAL_MODEL,
   DEFAULT_GOAL_LOOP_SYSTEM_PROMPT,
@@ -95,6 +99,7 @@ import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HA
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
@@ -202,7 +207,8 @@ function projectMenuItems(id: string): RowMenuItem[] {
   } satisfies RowMenuItem : null;
   return [
     {
-      action: 'new-chat', icon: 'i-pencil', label: () => t('New chat in this project'), data: { newProject: id },
+      // Chat Marks: a ChatGPT chat, so the ChatGPT chat type icon beside the engines' own.
+      action: 'new-chat', icon: chatTypeIcon('chatgpt'), label: () => t('New chat in this project'), data: { newProject: id },
       run: () => selectNewChat(id)
     } satisfies RowMenuItem,
     // Chat Marks: a CLIProxy chat that belongs to this project.
@@ -379,7 +385,7 @@ function ownsComposerDraft(owner: ComposerDraftOwner): boolean {
   return owner.key === draftKey() && owner.generation === composerDraftGeneration;
 }
 function replaceComposerDraft(): void {
-  retireDictation(); composerDraftGeneration++; skillPicker?.close();
+  retireDictation(); composerDraftGeneration++; skillPicker?.close(); disarmEscapeStop();
   // A recall ends here too; the same message recalled next must change the live region to be read.
   $('recallAnnounce').textContent = '';
 }
@@ -445,6 +451,21 @@ let dictationPhase: 'idle' | 'starting' | 'listening' | 'stopping' | 'error' = '
 let dictationNotice = '';
 let writingDictation = false;
 let dictationStopGuard: number | null = null;
+// Hold-to-talk: Ctrl+Shift+Space held in the composer records; letting go stops it the way the
+// microphone button does, so the phrase in progress is kept and nothing is sent.
+let heldDictation: DictationSession | null = null;
+
+/**
+ * Only Windows gets the chord, and only Windows names it. There Ctrl+Space toggles Chinese IMEs,
+ * Shift+Space switches their character width and Alt+Space opens the window menu, while
+ * Ctrl+Shift+Space is no Windows or IME default (pressing Space cancels a Ctrl+Shift layout switch,
+ * as with the docks' Ctrl+Shift+1–4). macOS owns Ctrl+Space, Ctrl+Option+Space, Cmd+Space and
+ * Ctrl+Cmd+Space, and IBus/Fcitx own Super+Space and Ctrl+Space on Linux; dictation is Windows-only
+ * today, so those platforms would need their own pick.
+ */
+function holdToTalkSupported(): boolean {
+  return /^Win/.test(navigator.platform);
+}
 
 function clearDictationStopGuard(): void {
   if (dictationStopGuard === null) return;
@@ -470,12 +491,16 @@ function guardDictationStop(): void {
   }, 5_500);
 }
 
+function dictationAvailable(): boolean {
+  return dictationBridge.dictationSupported === true &&
+    typeof dictationBridge.startDictation === 'function' &&
+    typeof dictationBridge.stopDictation === 'function' && typeof dictationBridge.onDictationEvent === 'function';
+}
+
 function paintDictation(): void {
   const button = $<HTMLButtonElement>('dictationButton');
   const status = $('dictationStatus');
-  const available = dictationBridge.dictationSupported === true &&
-    typeof dictationBridge.startDictation === 'function' &&
-    typeof dictationBridge.stopDictation === 'function' && typeof dictationBridge.onDictationEvent === 'function';
+  const available = dictationAvailable();
   button.hidden = !available;
   const active = dictationPhase === 'starting' || dictationPhase === 'listening' || dictationPhase === 'stopping';
   const label = !available ? 'Dictation unavailable' : dictationPhase === 'starting' ? 'Cancel dictation' :
@@ -485,7 +510,8 @@ function paintDictation(): void {
   button.dataset.state = dictationPhase;
   button.setAttribute('aria-pressed', String(active));
   button.setAttribute('aria-label', t(label));
-  button.title = t(label);
+  button.title = available && holdToTalkSupported() && (dictationPhase === 'idle' || dictationPhase === 'error')
+    ? `${t(label)} (${t('hold {0}', [`${t('Ctrl')}+${t('Shift')}+${t('Space')}`])})` : t(label);
   // Native Windows errors remain verbatim; known UI labels/statuses use the
   // existing locale catalog with English fallback until translations are merged.
   status.textContent = dictationNotice ? t(dictationNotice) : '';
@@ -665,9 +691,32 @@ export function initComposerDictation(): void {
   paintDictation();
   $<HTMLButtonElement>('dictationButton').addEventListener('click', () => { void toggleDictation(); });
   $('chatInput').addEventListener('input', () => { if (!writingDictation && dictation) retireDictation(); });
+  // Letting go of Ctrl or Shift first leaves Space auto-repeating without them. Those presses would
+  // type spaces, and as an edit drop the phrase the recognizer is still finishing.
+  let spaceStillHeld = false;
   $('chatInput').addEventListener('keydown', event => {
     if (event.key === 'Escape' && dictation) { event.preventDefault(); retireDictation(); }
+    if (spaceStillHeld && event.code === 'Space') { event.preventDefault(); return; }
+    if (event.code !== 'Space' || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey ||
+      event.isComposing || !holdToTalkSupported() || !dictationAvailable()) return;
+    event.preventDefault();
+    spaceStillHeld = true;
+    // Auto-repeat while held is the same press. A press during a clicked-on session stops it.
+    if (event.repeat || dictation && dictation === heldDictation) return;
+    const running = dictation;
+    void toggleDictation();
+    heldDictation = running ? null : dictation;
   });
+  const releaseHeld = (): void => {
+    const session = heldDictation;
+    heldDictation = null;
+    if (session && dictation === session && !session.stopping) void toggleDictation();
+  };
+  window.addEventListener('keyup', event => {
+    if (event.code === 'Space') spaceStillHeld = false;
+    if (heldDictation && (event.code === 'Space' || event.key === 'Control' || event.key === 'Shift')) releaseHeld();
+  }, true);
+  window.addEventListener('blur', () => { spaceStillHeld = false; releaseHeld(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) retireDictation(); });
   let unsubscribe: (() => void) | void;
   try { unsubscribe = dictationBridge.onDictationEvent?.(onDictationEvent); }
@@ -928,6 +977,9 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   top.tabIndex = 0;
   top.dataset.sessionSelect = '';
   top.dataset.sortHandle = '';
+  // Chat Marks: the chat's type (ChatGPT or its engine) before its title, in every layout.
+  const type = chatTypeOf(summary);
+  if (type) top.append(chatTypeMark(type, 'sess-type'));
   if (renaming?.id === summary.id) top.append(renameField(summary));
   else {
     const title = el('b', '', () => shownSessionTitle(summary)); title.dir = 'auto';
@@ -1107,9 +1159,11 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
 
 /** Slash commands that act on the open chat; New Chat does not offer them. */
-const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact']);
+const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find']);
 /** The commands that switch how the next message is sent; their rest is that message. */
 const MODE_COMMANDS = new Set(['plan', 'goal', 'loop']);
+/** The draft a typed /image is being sent from (#1701): that one message asks for a picture. */
+let pictureRequestFor: string | null = null;
 
 /** What a slash command does, picked from the composer menu or typed at the start of a message. */
 function runComposerCommand(name: string): void {
@@ -1129,23 +1183,36 @@ function runComposerCommand(name: string): void {
  * menu, unless a Skill has the name. Plan, Goal and Loop then send the rest the way their mode does;
  * any other command runs and leaves the rest in the composer.
  */
-async function sendTypedCommand(controlAction: boolean): Promise<void> {
+async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'after-turn'): Promise<void> {
   const input = $<HTMLTextAreaElement>('chatInput');
   const typed = /^\s*\/([a-z][a-z-]*)(?=\s|$)/i.exec(input.value);
   const name = typed?.[1]!.toLowerCase();
   const known = name && APP_COMMANDS.some(row => row.command === name) && (!CHAT_COMMANDS.has(name) || openChatSummary() !== null);
+  const selection = selectionGeneration, draft = input.value;
   const library = known ? await run(api.skillLibrary({ sessionId: selectedId, projectId: selectedLocalProject()?.id ?? selectedProjectId })) : null;
+  // Another chat opened or the draft changed while the Skills loaded: this command was typed for neither.
+  if (known && (selection !== selectionGeneration || input.value !== draft)) return;
   if (!typed || !known || !library || library.skills.some(skill => skill.id === name)) {
     if (taskPlans.has(draftKey())) { if (!$('createPlan').dataset.busy) void createTaskPlan(deps.state()?.config.ui.planBackend ?? 'chatgpt'); }
-    else void sendComposer(undefined, undefined, undefined, controlAction);
+    else void sendComposer(delivery, undefined, undefined, controlAction);
     return;
   }
   const rest = input.value.slice(typed[0].length).replace(/^\s+/, '');
   input.value = rest;
   input.dispatchEvent(new Event('input', { bubbles: true }));
   // The menu's Plan is a toggle; a typed /plan only arms, so an armed Plan stays armed.
+  if (name === 'image') {
+    // The rest is the picture request; a bare /image waits for one.
+    if (!rest.trim()) { input.value = '/image '; input.dispatchEvent(new Event('input', { bubbles: true })); return; }
+    pictureRequestFor = draftKey();
+    void sendComposer(delivery, undefined, undefined, controlAction);
+    return;
+  }
   if (name !== 'plan' || !taskPlans.has(draftKey())) runComposerCommand(name);
-  if (MODE_COMMANDS.has(name) && rest.trim()) $<HTMLFormElement>('composer').requestSubmit();
+  if (!MODE_COMMANDS.has(name) || !rest.trim()) return;
+  // Cmd/Ctrl+Shift+Enter's other way reaches the rest too; a typed /plan drafts the plan as Enter does.
+  if (delivery && name !== 'plan') void sendComposer(delivery);
+  else $<HTMLFormElement>('composer').requestSubmit();
 }
 function openChatSummary(): SessionSummary | null {
   return selectedId === null ? null : sessions.find(row => row.id === selectedId) ?? null;
@@ -1175,6 +1242,14 @@ function runSlashCommand(name: string): void {
     menu.querySelector<HTMLElement>('summary')?.focus();
   });
   else if (name === 'new') $('newChat').click();
+  else if (name === 'image') {
+    // In front of the draft, for the person to finish: sent, it asks ChatGPT for a picture.
+    const input = $<HTMLTextAreaElement>('chatInput');
+    input.value = `/image ${input.value.replace(/^\s+/, '')}`;
+    input.setSelectionRange(input.value.length, input.value.length);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  }
   else if (name === 'rename' && chat) startRename(chat);
   else if (name === 'pin' && chat && pinnable(chat)) {
     sidebarPins?.toggle(chat.id);
@@ -1188,6 +1263,11 @@ function runSlashCommand(name: string): void {
   else if (name === 'feedback') openSettingsTab('activity');
   else if (name === 'plugins') $('sidebarPlugins').click();
   else if (name === 'pet') $('sidebarPets').click();
+  else if (name === 'copy' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'latest', target: 'clipboard' }))
+    .then(result => { if (result?.done === 'copied') toast(t('Answer copied')); });
+  else if (name === 'export' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'session', target: 'file' }))
+    .then(result => { if (result?.done === 'saved') toast(t('Saved {0}', [result.name])); });
+  else if (name === 'find' && chat) afterClick(() => chatFind?.open());
 }
 
 function startRename(summary: SessionSummary): void {
@@ -1920,6 +2000,18 @@ function workerGroup(key: string, workers: SessionSummary[], parentRow: HTMLElem
   button.setAttribute('type', 'button'); button.setAttribute('aria-expanded', String(expandedWorkers.has(key)));
   button.addEventListener('click', (event) => { event.stopPropagation(); expandedWorkers.has(key) ? expandedWorkers.delete(key) : expandedWorkers.add(key); paintSessions(); });
   if (parentRow) { parentRow.append(button); parentRow.title += ` · ${button.title}`; } else target.push(button);
+  // Folded away, a sub-agent that needs the person (an approval card, a block, a failure) marks the
+  // chat itself, over its own spinner: needing someone outranks working, as in the Inbox's order.
+  const needing = workers.filter(worker => workerState(worker) === 'attention').length;
+  const top = parentRow?.querySelector<HTMLElement>('.sess-top');
+  if (needing && top && !expandedWorkers.has(key)) {
+    const label = () => tn('{0} sub-agent needs attention', '{0} sub-agents need attention', needing);
+    const mark = el('span', 'session-status is-failed');
+    ui(mark, 'title', label); ui(mark, 'aria-label', label);
+    const own = top.querySelector('.session-status');
+    if (own) own.replaceWith(mark); else top.append(mark);
+    parentRow!.title += ` · ${label()}`;
+  }
   if (expandedWorkers.has(key)) { const box = el('div', 'worker-group'); box.append(...workers.map(sessionRow)); target.push(box); }
 }
 
@@ -2321,6 +2413,42 @@ function recallPrompt(event: KeyboardEvent): boolean {
   recall = next ? { generation: selectionGeneration, draft: composerDraftGeneration, prompts, back: next, text } : null;
   // A screen reader doesn't read a value set by script, so the recalled message is announced.
   $('recallAnnounce').textContent = text;
+  return true;
+}
+
+/** How long after a first Esc a second one stops the turn. */
+const ESCAPE_STOP_MS = 1500;
+let escapeStop: { generation: number; turnId: string; at: number; timer: number } | null = null;
+function disarmEscapeStop(): void {
+  if (!escapeStop) return;
+  window.clearTimeout(escapeStop.timer);
+  escapeStop = null;
+  const status = $('composerStatus');
+  if (status.textContent === t('Press Esc again to stop the turn')) status.textContent = '';
+}
+/**
+ * Esc twice in an empty composer stops the running turn, as the Stop button does. The first press
+ * only says so under the composer: one stray Esc must not end a long Goal run. A held key, modifiers,
+ * IME composition and an Esc another control took (dictation, the slash menu) don't count.
+ */
+function escapeStopsTurn(event: KeyboardEvent): boolean {
+  if (event.key !== 'Escape') return false;
+  const send = $<HTMLButtonElement>('chatSend');
+  const running = selectedId !== null && controlledSessionId === selectedId && controlledSelection === selectionGeneration && controlledTurnId !== null;
+  // A held key repeats: it neither counts as the second press nor disarms the first.
+  if (event.repeat) return false;
+  if (event.defaultPrevented || event.isComposing || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey ||
+    !running || !controlledTurnId || controlledStopPending || send.dataset.action !== 'stop') { disarmEscapeStop(); return false; }
+  event.preventDefault();
+  const now = performance.now();
+  // Only the turn the first press was for: a new turn started meanwhile needs its own two presses.
+  const second = escapeStop?.generation === selectionGeneration && escapeStop.turnId === controlledTurnId && now - escapeStop.at <= ESCAPE_STOP_MS;
+  disarmEscapeStop();
+  // Stop exactly the turn both presses were for, as the button's Stop does; not through the form,
+  // where an armed Plan would take the submission, and with no refresh that could swap the turn.
+  if (second) { void stopCurrentTurn(); return true; }
+  escapeStop = { generation: selectionGeneration, turnId: controlledTurnId, at: now, timer: window.setTimeout(disarmEscapeStop, ESCAPE_STOP_MS) };
+  $('composerStatus').textContent = t('Press Esc again to stop the turn');
   return true;
 }
 
@@ -4294,7 +4422,10 @@ function appendToolOutput(box: HTMLDetailsElement, { call }: Extract<SessionEven
   };
   const facts = el('p', 'raw-facts');
   ui(facts, 'textContent', () => `${call.tool} · ${call.outcome} · ${Math.round(call.durationMs)} ms · ` +
-    t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution]));
+    // Chat Marks: a CLI engine's own tool says which engine ran it, in the user's words.
+    (call.attribution === 'engine' && call.engine && AGENT_ENGINE_LABELS[call.engine]
+      ? t("by {0} in this chat", [AGENT_ENGINE_LABELS[call.engine]])
+      : t("placed by {0}", [ATTRIBUTION_LABELS[call.attribution] ?? call.attribution])));
   raw.append(facts);
 
   const ownerId = context?.id ?? selectedId, generation = selectionGeneration;
@@ -4395,6 +4526,14 @@ function approvalRowText(text: string): string {
   // The recorded English stays as it was written; since 2.1.38 the row offers the answer itself.
   if (text === APPROVAL_WAITING_TEXT) return t('ChatGPT is waiting for you to allow or deny a tool call in this chat. Nothing continues until you answer it, here or in the browser.');
   if (text === APPROVAL_ANSWERED_TEXT) return t('The tool approval ChatGPT asked for in this chat was answered.');
+  return text;
+}
+
+/** A strict-trust notice in the interface language; older wordings stay as recorded. Literal keys for the catalog audit. */
+function trustNoticeText(text: string): string {
+  if (text === UNTRUSTED_NOTICE) return t("A tool call from an untrusted chat was refused. To allow it, open this chat's ⋯ menu in the sidebar (or right-click its row) and choose Trust chat.");
+  if (text === UNTRUSTED_WORKER_NOTICE) return t("A tool call from a worker whose main chat is not currently allowed was refused. Open that main chat's ⋯ menu in the sidebar and choose Trust chat if it is untrusted, or Release chat if it is blocked.");
+  if (text === UNPROVEN_WORKER_NOTICE) return t("A tool call from an app-created worker was refused because the main chat that started it is not proven yet. Return to that main chat in the sidebar; once its row is there, open its ⋯ menu and choose Trust chat, or Release chat if it is blocked, then retry after the worker is attached or recovered there.");
   return text;
 }
 
@@ -4512,6 +4651,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       return box;
     }
     case 'progress': {
+      if (event.progressId?.startsWith(STRICT_REFUSAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', () => trustNoticeText(event.message.text));
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
       // writes the English source; only the user can answer the card, so the row opens the page.
@@ -6679,7 +6819,11 @@ export function chatSettingsPatch(current: Config): {
   mcp: Config['mcp'];
 } {
   const number = (id: string, fallback: number, min: number, max: number): number => {
-    const raw = Number($<HTMLInputElement>(id).value);
+    // An emptied field means no new value, not 0: Number('') is 0, and an emptied threshold was
+    // saved as its 10,000-token minimum.
+    const text = $<HTMLInputElement>(id).value.trim();
+    if (!text) return fallback;
+    const raw = Number(text);
     if (!Number.isFinite(raw)) return fallback;
     return Math.min(max, Math.max(min, Math.round(raw)));
   };
@@ -6971,6 +7115,19 @@ function wireGoal(save: () => Promise<void>): void {
     await save();
     toast('Handoff prompt restored to default');
   });
+  // Empty means the built-in phrases; main.ts owns the ui field it saves into.
+  $<HTMLTextAreaElement>('customContinue').maxLength = CUSTOM_CONTINUE_MAX_CHARS;
+  $('customContinueEdit').addEventListener('click', () => {
+    const panel = $('customContinuePanel');
+    panel.hidden = !panel.hidden;
+    ui($('customContinueEdit'), 'textContent', () => panel.hidden ? t('Edit prompt') : t('Close prompt'));
+    if (!panel.hidden) $<HTMLTextAreaElement>('customContinue').focus();
+  });
+  $('customContinueReset').addEventListener('click', async () => {
+    $<HTMLTextAreaElement>('customContinue').value = '';
+    await save();
+    toast(t('Continue prompt restored to default'));
+  });
   $<HTMLTextAreaElement>('goalPrompt').maxLength = MAX_GOAL_SYSTEM_PROMPT_CHARS;
   $('goalPromptEdit').addEventListener('click', () => {
     const panel = $('goalPromptPanel');
@@ -7112,7 +7269,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'cosBrowserMinimize', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'rotateTurnMinutes', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishLeadMinutes', 'rotateTurnMinutes', 'rotateStopFallback', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
@@ -7127,6 +7284,7 @@ const CHAT_INPUTS = [
   'endSleepingWorkerProcesses',
   'archiveWorkerChats',
   'autoContinue',
+  'customContinue',
   'goalProvider',
   'goalBaseUrl',
   'goalCustomModel',
@@ -7210,6 +7368,7 @@ export function chatApply(state: AppState, previous?: Config): void {
     String(config.multiAgent.globalMaxWorkers ?? 0),
     previous?.multiAgent.globalMaxWorkers
   );
+  if (previous && workerSlotLimit(previous.multiAgent) !== workerSlotLimit(config.multiAgent)) agentPanel?.refreshSlots();
   applyChatChecked(
     $<HTMLInputElement>('allowUnattributedCalls'),
     config.multiAgent.allowUnattributedCalls,
@@ -7726,6 +7885,9 @@ let composerDiscoveryGeneration = 0;
 async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: string[], planObjective?: string, controlAction = false): Promise<boolean | void> {
   const input = $<HTMLTextAreaElement>('chatInput');
   const key = draftKey();
+  // Taken by this send whatever happens next, so a send that stops early marks no later message.
+  const picture = pictureRequestFor === key;
+  pictureRequestFor = null;
   const projectId = selectedId ? sessions.find(row => row.id === selectedId)?.projectId ?? null : selectedProjectId;
   const images = imageDrafts.get(key) ?? [];
   const text = plan?.[0] ?? (authoredComposerText().trim() || (images.length ? 'Please look at the attached files.' : ''));
@@ -7814,7 +7976,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   void refreshInputQueue();
   paintDeliveryControls();
   try {
-    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(picture ? { imageRequest: true as const } : {}), ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
     if (cancelledStarts.has(id)) return;
     if (!result) {
       // A disk failure after outbox commit still owns this input. Keep its exact
@@ -7902,8 +8064,10 @@ function showView(name: string): void {
 }
 
 /** Chat Marks: the selected chat and selection by id, for Marks modules (renderer/api-chat-ui.ts). */
-export function selectedChatSession(): { id: string; conversationId: string | null } | null {
-  return selectedId ? { id: selectedId, conversationId: sessions.find(row => row.id === selectedId)?.conversationId ?? null } : null;
+export function selectedChatSession(): { id: string; conversationId: string | null; engine?: AgentEngineId } | null {
+  if (!selectedId) return null;
+  const row = sessions.find(entry => entry.id === selectedId);
+  return { id: selectedId, conversationId: row?.conversationId ?? null, ...(row?.engine ? { engine: row.engine } : {}) };
 }
 export async function selectChatSession(id: string): Promise<void> {
   // A list read begun before the chat existed would drop the selection; this read supersedes it.
@@ -8033,6 +8197,7 @@ export function initChat(next: Deps): void {
     loadActivity: async id => (await run(api.getSession(id, { limit: 400, actions: true })))?.events ?? null,
     openMain: selectSession, working: sessionWorking,
     modelLabel: chatModelName,
+    slotLimit: () => workerSlotLimit(deps.state()?.config.multiAgent),
     agent: worker => [...(swarm?.agents ?? []), ...(swarm?.retainedWorkers ?? [])].find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&
       !!entry.conversationId && entry.conversationId === worker.conversationId) ?? null,
     render: (source, id, current, outlines) => {
@@ -8381,7 +8546,10 @@ export function initChat(next: Deps): void {
     // A slash or @file menu on screen keeps its arrows, also while it loads, has no choices, or is
     // closed by this very key because the caret left its fragment.
     const menuShown = !!skillPicker?.open();
-    if (skillPicker?.keydown(event) || (!menuShown && recallPrompt(event))) return;
+    // Any key but Esc ends an armed Esc-to-stop, also one the menu or prompt recall takes.
+    if (event.key !== 'Escape') disarmEscapeStop();
+    if (skillPicker?.keydown(event)) { disarmEscapeStop(); return; }
+    if (!menuShown && (recallPrompt(event) || escapeStopsTurn(event))) return;
     // Codex's "Enter key behavior": Enter sends, or only Cmd/Ctrl+Enter does and Enter adds a line.
     const enterSends = deps.state()?.config.ui.enterSends !== false || event.metaKey || event.ctrlKey;
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && enterSends) { event.preventDefault(); if (currentPreparedPlan() || authoredComposerText().trim() || imageDrafts.get(draftKey())?.length) $<HTMLFormElement>('composer').requestSubmit(); }
@@ -8391,7 +8559,10 @@ export function initChat(next: Deps): void {
       if (!authoredComposerText().trim() && !imageDrafts.get(draftKey())?.length) return;
       if ($('sendOptions').hidden || currentPreparedPlan() || taskPlans.has(draftKey())) { $<HTMLFormElement>('composer').requestSubmit(); return; }
       retireDictation();
-      void sendComposer($<HTMLSelectElement>('sendMode').value === 'after-turn' ? 'auto' : 'after-turn');
+      const other = $<HTMLSelectElement>('sendMode').value === 'after-turn' ? 'auto' : 'after-turn';
+      // A leading app command runs as Enter would run it, not as a Skill directive.
+      if (/^\s*\/[a-z]/i.test($<HTMLTextAreaElement>('chatInput').value)) void sendTypedCommand(false, other);
+      else void sendComposer(other);
     }
   });
   $('composerSettings').addEventListener('toggle', paintTaskActions);
@@ -8556,6 +8727,7 @@ export function initChat(next: Deps): void {
     pendingNewInput = null;
     selectSession(row.dataset.id);
   });
+  initChatCycle($('sessionList'), () => selectedId);
   $('sessionList').closest<HTMLElement>('.scroll')?.addEventListener('scroll', maybePageSessions);
   // Prefetch the visible edge, retaining direction across collapsed batches.
   // Layout restoration alone never starts another history read.
@@ -8595,6 +8767,7 @@ export function initChat(next: Deps): void {
       lastHeight = height;
     }).observe(historyPane);
   }
+  installFormulaMenu($('timeline'));
   $('timeline').addEventListener('click', event => {
     // Disclosure changes deliberately change geometry. Padding retained for an
     // earlier reconciliation is not part of the collapsed headline's height.

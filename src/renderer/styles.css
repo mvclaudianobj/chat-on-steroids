@@ -465,6 +465,9 @@ code {
 .row-menu-item > .ico { --ico: 15px; flex: none; color: var(--soft); }
 .row-menu-item.is-danger, .row-menu-item.is-danger > .ico { color: var(--red); }
 .row-menu-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-menu-lines { display: grid; flex: 1; min-width: 0; gap: 1px; }
+.row-menu-detail { max-width: 300px; color: var(--faint); font-size: .86em; line-height: 1.3; white-space: normal; overflow-wrap: anywhere; }
+.row-menu-item:disabled:has(.row-menu-detail) { opacity: .72; }
 .row-menu-gap { flex: none; width: 15px; }
 .row-menu-item > .row-menu-chevron, .row-menu-item > .row-menu-check { --ico: 13px; margin-inline-start: auto; color: var(--faint); }
 .row-menu-separator { height: 1px; margin: 4px 6px; background: var(--line); }
@@ -2283,6 +2286,9 @@ textarea {
   font-family: ui-monospace, SFMono-Regular, Consolas, 'Liberation Mono', monospace;
   font-size: calc(12px * var(--text-scale, 1));
 }
+
+/* One instruction, not a whole prompt: a few lines are enough. */
+#customContinue { min-height: 88px; }
 
 input[readonly] {
   background: var(--sunk);

@@ -1,6 +1,7 @@
 /** Chat Marks CLIProxyAPI renderer integration. Optional UI, separate from the systemd service. */
 import type { AppApi } from '../preload/index.js';
 import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
+import type { AgentEngineId } from '../shared/agent-engine.js';
 import { $, toast } from './dom.js';
 import { t, onLanguageChange } from './i18n.js';
 import { createCliModulesUi, type CliModuleSummary } from './cli-modules-ui.js';
@@ -14,7 +15,7 @@ export interface MarksModulesUiHooks {
   openChatView(name: string): void;
   workspace(): string | null;
   /** The chat the timeline shows; API chats take over its composer. */
-  selectedChat?(): { id: string; conversationId: string | null } | null;
+  selectedChat?(): { id: string; conversationId: string | null; engine?: AgentEngineId } | null;
   /** Shows a session in the normal chat view. */
   selectChat?(id: string): void | Promise<void>;
 }
@@ -38,7 +39,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
   let repaintNewChat = (): void => undefined;
   let openCliSession = async (_id: string): Promise<void> => undefined;
   const apiChatChats = createApiChatUi(api, { ...hooks, openCliSession: id => openCliSession(id) }, () => repaintNewChat());
-  const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems });
+  const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems, onEngineService: () => void apiChatChats.refresh() });
   repaintNewChat = cli.repaintNewChat;
   openCliSession = cli.openSession;
   const apiChat = createApiChatSettingsUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!);

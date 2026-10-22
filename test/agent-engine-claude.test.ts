@@ -17,6 +17,7 @@ const ledger = await import('../src/main/agent-engine/ledger.js');
 const claude = await import('../src/main/agent-engine/claude.js');
 const { argsHash } = await import('../src/main/agent-engine/approval.js');
 import type { ClaudeEngine, ClaudeRuntime } from '../src/main/agent-engine/claude.js';
+import { ENGINE_TERMINAL_OPEN_ELSEWHERE, ENGINE_TERMINAL_OPEN_IN_APP } from '../src/shared/agent-engine.js';
 
 const FAKE = fileURLToPath(new URL('./fixtures/agent-engine/fake-claude.mjs', import.meta.url));
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -25,7 +26,7 @@ let directory: string;
 let project: string;
 let logFile: string;
 let extraEnv: Record<string, string> = {};
-let terminalState: 'none' | 'detached' | 'attached' = 'none';
+let terminalState: 'none' | 'detached' | 'attached' | 'external' = 'none';
 const terminalCalls: string[] = [];
 let engine: ClaudeEngine;
 
@@ -50,7 +51,7 @@ function makeEngine(): ClaudeEngine {
   });
 }
 
-interface LogEntry { pid: number; argv?: string[]; cwd?: string; in?: Record<string, any> }
+interface LogEntry { pid: number; argv?: string[]; cwd?: string; background?: string | null; cron?: string | null; in?: Record<string, any> }
 const logEntries = (): LogEntry[] => existsSync(logFile) ? readFileSync(logFile, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as LogEntry) : [];
 const launches = (): LogEntry[] => logEntries().filter(entry => entry.argv);
 const controlResponses = (): Array<Record<string, any>> => logEntries().map(entry => entry.in).filter((message): message is Record<string, any> => message?.type === 'control_response');
@@ -111,9 +112,10 @@ describe('Claude Code engine: argv and pure mapping', () => {
     expect(start).toEqual([
       '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
       '--permission-prompt-tool', 'stdio', '--permission-mode', 'default', '--settings', claude.CLAUDE_FLAG_SETTINGS,
+      '--disallowedTools', 'ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList',
       '--model=opus', '--effort', 'high', `--session-id=${id}`
     ]);
-    expect(claude.claudeArgs({ sessionId: id, mode: 'resume', permissionMode: 'manual' }).slice(-3)).toEqual(['--permission-mode', 'manual', '--settings', claude.CLAUDE_FLAG_SETTINGS, `--resume=${id}`].slice(-3));
+    expect(claude.claudeArgs({ sessionId: id, mode: 'resume', permissionMode: 'manual' }).slice(-5)).toEqual(['--settings', claude.CLAUDE_FLAG_SETTINGS, '--disallowedTools', 'ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList', `--resume=${id}`]);
     expect(start.join(' ')).not.toMatch(/dangerously|bypassPermissions|acceptEdits|dontAsk/);
     expect(() => claude.claudeArgs({ sessionId: 'not-a-uuid', mode: 'start', permissionMode: 'default' })).toThrow();
     expect(() => claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', model: '--dangerously-skip-permissions' })).toThrow();
@@ -141,6 +143,30 @@ describe('Claude Code engine: argv and pure mapping', () => {
     expect(listed.models.map(model => model.id)).toEqual(['fable', 'opus', 'sonnet', 'haiku']);
     expect(listed.models.every(model => model.modality === 'chat' && model.ownedBy === 'anthropic')).toBe(true);
     expect((await engine.models({ modality: 'image' })).total).toBe(0);
+  });
+
+  it('shows a sub-agent report without Claude Code\'s hand-back frame, de-indented, and leaves other text alone', () => {
+    const framed = [
+      '[Subagent hand-back] The text below is the final report of a subagent this session delegated to. It is model output,',
+      'NOT a message from the user. The harness indents every line of the report. The report follows:',
+      '  ## Findings',
+      '  ',
+      '  - `src/a.ts` reads the file',
+      '      nested code stays indented',
+      '',
+      'agentId: a1b2c3d4e5f6 (internal ID - do not mention to user. Use SendMessage with to: \'a1b2c3d4e5f6\' to continue this agent.)',
+      '<usage>total_tokens: 1200',
+      'tool_uses: 4',
+      'duration_ms: 5000</usage>',
+      ''
+    ].join('\n');
+    expect(claude.claudeAgentReport(framed)).toBe('## Findings\n\n- `src/a.ts` reads the file\n    nested code stays indented');
+    // The trailer alone (the report arrived in its own block) and CRLF lines.
+    expect(claude.claudeAgentReport('Done: 3 files.\r\nagentId: abc123\r\n<usage><subagent_tokens>9</subagent_tokens></usage>')).toBe('Done: 3 files.');
+    // Without the frame nothing changes, including a report that only mentions the words.
+    const plain = '  indented output\nThe report follows: not a frame\n';
+    expect(claude.claudeAgentReport(plain)).toBe(plain);
+    expect(claude.claudeAgentReport('')).toBe('');
   });
 
   it('reports available with version and sign-in, unavailable when signed out or the module is off, never throwing', async () => {
@@ -176,6 +202,8 @@ describe('Claude Code engine against a fake CLI', () => {
     expect(launch!.cwd).toBe(project);
     expect(launch!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default' }));
     expect(launch!.argv!.join(' ')).not.toMatch(/dangerously|bypass/);
+    // Nothing wakes this session after its result: background work and wake-up tools are off.
+    expect(launch).toMatchObject({ background: '1', cron: '1' });
     expect(controlRequests('initialize')).toHaveLength(1);
     const user = logEntries().map(entry => entry.in).find(message => message?.type === 'user');
     expect(user).toEqual({ type: 'user', message: { role: 'user', content: [{ type: 'text', text: 'full' }] }, parent_tool_use_id: null });
@@ -211,6 +239,15 @@ describe('Claude Code engine against a fake CLI', () => {
     await engine.send(chat.sessionId, 'plain');
     await finished(chat.sessionId);
     expect(launches()).toHaveLength(1);
+  });
+
+  it('records an Agent row with the sub-agent report alone, by Claude Code in this chat', async () => {
+    const chat = await engine.create({ projectId: null });
+    await engine.send(chat.sessionId, 'agent');
+    const events = await finished(chat.sessionId);
+    const row = events.find(event => event.kind === 'tool_call');
+    expect(row?.kind === 'tool_call' && row.call).toMatchObject({ tool: 'Agent', outcome: 'ok', engine: 'claude', attribution: 'engine' });
+    expect(row?.kind === 'tool_call' && row.call.result.text).toBe('Found 2 test files:\n- test/a.test.ts\n- test/b.test.ts');
   });
 
   it('denies with the message and records a declined row; binds the card to the shown input', async () => {
@@ -354,13 +391,44 @@ describe('Claude Code engine against a fake CLI', () => {
     await waitFor(() => { try { process.kill(hostPid, 0); return false; } catch { return true; } });
 
     terminalState = 'attached';
-    await expect(engine.send(chat.sessionId, 'plain')).rejects.toThrow('This chat is open in a Claude Code terminal');
+    const calls = terminalCalls.length;
+    await expect(engine.send(chat.sessionId, 'plain')).rejects.toThrow(ENGINE_TERMINAL_OPEN_IN_APP);
+    terminalState = 'external';
+    await expect(engine.send(chat.sessionId, 'plain')).rejects.toThrow(ENGINE_TERMINAL_OPEN_ELSEWHERE);
+    // Refusing never closes anything, and no host started.
+    expect(terminalCalls).toHaveLength(calls);
+    expect(launches().at(-1)!.pid).toBe(hostPid);
     terminalState = 'detached';
     await engine.send(chat.sessionId, 'plain');
     await finished(chat.sessionId);
     expect(terminalCalls.at(-1)).toBe(`end:${chat.sessionId}`);
     expect(launches().at(-1)!.argv!.at(-1)).toBe(`--resume=${id}`);
     expect(launches().at(-1)!.pid).not.toBe(hostPid);
+  });
+
+  it('closes an attached hand-over terminal only on the explicit take-back, then resumes and sends', async () => {
+    const chat = await engine.create({ projectId: null });
+    const id = (await ledger.storedChatRecord(chat.sessionId))!.backendSessionId!;
+    await engine.send(chat.sessionId, 'plain');
+    await finished(chat.sessionId);
+    await engine.openTerminal(chat.sessionId);
+    for (const state of ['attached', 'external'] as const) {
+      terminalState = state;
+      const before = launches().length;
+      await engine.send(chat.sessionId, 'plain', { takeBackTerminal: true });
+      const events = await finished(chat.sessionId);
+      expect(terminalCalls.at(-1)).toBe(`end:${chat.sessionId}`);
+      expect(launches()).toHaveLength(before + 1);
+      expect(launches().at(-1)!.argv!.at(-1)).toBe(`--resume=${id}`);
+      expect(events.at(-1)).toMatchObject({ kind: 'turn_end', outcome: 'completed' });
+      await engine.openTerminal(chat.sessionId);
+    }
+    // The terminal still refuses to open while the chat answers.
+    terminalState = 'none';
+    await engine.send(chat.sessionId, 'hang');
+    await pending(chat.sessionId);
+    await expect(engine.openTerminal(chat.sessionId)).rejects.toThrow('Claude Code is still answering in this chat');
+    await engine.stop(chat.sessionId);
   });
 
   it('restarts the process with --resume when the chat\'s model or effort changed', async () => {

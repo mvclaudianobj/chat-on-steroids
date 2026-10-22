@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const durable = new Map<string, unknown>();
+const modules = vi.hoisted(() => ({ enabled: new Set<string>() }));
 vi.mock('../src/main/durable.js', () => ({
   readDurable: async (name: string) => structuredClone(durable.get(name) ?? null),
   writeDurableNow: async (name: string, value: unknown) => { durable.set(name, structuredClone(value)); }
+}));
+// OpenCode, Codex and Claude are registered for real; here their modules are off, so they are listed unavailable.
+vi.mock('../src/main/cli-modules.js', () => ({
+  cliEngineRuntime: async () => ({ ok: false, detail: 'Enable the Codex module in Settings > Modules first' }),
+  cliModuleState: async () => ({ enabled: false, command: true, binary: null })
 }));
 vi.mock('../src/main/secrets.js', () => ({
   getSecret: async () => null, hasSecret: async () => false, setSecret: async () => undefined, secretsRevision: () => 1
@@ -43,14 +49,38 @@ beforeEach(() => {
   ledger.resetChatLedgerForTests();
   registry.resetAgentEnginesForTests();
   settings.resetApiChatSettingsForTests();
+  modules.enabled.clear();
+  registry.setAgentEngineModulesForTests(async id => modules.enabled.has(id));
 });
 
 describe('agent engine registry', () => {
-  it('lists every engine in order; only CLIProxy is available in this version', async () => {
-    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; terminal: string | null }>;
-    expect(engines.map(engine => `${engine.id}:${engine.available}:${engine.terminal}`)).toEqual([
-      'cliproxy:true:null', 'markscode:false:live', 'codex:false:live', 'claude:false:handover'
+  it('lists every engine in order; OpenCode, Codex and Claude are unavailable while their modules are off, MarksCode is retired and hidden', async () => {
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; hidden: boolean; terminal: string | null }>;
+    expect(engines.map(engine => `${engine.id}:${engine.available}:${engine.enabled}:${engine.hidden}:${engine.terminal}`)).toEqual([
+      'cliproxy:true:true:false:null', 'opencode:false:false:false:live', 'codex:false:false:false:live', 'claude:false:false:false:handover', 'markscode:false:false:true:null'
     ]);
+  });
+
+  it('reports an engine whose module is on but which cannot run as enabled, with its reason', async () => {
+    registry.registerAgentEngine(fakeEngine('claude', false));
+    modules.enabled.add('claude');
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; detail: string }>;
+    expect(engines.find(engine => engine.id === 'claude')).toMatchObject({ available: false, enabled: true, detail: 'off' });
+    expect(engines.find(engine => engine.id === 'codex')).toMatchObject({ available: false, enabled: false });
+  });
+
+  it('hides the retired MarksCode from new chats, without probing it, and keeps routing its existing chats', async () => {
+    const markscode = fakeEngine('markscode');
+    registry.registerAgentEngine(markscode);
+    modules.enabled.add('markscode');
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; hidden: boolean; terminal: string | null }>;
+    expect(engines.find(engine => engine.id === 'markscode')).toMatchObject({ available: false, enabled: false, hidden: true });
+    expect(markscode.status).not.toHaveBeenCalled();
+    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('MarksCode chats are read-only. New chats use OpenCode.');
+    expect(markscode.create).not.toHaveBeenCalled();
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, { [SESSION]: { engine: 'markscode', backendSessionId: 'ses_1', model: null, effort: null } });
+    expect(await request({ action: 'chatSettings', sessionId: SESSION })).toMatchObject({ engine: 'markscode' });
+    expect(await request({ action: 'send', sessionId: SESSION, text: 'hi' })).toEqual({ turnId: 'markscode-turn' });
   });
 
   it('routes every chat action by the chat ledger record, and a record without engine to CLIProxy', async () => {
@@ -85,19 +115,21 @@ describe('agent engine registry', () => {
     await request({ action: 'createChat', projectId: null });
     expect(cliproxy.create).toHaveBeenCalledWith({ projectId: null });
     await expect(request({ action: 'createChat', engine: 'claude' })).rejects.toThrow('off');
-    await expect(request({ action: 'createChat', engine: 'codex' })).rejects.toThrow('Codex chats are not available in this version');
+    await expect(request({ action: 'createChat', engine: 'codex' })).rejects.toThrow('Enable the Codex module in Settings > Modules first');
+    await expect(request({ action: 'createChat', engine: 'opencode' })).rejects.toThrow('Enable the OpenCode module in Settings > Modules');
+    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('MarksCode chats are read-only. New chats use OpenCode.');
     expect(() => parseApiChatRequest({ action: 'createChat', engine: 'gemini' })).toThrow();
   });
 
   it("loads the named engine's models, CLIProxy's catalog when none is named", async () => {
     const cliproxy = fakeEngine('cliproxy');
-    const markscode = fakeEngine('markscode');
+    const opencode = fakeEngine('opencode');
     registry.registerAgentEngine(cliproxy);
-    registry.registerAgentEngine(markscode);
+    registry.registerAgentEngine(opencode);
     await request({ action: 'models', query: 'opus', limit: 20 });
-    await request({ action: 'models', engine: 'markscode', refresh: true });
+    await request({ action: 'models', engine: 'opencode', refresh: true });
     expect(cliproxy.models).toHaveBeenCalledWith({ query: 'opus', limit: 20 });
-    expect(markscode.models).toHaveBeenCalledWith({ refresh: true });
+    expect(opencode.models).toHaveBeenCalledWith({ refresh: true });
   });
 
   it('refuses a chat whose record this version cannot read, and keeps that record untouched', async () => {
@@ -127,5 +159,23 @@ describe('API chat ledger migration', () => {
     ledger.resetChatLedgerForTests();
     expect(await ledger.chatEngine(SESSION)).toBe('claude');
     expect((await ledger.storedChatRecord(SESSION))?.backendSessionId).toBe('7b1d2c3e-4f50-4a61-8b72-9c83d4e5f601');
+  });
+
+  it('names each listed API chat\'s engine for the sidebar, without writing anything', async () => {
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, {
+      'session-codex': { engine: 'codex', model: null, effort: null },
+      'session-old': { model: 'gpt-5', effort: null },
+      'session-later': { engine: 'engine-from-a-later-version', model: null, effort: null }
+    });
+    const before = structuredClone(durable.get(ledger.API_CHAT_SESSIONS_STATE));
+    const rows = await ledger.withChatEngines([
+      { id: 'session-codex', conversationId: 'cosapi-1' },
+      { id: 'session-old', conversationId: 'cosapi-2' },
+      { id: 'session-later', conversationId: 'cosapi-3' },
+      { id: 'session-native', conversationId: '6a1f0c2e-0000-4000-8000-000000000001' },
+      { id: 'session-unattributed', conversationId: null }
+    ]);
+    expect(rows.map(row => row.engine)).toEqual(['codex', 'cliproxy', undefined, undefined, undefined]);
+    expect(durable.get(ledger.API_CHAT_SESSIONS_STATE)).toEqual(before);
   });
 });

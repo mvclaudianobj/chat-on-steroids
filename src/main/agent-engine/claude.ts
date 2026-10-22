@@ -26,7 +26,7 @@
 import { spawn as spawnProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { AGENT_ENGINE_LABELS } from '../../shared/agent-engine.js';
+import { AGENT_ENGINE_LABELS, ENGINE_TERMINAL_OPEN_ELSEWHERE, ENGINE_TERMINAL_OPEN_IN_APP } from '../../shared/agent-engine.js';
 import {
   API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS, API_CONVERSATION_PREFIX, isApiConversationId,
   type ApiChatEffort, type ApiChatModel, type ApiChatView
@@ -56,6 +56,14 @@ const STATUS_CACHE_MS = 60_000;
  * the session from ever entering bypass mode and keeps the CLI's own permission default.
  */
 export const CLAUDE_FLAG_SETTINGS = JSON.stringify({ permissions: { disableBypassPermissionsMode: 'disable' } });
+/**
+ * A chat turn ends at its `result`: nothing re-invokes this session afterwards. Live 2026-10-21, a
+ * Claude Code chat launched a background agent and a 20-minute `ScheduleWakeup`, ended its turn on
+ * "I will report back", and its findings never reached the chat. Background work runs in the
+ * foreground here, and the tools that only finish on a later wake-up are not offered.
+ */
+export const CLAUDE_DEFERRED_TOOLS = ['ScheduleWakeup', 'Monitor', 'CronCreate', 'CronDelete', 'CronList'] as const;
+export const CLAUDE_CHAT_ENV = { CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: '1', CLAUDE_CODE_DISABLE_CRON: '1' } as const;
 
 /** Aliases Claude Code resolves to its current models (`--model` help); the CLI's reported ids join them. */
 export const CLAUDE_MODEL_ALIASES = ['fable', 'opus', 'sonnet', 'haiku'] as const;
@@ -71,7 +79,9 @@ export interface ClaudeRuntime {
 }
 
 export interface ClaudeTerminalDeps {
-  state(chatSessionId: string): Promise<'none' | 'detached' | 'attached'>;
+  /** `attached`: only the app's own terminal view; `external`: a tmux client outside the app too. */
+  state(chatSessionId: string): Promise<'none' | 'detached' | 'attached' | 'external'>;
+  /** Detaches the app's views and ends the terminal's tmux session (the TUI with it). */
   end(chatSessionId: string): Promise<void>;
   open(chat: { sessionId: string; projectId: string | null; args: string[]; title: string }): Promise<{ id: string }>;
 }
@@ -114,6 +124,7 @@ export function claudeArgs(options: {
   return [
     '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--permission-prompt-tool', 'stdio', '--permission-mode', options.permissionMode, '--settings', CLAUDE_FLAG_SETTINGS,
+    '--disallowedTools', CLAUDE_DEFERRED_TOOLS.join(','),
     ...(options.model ? [`--model=${modelId.parse(options.model)}`] : []),
     ...(options.effort ? ['--effort', z.enum(API_CHAT_EFFORTS).parse(options.effort)] : []),
     options.mode === 'resume' ? `--resume=${options.sessionId}` : `--session-id=${options.sessionId}`
@@ -193,6 +204,49 @@ function toolResultText(content: unknown): string {
   if (typeof content === 'string') return content;
   if (!Array.isArray(content)) return '';
   return content.map(record).map(block => block?.type === 'text' ? text(block.text) ?? '' : block?.type === 'image' ? '[image]' : '').filter(Boolean).join('\n');
+}
+
+/** Claude Code's sub-agent tool: `Agent`, named `Task` by earlier releases. */
+const isClaudeAgentTool = (name: string | undefined): boolean => name === 'Agent' || name === 'Task';
+
+/**
+ * The report a sub-agent handed back, as its Agent tool row shows it. Claude Code frames the
+ * report for its own model: a "[Subagent hand-back] ... The report follows:" preamble, every report
+ * line indented, then the sub-agent's `agentId: ...` line and a `<usage>...</usage>` block. The
+ * row shows the report alone, de-indented. Display only: the CLI already holds its own tool result,
+ * and nothing here is sent back to it. Text without that frame is returned as it is.
+ */
+export function claudeAgentReport(output: string): string {
+  const lines = output.replace(/\r\n?/g, '\n').split('\n');
+  let changed = false;
+  // The trailer, from the end: blank lines, the usage block and the sub-agent's id line.
+  for (;;) {
+    while (lines.length && !lines.at(-1)!.trim()) lines.pop();
+    const last = lines.at(-1)?.trim() ?? '';
+    if (last.endsWith('</usage>')) {
+      const start = lines.findLastIndex(line => line.trimStart().startsWith('<usage>'));
+      if (start < 0) break;
+      lines.splice(start);
+    } else if (/^agentId: \S+/.test(last)) lines.pop();
+    else break;
+    changed = true;
+  }
+  // The preamble: its first line opens the text, and it ends at "The report follows:".
+  const first = lines.findIndex(line => line.trim());
+  if (first >= 0 && lines[first]!.trimStart().startsWith('[Subagent hand-back]')) {
+    const end = lines.findIndex((line, index) => index >= first && line.includes('The report follows:'));
+    if (end >= 0 && end - first < 20) {
+      const rest = lines[end]!.slice(lines[end]!.indexOf('The report follows:') + 'The report follows:'.length).trim();
+      lines.splice(0, end + 1, ...(rest ? [rest] : []));
+      // The frame indents every report line; the report's own indentation stays.
+      const indent = Math.min(...lines.filter(line => line.trim()).map(line => /^[ \t]*/.exec(line)![0].length));
+      if (Number.isFinite(indent) && indent > 0) for (let i = 0; i < lines.length; i++) lines[i] = lines[i]!.slice(Math.min(indent, /^[ \t]*/.exec(lines[i]!)![0].length));
+      changed = true;
+    }
+  }
+  if (!changed) return output;
+  while (lines.length && !lines[0]!.trim()) lines.shift();
+  return lines.join('\n');
 }
 
 /** Session-scoped permission updates from the CLI's own suggestions; never a mode change. */
@@ -384,7 +438,7 @@ export class ClaudeEngine implements AgentEngine {
   }
 
   private spawnChild(runtime: ClaudeRuntime, args: string[]): ChildProcessWithoutNullStreams {
-    const env = { ...(this.deps.env?.() ?? process.env) };
+    const env: NodeJS.ProcessEnv = { ...(this.deps.env?.() ?? process.env), ...CLAUDE_CHAT_ENV };
     // A Claude Code session that launched the app must not make this one think it is nested.
     delete env.CLAUDECODE;
     delete env.ELECTRON_RUN_AS_NODE;
@@ -467,7 +521,12 @@ export class ClaudeEngine implements AgentEngine {
     return this.view(chat.id);
   }
 
-  async send(sessionId: string, question: string): Promise<{ turnId: string }> {
+  /**
+   * With the hand-over terminal attached, a send is refused with ENGINE_TERMINAL_OPEN_IN_APP (or
+   * _ELSEWHERE) unless `takeBackTerminal`: the user's explicit "Close the terminal and continue
+   * here". Then that terminal ends (Claude Code saved the session) and the host resumes it.
+   */
+  async send(sessionId: string, question: string, options: { takeBackTerminal?: boolean } = {}): Promise<{ turnId: string }> {
     this.hook();
     await this.recover();
     if (!question.trim() || question.length > MAX_CLAUDE_INPUT_CHARS) throw new Error('Write a message of up to 100,000 characters');
@@ -478,10 +537,12 @@ export class ClaudeEngine implements AgentEngine {
     let turn: ClaudeTurn | null = null;
     try {
       const terminal = await this.deps.terminal?.state(chat.id) ?? 'none';
-      if (terminal === 'attached') throw new Error('This chat is open in a Claude Code terminal. Disconnect that terminal view, then send again.');
-      if (terminal === 'detached') {
+      if ((terminal === 'attached' || terminal === 'external') && !options.takeBackTerminal) {
+        throw new Error(terminal === 'external' ? ENGINE_TERMINAL_OPEN_ELSEWHERE : ENGINE_TERMINAL_OPEN_IN_APP);
+      }
+      if (terminal !== 'none') {
         await this.deps.terminal!.end(chat.id);
-        logInfo(`Claude Code chat ${chat.id}: ended its hand-over terminal before resuming in the app`);
+        logInfo(`Claude Code chat ${chat.id}: ended its ${terminal} hand-over terminal before resuming in the app`);
       }
       const runtime = await this.deps.runtime(chat.projectId);
       const resume = (await readEvents(chat.id, { kinds: ['turn_start'] })).length > 0;
@@ -771,10 +832,12 @@ export class ClaudeEngine implements AgentEngine {
         const block = record(raw);
         if (block?.type !== 'tool_result' || typeof block.tool_use_id !== 'string') continue;
         const toolId = block.tool_use_id;
-        const output = toolResultText(block.content);
+        const tool = turn.tools.get(toolId);
+        const shown = toolResultText(block.content);
+        // The row shows a sub-agent's report without Claude Code's framing (display only).
+        const output = isClaudeAgentTool(tool?.name) ? claudeAgentReport(shown) : shown;
         const declined = turn.declined.has(toolId);
         const status = declined ? 'declined' : block.is_error === true ? 'failed' : 'ok';
-        const tool = turn.tools.get(toolId);
         const files = tool && claudeToolKind(tool.name) === 'patch' ? claudeToolFiles(tool.name, tool.input, result) : undefined;
         events.push({
           type: 'tool_finished', toolId, status, output: declined ? '' : output,
@@ -900,7 +963,7 @@ export function createClaudeEngine(deps: Partial<ClaudeEngineDeps> = {}): Claude
     },
     attachModuleHooks: engine => {
       void cliModules().then(modules => {
-        modules.registerCliEngineOpenHook(async session => { if (session.engineChat) await engine.handOver(session.engineChat); });
+        modules.registerCliEngineOpenHook('claude', async session => { if (session.engineChat) await engine.handOver(session.engineChat); });
         modules.registerCliModuleStopHook(id => { if (id === 'claude') void engine.stopAll(); });
       }).catch(error => logWarn(`Claude Code chats: module hooks not registered: ${(error as Error).message}`));
     },

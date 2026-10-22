@@ -1,0 +1,105 @@
+{
+  "engine": "opencode",
+  "note": "Synthetic OpenCode 2.x /api/event turn, already translated to EngineEvents. The permission is answered in the TUI attached to the same service session, then the run is interrupted there.",
+  "steps": [
+    {
+      "from": "session.text.delta",
+      "event": {
+        "type": "text_delta",
+        "delta": "Running the formatter."
+      }
+    },
+    {
+      "from": "session.tool.called {name:shell}",
+      "event": {
+        "type": "tool_started",
+        "toolId": "call-1",
+        "kind": "command",
+        "name": "shell",
+        "command": "npm run format"
+      }
+    },
+    {
+      "from": "session.tool.progress",
+      "event": {
+        "type": "tool_output",
+        "toolId": "call-1",
+        "chunk": "formatted 3 files\n"
+      }
+    },
+    {
+      "from": "session.tool.success {metadata.exit:0}",
+      "event": {
+        "type": "tool_finished",
+        "toolId": "call-1",
+        "status": "ok",
+        "exitCode": 0
+      }
+    },
+    {
+      "from": "permission.asked{id:per_1,action:edit,resources}",
+      "event": {
+        "type": "approval_requested",
+        "requestId": "per_1",
+        "toolId": "call-2",
+        "kind": "patch",
+        "tool": "edit",
+        "summary": "Edit src/a.ts",
+        "files": [
+          "src/a.ts"
+        ],
+        "action": {
+          "action": "edit",
+          "resources": [
+            "src/a.ts"
+          ]
+        }
+      }
+    },
+    {
+      "from": "permission.replied{requestID:per_1} (answered in the TUI)",
+      "event": {
+        "type": "approval_resolved",
+        "requestId": "per_1"
+      }
+    },
+    {
+      "from": "session.tool.called {name:edit}",
+      "event": {
+        "type": "tool_started",
+        "toolId": "call-2",
+        "kind": "patch",
+        "name": "edit",
+        "files": [
+          {
+            "path": "src/a.ts",
+            "kind": "update"
+          }
+        ]
+      }
+    },
+    {
+      "from": "session.retry.scheduled (provider overloaded)",
+      "event": {
+        "type": "error",
+        "message": "The provider is overloaded; retrying."
+      }
+    },
+    {
+      "from": "session.execution.interrupted {reason:user}",
+      "event": {
+        "type": "turn_end",
+        "outcome": "interrupted",
+        "detail": "The OpenCode run was stopped in its terminal"
+      }
+    },
+    {
+      "from": "session.tool.success (after the end: ignored)",
+      "event": {
+        "type": "tool_finished",
+        "toolId": "call-2",
+        "status": "ok"
+      }
+    }
+  ]
+}

@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const state = vi.hoisted(() => ({
   userData: '', home: '', project: '', calls: [] as string[],
-  durable: ['codex', 'markscode'] as unknown,
+  durable: ['codex', 'claude'] as unknown,
   handler: null as null | ((event: any, request: unknown) => Promise<any>)
 }));
 vi.mock('electron', () => ({
@@ -20,7 +20,7 @@ vi.mock('../src/main/durable.js', () => ({
   readDurable: async () => state.durable,
   writeDurableNow: async (_key: string, value: unknown) => { state.durable = value; }
 }));
-vi.mock('../src/main/cli-source-install.js', () => ({ installFork: vi.fn() }));
+vi.mock('../src/main/cli-source-install.js', () => ({ installPublishedCli: vi.fn() }));
 
 import { cliAction, cliCreateSession, cliOpen, cliStatus, registerCliModuleIpc } from '../src/main/cli-modules.js';
 
@@ -60,7 +60,7 @@ describe.skipIf(!linux)('real Linux tmux terminal lifecycle', () => {
     state.project = path.join(temporary, 'project with spaces');
     const binDir = path.join(temporary, 'bin with spaces');
     for (const folder of [state.userData, state.home, state.project, binDir]) mkdirSync(folder, { recursive: true });
-    for (const id of ['codex', 'markscode']) {
+    for (const id of ['codex', 'claude']) {
       const binary = path.join(binDir, id);
       writeFileSync(binary, `#!/bin/sh\nif [ "\${1:-}" = "--version" ]; then printf '${id} probe-1\\n'; exit 0; fi\nprintf 'ready\\n' > ready-${id}.txt\nexec /bin/sh -i\n`, { mode: 0o755 });
     }
@@ -100,23 +100,23 @@ describe.skipIf(!linux)('real Linux tmux terminal lifecycle', () => {
 
   it('isolates two project IDs pointing to the same directory, and Stop/Disable kill only their module', async () => {
     const codexSession = await cliCreateSession('codex', secondProject);
-    const markscodeSession = await cliCreateSession('markscode', firstProject);
+    const claudeSession = await cliCreateSession('claude', firstProject);
     const codexOtherSession = await cliCreateSession('codex', firstProject);
     const codex = await cliOpen(codexSession.id, 80, 24, randomUUID());
-    const markscode = await cliOpen(markscodeSession.id, 80, 24, randomUUID());
+    const claude = await cliOpen(claudeSession.id, 80, 24, randomUUID());
     const codexOther = await cliOpen(codexOtherSession.id, 80, 24, randomUUID());
     expect(codex.session).not.toBe(codexOther.session);
-    expect(codex.session).not.toBe(markscode.session);
+    expect(codex.session).not.toBe(claude.session);
     expect((await cliStatus()).find(item => item.id === 'codex')).toMatchObject({ installed: true, running: true, version: 'codex probe-1' });
     await cliAction('codex', 'stop');
     expect(hasSession(codex.session)).toBe(false);
     expect(hasSession(codexOther.session)).toBe(false);
-    expect(hasSession(markscode.session)).toBe(true);
+    expect(hasSession(claude.session)).toBe(true);
     const restarted = await cliOpen(codexSession.id, 80, 24, randomUUID());
     expect(restarted.session).toBe(codex.session);
     expect(hasSession(restarted.session)).toBe(true);
-    await cliAction('markscode', 'disable');
-    expect(hasSession(markscode.session)).toBe(false);
-    await expect(cliOpen(markscodeSession.id, 80, 24, randomUUID())).rejects.toThrow('disabled');
+    await cliAction('claude', 'disable');
+    expect(hasSession(claude.session)).toBe(false);
+    await expect(cliOpen(claudeSession.id, 80, 24, randomUUID())).rejects.toThrow('disabled');
   });
 });

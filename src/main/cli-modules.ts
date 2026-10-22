@@ -9,18 +9,39 @@ import { projectWorkspace } from './projects.js';
 import { getConfig, effectiveCapabilities } from './config.js';
 import { readDurable, writeDurableNow } from './durable.js';
 import { normalizeEnvironment, deleteEnvValue } from './env.js';
-import { installFork, installPublishedCli } from './cli-source-install.js';
+import { installPublishedCli } from './cli-source-install.js';
+import { localRunner, probeVersion, wslRunner } from './upstream/install.js';
 import { markspanelAccessBlocked } from './markspanel-auth.js';
 
-export const CLI_IDS = ['markscode', 'codex', 'claude', 'marksclaw'] as const;
+export const CLI_IDS = ['opencode', 'codex', 'claude', 'zeroclaw', 'markscode', 'marksclaw'] as const;
 export type CliId = typeof CLI_IDS[number];
-const manifest: Record<CliId, { name: string; bin: string; homepage: string; package?: string }> = {
-  markscode: { name: 'MarksCode', bin: 'markscode', homepage: 'https://github.com/mvclaudianobj/markscode' },
+/**
+ * Every module's source. `upstream` modules install an official release (OpenCode from npm, ZeroClaw from GitHub) into
+ * `<userData>/modules/<id>/bin` (main/upstream, Settings > Modules shows versions and updates);
+ * `package` modules install from npm. `legacy` modules are the retired Marks forks: kept so a
+ * saved activation and its tmux sessions can still be stopped, never resolved, probed, installed
+ * or run (their data folders are never touched).
+ */
+const manifest: Record<CliId, { name: string; bin: string; homepage: string; package?: string; upstream?: true; legacy?: true; terminalBin?: string }> = {
+  opencode: { name: 'OpenCode', bin: 'opencode', upstream: true, homepage: 'https://github.com/anomalyco/opencode' },
   codex: { name: 'Codex', bin: 'codex', package: '@openai/codex', homepage: 'https://github.com/openai/codex' },
   claude: { name: 'Claude', bin: 'claude', package: '@anthropic-ai/claude-code', homepage: 'https://code.claude.com/docs/en/overview' },
-  marksclaw: { name: 'MarksClaw', bin: 'marksclaw', homepage: 'https://github.com/mvclaudianobj/marksclaw' }
+  // `zeroclaw` needs a subcommand; its module terminal is the `zerocode` TUI installed beside it.
+  zeroclaw: { name: 'ZeroClaw', bin: 'zeroclaw', terminalBin: 'zerocode', upstream: true, homepage: 'https://github.com/zeroclaw-labs/zeroclaw' },
+  markscode: { name: 'MarksCode', bin: 'markscode', legacy: true, homepage: 'https://github.com/mvclaudianobj/markscode' },
+  marksclaw: { name: 'MarksClaw', bin: 'marksclaw', legacy: true, homepage: 'https://github.com/mvclaudianobj/marksclaw' }
 };
-type Status = { id: CliId; name: string; installed: boolean; enabled: boolean; running: boolean; version: string | null; supported: boolean; detail: string };
+export type CliModuleStatus = {
+  id: CliId; name: string; installed: boolean; enabled: boolean; running: boolean; version: string | null; supported: boolean; detail: string;
+  /** Installs from its official release (OpenCode, ZeroClaw): Settings shows versions and updates. */
+  upstream: boolean;
+  /** A retired Marks fork: only Stop and Disable remain. */
+  legacy: boolean;
+  /** The binary in use is the module folder's own (false: found on PATH). */
+  managed: boolean;
+};
+type Status = CliModuleStatus;
+const SESSION_NAME = new RegExp(`^marks_(${CLI_IDS.join('|')})_[0-9a-f]{18}$`);
 export type CliSession = {
   id: string;
   module: CliId;
@@ -31,9 +52,11 @@ export type CliSession = {
   createdAt: number;
   updatedAt: number;
   /**
-   * Chat Marks agent engines (handover terminal): the API chat this terminal resumes and the
-   * exact arguments after the binary (`--resume <uuid>` or `--session-id <uuid>`). Absent for an
-   * ordinary module terminal, which starts the bare binary.
+   * Chat Marks agent engines: the API chat this terminal opens and the exact arguments after the
+   * binary — Claude Code hands over (`--resume <uuid>` / `--session-id <uuid>`), Codex attaches
+   * live (`resume <thread> --remote unix://<sock>`), OpenCode attaches live to its background
+   * service (`-s <session> <folder>`). Absent for an ordinary module terminal, which
+   * starts the bare binary; a ZeroClaw quickstart terminal carries `args: ['quickstart']` alone.
    */
   engineChat?: string;
   args?: string[];
@@ -52,15 +75,48 @@ const openingAttachments = new Set<string>();
 const installations = new Set<CliId>();
 let emit: ((id: string, event: { data?: string; exitCode?: number }) => void) | null = null;
 const stopListeners = new Set<(id: CliId) => void>();
-/** Runs before an engine-bound terminal attaches; it throws to refuse (the chat's host is busy). */
-let engineOpenHook: ((session: Readonly<CliSession>) => Promise<void>) | null = null;
-export function registerCliEngineOpenHook(hook: ((session: Readonly<CliSession>) => Promise<void>) | null): void {
-  engineOpenHook = hook;
+/**
+ * Runs before an engine-bound terminal attaches, per module. A hand-over engine (Claude Code)
+ * stops its host or throws to refuse (a turn runs); a live engine makes sure the server the
+ * terminal attaches to is running (Codex starts its app-server, OpenCode its background service;
+ * OpenCode's hook runs before every OpenCode terminal, also a plain one, so the TUI joins the
+ * service the app started instead of starting its own).
+ */
+const engineOpenHooks = new Map<EngineTerminalModule, (session: Readonly<CliSession>) => Promise<void>>();
+export function registerCliEngineOpenHook(module: EngineTerminalModule, hook: ((session: Readonly<CliSession>) => Promise<void>) | null): void {
+  if (hook) engineOpenHooks.set(module, hook); else engineOpenHooks.delete(module);
 }
+export type EngineTerminalModule = 'opencode' | 'codex' | 'claude';
+/** Engines whose terminal takes the session over: their open hook is required. */
+const HANDOVER_MODULES: ReadonlySet<CliId> = new Set(['claude']);
 const ENGINE_TERMINAL_ARGS = /^--(resume|session-id)$/;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const validEngineArgs = (args: unknown): args is string[] =>
-  Array.isArray(args) && args.length === 2 && typeof args[0] === 'string' && ENGINE_TERMINAL_ARGS.test(args[0]) && typeof args[1] === 'string' && UUID.test(args[1]);
+const CODEX_THREAD = /^[0-9a-z][0-9a-z-]{0,199}$/i;
+const CODEX_REMOTE = /^unix:\/\/\/[^\s\u0000]{1,900}\.sock$/;
+/** A MarksCode service session id (`ses_…`); only to keep a retired module's saved terminals readable. */
+const MARKSCODE_SESSION = /^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$/;
+/** An OpenCode session id; never starts with `-`, so it cannot read as an option. */
+const OPENCODE_SESSION = /^ses_[A-Za-z0-9]{1,190}$/;
+/** An absolute folder (the chat's project, as the service sees it). */
+const ABSOLUTE_DIR = /^\/[^\u0000-\u001f]{0,900}$/;
+/**
+ * Every OpenCode terminal (the TUI) starts with OpenCode's self-update off: the module installs
+ * and updates it. The TUI reads the background service's URL and password itself.
+ */
+export const OPENCODE_TERMINAL_SCRIPT = 'OPENCODE_DISABLE_AUTOUPDATE=1 exec "$@"';
+/** The only argument shapes an engine terminal may carry, per module. */
+const validEngineArgs = (module: CliId, args: unknown): args is string[] => {
+  if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) return false;
+  if (module === 'claude') return args.length === 2 && ENGINE_TERMINAL_ARGS.test(args[0]!) && UUID.test(args[1]!);
+  if (module === 'markscode') return args.length === 3 && args[0] === '-s' && MARKSCODE_SESSION.test(args[1]!) && args[2] === '.';
+  if (module === 'opencode') return args.length === 3 && args[0] === '-s' && OPENCODE_SESSION.test(args[1]!)
+    && ABSOLUTE_DIR.test(args[2]!) && !args[2]!.split('/').includes('..');
+  if (module === 'codex') return args.length === 4 && args[0] === 'resume' && CODEX_THREAD.test(args[1]!) && args[2] === '--remote' && CODEX_REMOTE.test(args[3]!);
+  return false;
+};
+/** Arguments of an ordinary (not engine) module terminal: only ZeroClaw's `quickstart`. */
+const validTerminalArgs = (module: CliId, args: unknown): boolean =>
+  module === 'zeroclaw' && Array.isArray(args) && args.length === 1 && args[0] === 'quickstart';
 export function registerCliModuleStopHook(listener: (id: CliId) => void): () => void {
   stopListeners.add(listener);
   return () => { stopListeners.delete(listener); };
@@ -106,11 +162,11 @@ function validSession(value: unknown): value is CliSession {
     && typeof row.module === 'string' && CLI_IDS.includes(row.module as CliId)
     && (row.projectId === null || typeof row.projectId === 'string')
     && typeof row.cwd === 'string' && typeof row.title === 'string'
-    && typeof row.tmuxSession === 'string' && /^marks_(markscode|codex|claude|marksclaw)_[0-9a-f]{18}$/.test(row.tmuxSession)
+    && typeof row.tmuxSession === 'string' && SESSION_NAME.test(row.tmuxSession)
     && typeof row.createdAt === 'number' && Number.isFinite(row.createdAt)
     && typeof row.updatedAt === 'number' && Number.isFinite(row.updatedAt)
-    && (row.engineChat === undefined || (row.module === 'claude' && typeof row.engineChat === 'string' && /^[0-9a-z-]{8,64}$/i.test(row.engineChat) && validEngineArgs(row.args)))
-    && (row.args === undefined || row.engineChat !== undefined);
+    && (row.engineChat === undefined || (typeof row.engineChat === 'string' && /^[0-9a-z-]{8,64}$/i.test(row.engineChat) && validEngineArgs(row.module as CliId, row.args)))
+    && (row.args === undefined || row.engineChat !== undefined || validTerminalArgs(row.module as CliId, row.args));
 }
 
 async function saveCliModules(nextEnabled: Set<CliId>, nextSessions: CliSession[]): Promise<void> {
@@ -119,6 +175,8 @@ async function saveCliModules(nextEnabled: Set<CliId>, nextSessions: CliSession[
 
 async function executable(name: string): Promise<string | null> {
   const module = CLI_IDS.find(id => manifest[id].bin === name);
+  // The retired forks are never looked up, so nothing here can ever run one.
+  if (module && manifest[module].legacy) return null;
   if (module) {
     const compiled = path.join(installedRoot(), module, 'bin', process.platform === 'win32' ? `${name}.exe` : name);
     try { const { access } = await import('node:fs/promises'); await access(compiled); return compiled; } catch {}
@@ -143,6 +201,7 @@ async function wslModulePrefix(id: CliId): Promise<string> {
   return `${await wslHome()}/.local/share/chat-marks-modules/${id}`;
 }
 async function runtimeBinary(id: CliId): Promise<string | null> {
+  if (manifest[id].legacy) return null;
   if (process.platform !== 'win32') return executable(manifest[id].bin);
   try {
     const candidate = `${await wslModulePrefix(id)}/bin/${manifest[id].bin}`;
@@ -162,9 +221,59 @@ async function tmuxAvailable(): Promise<boolean> {
   } catch { return false; }
 }
 
+/** The module folder as the binary's environment sees it (`<userData>/modules`, or the WSL prefix's parent). */
+export async function cliModulesRoot(): Promise<string> {
+  return process.platform === 'win32' ? `${await wslHome()}/.local/share/chat-marks-modules` : installedRoot();
+}
+
+/** Whether a resolved binary is the module folder's own (not one found on PATH). */
+async function isManaged(id: CliId, binary: string | null): Promise<boolean> {
+  return !!binary && binary === `${await cliModulesRoot()}/${id}/bin/${manifest[id].bin}`;
+}
+
+const upstreamProbes = new Map<string, { key: string; version: string | null }>();
+/**
+ * An upstream module's version: `--version` under `env -i` with a private HOME/XDG folder inside
+ * the module folder, so probing never reads or migrates the user's own data. Cached by the
+ * binary's path, size and mtime (Linux) for the app's lifetime.
+ */
+export async function cliUpstreamVersion(id: 'opencode' | 'zeroclaw', binary: string): Promise<string | null> {
+  const windows = process.platform === 'win32';
+  let key = binary;
+  if (!windows) {
+    const { stat } = await import('node:fs/promises');
+    const info = await stat(binary).catch(() => null);
+    if (!info?.isFile()) return null;
+    key = `${binary}\n${info.size}\n${info.mtimeMs}`;
+    const cached = upstreamProbes.get(binary);
+    if (cached?.key === key) return cached.version;
+  }
+  const probed = await probeVersion(windows ? wslRunner : localRunner, binary, `${await cliModulesRoot()}/${id}/.probe`);
+  if (!windows) upstreamProbes.set(binary, { key, version: probed });
+  return probed;
+}
+
+/** An upstream module's managed binary (when installed) and the one PATH would give, with their versions. */
+export async function cliUpstreamBinaries(id: 'opencode' | 'zeroclaw'): Promise<{ managed: string | null; unmanaged: string | null }> {
+  const managedPath = `${await cliModulesRoot()}/${id}/bin/${manifest[id].bin}`;
+  const exists = process.platform === 'win32'
+    ? await wslCommand('test', ['-x', managedPath]).then(() => true, () => false)
+    : await import('node:fs/promises').then(fs => fs.access(managedPath)).then(() => true, () => false);
+  let located: string | null = null;
+  try {
+    const output = process.platform === 'win32' ? await wslCommand('/usr/bin/env', ['which', manifest[id].bin])
+      : (await run('/usr/bin/env', ['which', manifest[id].bin], { timeout: 5_000 })).stdout;
+    located = output.split(/\r?\n/)[0]?.trim() || null;
+  } catch { located = null; }
+  const managed = exists ? await cliUpstreamVersion(id, managedPath) : null;
+  const unmanaged = located && located.startsWith('/') && located !== managedPath ? await cliUpstreamVersion(id, located) : null;
+  return { managed, unmanaged };
+}
+
 async function version(id: CliId): Promise<string | null> {
   const bin = await runtimeBinary(id);
   if (!bin) return null;
+  if (id === 'opencode' || id === 'zeroclaw') return (await cliUpstreamVersion(id, bin)) ?? 'Version unavailable';
   try {
     const { stdout, stderr } = await run(process.platform === 'win32' ? 'wsl.exe' : bin,
       process.platform === 'win32' ? ['--exec', bin, '--version'] : ['--version'], { timeout: 6_000, maxBuffer: 4096 });
@@ -187,17 +296,53 @@ export async function cliChatRuntime(id: 'markscode' | 'codex' | 'claude', proje
   return { bin: process.platform === 'win32' ? 'wsl.exe' : binary, cwd, argsPrefix };
 }
 
+/**
+ * Whether a module can run here now, without throwing: enabled, the command capability, and
+ * the binary the module terminals use (userData/modules/<id>/bin, its node_modules/.bin, PATH;
+ * inside WSL on Windows). Agent engines read their status from it.
+ */
+export async function cliModuleState(id: CliId): Promise<{ enabled: boolean; command: boolean; binary: string | null; managed: boolean }> {
+  await loadCliModules();
+  const command = effectiveCapabilities(getConfig()).command;
+  if (!enabled.has(id) || !command) return { enabled: enabled.has(id), command, binary: null, managed: false };
+  const binary = await runtimeBinary(id);
+  return { enabled: true, command, binary, managed: await isManaged(id, binary) };
+}
+
+/**
+ * Chat Marks agent engines: the CLI an engine runs, behind the same gates as a module terminal
+ * (command execution allowed, the module enabled, the binary resolved the same way). On Windows
+ * the binary is a WSL path and runs through `wsl.exe --exec`.
+ */
+export async function cliEngineRuntime(id: 'opencode' | 'codex' | 'claude'):
+  Promise<{ ok: true; binary: string; windows: boolean } | { ok: false; detail: string }> {
+  await loadCliModules();
+  if (!effectiveCapabilities(getConfig()).command) return { ok: false, detail: 'Command execution is disabled' };
+  if (!enabled.has(id)) return { ok: false, detail: `Enable the ${manifest[id].name} module in Settings > Modules first` };
+  const binary = await runtimeBinary(id);
+  if (!binary) return { ok: false, detail: `${manifest[id].name} is not installed` };
+  return { ok: true, binary, windows: process.platform === 'win32' };
+}
+
+/** A native folder as WSL sees it (Windows only). */
+export const cliWslPath = (native: string): Promise<string> => wslCommand('wslpath', ['-a', native]);
+export const cliWslHome = (): Promise<string> => wslHome();
+
 export async function cliStatus(): Promise<Status[]> {
   await loadCliModules();
   const sessionOutput = await listSessions();
-  const runningSessions = sessionOutput.split(/\r?\n/).filter(s => /^marks_(markscode|codex|claude|marksclaw)_[0-9a-f]{18}$/.test(s));
+  const runningSessions = sessionOutput.split(/\r?\n/).filter(s => SESSION_NAME.test(s));
   const supported = await tmuxAvailable();
   return Promise.all(CLI_IDS.map(async id => {
-    const v = await version(id);
+    const legacy = !!manifest[id].legacy;
+    const bin = legacy ? null : await runtimeBinary(id);
+    const v = bin ? await version(id) : null;
     return { id, name: manifest[id].name, installed: v !== null, enabled: enabled.has(id), running: runningSessions.some(s => s.startsWith(`marks_${id}_`)), version: v, supported,
-      detail: !supported ? 'Persistent terminal requires tmux on Linux/macOS or WSL with tmux on Windows.'
-        : v === 'Version unavailable' ? 'CLI found, but its version check failed; check the executable before opening.'
-          : v ? 'Ready for a persistent workspace terminal.' : 'Install the CLI from its trusted publisher.' };
+      upstream: !!manifest[id].upstream, legacy, managed: await isManaged(id, bin),
+      detail: legacy ? `${manifest[id].name} is retired; its data is left untouched. Stop its terminals, then disable it.`
+        : !supported ? 'Persistent terminal requires tmux on Linux/macOS or WSL with tmux on Windows.'
+          : v === 'Version unavailable' ? 'CLI found, but its version check failed; check the executable before opening.'
+            : v ? 'Ready for a persistent workspace terminal.' : 'Install the CLI from its trusted publisher.' };
   }));
 }
 
@@ -213,7 +358,7 @@ async function listSessions(): Promise<string> {
 async function killModuleSessions(id: CliId): Promise<void> {
   const existing = await listSessions();
   for (const name of existing.split('\n')) {
-    if (/^marks_(markscode|codex|claude|marksclaw)_[0-9a-f]{18}$/.test(name) && name.startsWith(`marks_${id}_`)) {
+    if (SESSION_NAME.test(name) && name.startsWith(`marks_${id}_`)) {
       try { await tmux(['kill-session', '-t', `=${name}`]); }
       catch (error) {
         const failure = error as NodeJS.ErrnoException & { stderr?: string | Buffer };
@@ -264,12 +409,14 @@ export async function cliAction(id: CliId, action: 'enable' | 'disable' | 'insta
     } else if (action === 'stop') {
       try { await killModuleSessions(id); } finally { detachModule(id); }
     } else {
+    const source = manifest[id];
+    if (source.legacy) throw new Error(`${source.name} is retired and is no longer installed`);
+    // Upstream modules install the release the user confirmed in Settings (marksUpstream:request).
+    if (!source.package) throw new Error(`Install ${source.name} from its release in Settings > Modules`);
     if (installations.has(id)) throw new Error('This module is already being installed or updated');
     installations.add(id);
-    const source = manifest[id];
     try {
-      if (source.package) await installPublishedCli(id as 'codex' | 'claude', source.package);
-      else await installFork(id as 'markscode' | 'marksclaw');
+      await installPublishedCli(id as 'codex' | 'claude', source.package);
     } finally { installations.delete(id); }
     }
   });
@@ -281,17 +428,19 @@ export async function cliSessions(): Promise<CliSession[]> {
   return sessions.slice().sort((a, b) => b.updatedAt - a.updatedAt).map(session => ({ ...session }));
 }
 
-export async function cliCreateSession(id: CliId, projectId: string | null): Promise<CliSession> {
-  return createSessionRecord(id, projectId, null);
+export async function cliCreateSession(id: CliId, projectId: string | null, kind?: 'quickstart'): Promise<CliSession> {
+  if (kind === 'quickstart' && id !== 'zeroclaw') throw new Error('Only ZeroClaw has a quickstart terminal');
+  return createSessionRecord(id, projectId, null, kind === 'quickstart' ? { args: ['quickstart'], title: 'ZeroClaw quickstart' } : undefined);
 }
 
 /**
- * Chat Marks agent engines: the handover terminal of one API chat (Claude Code). One per chat:
- * an existing one is reused with the new arguments; it starts `<binary> <args>` in the chat's
- * project folder through the same tmux mechanism as every module terminal.
+ * Chat Marks agent engines: the terminal of one API chat (Claude Code hand-over, Codex and
+ * OpenCode live attach). One per chat: an existing one is reused with the new arguments; it starts
+ * `<binary> <args>` in the chat's project folder through the same tmux mechanism as every
+ * module terminal.
  */
-export async function cliEngineTerminal(id: 'claude', chat: { sessionId: string; projectId: string | null; args: string[]; title: string }): Promise<CliSession> {
-  if (!validEngineArgs(chat.args) || !/^[0-9a-z-]{8,64}$/i.test(chat.sessionId)) throw new Error('Invalid terminal arguments');
+export async function cliEngineTerminal(id: EngineTerminalModule, chat: { sessionId: string; projectId: string | null; args: string[]; title: string }): Promise<CliSession> {
+  if (!validEngineArgs(id, chat.args) || !/^[0-9a-z-]{8,64}$/i.test(chat.sessionId)) throw new Error('Invalid terminal arguments');
   await loadCliModules();
   const existing = sessions.find(session => session.module === id && session.engineChat === chat.sessionId);
   if (!existing) return createSessionRecord(id, chat.projectId, { engineChat: chat.sessionId, args: [...chat.args], title: chat.title.slice(0, 120) });
@@ -310,28 +459,44 @@ export async function cliEngineTerminal(id: 'claude', chat: { sessionId: string;
   });
 }
 
-/** Whether a chat's handover terminal runs, and whether a terminal view is attached to it now. */
-export async function cliEngineTerminalState(chatSessionId: string): Promise<'none' | 'detached' | 'attached'> {
+/**
+ * Whether a chat's handover terminal runs, and who looks at it now: `attached` only the app's own
+ * terminal view(s), `external` also a tmux client outside the app (each app view is one client).
+ */
+export async function cliEngineTerminalState(chatSessionId: string): Promise<'none' | 'detached' | 'attached' | 'external'> {
   await loadCliModules();
   const session = sessions.find(candidate => candidate.engineChat === chatSessionId);
   if (!session) return 'none';
   try { await tmux(['has-session', '-t', `=${session.tmuxSession}`]); } catch { return 'none'; }
-  for (const entry of attachments.values()) if (entry.tmuxSession === session.tmuxSession) return 'attached';
-  const clients = await tmux(['list-clients', '-t', `=${session.tmuxSession}`, '-F', '#{client_name}']).catch(() => '');
-  return clients.trim() ? 'attached' : 'detached';
+  const views = [...attachments.values()].filter(entry => entry.tmuxSession === session.tmuxSession).length;
+  const clients = (await tmux(['list-clients', '-t', `=${session.tmuxSession}`, '-F', '#{client_name}']).catch(() => ''))
+    .split('\n').filter(line => line.trim()).length;
+  if (clients > views) return 'external';
+  return views ? 'attached' : 'detached';
 }
 
-/** Ends a chat's handover terminal session (tmux), keeping its sidebar entry for the next hand-over. */
+/**
+ * Ends a chat's handover terminal: the app's own views of it are told it exited and detached, then
+ * its tmux session (and the TUI in it, any outside client with it) is killed. The sidebar entry
+ * stays for the next hand-over. Only the chat's explicit take-back or a detached terminal leads here.
+ */
 export async function cliEndEngineTerminal(chatSessionId: string): Promise<void> {
   await loadCliModules();
   const session = sessions.find(candidate => candidate.engineChat === chatSessionId);
   if (!session) return;
+  for (const [attachmentId, entry] of attachments) {
+    if (entry.tmuxSession !== session.tmuxSession) continue;
+    emit?.(attachmentId, { exitCode: 0 });
+    cliDetach(attachmentId);
+  }
   await tmux(['kill-session', '-t', `=${session.tmuxSession}`]).catch(() => undefined);
 }
 
-async function createSessionRecord(id: CliId, projectId: string | null, engine: { engineChat: string; args: string[]; title: string } | null): Promise<CliSession> {
+async function createSessionRecord(id: CliId, projectId: string | null, engine: { engineChat: string; args: string[]; title: string } | null,
+  terminal?: { args: string[]; title: string }): Promise<CliSession> {
   await loadCliModules();
   return onModule(id, async () => {
+    if (manifest[id].legacy) throw new Error(`${manifest[id].name} is retired`);
     if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
     if (!effectiveCapabilities(getConfig()).command) throw new Error('Command execution is disabled');
     if (!enabled.has(id)) throw new Error('This module has been disabled');
@@ -351,11 +516,11 @@ async function createSessionRecord(id: CliId, projectId: string | null, engine: 
       module: id,
       projectId,
       cwd,
-      title: engine?.title || `${manifest[id].name} ${sequence}`,
+      title: engine?.title || terminal?.title || `${manifest[id].name} ${sequence}`,
       tmuxSession: sessionName(id, sessionId),
       createdAt: now,
       updatedAt: now,
-      ...(engine ? { engineChat: engine.engineChat, args: engine.args } : {})
+      ...(engine ? { engineChat: engine.engineChat, args: engine.args } : terminal ? { args: [...terminal.args] } : {})
     };
     const operation = enabledOperations.then(async () => {
       if (!effectiveCapabilities(getConfig()).command || !enabled.has(id)) throw new Error('This module has been disabled');
@@ -395,6 +560,7 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
   const selected = sessions.find(session => session.id === sessionId);
   if (!selected) throw new Error('CLI session not found');
   const id = selected.module;
+  if (manifest[id].legacy) throw new Error(`${manifest[id].name} is retired; its terminal is not opened`);
   const checkAccess = (): void => {
     if (cancelled()) throw new Error('Terminal opening was cancelled');
     if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
@@ -420,18 +586,20 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
   if (projectId && (await projectWorkspace(projectId)).real !== nativeCwd) throw new Error('Workspace changed while opening terminal');
   if (attachments.has(attachmentId)) throw new Error('Terminal already attached');
   const session = currentSession.tmuxSession;
-  // An engine's handover terminal: its chat's app-side host stops first (or the open is refused).
-  if (currentSession.engineChat) {
-    if (!engineOpenHook) throw new Error('This terminal belongs to a chat engine that is not available');
-    await engineOpenHook(currentSession);
+  // An engine's terminal: a hand-over engine's host stops first (or the open is refused); a live
+  // engine starts the server the terminal attaches to (OpenCode: for every terminal).
+  if (currentSession.engineChat || id === 'opencode') {
+    const hook = engineOpenHooks.get(id as EngineTerminalModule);
+    if (!hook && HANDOVER_MODULES.has(id)) throw new Error('This terminal belongs to a chat engine that is not available');
+    if (hook) await hook(currentSession);
     checkAccess();
   }
-  const args = currentSession.engineChat && validEngineArgs(currentSession.args) ? currentSession.args : [];
+  const command = await terminalCommand(id, bin, currentSession);
   let created = false;
   try { await tmux(['has-session', '-t', `=${session}`]); }
   catch {
     checkAccess();
-    await tmux(['new-session', '-d', '-s', session, '-c', cwd, 'sh', '-c', 'exec "$@"', 'marks-cli', bin, ...args]);
+    await tmux(['new-session', '-d', '-s', session, '-c', cwd, ...command]);
     created = true;
   }
   try { checkAccess(); }
@@ -482,6 +650,25 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
   }); } finally { openingAttachments.delete(attachmentId); }
 }
 
+/**
+ * The tmux command of a module terminal, argv only: `sh -c 'exec "$@"' marks-cli <bin> <args>`;
+ * OpenCode's with its self-update off (`OPENCODE_TERMINAL_SCRIPT`); ZeroClaw runs its `zerocode`
+ * TUI (or `zeroclaw quickstart`).
+ */
+async function terminalCommand(id: CliId, bin: string, session: Readonly<CliSession>): Promise<string[]> {
+  const script = id === 'opencode' ? OPENCODE_TERMINAL_SCRIPT : 'exec "$@"';
+  if (session.engineChat) {
+    const args = validEngineArgs(id, session.args) ? session.args : [];
+    return ['sh', '-c', script, 'marks-cli', bin, ...args];
+  }
+  const terminalBin = manifest[id].terminalBin;
+  if (terminalBin) {
+    if (validTerminalArgs(id, session.args)) return ['sh', '-c', 'exec "$@"', 'marks-cli', bin, ...session.args!];
+    return ['sh', '-c', 'exec "$@"', 'marks-cli', `${bin.slice(0, bin.lastIndexOf('/') + 1)}${terminalBin}`];
+  }
+  return ['sh', '-c', script, 'marks-cli', bin];
+}
+
 function cliDetach(id: string): void {
   const entry = attachments.get(id);
   if (!entry) return;
@@ -496,7 +683,7 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
   const request = z.discriminatedUnion('action', [
     z.object({ action: z.literal('status') }).strict(),
     z.object({ action: z.literal('sessions') }).strict(),
-    z.object({ action: z.literal('create'), module: id, projectId: z.string().uuid().nullable() }).strict(),
+    z.object({ action: z.literal('create'), module: id, projectId: z.string().uuid().nullable(), kind: z.literal('quickstart').optional() }).strict(),
     z.object({ action: z.enum(['enable', 'disable', 'install', 'update', 'stop']), module: id }).strict(),
     z.object({ action: z.literal('open'), sessionId: z.string().uuid(), attachmentId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(2).max(200) }).strict(),
     z.object({ action: z.literal('write'), attachmentId: z.string().uuid(), data: z.string().max(16_384) }).strict(),
@@ -523,7 +710,7 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
       const input = request.parse(payload);
       const data = input.action === 'status' ? await cliStatus()
         : input.action === 'sessions' ? await cliSessions()
-          : input.action === 'create' ? await cliCreateSession(input.module, input.projectId)
+          : input.action === 'create' ? await cliCreateSession(input.module, input.projectId, input.kind)
         : ['enable', 'disable', 'install', 'update', 'stop'].includes(input.action) ? await cliAction((input as { module: CliId }).module, input.action as 'enable' | 'disable' | 'install' | 'update' | 'stop')
           : input.action === 'open' ? await cliOpen(input.sessionId, input.cols, input.rows, input.attachmentId,
             () => owner !== event.sender || event.sender.isDestroyed())

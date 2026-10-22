@@ -3,6 +3,7 @@ import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
 import { registerCliModuleIpc } from './cli-modules.js';
 import { registerApiChatIpc } from './api-chat/ipc.js';
 import { registerCliProxyIpc } from './cliproxy/ipc.js';
+import { registerUpstreamIpc } from './upstream/ipc.js';
 import { registerCliChatIpc } from './cli-chat.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
@@ -78,6 +79,7 @@ import {
 } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
+import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
@@ -144,6 +146,7 @@ import {
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
+import { withChatEngines } from './agent-engine/ledger.js'; // Chat Marks: chat type icons
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
@@ -231,6 +234,7 @@ const settingsPatch = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    customContinue: z.string().trim().max(CUSTOM_CONTINUE_MAX_CHARS).optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
     mentionPlugins: z.boolean().optional(),
@@ -256,6 +260,7 @@ const settingsPatch = z.object({
     startAtLogin: z.boolean().optional(),
     turnNotifications: z.boolean().optional(),
     rotateTurnMinutes: z.number().int().min(0).max(120).optional(),
+    rotateStopFallback: z.boolean().optional(),
     localAppUsage: z.boolean().optional(),
     keepAwake: z.boolean().optional(),
     keepScreenAwake: z.boolean().optional(),
@@ -415,6 +420,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
+      // An emptied field means the built-in phrases again.
+      customContinue: pick(current.ui.customContinue, base.ui.customContinue, wanted.ui.customContinue || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
@@ -443,6 +450,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
       rotateTurnMinutes: pick(current.ui.rotateTurnMinutes, base.ui.rotateTurnMinutes, wanted.ui.rotateTurnMinutes),
+      rotateStopFallback: pick(current.ui.rotateStopFallback === true, base.ui.rotateStopFallback === true, wanted.ui.rotateStopFallback ?? current.ui.rotateStopFallback === true),
       localAppUsage: pick(current.ui.localAppUsage, base.ui.localAppUsage, wanted.ui.localAppUsage),
       keepAwake: pick(current.ui.keepAwake, base.ui.keepAwake, wanted.ui.keepAwake),
       keepScreenAwake: pick(current.ui.keepScreenAwake, base.ui.keepScreenAwake, wanted.ui.keepScreenAwake),
@@ -648,6 +656,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   registerCliModuleIpc(getWindow);
   registerApiChatIpc(getWindow);
   registerCliProxyIpc(getWindow); // Chat Marks: CLIProxyAPI versions, install/update, management keys.
+  registerUpstreamIpc(getWindow); // Chat Marks: upstream OpenCode and ZeroClaw versions and install/update.
   registerCliChatIpc(getWindow);
   // Sign out is an application admission transition. End this process after
   // clearing its secure session so the next startup must authenticate again.
@@ -1323,7 +1332,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('sessions:exportMarkdown', async (payload) => {
     const request = z.object({
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
-      scope: z.enum(['answer', 'session']),
+      scope: z.enum(['answer', 'latest', 'session']),
       turnId: z.string().min(1).max(200).optional(),
       messageId: z.string().min(1).max(200).optional(),
       target: z.enum(['clipboard', 'file'])
@@ -1430,7 +1439,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         projectId: z.string().regex(/^[a-f0-9-]{36}$/i).optional()
       })
       .parse(payload ?? {});
-    return readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
+    const list = await readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
+    // Chat Marks: each API chat names its engine, for the sidebar's chat type icon.
+    return { ...list, sessions: await withChatEngines(list.sessions) };
   });
 
   handle('sessions:image', async (payload) => {
@@ -1460,7 +1471,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { actions, ...paging } = options;
     const page = await readSessionEvents(id, actions ? { ...paging, kinds: ['session_start', 'tool_call'] } : paging);
     if (!page) throw new Error('Session not found');
-    return page;
+    // Chat Marks: the same engine projection as the list, so a merged row keeps its type icon.
+    return page.summary ? { ...page, summary: (await withChatEngines([page.summary]))[0]! } : page;
   });
 
   const stageFiles = async (sources: AttachmentSource[]) => {
