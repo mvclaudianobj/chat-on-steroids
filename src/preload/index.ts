@@ -31,6 +31,8 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import type { AppState, Capabilities, CompanionDiagnostics, Config, Diagnosis, LogEntry } from '../shared/types.js';
+import { BRAIN_IMPORT_ACTIONS } from '../shared/brain-import-actions.js';
+import type { BrainImportProgress } from '../shared/brain-import.js';
 import type {
   Handoff,
   ImageStorageClearMode,
@@ -284,9 +286,15 @@ const api = {
   },
   brain: (action: string, payload?: unknown) => {
     // Chat Marks: model memory administration is a fixed local-only IPC action list.
-    const allowed = ['status','doctor','sources','settings.get','settings.set','recall','memories.list','memories.search','memories.get','memories.save','memories.update','memories.delete','memories.export','pending.list','pending.decide','providers.test','providers.setKey','providers.importMarksCode'];
+    const allowed: string[] = ['status','doctor','sources','settings.get','settings.set','recall','memories.list','memories.search','memories.get','memories.save','memories.update','memories.delete','memories.export','pending.list','pending.decide','providers.test','providers.setKey','providers.importMarksCode', ...BRAIN_IMPORT_ACTIONS];
     if (!allowed.includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown Brain action' });
     return call<unknown>('marksBrain:request', { action, payload });
+  },
+  /** Chat Marks H2: copy, index and import progress of old history. */
+  onBrainProgress: (listener: (event: BrainImportProgress) => void): (() => void) => {
+    const handler = (_event: unknown, value: BrainImportProgress): void => listener(value);
+    ipcRenderer.on('marksBrain:progress', handler);
+    return () => ipcRenderer.removeListener('marksBrain:progress', handler);
   },
   onBrainApprovalsChanged: (listener: () => void): (() => void) => {
     const handler = (): void => listener();

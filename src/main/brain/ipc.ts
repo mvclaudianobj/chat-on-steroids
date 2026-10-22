@@ -9,12 +9,14 @@ import { importMarksCodeCredential, storeProviderKey } from './provider-keys.js'
 import { brainPendingApprovals, decideBrainSaveApproval, onBrainApprovalsChanged } from './approval.js';
 import { brainDelete, brainDoctor, brainGet, brainList, brainSave, brainSearch, brainStatus, brainUpdate } from './store.js';
 import { getBrainSettings, setBrainSettings } from './settings.js';
+import { BRAIN_IMPORT_ACTIONS } from '../../shared/brain-import.js';
+import { isBrainImportAction, runBrainImport } from './import/ipc.js';
 
 const empty = z.object({}).strict();
 const query = z.object({ query: z.string().min(1).max(1000), limit: z.number().int().min(1).max(100).optional() }).strict();
 const identifier = z.object({ id: z.string().uuid() }).strict();
 const save = brainSaveSchema.omit({ provenance: true });
-const actionSchema = z.enum(['status','doctor','sources','settings.get','settings.set','recall','memories.list','memories.search','memories.get','memories.save','memories.update','memories.delete','memories.export','pending.list','pending.decide','providers.test','providers.setKey','providers.importMarksCode']);
+const actionSchema = z.enum(['status','doctor','sources','settings.get','settings.set','recall','memories.list','memories.search','memories.get','memories.save','memories.update','memories.delete','memories.export','pending.list','pending.decide','providers.test','providers.setKey','providers.importMarksCode', ...BRAIN_IMPORT_ACTIONS]);
 const providerId = z.enum(BRAIN_PROVIDER_IDS);
 /** Chat Marks H1b: whether ChatGPT still has to refresh the Core plugin to see the Brain tools. */
 async function chatgptRefreshState(): Promise<string | null> {
@@ -37,6 +39,8 @@ export function registerBrainIpc(getWindow: () => BrowserWindow | null): void {
     try {
       const request = z.object({ action: actionSchema, payload: z.unknown().optional() }).strict().parse(input);
       const { action, payload } = request;
+      // Chat Marks H2: old-history search and confirmed imports (main/brain/import).
+      if (isBrainImportAction(action)) return await runBrainImport(action, payload, event => { if (!window.isDestroyed()) window.webContents.send('marksBrain:progress', event); });
       let data: unknown;
       switch (action) {
         case 'status': empty.parse(payload ?? {}); data = { ...await brainStatus(), chatgptRefresh: await chatgptRefreshState() }; break;
