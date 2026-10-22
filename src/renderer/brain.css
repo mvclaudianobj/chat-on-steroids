@@ -48,3 +48,27 @@
 .brain-recall-results label > span { min-width: 0; white-space: pre-wrap; }
 .brain-recall-actions { display: flex; justify-content: end; gap: 8px; flex-wrap: wrap; }
 @media (max-width: 640px) { .brain-fields { grid-template-columns: 1fr; } .brain-panel .settings-section-head { align-items: flex-start; flex-wrap: wrap; } }
+/* Chat Marks H2: old-history copies, search and read-only viewer. */
+.brain-import { display: grid; gap: 0; }
+.brain-import-copy { padding: 16px 18px; margin: 0; border-bottom: 1px solid var(--line); }
+.brain-import-copies { display: grid; }
+.brain-import-copies > p { padding: 12px 18px; margin: 0; color: var(--soft); }
+.brain-import-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; padding: 12px 18px; border-bottom: 1px solid var(--line); }
+.brain-import-row > span { display: grid; gap: 4px; flex: 1 1 260px; min-width: 0; }
+.brain-import-row small { color: var(--soft); font-size: 12px; overflow-wrap: anywhere; }
+.brain-import-row .brain-actions { margin: 0; }
+.brain-import-warning { color: var(--red); }
+.brain-import-progress:empty, .brain-import-summary:empty { display: none; }
+.brain-import-progress, .brain-import-summary { margin: 0; padding: 10px 18px; color: var(--soft); }
+.brain-history-results { max-height: 460px; }
+.brain-history-results mark { background: var(--accent-wash); color: inherit; border-radius: 3px; }
+.brain-import-dialog { width: min(860px, calc(100vw - 32px)); max-height: calc(100vh - 48px); border: 1px solid var(--line); border-radius: var(--r-md, 12px); background: var(--bg, Canvas); color: var(--ink); padding: 18px; }
+.brain-import-dialog textarea, .brain-import-dialog input[type="text"] { width: 100%; }
+.brain-import-dialog .brain-recall-results { display: grid; gap: 8px; max-height: 55vh; overflow: auto; }
+.brain-import-dialog .brain-recall-results label { display: flex; gap: 10px; align-items: flex-start; overflow-wrap: anywhere; }
+.brain-history-viewer header p { color: var(--soft); margin-top: 4px; }
+.brain-history-transcript { display: grid; gap: 12px; max-height: 55vh; overflow: auto; margin: 12px 0; }
+.brain-history-message { padding: 10px 12px; border-radius: var(--r-sm); background: var(--hover); }
+.brain-history-message.user { background: var(--accent-wash); }
+.brain-history-message p { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.brain-history-message small { display: block; color: var(--soft); font-size: 12px; overflow-wrap: anywhere; }

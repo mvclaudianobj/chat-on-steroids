@@ -2747,7 +2747,8 @@ Continuous recording serves the local transcript, exact identity and continuatio
 There is no model-facing session lookup tool. `update_plan` remains recording-backed; historical
 lookup tool calls remain displayable in existing transcripts. Chat Marks Brain (H1a) is a
 separate, user-curated local memory store: it does not read the session archive or expose a
-general session-history lookup.
+general session-history lookup. H2 searches staged copies of old MarksCode/OpenCode/MarksClaw
+history for the user only; no model tool reads it.
 
 ### Chat Marks Brain (H1a)
 
@@ -2770,8 +2771,48 @@ explicit `/remember` command are user-authored saves; `/recall` inserts a bounde
 Zod-validated action list guarded to the main window/frame. Its preload is not a generic
 filesystem bridge. Keep the few Core/API registration hooks marked `Chat Marks:`.
 
-H1a has no remote Marks API, OpenViking, engine MCP, automatic prompt injection or
-MarksCode/MarksClaw archive import. Those are later separately approved H phases.
+H1a has no remote Marks API, OpenViking, engine MCP or automatic prompt injection.
+Those are later separately approved H phases.
+
+### Chat Marks Brain H2: old-history search and selective import
+
+`src/main/brain/import/` (actions `import.*`, `history.*`, `archive.*` of `marksBrain:request`,
+list in `shared/brain-import-actions.ts`; push `marksBrain:progress`, preload `onBrainProgress`;
+UI `renderer/brain-import-ui.ts`, mounted once from `main.ts` into `#brainImport`) imports
+MarksCode/OpenCode/MarksClaw history SELECTIVELY. Nothing is imported in bulk; every write
+carries `confirmed: true` from the user's click and is refused without it.
+- Originals are never opened by the app. All reads go through staged copies in
+  `~/.local/state/chat-marks/brain-import/staging/<uuid>/` (0700, `manifest.json` with each
+  source's sha256/size/mtime before and after; `unchanged` false = it moved during the copy).
+- Root sources (`sources.ts` `ADMIN_SOURCES`: root `markscode.db`, `opencode.db`,
+  `markscode-11510/-143/-1227_7.db`, `memory/*.jsonl`, legacy `storage/{session,message,part,project}`)
+  are copied by ONE `pkexec /bin/sh -c ADMIN_EXPORT_SCRIPT chat-marks-brain-export <uuid>`
+  (`admin-export.ts`, CLIProxy precedent). The constant script has no single quote (the same
+  text is offered for `sudo /bin/sh -c '…'`), takes the owner from `PKEXEC_UID`/`SUDO_UID`
+  (never 0), checks free space (2x the source sizes), opens originals only with
+  `sqlite3 -readonly` / `mode=ro&immutable=1` (a non-empty WAL: db+wal+shm are copied first and
+  only the copy is opened), creates only `session_v2`, `session_message`, `project` and v1
+  `session/message/part` for ids missing from v2 (`filteredCopyStatements` is the Node twin),
+  never `credential`/`account`/`kv`/`auth.json`, then `chown -R` to the requester.
+  `user-export.ts` does the same in-process for sources the user can read (`opencode.db` of the
+  running 2.0.25 service, MarksClaw `sessions.db` whose data is only in the WAL): db+wal+shm copied
+  together (3 tries while hashes move), only the private copy opened.
+- `indexer.ts` `buildIndex` builds `<staging>/index.sqlite` (FTS5) in a `worker_threads` worker
+  (`worker.ts` runs its source text; keep it self-contained). Cursor `(time,id)` per source/pass
+  committed with each batch: cancel/quit resumes. Dedupe by `opencode:<ses_id>` across databases
+  (v2 > v1 > legacy JSON, then more messages, then newer); sub-agent sessions fold under the parent
+  in search and are listed as children in the viewer.
+- `search.ts`/`reader.ts`: AND-of-quoted-terms FTS over every staged index and the archive;
+  reading is bounded (64k chars/message, 2k/tool output, 5 MB and 5,000 messages/conversation) and
+  redacted (`redactSecretText` + vault values).
+- Imports: "Save as memory" = text the user wrote/selected, `brainSave` with provenance
+  `import`; "Keep in archive" = `<userData>/brain/archive.sqlite` (0600, FTS, separate from
+  `brain.sqlite`, 4 GB limit, idempotent by key); "Open as read-only chat" (`materialize.ts`) =
+  a `cosapi-` session with ledger engine `markscode` (retired, view-only), reusing an existing
+  chat with the same `backendSessionId`; hybrid memories: preview with checkboxes, only selected
+  items saved, dedupe by content hash and (file, source_id). "Delete copy" removes only a staged
+  folder. Proof: `test/brain-import.test.ts` (synthetic v1/v2/mixed, credential tables, WAL-only
+  MarksClaw, legacy JSON, hybrid JSONL; originals hashed before/after).
 
 Desktop session lists use stable `(updatedAt,id)` pagination. Each session selection loads a
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;
