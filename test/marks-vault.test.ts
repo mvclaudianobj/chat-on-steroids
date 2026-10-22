@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   configureVaultForTests, createVault, vaultStatus, listVault, putVault, useVault, revealVault,
   removeVault, recoverVault, changeVaultPassword, exportVault, importVault, importEntries
@@ -9,7 +9,7 @@ import {
 import { parseGpgVault } from '../src/main/marks-vault-gpg.js';
 import { redactVaultText, replaceVaultRedactionEntries, redactVaultValues } from '../src/main/marks-vault-redaction.js';
 import { redactCredentialText } from '../src/main/redaction.js';
-import { decideVaultApproval, requestVaultApproval, resetVaultApprovals, revokeVaultChat, vaultApprovals } from '../src/main/marks-vault-approval.js';
+import { decideVaultApproval, onVaultApprovalsChanged, requestVaultApproval, resetVaultApprovals, revokeVaultChat, vaultApprovals } from '../src/main/marks-vault-approval.js';
 let directory: string, stored: string | null, file: string;
 const master = 'an example strong master passphrase';
 const example = { name: 'service/token', value: 'secret-value-is-never-public', origin: 'https://service.example', header: 'Authorization' };
@@ -101,4 +101,32 @@ it('requires a live human decision and scopes session grants to the chat plus na
   const again = requestVaultApproval('chat-1', 'token', 'GET /');
   expect(vaultApprovals()).toHaveLength(1);
   resetVaultApprovals(); expect(await again).toBe(false);
+});
+
+describe('vault approval change events', () => {
+  it('announces each held, decided and revoked request so the window never polls', async () => {
+    resetVaultApprovals();
+    let changes = 0;
+    const stop = onVaultApprovalsChanged(() => { changes++; });
+    const first = requestVaultApproval('chat-a', 'deploy-key', 'header');
+    expect(changes).toBe(1);
+    expect(decideVaultApproval(vaultApprovals()[0]!.id, 'once')).toBe(true);
+    await expect(first).resolves.toBe(true);
+    expect(changes).toBe(2);
+    const second = requestVaultApproval('chat-b', 'deploy-key', 'header');
+    revokeVaultChat('chat-b');
+    await expect(second).resolves.toBe(false);
+    expect(changes).toBe(4);
+    stop();
+    void requestVaultApproval('chat-c', 'deploy-key', 'header');
+    expect(changes).toBe(4);
+    resetVaultApprovals();
+  });
+
+  it('does not start a renderer timer for the pending banner', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../src/renderer/marks-vault.ts', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/setInterval\(/);
+    expect(source).toContain('onVaultPendingChanged');
+  });
 });
