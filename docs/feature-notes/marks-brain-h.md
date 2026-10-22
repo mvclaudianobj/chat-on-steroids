@@ -9,3 +9,10 @@ The feature is disabled by default for both model-facing surfaces. The Settings 
 Core schema changes are published through the existing connector publication/refresh mechanism; ChatGPT may need to refresh the connector before newly enabled tools appear in its cached list. No additional MCP surface is created. A `marksBrain:request` renderer IPC channel permits only validated actions from the main app window/frame.
 
 Phase H1a has no remote provider, OpenViking, engine MCP, automatic prompt injection or history import. Future H1b/H1c/H2 require separate user approval, and H1b will refuse insecure plain HTTP memory endpoints unless explicitly reviewed in that phase.
+
+## H1b — optional sources
+
+Three opt-in providers (ai-memory remote MCP, OpenViking HTTP, Marks memory API) recall alongside
+local memories when "Remote recall" is on, and receive new memories when "Remote sync" is on.
+Keys live in the K vault bound to each provider origin. The Marks API is plain HTTP today and is
+used only after its insecure-HTTP acknowledgement. See AGENTS.md "Chat Marks Brain (H1b sources)".

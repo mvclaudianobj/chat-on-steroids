@@ -2770,8 +2770,33 @@ explicit `/remember` command are user-authored saves; `/recall` inserts a bounde
 Zod-validated action list guarded to the main window/frame. Its preload is not a generic
 filesystem bridge. Keep the few Core/API registration hooks marked `Chat Marks:`.
 
-H1a has no remote Marks API, OpenViking, engine MCP, automatic prompt injection or
-MarksCode/MarksClaw archive import. Those are later separately approved H phases.
+### Chat Marks Brain (H1b sources)
+
+`src/main/brain/recall.ts` owns combined recall and remote sync; `providers/` holds one module
+per optional source: `ai-memory.ts` (remote MCP, minimal streamable-HTTP JSON-RPC client:
+initialize, tools/list, then `memory_query` / `memory_write_page`), `openviking.ts`
+(`/api/v1/system/status`, `/api/v1/search/find`) and `marks-remote.ts` (`/health`,
+`/memories/human/recall`, `/memories/human`, `/memories/{id}/delete`). Every provider is Off by
+default in `settings.providers`, has its own timeout and error, and is reported in Doctor/Sources.
+Nothing leaves the machine unless a provider is enabled *and* `remoteRecall` (query text) or
+`remoteSync` (saved memories) is on; queries and synced content are redacted first and imported
+memories never sync. Results are merged round-robin, de-duplicated by remote id/content hash,
+budgeted and labelled with their source in `/recall` and `memory_search`.
+
+Credentials come only from K vault entries bound to the provider's exact origin
+(`brain.ai-memory`, `brain.openviking`, `brain.marks-memories`); a missing key sends nothing.
+"Import from MarksCode" copies the one needed value (ai-memory Authorization header, Marks
+`memories_api_key`) into the vault after the user clicks and enters the master password; no value
+reaches the renderer or logs. Plain HTTP is allowed only on loopback or, for the Marks API, behind
+its explicit `insecureHttp` acknowledgement; the vault accepts an `http:` origin only with an
+entry-level `insecureHttp` flag, and model-facing `vault_use` refuses such entries. Markspanel
+bearer auth uses the main-only `markspanelBrainSession()`. Brain logs one `brain: …` line per save,
+recall, held approval and provider error, never content. Settings patches merge only sent keys
+(Zod 4 `partial()` fills defaults). ai-memory is a Brain provider, not a Plugins catalog entry:
+the curated catalog requires OAuth remotes and reviewed license inventory.
+
+H1b has no engine MCP, automatic prompt injection or MarksCode/MarksClaw archive import. Those
+are separate H phases.
 
 Desktop session lists use stable `(updatedAt,id)` pagination. Each session selection loads a
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;
