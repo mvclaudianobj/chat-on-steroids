@@ -111,12 +111,10 @@ export function initMarksVaultUi(api: AppApi): void {
     return result;
   }, false));
   $('vaultPendingRefresh').addEventListener('click', () => void refreshPending());
-  // A pending approval must be noticed even when the user is in a chat, not only
-  // when General Settings is open; the banner is always available in that case.
-  const interval = setInterval(() => {
-    void refreshPending();
-  }, 2500);
-  void interval;
+  // A pending approval must be noticed even when the user is in a chat, not only when General
+  // Settings is open. Main announces each change; a 2.5 s poll that was never cleared kept every
+  // renderer load alive (renderer-timeline.test.ts went from 1.4 GB to an out-of-memory abort).
+  api.onVaultPendingChanged?.(() => { void refreshPending(); });
   onLanguageChange(() => { void refresh(); });
   void refresh();
 }
