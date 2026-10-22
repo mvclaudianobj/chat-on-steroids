@@ -1150,6 +1150,13 @@ export class ClaudeEngine implements AgentEngine {
     await Promise.all([...this.hosts.keys()].map(id => this.stopHost(id)));
     for (const turn of [...this.turns.values()]) await this.endTurn(turn, 'stopped');
   }
+  /** Only idle CLI hosts may be replaced after a module update. */
+  hasActiveTurns(): boolean { return this.turns.size > 0 || this.starting.size > 0; }
+  async restartIdleHosts(): Promise<boolean> {
+    if (this.hasActiveTurns()) return false;
+    await Promise.all([...this.hosts.keys()].map(id => this.stopHost(id)));
+    return true;
+  }
 
   /** Tests: the running turn's completion. */
   turnDone(sessionId: string): Promise<TurnOutcome> | null {

@@ -1,56 +1,57 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readlinkSync, existsSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-const fixture = vi.hoisted(() => ({ home: '', build: 'valid' as 'valid' | 'missing' | 'link', failNpm: false, commands: [] as string[][] }));
+const fixture = vi.hoisted(() => ({ home: '', fail: false, latest: '1.2.3', commands: [] as string[][] }));
 vi.mock('electron', () => ({ app: { getPath: () => fixture.home } }));
-vi.mock('node:child_process', async () => {
-  const fs = await import('node:fs');
-  const path = await import('node:path');
+vi.mock('../src/main/npm-release.js', () => ({
+  NPM_REGISTRY: 'https://registry.npmjs.org/',
+  fetchNpmVersion: vi.fn(async (name: string, version: string) => ({ name, version: version === 'latest' ? fixture.latest : version,
+    tarball: `https://registry.npmjs.org/${name}/-/${name.split('/').at(-1)}-${version === 'latest' ? fixture.latest : version}.tgz`, integrity: 'sha512-synthetic' })),
+  npmTarballUrl: (name: string, version: string) => `https://registry.npmjs.org/${name}/-/${name.split('/').at(-1)}-${version}.tgz`,
+  downloadNpmTarball: vi.fn(async () => Buffer.from('verified fixture'))
+}));
+vi.mock('../src/main/upstream/install.js', () => ({
+  localRunner: { run: vi.fn(async (_file: string, args: string[]) => ({ stdout: args.at(-1) === '--version' ? 'codex-cli 1.2.3\n' : '', stderr: '' })) },
+  wslRunner: { run: vi.fn() }, probeEnvironment: (home: string) => [`HOME=${home}`, 'PATH=/usr/bin:/bin']
+}));
+vi.mock('node:child_process', () => {
   const execFile = vi.fn();
   (execFile as any)[Symbol.for('nodejs.util.promisify.custom')] = async (file: string, args: string[]) => {
     fixture.commands.push([file, ...args]);
-    if (file === 'git' && args[0] === 'clone') fs.mkdirSync(args.at(-1)!, { recursive: true });
-    if (file === 'git' && args[0] === 'rev-parse') return { stdout: 'a'.repeat(40), stderr: '' };
     if (file === 'npm' && args[0] === 'install') {
-      if (fixture.failNpm) throw new Error('npm network failure');
-      const prefix = args[args.indexOf('--prefix') + 1]!;
+      if (fixture.fail) throw new Error('synthetic npm failure');
+      const prefix = args.find(arg => arg.startsWith('--prefix='))!.slice('--prefix='.length);
       const bin = path.join(prefix, 'node_modules/.bin/codex');
-      fs.mkdirSync(path.dirname(bin), { recursive: true });
-      fs.writeFileSync(bin, 'installed codex', { mode: 0o755 });
+      mkdirSync(path.dirname(bin), { recursive: true });
+      writeFileSync(bin, 'codex fixture', { mode: 0o755 });
     }
-    if (args[0] === '--version') return { stdout: file === 'bun' ? '1.0.0' : file.includes('codex') ? 'codex-cli 0.162.0' : 'markscode 2.0.25', stderr: '' };
     return { stdout: '', stderr: '' };
   };
   return { execFile };
 });
 
-import { installPublishedCli } from '../src/main/cli-source-install.js';
+import { installPublishedCli, publishedLatest, publishedUpdateAvailable } from '../src/main/cli-source-install.js';
 
-const onLinux = process.platform === 'linux' && process.arch === 'x64';
-describe.skipIf(!onLinux)('published CLI installation safety', () => {
-  beforeEach(() => {
-    fixture.home = mkdtempSync(path.join(os.tmpdir(), 'marks-source-install-'));
-    fixture.build = 'valid';
-    fixture.failNpm = false;
-    fixture.commands.length = 0;
-  });
+describe.skipIf(process.platform !== 'linux')('published CLI module updates', () => {
+  beforeEach(() => { fixture.home = mkdtempSync(path.join(os.tmpdir(), 'marks-cli-test-')); fixture.fail = false; fixture.latest = '1.2.3'; fixture.commands = []; });
   afterEach(() => { if (fixture.home) rmSync(fixture.home, { recursive: true, force: true }); });
 
-  it('atomically upgrades the official npm prefix, retaining its earlier version on failure', async () => {
-    const directory = path.join(fixture.home, 'modules/codex/node_modules/.bin');
-    mkdirSync(directory, { recursive: true });
-    const binary = path.join(directory, 'codex');
-    writeFileSync(binary, 'previous codex');
-    fixture.failNpm = true;
-    await expect(installPublishedCli('codex', '@openai/codex')).rejects.toThrow('npm network failure');
-    expect(readFileSync(binary, 'utf8')).toBe('previous codex');
-    fixture.failNpm = false;
-    await installPublishedCli('codex', '@openai/codex');
-    expect(readFileSync(binary, 'utf8')).toBe('installed codex');
-    expect(readdirSync(path.join(fixture.home, 'modules')).sort()).toEqual(['codex']);
-    expect(fixture.commands.some(args => args[0] === 'npm' && args.includes('@openai/codex@latest'))).toBe(true);
-    await expect(installPublishedCli('codex', '@untrusted/codex')).rejects.toThrow('publisher');
+  it('requires an exact official version and preserves the installed launcher on failure', async () => {
+    expect(await publishedLatest('codex')).toBe('1.2.3');
+    expect(publishedUpdateAvailable('1.2.2', '1.2.3')).toBe(true);
+    expect(publishedUpdateAvailable('1.2.3', '1.2.3')).toBe(false);
+    await expect(installPublishedCli('codex', '@untrusted/codex', '1.2.3', 'install')).rejects.toThrow('unexpected_package');
+    await expect(installPublishedCli('codex', '@openai/codex', '1.2.2', 'install')).rejects.toThrow('version_changed');
+    await installPublishedCli('codex', '@openai/codex', '1.2.3', 'install');
+    const launcher = path.join(fixture.home, 'modules/codex/bin/codex');
+    const before = readlinkSync(launcher);
+    expect(before).toContain('versions/v1.2.3-');
+    expect(fixture.commands.find(row => row[0] === 'npm')).toEqual(expect.arrayContaining(['--ignore-scripts']));
+    fixture.fail = true;
+    await expect(installPublishedCli('codex', '@openai/codex', '1.2.3', 'update')).rejects.toThrow('synthetic npm failure');
+    expect(readlinkSync(launcher)).toBe(before);
+    expect(existsSync(path.join(fixture.home, 'modules/codex/versions'))).toBe(true);
   });
 });

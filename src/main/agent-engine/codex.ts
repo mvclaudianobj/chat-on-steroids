@@ -310,6 +310,7 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
   let statusCache: { at: number; value: { available: boolean; detail: string; router: boolean }; unavailable: string | null } | null = null;
   let recovery: Promise<void> | null = null;
   const running = new Map<string, CodexTurn>();
+  codexRunningProbe = () => running.size > 0;
   const byThread = new Map<string, CodexTurn>();
 
   let shutdownHooked = false;
@@ -917,6 +918,11 @@ export function codexEngine(): CodexEngine {
   singleton ??= createCodexEngine();
   return singleton;
 }
+/** Module upgrades use this gate before recycling an idle app-server. */
+export function codexHasActiveTurns(): boolean {
+  return codexRunningProbe?.() ?? false;
+}
+let codexRunningProbe: (() => boolean) | null = null;
 
 function safe(write: () => void): void {
   try { write(); } catch (error) { logWarn(`Codex reply not sent: ${(error as Error).message}`); }

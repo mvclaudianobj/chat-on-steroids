@@ -78,7 +78,7 @@ vi.mock('../src/main/durable.js', () => ({
     return fixture.save(name, value);
   }
 }));
-vi.mock('../src/main/cli-source-install.js', () => ({ installPublishedCli: vi.fn() }));
+vi.mock('../src/main/cli-source-install.js', () => ({ installPublishedCli: vi.fn(), publishedLatest: vi.fn(async () => null), publishedUpdateAvailable: vi.fn(() => false), verifiedVersion: vi.fn(async () => '1.0.0'), externalNpmPrefix: vi.fn(async () => null) }));
 
 import {
   cliAction, cliChatRuntime, cliCreateSession, cliEndEngineTerminal, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
@@ -133,7 +133,7 @@ describe('Persistent coding CLI terminal', () => {
     const result = await cliAction('codex', 'enable');
     expect(result.find(item => item.id === 'codex')).toMatchObject({ enabled: true, installed: true });
     expect(fixture.save).toHaveBeenCalledWith('marks-cli-modules', expect.objectContaining({ enabled: expect.arrayContaining(['codex']), sessions: expect.any(Array) }));
-    expect((await cliStatus()).find(item => item.id === 'codex')?.version).toBe('codex-cli 1.0');
+    expect((await cliStatus()).find(item => item.id === 'codex')?.version).toBe('1.0.0');
   });
 
   it('uses Windows WSL2 tmux with the converted approved workspace and detached session', async () => {
