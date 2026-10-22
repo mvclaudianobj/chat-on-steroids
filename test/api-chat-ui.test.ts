@@ -384,6 +384,33 @@ it('offers the route of a Codex or Claude Code chat when a router is detected, w
   await vi.waitFor(() => expect(select.disabled).toBe(true));
 });
 
+it('tells a router chat why its router cannot answer and offers only the move to direct', async () => {
+  let current: Record<string, unknown> = { ...view({ model: 'gpt-6-codex' }), engine: 'codex', approval: 'ask', pending: null, route: 'router', routes: ['direct'], routeNotice: 'not_installed' };
+  const api = apiMock({
+    apiChatChatSettings: vi.fn(async () => ({ ok: true as const, data: current })),
+    apiChatSetChatSettings: vi.fn(async (_id: string, settings: { route?: string }) => {
+      current = { ...current, ...settings, routes: [], routeNotice: undefined };
+      return { ok: true as const, data: current };
+    }),
+    apiChatModels: vi.fn(async () => ({ ok: true as const, data: { total: 0, models: [] } }))
+  });
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
+  chats.sync();
+  const select = $<HTMLSelectElement>('apiChatComposerRoute');
+  const notice = $('apiChatRouteNotice');
+  await vi.waitFor(() => expect(notice.hidden).toBe(false));
+  expect(notice.textContent).toBe('Claude Code Router is not installed. Install it from Settings > Modules. This Codex chat cannot answer until then; switch to "CLI account (direct)" to continue in a new Codex thread.');
+  expect(select.hidden).toBe(false);
+  expect(select.value).toBe('router');
+  // The stored choice stays visible; switching to it again is not offered until the router answers.
+  expect([...select.options].map(option => [option.value, option.disabled])).toEqual([['direct', false], ['router', false]]);
+  select.value = 'direct';
+  select.dispatchEvent(new dom.window.Event('change'));
+  await vi.waitFor(() => expect(api.apiChatSetChatSettings).toHaveBeenCalledWith('session-api', { route: 'direct' }));
+  await vi.waitFor(() => expect(notice.hidden).toBe(true));
+  expect(select.hidden).toBe(true);
+});
+
 it('offers an OpenCode chat once main reports it available, and opens its live terminal through the shared seam', async () => {
   const api = apiMock({
     apiChatEngines: vi.fn(async () => ({ ok: true as const, data: engineList(['cliproxy', 'opencode']) })),

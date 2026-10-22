@@ -4,6 +4,7 @@ import { registerCliModuleIpc } from './cli-modules.js';
 import { registerApiChatIpc } from './api-chat/ipc.js';
 import { registerCliProxyIpc } from './cliproxy/ipc.js';
 import { registerUpstreamIpc } from './upstream/ipc.js';
+import { registerCcrIpc } from './ccr/ipc.js';
 import { registerCliChatIpc } from './cli-chat.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
@@ -657,6 +658,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   registerApiChatIpc(getWindow);
   registerCliProxyIpc(getWindow); // Chat Marks: CLIProxyAPI versions, install/update, management keys.
   registerUpstreamIpc(getWindow); // Chat Marks: upstream OpenCode and ZeroClaw versions and install/update.
+  registerCcrIpc(getWindow); // Chat Marks: Claude Code Router module (install/update, service, router availability for chat routes).
   registerCliChatIpc(getWindow);
   // Sign out is an application admission transition. End this process after
   // clearing its secure session so the next startup must authenticate again.

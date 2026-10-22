@@ -150,6 +150,13 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   terminal.hidden = true;
   ui(terminal, 'textContent', () => t('Open in terminal'));
   terminal.addEventListener('click', () => void openTerminal());
+  // A chat on "Via Claude Code Router" whose router is configured but not installed or not running:
+  // a row of the composer dock (above the composer), like the approval card.
+  const routeNotice = document.createElement('p');
+  routeNotice.id = 'apiChatRouteNotice';
+  routeNotice.className = 'api-chat-route-notice';
+  routeNotice.setAttribute('role', 'status');
+  routeNotice.hidden = true;
   controls.append(route, model, effort, approval, terminal);
 
   // The paused call of the running turn: tool, readable arguments and the three answers.
@@ -206,9 +213,9 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   ui(cardTitle, 'textContent', () => t('Approve this action?'));
   // A row of the composer dock, like the queue and plan rows: directly above the composer.
   const dockBody = document.querySelector('#composerDock .composer-dock-body');
-  if (dockBody) dockBody.append(card, takeBack);
-  else if (composer) composer.before(card, takeBack);
-  else host.append(card, takeBack);
+  if (dockBody) dockBody.append(card, takeBack, routeNotice);
+  else if (composer) composer.before(card, takeBack, routeNotice);
+  else host.append(card, takeBack, routeNotice);
   const modelMenu = document.getElementById('modelMenu');
   if (modelMenu?.parentElement) modelMenu.before(controls);
   else composer?.querySelector('.composer-toolbar')?.append(controls);
@@ -265,7 +272,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     nativeMark.hidden = !!id || !selected || chatTypeOf(selected) !== 'chatgpt';
     paintApproval(id ? view?.pending ?? null : null);
     paintTakeBack();
-    if (!id) return;
+    if (!id) { routeNotice.hidden = true; return; }
     setIcon(labelIcon, chatTypeIcon(engineOf()), 'ico chat-type-icon api-chat-label-icon');
     labelIcon.dataset.chatType = engineOf();
     const chosenRoute = routeOfChat();
@@ -290,8 +297,18 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     model.value = current;
     effort.value = view?.effort ?? '';
     approval.value = view?.approval ?? 'ask';
-    route.hidden = !chosenRoute || routes.length < 2;
+    // Both routes while the router is usable; a chat stored on the router while it is unavailable
+    // may still move to direct (its router choice stays visible, disabled).
+    route.hidden = !chosenRoute || !(routes.length > 1 || (routes.length === 1 && !routes.includes(chosenRoute)));
+    for (const option of route.options) option.disabled = !routes.includes(option.value as AgentEngineRoute) && option.value !== chosenRoute;
     route.value = chosenRoute ?? DEFAULT_AGENT_ENGINE_ROUTE;
+    const notice = chosenRoute === 'router' ? view?.routeNotice : undefined;
+    routeNotice.hidden = !notice;
+    routeNotice.textContent = !notice ? '' : `${notice === 'not_installed'
+      ? t('Claude Code Router is not installed. Install it from Settings > Modules.')
+      : t('Claude Code Router is not running. Start it from Settings > Modules.')} ${engineOf() === 'codex'
+      ? t('This Codex chat cannot answer until then; switch to "CLI account (direct)" to continue in a new Codex thread.')
+      : t('Until then this chat answers with the CLI account (direct).')}`;
     // Between turns only: the next message runs on the other route.
     route.disabled = !view || busy || view.running;
     model.disabled = !view || busy;

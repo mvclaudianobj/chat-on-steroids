@@ -30,7 +30,7 @@ let terminalState: 'none' | 'detached' | 'attached' | 'external' = 'none';
 const terminalCalls: string[] = [];
 let engine: ClaudeEngine;
 /** The user's Claude Code Router setup as the engine sees it: never this machine's real files. */
-let routing: { detected: boolean; model: string | null } = { detected: false, model: null };
+let routing: { detected: boolean; model: string | null; unavailable?: 'not_installed' | 'stopped' } = { detected: false, model: null };
 
 const runtime = async (): Promise<ClaudeRuntime> => ({ bin: process.execPath, argsPrefix: [FAKE], cwd: project });
 
@@ -560,6 +560,40 @@ describe('Claude Code engine: routes (direct CLI account or a detected Claude Co
     await expect(engine.send(chat.sessionId, 'plain')).rejects.toThrow(claude.CLAUDE_DIRECT_NOT_SIGNED_IN);
     expect(await store.readEvents(chat.sessionId)).toHaveLength(before);
     expect(launches()).toHaveLength(1);
+  });
+
+  it('falls back to the CLI account while the configured router is not installed or not running, and says why', async () => {
+    const chat = await engine.create({ projectId: null, route: 'router' });
+    const id = (await ledger.storedChatRecord(chat.sessionId))!.backendSessionId!;
+    routing = { detected: true, model: 'Local/router-model', unavailable: 'not_installed' };
+    expect(await engine.view(chat.sessionId)).toMatchObject({ route: 'router', routes: ['direct'], routeNotice: 'not_installed' });
+    const fresh = makeEngine();
+    expect(await fresh.status()).toEqual({ available: true, router: false,
+      detail: '2.1.306 (Claude Code) · direct: signed in · Claude Code Router is not installed. Install it from Settings > Modules > Claude Code Router.' });
+    await fresh.resetForTests();
+    // The same session runs with the direct settings: the CLI never tries the dead router address.
+    await engine.send(chat.sessionId, 'plain');
+    await finished(chat.sessionId);
+    expect(launches().at(-1)!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', settings: claude.CLAUDE_DIRECT_SETTINGS }));
+    expect((await ledger.storedChatRecord(chat.sessionId))?.route).toBe('router');
+    // Choosing the router route needs one that answers.
+    routing = { detected: true, model: 'Local/router-model', unavailable: 'stopped' };
+    const other = await engine.create({ projectId: null });
+    expect(other).toMatchObject({ route: 'direct', routes: [] });
+    await expect(engine.setChatSettings(other.sessionId, { route: 'router' })).rejects.toThrow('Claude Code Router is not running. Start it from Settings > Modules > Claude Code Router.');
+    await expect(engine.create({ projectId: null, route: 'router' })).rejects.toThrow('Claude Code Router is not running.');
+    // Without an account of its own the fallback is refused with both reasons.
+    extraEnv.FAKE_CLAUDE_DIRECT_ACCOUNT = signedIn(false);
+    const signedOut = makeEngine();
+    await expect(signedOut.send(chat.sessionId, 'plain')).rejects.toThrow(`Claude Code Router is not running. Start it from Settings > Modules > Claude Code Router. ${claude.CLAUDE_DIRECT_NOT_SIGNED_IN}`);
+    await signedOut.resetForTests();
+    // Once it answers again, the chat is back on the router with the same session.
+    extraEnv.FAKE_CLAUDE_DIRECT_ACCOUNT = signedIn(true);
+    routing = { detected: true, model: 'Local/router-model' };
+    expect(await engine.view(chat.sessionId)).toMatchObject({ route: 'router', routes: ['direct', 'router'] });
+    await engine.send(chat.sessionId, 'plain');
+    await finished(chat.sessionId);
+    expect(launches().at(-1)!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'resume', permissionMode: 'default', settings: claude.CLAUDE_FLAG_SETTINGS }));
   });
 
   it('changes nothing without a detected router: no override, no route choice', async () => {

@@ -543,6 +543,8 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .cli-module-view .marks-cli-terminal { flex: 1; min-height: 0; height: auto; }
 /* Chat Marks D4: a paused API chat tool call, a row of the composer dock. */
 .api-chat-approval[hidden] { display: none; }
+.api-chat-route-notice { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--edge); color: var(--muted); font-size: calc(13px * var(--text-scale, 1)); }
+.api-chat-route-notice[hidden] { display: none; }
 .api-chat-approval { display: grid; gap: 8px; margin: 0; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--edge); color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); }
 .api-chat-approval-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .api-chat-approval-head code { color: var(--soft); }

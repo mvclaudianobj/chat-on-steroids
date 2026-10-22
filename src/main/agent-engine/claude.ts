@@ -43,7 +43,8 @@ import { bindSessionProject, createSession, getSession, readEvents } from '../se
 import { ApprovalGate, argsHash, claudeApprovalDecision, type ApprovalOutcome } from './approval.js';
 import { engineOf, routeOf, storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
 import {
-  CLAUDE_DIRECT_SETTINGS, CLAUDE_FLAG_SETTINGS, claudeRouteSettings, detectClaudeRouter, ROUTER_LABEL, type ClaudeRouterDetection
+  chatRoutes, CLAUDE_DIRECT_SETTINGS, CLAUDE_FLAG_SETTINGS, claudeRouteSettings, detectClaudeRouter, refreshRouterAvailability, registerRoutedTurnProbe,
+  ROUTER_LABEL, ROUTER_UNAVAILABLE_TEXT, routerUsable, type ClaudeRouterDetection
 } from './router.js';
 import { storeProjectorSink, TurnProjector, type ProjectorSink } from './projector.js';
 import type { AgentEngine, EngineChatRef, EngineCreateOptions, EngineEvent, EngineFileChange, EngineModelQuery, EngineTerminal, EngineToolKind } from './types.js';
@@ -372,6 +373,8 @@ interface ClaudeTurn {
   host: ClaudeHost | null;
   stopped: boolean;
   done: Promise<TurnOutcome>;
+  /** The turn runs through Claude Code Router (the CCR module restarts the router only when none does). */
+  routed: boolean;
 }
 
 interface Launch { cwd: string; backendId: string; model: string | null; effort: ApiChatEffort | null; settings: string }
@@ -492,12 +495,14 @@ export class ClaudeEngine implements AgentEngine {
   /** Chats whose send is between its checks and its recorded question. */
   private readonly starting = new Set<string>();
   private readonly reportedModels = new Set<string>();
-  private statusCache: { at: number; value: { available: boolean; detail: string; router?: boolean }; permissionMode: 'default' | 'manual' } | null = null;
+  private statusCache: { at: number; value: { available: boolean; detail: string; router?: boolean }; permissionMode: 'default' | 'manual'; unavailable: string | null } | null = null;
   /** `initialize` answers by flag settings (one per route). */
   private readonly catalogs = new Map<string, { at: number; info: ClaudeInitInfo | null }>();
   private hooked = false;
 
-  constructor(private readonly deps: ClaudeEngineDeps) {}
+  constructor(private readonly deps: ClaudeEngineDeps) {
+    registerRoutedTurnProbe(() => [...this.turns.values()].some(turn => turn.routed));
+  }
 
   private hook(): void {
     if (this.hooked) return;
@@ -584,7 +589,9 @@ export class ClaudeEngine implements AgentEngine {
 
   async status(): Promise<{ available: boolean; detail: string; router?: boolean }> {
     this.hook();
-    if (this.statusCache && Date.now() - this.statusCache.at < STATUS_CACHE_MS) return this.statusCache.value;
+    await refreshRouterAvailability();
+    const unavailable = this.routing().unavailable ?? null;
+    if (this.statusCache && Date.now() - this.statusCache.at < STATUS_CACHE_MS && this.statusCache.unavailable === unavailable) return this.statusCache.value;
     try {
       let runtime: ClaudeRuntime;
       try { runtime = await this.deps.runtime(null); }
@@ -602,21 +609,24 @@ export class ClaudeEngine implements AgentEngine {
       let loggedIn: boolean | null = null;
       try { const parsed = record(JSON.parse(auth.stdout)); if (typeof parsed?.loggedIn === 'boolean') loggedIn = parsed.loggedIn; } catch { /* older CLI: not checked */ }
       const routing = this.routing();
+      // Configured but not installed or not answering: router chats run on the CLI account meanwhile.
+      const routerNote = routing.detected && routing.unavailable ? ` · ${ROUTER_UNAVAILABLE_TEXT[routing.unavailable]}` : '';
       if (routing.detected) {
         // `auth status` reads the user's settings, so it answers for the router route; the
         // direct route's own account is what a process with the direct settings reports.
         const direct = await this.initInfo(runtime, CLAUDE_DIRECT_SETTINGS);
         const directSignedIn = direct?.signedIn ?? null;
-        const available = directSignedIn !== false || loggedIn !== false;
+        const usable = routerUsable(routing);
+        const available = directSignedIn !== false || (usable && loggedIn !== false);
         value = {
-          available, router: true,
+          available, router: usable,
           detail: available
-            ? `${versionText || LABEL} · direct: ${directSignedIn === false ? 'not signed in' : directSignedIn ? 'signed in' : 'not checked'} · ${ROUTER_LABEL} detected`
-            : `${LABEL} is not signed in. Run "claude auth login" in a terminal.`
+            ? `${versionText || LABEL} · direct: ${directSignedIn === false ? 'not signed in' : directSignedIn ? 'signed in' : 'not checked'} · ${usable ? `${ROUTER_LABEL} detected` : routerNote.slice(3)}`
+            : `${LABEL} is not signed in. Run "claude auth login" in a terminal.${routerNote}`
         };
       } else if (loggedIn === false) value = { available: false, detail: `${LABEL} is not signed in. Run "claude auth login" in a terminal.`, router: false };
       else value = { available: true, detail: `${versionText || LABEL}${loggedIn ? ' · signed in' : ''}`, router: false };
-      this.statusCache = { at: Date.now(), value, permissionMode };
+      this.statusCache = { at: Date.now(), value, permissionMode, unavailable };
       return value;
     } catch (error) {
       return { available: false, detail: clip((error as Error).message || 'Status unavailable', 200) };
@@ -648,6 +658,7 @@ export class ClaudeEngine implements AgentEngine {
     this.hook();
     await this.recover();
     if (options.model !== undefined) modelId.parse(options.model);
+    if (options.route === 'router') this.refuseUnavailableRouter(await this.freshRouting());
     // The project must resolve to its canonical folder now; the process starts there.
     if (options.projectId) await this.deps.runtime(options.projectId);
     const summary = await createSession({ title: `New ${LABEL} chat`, titleSource: 'fallback', conversationId: `${API_CONVERSATION_PREFIX}${randomUUID()}` });
@@ -658,13 +669,25 @@ export class ClaudeEngine implements AgentEngine {
     return this.view(summary.id);
   }
 
+  /** The routing as the user's files and the router program are now. */
+  private async freshRouting(): Promise<ClaudeRouterDetection> {
+    await refreshRouterAvailability();
+    return this.routing();
+  }
+
+  /** Choosing the router route (a new chat, a route change) needs a router that answers. */
+  private refuseUnavailableRouter(routing: ClaudeRouterDetection): void {
+    if (routing.detected && routing.unavailable) throw new Error(ROUTER_UNAVAILABLE_TEXT[routing.unavailable]);
+  }
+
   async view(sessionId: string): Promise<ApiChatView> {
+    const routing = await this.freshRouting();
     const chat = await this.chat(sessionId);
     const turn = this.turns.get(chat.id);
     return {
       sessionId: chat.id, conversationId: chat.conversationId, engine: 'claude', model: chat.record.model, effort: chat.record.effort,
       running: !!turn || this.starting.has(chat.id), approval: chat.record.approval ?? 'ask', pending: turn?.gate.view() ?? null,
-      route: routeOf(chat.record), routes: this.routing().detected ? [...AGENT_ENGINE_ROUTES] : []
+      route: routeOf(chat.record), ...chatRoutes(routeOf(chat.record), routing)
     };
   }
 
@@ -674,6 +697,7 @@ export class ClaudeEngine implements AgentEngine {
     // The session itself moves with the chat (the same session file, resumed with the other
     // route's settings by the next send); only a running answer must finish first.
     if (route !== undefined && route !== routeOf(chat.record) && (this.turns.has(chat.id) || this.starting.has(chat.id))) throw new Error(CLAUDE_ROUTE_WHILE_RUNNING);
+    if (route === 'router' && route !== routeOf(chat.record)) this.refuseUnavailableRouter(await this.freshRouting());
     // The other route lists other models: a model it lacks gives way to the CLI's default.
     let model: null | undefined;
     if (route !== undefined && patch.model === undefined && chat.record.model && this.settingsFor(route) !== this.settingsFor(routeOf(chat.record))) {
@@ -715,16 +739,22 @@ export class ClaudeEngine implements AgentEngine {
         logInfo(`Claude Code chat ${chat.id}: ended its ${terminal} hand-over terminal before resuming in the app`);
       }
       const runtime = await this.deps.runtime(chat.projectId);
-      const settings = this.settingsFor(routeOf(chat.record));
+      // A router chat whose router is configured but not installed or not answering falls back
+      // to the CLI's own account (the same session resumes there); its view says why.
+      const routing = await this.freshRouting();
+      const settings = this.settingsFor(routeOf(chat.record), routing);
+      const routed = routeOf(chat.record) === 'router' && routerUsable(routing);
       // A direct chat with a router detected runs on the CLI's own login: none, no turn.
       if (settings === CLAUDE_DIRECT_SETTINGS && (await this.initInfo(runtime, settings))?.signedIn === false
         // A login since the cached answer counts: asked again before refusing.
-        && (await this.initInfo(runtime, settings, true))?.signedIn === false) throw new Error(CLAUDE_DIRECT_NOT_SIGNED_IN);
+        && (await this.initInfo(runtime, settings, true))?.signedIn === false) {
+        throw new Error(routeOf(chat.record) === 'router' && routing.unavailable ? `${ROUTER_UNAVAILABLE_TEXT[routing.unavailable]} ${CLAUDE_DIRECT_NOT_SIGNED_IN}` : CLAUDE_DIRECT_NOT_SIGNED_IN);
+      }
       const resume = (await readEvents(chat.id, { kinds: ['turn_start'] })).length > 0;
       const turnId = `api-${randomUUID()}`;
       const gate = new ApprovalGate(() => notifyChanged(chat.id));
       const created: ClaudeTurn = {
-        sessionId: chat.id, turnId, gate, requests: new Map(), declined: new Set(), tools: new Map(), seen: new Set(), cancelled: new Set(), host: null, stopped: false,
+        sessionId: chat.id, turnId, gate, requests: new Map(), declined: new Set(), tools: new Map(), seen: new Set(), cancelled: new Set(), host: null, stopped: false, routed,
         done: Promise.resolve('failed'),
         projector: new TurnProjector({
           engine: 'claude', conversationId: chat.conversationId, turnId, sink: (this.deps.sink ?? storeProjectorSink)(chat.id),

@@ -1454,10 +1454,13 @@ drawn by icons.css `.cm-glyph-*`, painted in `currentColor` through a CSS mask (
 themes alike): line SVGs on Phosphor's 256 grid with its 16-unit round stroke, **or a project's
 own simple logo when its licence allows it** (OpenCode: `packages/identity/mark.svg`, MIT, the
 frame plus its inner square at 40% coverage). Never a company's brand logo or a fixed colour. The
-ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark). Every
+ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark); the
+Claude Code Router card a line router (`cm:ccr`, `i-module-ccr`: three lines joining a router and
+leaving as one arrow, drawn after its MIT app icon, which is a coloured raster and not usable as a
+mark; not `cm:route*`, the retired CLIProxy drawing the test keeps out). Every
 module's management entry (the Settings sub-nav item, for ZeroClaw its primary sidebar item, its
 Modules card heading and its page heading) shows the module's own icon (`chat-types.ts` `moduleIcon`/`moduleMark`: OpenCode mark, Codex
-hexagon, Claude spark, ZeroClaw and the retired MarksClaw claw, CLIProxyAPI plug; test
+hexagon, Claude spark, ZeroClaw and the retired MarksClaw claw, CLIProxyAPI plug, Claude Code Router its router; test
 `chat-types.test.ts`, `cli-chat-ui.test.ts`). Icons are decorative (`aria-hidden`); the title or engine name stays
 the text. The sidebar learns an API chat's engine from `SessionSummary.engine`, a read-time
 projection of the ledger (`agent-engine/ledger.ts` `withChatEngines`, applied by IPC
@@ -1771,6 +1774,25 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   marker). A remote gateway or another custom provider is the user's own setup and never
   overridden; without a detected router both routes are the same unmodified process
   (`effectiveRoute`) and no choice is shown. Windows (CLIs inside WSL) detects nothing (untested).
+  **Router availability** (main/ccr, below): a router configured in those files but whose program is
+  not installed (`not_installed`) or whose gateway does not answer `/health` (`stopped`) is not
+  usable: the detection carries `unavailable` (registered by the CCR module through
+  `registerRouterAvailability`, cached 5 s, re-checked by `refreshRouterAvailability` before every
+  engine status, view, create, route change and send; without a registered provider nothing
+  changes). Then `effectiveRoute` is `direct` for both routes and the direct overrides apply to both
+  (the CLI never tries the dead router address); `chatRoutes(stored, detection)` offers both routes
+  only while the router is usable, none without a configured router, and `['direct']` plus
+  `routeNotice` (`not_installed` | `stopped`) for a chat stored on `router`, so it can move away.
+  Claude Code falls back: the same session runs with the direct settings (refused with both reasons
+  when the CLI has no account of its own). Codex cannot (a router thread keeps CCR's provider): the
+  send is refused before anything is recorded (`ROUTER_UNAVAILABLE_TEXT` + "Or switch this chat to
+  "CLI account (direct)"; Codex then starts a new thread."), and moving to direct always forgets the
+  thread (`homeRoute`). Choosing the router (a new router chat, a route change to it) is refused with
+  the same text while it is unavailable. Engine status says it (`· Claude Code Router is not
+  installed. Install it from Settings > Modules > Claude Code Router.`; `router: false`). The
+  renderer shows `routeNotice` as a row of the composer dock (`#apiChatRouteNotice`, translated by
+  code) and keeps the stored router choice visible in the route select. On a fresh machine without
+  CCR nothing is detected, no route select appears and every chat runs as before.
   Direct overrides apply only to the processes the app starts; the user's files are never
   written. Claude Code: precedence is flag `--settings` > local > project > user settings, and a
   settings `env` beats the process environment, so the direct process gets `CLAUDE_DIRECT_SETTINGS`
@@ -1996,6 +2018,82 @@ linked member, non-ELF, wrong version); GitHub digest/SHA256SUMS, redirect hosts
 swap, with real `tar` archives). Installed through this code from the real sources on Linux
 (OpenCode 2.1.2 from npm, integrity-verified, `opencode v2.1.2`; ZeroClaw 0.8.6, `zeroclaw 0.8.6
 (c473221)`, `zerocode 0.8.6`).
+
+### Claude Code Router module (`ccr`)
+
+`main/ccr/` (Marks-owned; IPC `marksCcr:request` `status|install|service|openUi`, sender/frame
+checked; preload `ccrStatus/Install/Service/OpenUi`, progress `marksCcr:progress`) manages Claude Code
+Router (`@musistudio/claude-code-router`, MIT, `musistudio/claude-code-router`; checked against
+3.1.3), the gateway behind the "Via Claude Code Router" route. It is a module card in Settings >
+Modules (`renderer/ccr-manage-ui.ts`, created by `marks-modules-ui.ts` after the CLI modules), not a
+chat or terminal type, with no activation toggle: the route needs it installed and configured.
+- Copies (`service.ts`): Chat Marks' own copy is an npm prefix `<userData>/modules/ccr/versions/
+  v<x.y.z>-<8 hex>/`, the one in use named by `<userData>/modules/ccr/current` (replaced by rename),
+  plus the launcher `<userData>/modules/ccr/bin/ccr` (`exec <node> <cli.js> "$@"`); it takes
+  precedence over PATH. A new version is a new folder, so a running daemon keeps its files; an older
+  folder is removed only when no daemon runs from it (`pruneVersions`, by the process list). A copy
+  the user installed (the `ccr` on PATH, else `~/.local/bin`, `~/.npm-global/bin`, `~/.volta/bin`,
+  `/usr/local/bin`, `/usr/bin`) must resolve to this package's `dist/main/cli.js` (its package.json
+  name, x.y.z version and `bin.ccr`); it is shown as "Using installed <path> <version>" (home as `~`)
+  and used as it is. It can be updated in place only after confirmation and only when its npm
+  prefix (`<prefix>/lib/node_modules/…`) and package folder are writable by the user (never with
+  administrator rights; otherwise `external_not_writable`), and "Install a copy managed by Chat Marks"
+  is offered beside it.
+- Install/update (`release.ts`): CCR is a Node.js program (`engines.node >=22`) with runtime
+  dependencies, one native (`better-sqlite3`, its config store): 3.1.3 pulls 101 packages, ~110 MB.
+  So the system's own Node.js (>= the `engines` major, else `node_too_old`) and npm do the tree,
+  under these rules: the main tarball comes from the registry through `npm-release.ts` (registry
+  only, no redirect, canonical URL, latest must still be the confirmed version: `version_changed`)
+  and is used only after its SHA-512 equals `dist.integrity`; `npm install --prefix=<stage>/app
+  --ignore-scripts --omit=dev --no-save --registry=https://registry.npmjs.org/ --userconfig=<empty>
+  --no-audit --no-fund -- <verified package.tgz>` (no package runs a script; `npm_config_*` and the
+  app's Electron variables are removed from its environment); then `npm rebuild -- better-sqlite3`
+  only (`NATIVE_PACKAGES`: its `prebuild-install || node-gyp rebuild` fetches the prebuilt binding
+  from better-sqlite3's own GitHub releases); the installed package must report exactly the version
+  and the binding must open a memory database (`node -e`) before the folder is renamed into
+  `versions/`. Stage `<module>/.stage-<uuid>` (0700) is removed in every case. The gate:
+  `ccrSupport` 3.x (`ok`, `newer` above 3.1.3), anything else `unsupported` (never offered).
+  Errors: `node_missing`, `node_too_old`, `npm_missing`, `npm_failed`, `version_mismatch`,
+  `native_failed`, `checksum_mismatch`, `version_changed`, `unsupported_version`, … (translated in
+  the card).
+- Service: `node <cli.js> start --daemon --no-open` (it starts `cli.js serve --daemon-child` for the
+  web UI and a gateway child, then exits; its stdout names the web UI with its token, so it is
+  never logged or returned) and `node <cli.js> stop` (stops the daemon `~/.claude-code-router/
+  service.json` names), with the copy in use; Restart = stop, wait for the gateway to go, start,
+  wait for `/health`. State = the gateway's own `GET http://<host>:<port>/health` (200 JSON with a
+  `status`; checked: `{"runtimeId":…,"status":"ok",…}` on 3456; the web UI port answers 404 there),
+  plus `ps -eo pid=,args=` for which copy the daemon came from. The gateway address is read,
+  read-only, from CCR's store `~/.claude-code-router/config.sqlite` (`node:sqlite` with
+  `readOnly`, `app_config` row `default`, only `gateway.host`/`gateway.port`, else `HOST`/`PORT`),
+  else from the user's CLI files' loopback router URL (`routerAddressFromCliFiles`), else
+  127.0.0.1:3456. "Open router UI" opens the `url` CCR registered in `service.json` (only an http
+  loopback URL of a live pid) with `shell.openExternal`; the address never reaches the renderer.
+- No downtime: after an install or update the router restarts with the copy in use only when no
+  routed Codex/Claude Code turn runs (`routedTurnsRunning`, probes registered by both engines), else
+  `restartPending` (checked every 5 s); a stopped router stays stopped. Stop and Restart are
+  confirmed, saying when routed chats are answering.
+- The user's files: the module never writes `~/.claude/settings.json`, `~/.codex/config.toml` or
+  anything in `~/.claude-code-router` (CCR edits those itself), and never prints or copies a key or
+  token. `configured` = the router detection of those files (Claude Code, Codex).
+- Card: state (Running / Stopped / Not installed), installed version (managed / "Using installed"),
+  latest release with "Update available", router address and which copy runs it, restart pending,
+  which CLIs it is configured for (or how to configure them in the router UI), notes (newer/
+  unsupported version, why it cannot install), one confirmed Install/Update button naming the npm
+  registry, Start / Stop / Restart router, Open router UI. Linux only (`unsupported_platform`
+  elsewhere; the routes detect nothing on Windows).
+Proof: `test/ccr-module.test.ts` (version gate, registry-only metadata, moved latest, integrity
+mismatch, npm/service argv, install into a version folder with launcher and pointer, refusals before
+npm, failures keeping the old copy, an installed copy shown and updated in place, daemon process
+parsing, `/health`, the config store read-only with synthetic keys, web UI URL checks, start/stop
+through the CLI, restart only without routed turns, fresh machine, configured-but-missing/stopped
+fallback), `test/ccr-manage-ui.test.ts` (card states), `test/agent-engine-claude.test.ts` and
+`test/agent-engine-codex.test.ts` (fallback/refusal with an unavailable router), `test/api-chat-ui.test.ts`
+(route notice). Checked live as the user (2026-10-22): the installed 3.1.3 (`~/.local`) was found,
+running from that copy on 127.0.0.1:3456 (port read from its store), configured for Claude Code and
+Codex, read-only; an install of 3.1.3 through this code into a temporary prefix and HOME (integrity
+verified, 92 top-level entries, 110 MB, better-sqlite3 built, 21 s with a cold npm cache) whose
+launcher answered `--help` and whose `start --daemon --no-open --port 3497` / `stop` ran in that
+temporary HOME without touching the user's running router.
 
 ### CLIProxyAPI module management
 
