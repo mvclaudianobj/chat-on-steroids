@@ -100,6 +100,12 @@ export interface ApiChatView {
   route?: AgentEngineRoute;
   /** The routes this chat can switch between now: both when a router is detected, else none. */
   routes?: AgentEngineRoute[];
+  /**
+   * The chat's route is `router` but Claude Code Router is configured and cannot answer now
+   * (`not_installed` | `stopped`): Claude Code chats run on the CLI account meanwhile, Codex
+   * chats are refused until it answers or the chat switches to direct.
+   */
+  routeNotice?: 'not_installed' | 'stopped';
 }
 
 /** Whether an API chat asks before running a tool that edits files or runs commands. */

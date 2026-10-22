@@ -97,7 +97,8 @@ function fakeHost(options: { script?: Record<string, unknown>; version?: string;
   writeFileSync(scriptFile, JSON.stringify(options.script ?? {}));
   const env = { ...process.env, CODEX_FAKE_LOG: logFile, CODEX_FAKE_SCRIPT: scriptFile, CODEX_FAKE_VERSION: options.version ?? '0.163.0' };
   const opened: string[][] = [];
-  const routing = options.router
+  // `unavailable`: the router is configured but not installed or not answering (main/ccr).
+  const routing: { detected: boolean; provider: string | null; directOverrides: string[]; unavailable?: 'not_installed' | 'stopped' } = options.router
     ? { detected: true, provider: 'claude-code-router', directOverrides: ['model_provider="openai"', 'model_catalog_json="/home/user/.codex/models_cache.json"'] }
     : { detected: false, provider: null, directOverrides: [] };
   const terminals: Array<{ sessionId: string; projectId: string | null; args: string[]; title: string }> = [];
@@ -124,7 +125,7 @@ function fakeHost(options: { script?: Record<string, unknown>; version?: string;
     return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Logged) : [];
   };
   return {
-    host, messages, opened, terminals, terminalHook: () => terminalHook,
+    host, messages, opened, terminals, routing, terminalHook: () => terminalHook,
     requests: (method: string, route: 'direct' | 'router' = 'direct') => messages(route).filter(message => message.method === method)
   };
 }
@@ -571,6 +572,38 @@ describe('Codex engine: routes (one app-server per route)', () => {
     expect(await engine.openTerminal!(chat.sessionId)).toEqual({ cliSessionId: 'cli-codex-1' });
     expect(fake.terminals.at(-1)?.args).toEqual(['resume', 'router-thread-1', '--remote', `unix://${ROUTER_SOCKET}`]);
     await fake.terminalHook()!(chat.sessionId);
+  });
+
+  it('refuses a router chat clearly while the configured router is not installed or not running, and lets it move to direct', async () => {
+    const { fake, engine } = start(routed({ routes: {
+      direct: { models: [codexModel('gpt-6.1-sol', 'GPT-6.1-Sol', true)], turns: [[completed()]] },
+      router: { account: { account: null, requiresOpenaiAuth: false }, models: [codexModel('Local/router-model', 'Local/router-model', true)], turns: [[completed()]] }
+    } }));
+    const chat = await engine.create({ projectId: null, route: 'router' });
+    expect(await ledger.storedChatRecord(chat.sessionId)).toMatchObject({ route: 'router', backendSessionId: 'router-thread-1' });
+    fake.routing.unavailable = 'not_installed';
+    // Only direct is offered now; the chat keeps its router choice and is told why.
+    expect(await engine.view(chat.sessionId)).toMatchObject({ route: 'router', routes: ['direct'], routeNotice: 'not_installed' });
+    expect((await engine.status()).detail).toContain('Claude Code Router is not installed. Install it from Settings > Modules > Claude Code Router.');
+    // Its thread carries CCR's provider: no silent fallback, nothing recorded, nothing started.
+    const before = (await store.readEvents(chat.sessionId)).length;
+    await expect(engine.send(chat.sessionId, 'hi')).rejects.toThrow('Claude Code Router is not installed. Install it from Settings > Modules > Claude Code Router. Or switch this chat to "CLI account (direct)"');
+    expect(await store.readEvents(chat.sessionId)).toHaveLength(before);
+    expect(fake.requests('turn/start', 'router')).toEqual([]);
+    // To direct: a new thread on the direct server (the router's one is not resumed there).
+    await engine.setChatSettings(chat.sessionId, { route: 'direct' });
+    expect((await ledger.storedChatRecord(chat.sessionId))?.backendSessionId).toBeUndefined();
+    await engine.send(chat.sessionId, 'hi');
+    await engine.turnDone(chat.sessionId);
+    expect(fake.requests('thread/resume')).toEqual([]);
+    expect(fake.requests('turn/start')).toHaveLength(1);
+    // Choosing the router again, or a new router chat, waits for a router that answers.
+    fake.routing.unavailable = 'stopped';
+    await expect(engine.setChatSettings(chat.sessionId, { route: 'router' })).rejects.toThrow('Claude Code Router is not running. Start it from Settings > Modules > Claude Code Router.');
+    await expect(engine.create({ projectId: null, route: 'router' })).rejects.toThrow('Claude Code Router is not running.');
+    const direct = await engine.create({ projectId: null });
+    expect(direct).toMatchObject({ route: 'direct', routes: [] });
+    expect(direct.routeNotice).toBeUndefined();
   });
 
   it('refuses a route change while a turn runs', async () => {

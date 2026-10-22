@@ -33,7 +33,64 @@ import type { AgentEngineRoute } from '../../shared/agent-engine.js';
 export const ROUTER_LABEL = 'Claude Code Router';
 
 export interface RouterDetection {
+  /** The user's CLI files are set up for the router (CCR configured itself into them). */
   detected: boolean;
+  /**
+   * Set only when the router is configured but cannot answer now (main/ccr: the program is not
+   * installed, or its gateway does not answer). The router route then falls back (`effectiveRoute`).
+   */
+  unavailable?: RouterUnavailable;
+}
+
+/** Why a configured router cannot take a chat now. */
+export type RouterUnavailable = 'not_installed' | 'stopped';
+
+/**
+ * Whether the router program can take routed chats now: the Claude Code Router module
+ * (main/ccr/service.ts) registers its cached answer here (null: installed and answering, or not
+ * known yet). Without a registered provider (tests, or before the module loads) nothing changes.
+ */
+let availability: (() => RouterUnavailable | null) | null = null;
+let availabilityRefresh: (() => Promise<void>) | null = null;
+export function registerRouterAvailability(read: (() => RouterUnavailable | null) | null, refresh: (() => Promise<void>) | null = null): void {
+  availability = read;
+  availabilityRefresh = refresh;
+}
+/** Re-checks the router program (bounded, cached by the module) before a send, status or view. */
+export async function refreshRouterAvailability(): Promise<void> {
+  try { await availabilityRefresh?.(); } catch { /* the last answer stays */ }
+}
+function withAvailability<T extends RouterDetection>(detection: T): T {
+  if (!detection.detected || !availability) return detection;
+  let reason: RouterUnavailable | null = null;
+  try { reason = availability(); } catch { reason = null; }
+  return reason ? { ...detection, unavailable: reason } : detection;
+}
+
+/** The router route can be chosen and used now: configured, installed and answering. */
+export const routerUsable = (detection: RouterDetection): boolean => detection.detected && !detection.unavailable;
+
+/**
+ * What a chat whose route is `router` is told while the router is configured but unavailable
+ * (engine status, the chat view's `routeNotice`). The renderer translates the code.
+ */
+export const ROUTER_UNAVAILABLE_TEXT: Readonly<Record<RouterUnavailable, string>> = {
+  not_installed: 'Claude Code Router is not installed. Install it from Settings > Modules > Claude Code Router.',
+  stopped: 'Claude Code Router is not running. Start it from Settings > Modules > Claude Code Router.'
+};
+
+/**
+ * Busy probes of the engines: whether a turn that runs through the router is answering now, so
+ * the module restarts the router (after an update, or a Restart) only when none is.
+ */
+const routedProbes = new Set<() => boolean>();
+export function registerRoutedTurnProbe(probe: () => boolean): () => void {
+  routedProbes.add(probe);
+  return () => { routedProbes.delete(probe); };
+}
+export function routedTurnsRunning(): boolean {
+  for (const probe of routedProbes) { try { if (probe()) return true; } catch { /* a broken probe is not busy */ } }
+  return false;
 }
 
 export interface ClaudeRouterDetection extends RouterDetection {
@@ -80,9 +137,13 @@ export const CLAUDE_DIRECT_SETTINGS = JSON.stringify({
   apiKeyHelper: ''
 });
 
-/** Without a router both routes run the same process; the chat keeps the route the user chose. */
+/**
+ * Without a usable router both routes run the same process; the chat keeps the route the user
+ * chose. A configured router that is not installed or not answering falls back to the direct
+ * route (with its overrides, so the CLI does not try the dead router address).
+ */
 export const effectiveRoute = (route: AgentEngineRoute, detection: RouterDetection): AgentEngineRoute =>
-  detection.detected ? route : 'direct';
+  routerUsable(detection) ? route : 'direct';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
@@ -116,7 +177,7 @@ export function detectClaudeRouter(environment: RoutingEnvironment = realEnviron
     || Object.keys(env).some(key => key.startsWith('CCR_'));
   if (!marked) return none;
   const model = value('ANTHROPIC_MODEL');
-  return { detected: true, model: model && model.length <= 200 ? model : null };
+  return withAvailability({ detected: true, model: model && model.length <= 200 ? model : null });
 }
 
 const CCR_PROVIDER = /claude[-_ ]?code[-_ ]?router/i;
@@ -142,7 +203,7 @@ export function detectCodexRouter(environment: RoutingEnvironment = realEnvironm
   const overrides = ['model_provider="openai"'];
   const ownCatalog = path.join(home, 'models_cache.json');
   if (typeof config.model_catalog_json === 'string' && existsSync(ownCatalog)) overrides.push(`model_catalog_json=${JSON.stringify(ownCatalog)}`);
-  return { detected: true, provider: provider.slice(0, 100), directOverrides: overrides };
+  return withAvailability({ detected: true, provider: provider.slice(0, 100), directOverrides: overrides });
 }
 
 /** The `-c` values of one route's app-server, after the safe overrides. */
@@ -151,4 +212,47 @@ export const codexRouteOverrides = (route: AgentEngineRoute, detection: CodexRou
 
 /** The `--settings` layer of one route's Claude Code process. */
 export const claudeRouteSettings = (route: AgentEngineRoute, detection: RouterDetection): string =>
-  detection.detected && route === 'direct' ? CLAUDE_DIRECT_SETTINGS : CLAUDE_FLAG_SETTINGS;
+  detection.detected && effectiveRoute(route, detection) === 'direct' ? CLAUDE_DIRECT_SETTINGS : CLAUDE_FLAG_SETTINGS;
+
+/**
+ * The routes a chat can switch between now, and what it is told: both while the router is usable;
+ * none without a configured router (both routes are the same process); with a configured router
+ * that is unavailable, only `direct` (so a chat stored on `router` can move away) plus the reason.
+ */
+export function chatRoutes(stored: AgentEngineRoute, detection: RouterDetection): { routes: AgentEngineRoute[]; routeNotice?: RouterUnavailable } {
+  if (routerUsable(detection)) return { routes: ['direct', 'router'] };
+  if (!detection.detected || !detection.unavailable) return { routes: [] };
+  return stored === 'router' ? { routes: ['direct'], routeNotice: detection.unavailable } : { routes: [] };
+}
+
+/**
+ * The CCR gateway address the user's CLI files point at (Claude settings' loopback base URL, else
+ * Codex's CCR provider `base_url`), read-only; null when neither names a loopback port.
+ */
+export function routerAddressFromCliFiles(environment: RoutingEnvironment = realEnvironment()): { host: string; port: number } | null {
+  if (environment.platform === 'win32') return null;
+  const fromUrl = (raw: unknown): { host: string; port: number } | null => {
+    if (typeof raw !== 'string') return null;
+    try {
+      const url = new URL(raw);
+      const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
+      return LOOPBACK.has(url.hostname) && Number.isInteger(port) && port > 0 && port < 65536 ? { host: url.hostname.replace(/^\[|\]$/g, ''), port } : null;
+    } catch { return null; }
+  };
+  const dir = environment.env.CLAUDE_CONFIG_DIR?.trim() || path.join(environment.home, '.claude');
+  const settings = readJson(path.join(dir, 'settings.json'));
+  const env = isRecord(settings) && isRecord(settings.env) ? settings.env : {};
+  const claude = fromUrl(env.ANTHROPIC_BASE_URL) ?? fromUrl(env.ANTHROPIC_API_BASE_URL);
+  if (claude) return claude;
+  const home = environment.env.CODEX_HOME?.trim() || path.join(environment.home, '.codex');
+  try {
+    const config = parseToml(readFileSync(path.join(home, 'config.toml'), 'utf8')) as Record<string, unknown>;
+    const providers = isRecord(config.model_providers) ? config.model_providers : {};
+    for (const [id, table] of Object.entries(providers)) {
+      if (!isRecord(table) || (!CCR_PROVIDER.test(id) && !CCR_PROVIDER.test(String(table.name ?? '')))) continue;
+      const found = fromUrl(table.base_url);
+      if (found) return found;
+    }
+  } catch { /* none */ }
+  return null;
+}

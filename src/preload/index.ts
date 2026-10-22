@@ -381,6 +381,18 @@ const api = {
     ipcRenderer.on('marksUpstream:progress', wrapped);
     return () => ipcRenderer.removeListener('marksUpstream:progress', wrapped);
   },
+  // Chat Marks: Claude Code Router module (npm release into the module folder, its daemon, its web UI).
+  ccrStatus: (refresh = false) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'status', refresh }),
+  /** Installs or updates to `version`, the release the user confirmed; `update-external` updates the user's own copy in place. */
+  ccrInstall: (mode: import('../shared/ccr-module.js').CcrInstallMode, version: string) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'install', mode, version }),
+  ccrService: (op: import('../shared/ccr-module.js').CcrServiceAction) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'service', op }),
+  /** Opens CCR's web UI in the browser (main reads its address; it never reaches the renderer). */
+  ccrOpenUi: () => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'openUi' }),
+  onCcrProgress: (listener: (progress: import('../shared/ccr-module.js').CcrInstallProgress) => void): (() => void) => {
+    const wrapped = (_event: unknown, progress: import('../shared/ccr-module.js').CcrInstallProgress): void => listener(progress);
+    ipcRenderer.on('marksCcr:progress', wrapped);
+    return () => ipcRenderer.removeListener('marksCcr:progress', wrapped);
+  },
   installUpdate: () => call<boolean>('update:install'),
   /** Check/stage/apply supported updates and request one connector refresh round. May restart. */
   updateAll: (restartVersion?: string) => call<import('../shared/types.js').UpdateAllResult>('update:all', restartVersion),

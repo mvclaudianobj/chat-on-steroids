@@ -9,6 +9,7 @@ import { createApiChatSettingsUi } from './api-chat-settings-ui.js';
 import { createApiChatUi } from './api-chat-ui.js';
 import type { RowMenuItem } from './row-menu.js';
 import { createCliProxyManageUi } from './cliproxy-manage-ui.js';
+import { createCcrManageUi } from './ccr-manage-ui.js';
 
 export interface MarksModulesUiHooks {
   showTab(name: string): void;
@@ -42,6 +43,9 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
   const cli = createCliModulesUi(api, { ...hooks, newChatItems: apiChatChats.newChatItems, onEngineService: () => void apiChatChats.refresh() });
   repaintNewChat = cli.repaintNewChat;
   openCliSession = cli.openSession;
+  // Claude Code Router: its own card after the CLI modules (install/update, its daemon, its web UI).
+  // A change (installed, started, stopped) changes which routes Codex and Claude Code chats offer.
+  const ccr = createCcrManageUi(api, document.querySelector('[data-panel="modules"] .appearance-content')!, () => void apiChatChats.refresh());
   const apiChat = createApiChatSettingsUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!);
   // Versions, verified install/update, management password and API keys inside the same card.
   const manage = createCliProxyManageUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!,
@@ -220,7 +224,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     }
   }
 
-  $('moduleRefresh').addEventListener('click', () => { void refreshModules().then(() => manage.refresh(true)); void apiChat.refresh(); void apiChatChats.refresh(); });
+  $('moduleRefresh').addEventListener('click', () => { void refreshModules().then(() => manage.refresh(true)); void apiChat.refresh(); void apiChatChats.refresh(); void ccr.refresh(true); });
   $('moduleCliReopen').addEventListener('click', () => void actOnModule('open'));
   $<HTMLInputElement>('moduleCliActive').addEventListener('change', () =>
     setModuleUiActive($<HTMLInputElement>('moduleCliActive').checked));
@@ -247,7 +251,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     projectChatItems: apiChatChats.projectChatItems,
     normalizeTab: name => cli.normalizeTab(name === 'module-cli-proxy' && !moduleUiActive ? 'modules' : name),
     onTabOpening: name => {
-      if (name === 'modules') { void refreshModules().then(() => manage.refresh()); void apiChat.refresh(); }
+      if (name === 'modules') { void refreshModules().then(() => manage.refresh()); void apiChat.refresh(); void ccr.refresh(); }
       if (name === 'chat') void apiChatChats.refresh();
       cli.onTabOpening(name);
     },

@@ -60,7 +60,7 @@ export interface AgentEngineInfo {
   /** Short, one-line reason or location, e.g. the endpoint or why it is unavailable. */
   detail: string;
   terminal: AgentEngineTerminalMode | null;
-  /** Codex and Claude Code: whether a Claude Code Router is configured for this CLI (the router route is offered). */
+  /** Codex and Claude Code: whether a Claude Code Router is configured for this CLI, installed and answering (the router route is offered). */
   router?: boolean;
 }
 
