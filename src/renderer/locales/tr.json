@@ -1,4 +1,13 @@
 {
+  "Hold to speak to Jarvis": "Jarvis ile konuşmak için basılı tutun",
+  "Jarvis speech recognition currently requires Windows.": "Jarvis ses tanıma şu anda Windows gerektirir.",
+  "Enable microphone consent to use Jarvis.": "Jarvis için mikrofon izni verin.",
+  "Select a CLIProxy chat to use Jarvis.": "Jarvis için bir CLIProxy sohbeti seçin.",
+  "Jarvis is ready.": "Jarvis hazır.",
+  "No speech was sent.": "Konuşma gönderilmedi.",
+  "Sending Jarvis message…": "Jarvis mesajı gönderiliyor…",
+  "Jarvis message sent to this CLIProxy chat.": "Mesaj bu CLIProxy sohbetine gönderildi.",
+  "Jarvis message could not be sent.": "Jarvis mesajı gönderilemedi.",
   "Dictation unavailable": "Sesle yazma kullanılamıyor",
   "Cancel dictation": "Sesle yazmayı iptal et",
   "Stop dictation": "Sesle yazmayı durdur",

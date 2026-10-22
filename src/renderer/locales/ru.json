@@ -1,4 +1,13 @@
 {
+  "Hold to speak to Jarvis": "Удерживайте, чтобы говорить с Jarvis",
+  "Jarvis speech recognition currently requires Windows.": "Для распознавания речи Jarvis пока требуется Windows.",
+  "Enable microphone consent to use Jarvis.": "Разрешите доступ к микрофону для Jarvis.",
+  "Select a CLIProxy chat to use Jarvis.": "Выберите чат CLIProxy для Jarvis.",
+  "Jarvis is ready.": "Jarvis готов.",
+  "No speech was sent.": "Речь не отправлена.",
+  "Sending Jarvis message…": "Отправка сообщения Jarvis…",
+  "Jarvis message sent to this CLIProxy chat.": "Сообщение отправлено в этот чат CLIProxy.",
+  "Jarvis message could not be sent.": "Не удалось отправить сообщение Jarvis.",
   "Dictation unavailable": "Голосовой ввод недоступен",
   "Cancel dictation": "Отменить голосовой ввод",
   "Stop dictation": "Остановить голосовой ввод",

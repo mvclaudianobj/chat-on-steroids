@@ -1,4 +1,13 @@
 {
+  "Hold to speak to Jarvis": "按住与 Jarvis 对话",
+  "Jarvis speech recognition currently requires Windows.": "Jarvis 语音识别目前需要 Windows。",
+  "Enable microphone consent to use Jarvis.": "允许麦克风权限以使用 Jarvis。",
+  "Select a CLIProxy chat to use Jarvis.": "选择一个 CLIProxy 聊天以使用 Jarvis。",
+  "Jarvis is ready.": "Jarvis 已就绪。",
+  "No speech was sent.": "未发送语音。",
+  "Sending Jarvis message…": "正在发送 Jarvis 消息…",
+  "Jarvis message sent to this CLIProxy chat.": "消息已发送至此 CLIProxy 聊天。",
+  "Jarvis message could not be sent.": "无法发送 Jarvis 消息。",
   "Dictation unavailable": "语音听写不可用",
   "Cancel dictation": "取消听写",
   "Stop dictation": "停止听写",

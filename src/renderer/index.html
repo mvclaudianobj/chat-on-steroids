@@ -40,6 +40,7 @@
           <i class="ico ph ph-house" aria-hidden="true"></i>Workspace
         </button>
         <button data-tab="general" type="button"><i class="ico ph ph-sliders-horizontal" aria-hidden="true"></i>General</button>
+        <button data-tab="jarvis" type="button"><i class="ico ph ph-microphone" aria-hidden="true"></i>Jarvis</button>
         <button data-tab="notifications" type="button"><i class="ico ph ph-bell" aria-hidden="true"></i>Notifications</button>
         <button data-tab="remote-hosts" type="button"><i class="ico ph ph-monitor" aria-hidden="true"></i>Remote hosts</button>
         <button data-tab="usage" type="button"><i class="ico ph ph-chart-line" aria-hidden="true"></i>Usage</button>
@@ -253,6 +254,26 @@
         </section>
 
         <!-- Chat Marks: H1a local-first Brain, independent of remote providers and imported history. -->
+        <section class="panel appearance-panel jarvis-panel scroll" data-panel="jarvis" aria-labelledby="jarvisTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head appearance-page-head">
+              <div><h1 id="jarvisTitle">Jarvis</h1><p>Push-to-talk voice assistant for CLIProxy chats.</p></div>
+            </header>
+            <section class="appearance-section" id="jarvisSettings">
+              <header class="settings-section-head"><div><h2>Jarvis</h2><p>Hold to speak in a CLIProxy chat. The microphone starts only while you hold the button or your chosen key.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Enable Jarvis</b><em>Requires a CLIProxy chat and Windows speech recognition.</em></span><input id="jarvisEnabled" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Push-to-talk key</b><em>Press the chosen key while in the chat composer.</em></span><select id="jarvisKey"><option value="F8">F8</option><option value="F9">F9</option><option value="F10">F10</option><option value="F11">F11</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Speech language</b><em>Optional language code (for example pt-BR). Windows must have its speech language installed; also sets the spoken reply language.</em></span><input id="jarvisLanguage" type="text" maxlength="35" placeholder="System default" /></label>
+                <label class="setting"><span class="setting-text"><b>Chat model</b><em>Choose a model in the CLIProxy chat; Jarvis sends text to that same model.</em></span><span id="jarvisModelInfo">Current CLIProxy chat model</span></label>
+                <label class="setting"><span class="setting-text"><b>Speak replies</b><em>Optional system speech synthesis, off by default.</em></span><input id="jarvisTts" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Voice</b><em>Choose a voice installed in your operating system.</em></span><select id="jarvisVoice"><option value="">System default</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Microphone consent (this session only)</b><em>The Windows recognizer may use Microsoft's online speech service. Only recognized text is sent to CLIProxy after you release.</em></span><input id="jarvisConsent" type="checkbox" /></label>
+                <p id="jarvisSettingsStatus" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+          </div>
+        </section>
         <section class="panel appearance-panel brain-panel scroll" data-panel="brain" aria-labelledby="brainTitle">
           <div class="appearance-content settings-page-content" id="brainSettings">
             <header class="settings-page-head"><h1 id="brainTitle"><i class="ico ph ph-brain" aria-hidden="true"></i>Brain</h1><p>Search and manage memories stored on this computer.</p></header>
@@ -1620,6 +1641,7 @@
                   </details>
                   <button id="createPlan" type="button"><i class="ico ph ph-list-checks" aria-hidden="true"></i><span>Plan</span></button>
                   <button class="composer-dictation-button" id="dictationButton" type="button" aria-label="Start dictation" aria-pressed="false" aria-describedby="dictationStatus" data-state="idle" title="Start dictation" hidden disabled><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
+                  <button class="composer-dictation-button" id="jarvisTalk" type="button" aria-label="Hold to speak to Jarvis" aria-pressed="false" aria-describedby="jarvisStatus" data-state="idle" title="Hold to speak to Jarvis" hidden><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
                 </div>
                 <div class="context-meter" id="contextMeter">
                   <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">
