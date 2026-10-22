@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it } from 'vitest';
@@ -56,6 +56,21 @@ it('exports encrypted portable vault and imports with master recovery', async ()
   configureVaultForTests(path.join(directory, 'imported.json'), { getKey: async () => stored, setKey: async value => { stored = value; } });
   await expect(importVault(backup, 'incorrect password 123')).rejects.toThrow();
   await importVault(backup, master);
+  expect(await revealVault(example.name, master)).toBe(example.value);
+});
+it('does not overwrite old installations or corrupted ciphertext', async () => {
+  expect(await vaultStatus()).toEqual({ created: false, count: 0, ready: false });
+  await createVault(master);
+  await putVault(example, master);
+  const intact = await readFile(file, 'utf8');
+  const corrupted = JSON.parse(intact);
+  corrupted.records.data = Buffer.from('damaged').toString('base64');
+  await writeFile(file, JSON.stringify(corrupted));
+  expect(await vaultStatus()).toMatchObject({ created: true, ready: false });
+  await expect(listVault()).rejects.toThrow();
+  await expect(putVault(example, master)).rejects.toThrow();
+  expect(JSON.parse(await readFile(file, 'utf8'))).toEqual(corrupted);
+  await writeFile(file, intact);
   expect(await revealVault(example.name, master)).toBe(example.value);
 });
 it('rejects corrupt, duplicate or unapproved origins and GPG unsupported shapes', async () => {
