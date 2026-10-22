@@ -282,6 +282,12 @@ const api = {
     if (!allowed.includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown vault action' });
     return call<unknown>(`vault:${action}`, payload);
   },
+  /** The vault's pending chat requests changed; read them again with `vault('pending')`. */
+  onVaultPendingChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('vault:pending-changed', wrapped);
+    return () => ipcRenderer.removeListener('vault:pending-changed', wrapped);
+  },
   getState: () => call<AppState>('state:get'),
   resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */
