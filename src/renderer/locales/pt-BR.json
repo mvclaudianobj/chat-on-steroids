@@ -3277,5 +3277,6 @@
   "Recall": "Recordar",
   "Remember": "Memorizar",
   "Search local Brain memories and insert selected context into this draft.": "Pesquisar memórias locais e inserir contexto selecionado no rascunho.",
-  "Save selected or drafted text as a local Brain memory.": "Salvar texto selecionado ou rascunho como memória local do Brain."
+  "Save selected or drafted text as a local Brain memory.": "Salvar texto selecionado ou rascunho como memória local do Brain.",
+  "Approve saving a memory?": "Aprovar o salvamento de uma memória?"
 }

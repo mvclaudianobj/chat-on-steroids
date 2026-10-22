@@ -3185,5 +3185,6 @@
   "Recall": "thu hồi",
   "Remember": "Ghi nhớ",
   "Search local Brain memories and insert selected context into this draft.": "Tìm kiếm các ký ức cục bộ của Brain và chèn bối cảnh đã chọn vào bản nháp này.",
-  "Save selected or drafted text as a local Brain memory.": "Lưu văn bản đã chọn hoặc soạn thảo dưới dạng bộ nhớ Brain cục bộ."
+  "Save selected or drafted text as a local Brain memory.": "Lưu văn bản đã chọn hoặc soạn thảo dưới dạng bộ nhớ Brain cục bộ.",
+  "Approve saving a memory?": "Phê duyệt lưu một ký ức?"
 }

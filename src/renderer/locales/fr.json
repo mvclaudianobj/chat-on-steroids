@@ -3277,5 +3277,6 @@
   "Recall": "Rappel",
   "Remember": "Rappelez-vous",
   "Search local Brain memories and insert selected context into this draft.": "Recherchez les mémoires cérébrales locales et insérez le contexte sélectionné dans ce brouillon.",
-  "Save selected or drafted text as a local Brain memory.": "Enregistrez le texte sélectionné ou rédigé en tant que mémoire cérébrale locale."
+  "Save selected or drafted text as a local Brain memory.": "Enregistrez le texte sélectionné ou rédigé en tant que mémoire cérébrale locale.",
+  "Approve saving a memory?": "Approuver l’enregistrement d’un souvenir ?"
 }

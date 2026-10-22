@@ -3323,5 +3323,6 @@
   "Recall": "Напомним",
   "Remember": "Помните",
   "Search local Brain memories and insert selected context into this draft.": "Найдите локальные воспоминания Brain и вставьте выбранный контекст в этот черновик.",
-  "Save selected or drafted text as a local Brain memory.": "Сохраните выделенный или черновой текст в локальной памяти мозга."
+  "Save selected or drafted text as a local Brain memory.": "Сохраните выделенный или черновой текст в локальной памяти мозга.",
+  "Approve saving a memory?": "Разрешить сохранение воспоминания?"
 }

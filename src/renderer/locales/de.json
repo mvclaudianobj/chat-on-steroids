@@ -3231,5 +3231,6 @@
   "Recall": "Abrufen",
   "Remember": "Merken",
   "Search local Brain memories and insert selected context into this draft.": "Durchsuche lokale Erinnerungen und füge ausgewählten Kontext in den Entwurf ein.",
-  "Save selected or drafted text as a local Brain memory.": "Speichere den markierten Text oder Entwurf als lokale Brain-Erinnerung."
+  "Save selected or drafted text as a local Brain memory.": "Speichere den markierten Text oder Entwurf als lokale Brain-Erinnerung.",
+  "Approve saving a memory?": "Speichern einer Erinnerung genehmigen?"
 }

@@ -3185,5 +3185,6 @@
   "Recall": "リコール",
   "Remember": "覚えておいてください",
   "Search local Brain memories and insert selected context into this draft.": "ローカルの脳の記憶を検索し、選択したコンテキストをこのドラフトに挿入します。",
-  "Save selected or drafted text as a local Brain memory.": "選択したテキストまたは下書きしたテキストをローカルの Brain メモリとして保存します。"
+  "Save selected or drafted text as a local Brain memory.": "選択したテキストまたは下書きしたテキストをローカルの Brain メモリとして保存します。",
+  "Approve saving a memory?": "メモリの保存を承認しますか？"
 }

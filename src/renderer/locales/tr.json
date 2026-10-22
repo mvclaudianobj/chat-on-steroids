@@ -3231,5 +3231,6 @@
   "Recall": "Geri çağırma",
   "Remember": "Hatırla",
   "Search local Brain memories and insert selected context into this draft.": "Yerel Beyin anılarını arayın ve seçilen bağlamı bu taslağa ekleyin.",
-  "Save selected or drafted text as a local Brain memory.": "Seçili veya taslak halindeki metni yerel Beyin belleği olarak kaydedin."
+  "Save selected or drafted text as a local Brain memory.": "Seçili veya taslak halindeki metni yerel Beyin belleği olarak kaydedin.",
+  "Approve saving a memory?": "Bir anının kaydedilmesini onaylıyor musunuz?"
 }

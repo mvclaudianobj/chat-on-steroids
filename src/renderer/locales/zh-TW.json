@@ -3185,5 +3185,6 @@
   "Recall": "召回",
   "Remember": "記住",
   "Search local Brain memories and insert selected context into this draft.": "搜索本地大脑记忆并将选定的上下文插入到此草稿中。",
-  "Save selected or drafted text as a local Brain memory.": "将选定或起草的文本保存为本地大脑记忆。"
+  "Save selected or drafted text as a local Brain memory.": "将选定或起草的文本保存为本地大脑记忆。",
+  "Approve saving a memory?": "核准儲存一則記憶？"
 }
