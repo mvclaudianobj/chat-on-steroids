@@ -6,6 +6,7 @@
     <link rel="stylesheet" href="./icons.css" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./settings.css" />
+    <link rel="stylesheet" href="./brain.css" />
     <link rel="stylesheet" href="./dictation.css" />
   </head>
   <body>
@@ -46,6 +47,7 @@
           <i class="ico ph ph-robot" aria-hidden="true"></i>Agents &amp; automation
         </button>
         <button data-tab="modules" type="button"><i class="ico ph ph-squares-four" aria-hidden="true"></i>Modules</button>
+        <button data-tab="brain" type="button"><i class="ico ph ph-brain" aria-hidden="true"></i>Brain</button>
         <button id="moduleCliNav" class="modules-subnav" data-module-page="module-cli-proxy" type="button" aria-label="CLIProxyAPI" translate="no" hidden>
           <i class="ico ph ph-plug chat-type-icon module-mark" aria-hidden="true" data-module="cliproxy"></i><span translate="no">CLIProxyAPI</span>
         </button>
@@ -212,6 +214,25 @@
                 <div class="setting"><span class="setting-text"><b>Sign out from MarksPanel</b><em>Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.</em></span><button id="marksPanelLogout" type="button" class="btn">Sign out</button></div>
               </div>
             </section>
+            <section class="appearance-section" id="marksVault">
+              <header class="settings-section-head"><div><h2>Chat Marks Vault</h2><p>Encrypted secrets: your master password is required only for recovery and administration. Chats never receive secret values.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <p id="vaultStatus" role="status">Checking vault…</p>
+                <label class="setting"><span class="setting-text"><b>Master password (administration only)</b><em>Use at least 12 characters. Daily chat uses your operating-system keyring instead.</em></span><input id="vaultMaster" type="password" autocomplete="new-password" /></label>
+                <div class="setting"><span class="setting-text"><b>Create or recover</b><em>A portable vault has independent master-password recovery.</em></span><button class="btn" type="button" id="vaultCreate">Create</button><button class="btn" type="button" id="vaultRecover">Recover on this device</button></div>
+                <label class="setting"><span class="setting-text"><b>Secret name</b><em>Only names are visible to chats.</em></span><input id="vaultName" type="text" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Secret</b><em>Never logged or added to chat history.</em></span><input id="vaultValue" type="password" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Allowed HTTPS origin</b><em>Exact origin for approved requests, e.g. https://example.com; empty means local-only.</em></span><input id="vaultOrigin" type="url" translate="no" placeholder="https://example.com" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Request header</b><em>Authorization uses a Bearer token. Other headers send their value unchanged.</em></span><input id="vaultHeader" type="text" value="Authorization" autocomplete="off" /></label>
+                <div class="setting"><button class="btn" type="button" id="vaultSave">Save secret</button><button class="btn" type="button" id="vaultReveal">Reveal (admin)</button><button class="btn" type="button" id="vaultRemove">Remove secret</button></div>
+                <div id="vaultEntries" aria-label="Stored secret names"></div>
+                <label class="setting"><span class="setting-text"><b>GPG passphrase (import only)</b><em>Import a GPG JSON catalog without placing its secrets in the app history.</em></span><input id="vaultGpgPassword" type="password" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>New master password</b><em>Requires current master password.</em></span><input id="vaultNewPassword" type="password" autocomplete="new-password" /></label>
+                <div class="setting"><button class="btn" type="button" id="vaultChangePassword">Change password</button><button class="btn" type="button" id="vaultImport">Import encrypted vault</button><button class="btn" type="button" id="vaultImportGpg">Import GPG</button><button class="btn" type="button" id="vaultExport">Export encrypted</button></div>
+                <header class="settings-section-head"><div><h3>Chat secret approvals</h3><p>Approve once, for this chat until you close Chat Marks, or deny.</p></div><button class="btn" type="button" id="vaultPendingRefresh">Refresh</button></header>
+                <div id="vaultPending" role="region" aria-label="Pending vault approvals"></div>
+              </div>
+            </section>
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>For developers</h2><p>Troubleshooting details and access for tools on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
@@ -220,6 +241,56 @@
                 <label class="setting"><span class="setting-text"><b>Local control API</b><em>Let agents on this computer read app status and chats.</em></span><input id="controlApiEnabled" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Allow actions</b><em>Let those agents also send messages, start new chats and cancel messages. Needs the local control API.</em></span><input id="controlApiAllowActions" type="checkbox" disabled /></label>
               </div>
+            </section>
+          </div>
+        </section>
+
+        <!-- Chat Marks: H1a local-first Brain, independent of remote providers and imported history. -->
+        <section class="panel appearance-panel brain-panel scroll" data-panel="brain" aria-labelledby="brainTitle">
+          <div class="appearance-content settings-page-content" id="brainSettings">
+            <header class="settings-page-head"><h1 id="brainTitle"><i class="ico ph ph-brain" aria-hidden="true"></i>Brain</h1><p>Search and manage memories stored on this computer.</p></header>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Memory status</h2><p>Your local memory is private and stays on this device.</p></div><button class="btn" id="brainRefresh" type="button">Refresh</button></header>
+              <div class="settings-surface brain-overview"><p id="brainStatus" role="status">Checking local memory…</p><p id="brainCount"></p><p id="brainSize"></p></div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Diagnosis</h2><p>Check the local database, full-text search, and available connections.</p></div><button class="btn" id="brainDoctorRun" type="button">Run diagnosis</button></header>
+              <div id="brainDoctor" class="settings-surface brain-output" role="status">Run diagnosis to check Brain.</div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Sources</h2><p>H1a searches locally stored memories only.</p></div></header>
+              <div id="brainSources" class="settings-surface brain-output" role="status">Local database</div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Memories</h2><p>Search, review, edit, delete, or export your saved memories.</p></div><button class="btn" id="brainExport" type="button">Export JSONL</button></header>
+              <div class="settings-surface brain-library">
+                <form id="brainSearchForm" class="brain-search"><label for="brainQuery">Search memories</label><input id="brainQuery" type="search" maxlength="400" autocomplete="off" spellcheck="false" placeholder="Search saved memories…" /><button class="btn" type="submit">Search</button><button class="btn" id="brainClear" type="button">Clear</button></form>
+                <div id="brainResults" class="brain-results" role="region" aria-label="Saved memories"></div>
+                <form id="brainEditor" class="brain-editor">
+                  <h3 id="brainEditorTitle">New memory</h3><input id="brainMemoryId" type="hidden" />
+                  <label for="brainMemoryTitle">Title</label><input id="brainMemoryTitle" type="text" maxlength="160" />
+                  <label for="brainMemoryContent">Memory text</label><textarea id="brainMemoryContent" rows="5" maxlength="4000" required placeholder="What should Brain remember?"></textarea>
+                  <div class="brain-fields">
+                    <label for="brainMemoryType">Type<select id="brainMemoryType"><option value="semantic">Fact</option><option value="episodic">Event</option><option value="procedural">Procedure</option></select></label>
+                    <label for="brainMemoryMode">Retention<select id="brainMemoryMode"><option value="long_term">Long term</option><option value="short_term">Short term</option></select></label>
+                  </div>
+                  <label for="brainMemoryTags">Tags (comma separated)</label><input id="brainMemoryTags" type="text" maxlength="500" autocomplete="off" />
+                  <div class="brain-actions"><button class="btn" type="submit" id="brainSave">Save memory</button><button class="btn" type="button" id="brainNew">New memory</button><button class="btn" type="button" id="brainDelete" hidden>Delete memory</button></div>
+                  <p id="brainEditorStatus" role="status" aria-live="polite"></p>
+                </form>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Brain options</h2><p>Model access and automatic context remain disabled until you enable them.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card" id="brainOptions">
+                <label class="setting"><span class="setting-text"><b>ChatGPT memory tools</b><em>Allow ChatGPT chats to search and request saving local memories.</em></span><input id="brainChatgptTools" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>API chat memory tools</b><em>Allow CLIProxy chats to use local memory tools.</em></span><input id="brainApiChatTools" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Ask before model saves</b><em>Review each memory requested by a model. Manual saves happen immediately.</em></span><input id="brainAskBeforeSave" type="checkbox" checked /></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Save approvals</h2><p>Review pending model requests before they become memories.</p></div><button class="btn" id="brainPendingRefresh" type="button">Refresh</button></header>
+              <div id="brainPending" class="settings-surface brain-output" role="region" aria-label="Pending memory saves"></div>
             </section>
           </div>
         </section>

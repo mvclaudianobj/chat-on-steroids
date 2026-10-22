@@ -8,6 +8,7 @@ import { createWorkspaceDocks } from './workspace-docks.js';
 import { showMarksProjectDockPicker } from './marks-project-dock.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
 import { APP_COMMANDS, initSkills } from './skills.js';
+import { openBrainRecall, rememberBrainSelection } from './brain-ui.js';
 import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
@@ -1200,6 +1201,13 @@ async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'aft
   const rest = input.value.slice(typed[0].length).replace(/^\s+/, '');
   input.value = rest;
   input.dispatchEvent(new Event('input', { bubbles: true }));
+  if (name === 'recall') {
+    // /recall <query> is a local search command: the query is not part of the draft.
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    openBrainRecall(api, input, rest.trim());
+    return;
+  }
   // The menu's Plan is a toggle; a typed /plan only arms, so an armed Plan stays armed.
   if (name === 'image') {
     // The rest is the picture request; a bare /image waits for one.
@@ -1258,6 +1266,8 @@ function runSlashCommand(name: string): void {
   } else if (name === 'pin') toast(t('This chat cannot be pinned yet.'));
   else if (name === 'status') afterClick(() => { const meter = $('contextMeterButton'); if (meter.getAttribute('aria-expanded') !== 'true') meter.click(); });
   else if (name === 'review') prefillComposer(t('Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.'));
+  else if (name === 'recall') afterClick(() => openBrainRecall(api, $<HTMLTextAreaElement>('chatInput')));
+  else if (name === 'remember') void rememberBrainSelection(api, $<HTMLTextAreaElement>('chatInput'));
   else if (name === 'init') prefillComposer(t('Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.'));
   else if (name === 'usage') openSettingsTab('usage');
   else if (name === 'feedback') openSettingsTab('activity');
