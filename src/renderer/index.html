@@ -212,6 +212,25 @@
                 <div class="setting"><span class="setting-text"><b>Sign out from MarksPanel</b><em>Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.</em></span><button id="marksPanelLogout" type="button" class="btn">Sign out</button></div>
               </div>
             </section>
+            <section class="appearance-section" id="marksVault">
+              <header class="settings-section-head"><div><h2>Chat Marks Vault</h2><p>Encrypted secrets: your master password is required only for recovery and administration. Chats never receive secret values.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <p id="vaultStatus" role="status">Checking vault…</p>
+                <label class="setting"><span class="setting-text"><b>Master password (administration only)</b><em>Use at least 12 characters. Daily chat uses your operating-system keyring instead.</em></span><input id="vaultMaster" type="password" autocomplete="new-password" /></label>
+                <div class="setting"><span class="setting-text"><b>Create or recover</b><em>A portable vault has independent master-password recovery.</em></span><button class="btn" type="button" id="vaultCreate">Create</button><button class="btn" type="button" id="vaultRecover">Recover on this device</button></div>
+                <label class="setting"><span class="setting-text"><b>Secret name</b><em>Only names are visible to chats.</em></span><input id="vaultName" type="text" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Secret</b><em>Never logged or added to chat history.</em></span><input id="vaultValue" type="password" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Allowed HTTPS origin</b><em>Exact origin for approved requests, e.g. https://example.com; empty means local-only.</em></span><input id="vaultOrigin" type="url" translate="no" placeholder="https://example.com" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Request header</b><em>Authorization uses a Bearer token. Other headers send their value unchanged.</em></span><input id="vaultHeader" type="text" value="Authorization" autocomplete="off" /></label>
+                <div class="setting"><button class="btn" type="button" id="vaultSave">Save secret</button><button class="btn" type="button" id="vaultReveal">Reveal (admin)</button><button class="btn" type="button" id="vaultRemove">Remove secret</button></div>
+                <div id="vaultEntries" role="group" aria-label="Stored secret names"></div>
+                <label class="setting"><span class="setting-text"><b>GPG passphrase (import only)</b><em>Import a GPG JSON catalog without placing its secrets in the app history.</em></span><input id="vaultGpgPassword" type="password" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>New master password</b><em>Requires current master password.</em></span><input id="vaultNewPassword" type="password" autocomplete="new-password" /></label>
+                <div class="setting"><button class="btn" type="button" id="vaultChangePassword">Change password</button><button class="btn" type="button" id="vaultImport">Import encrypted vault</button><button class="btn" type="button" id="vaultImportGpg">Import GPG</button><button class="btn" type="button" id="vaultExport">Export encrypted</button></div>
+                <header class="settings-section-head"><div><h3>Chat secret approvals</h3><p>Approve once, for this chat until you close Chat Marks, or deny.</p></div><button class="btn" type="button" id="vaultPendingRefresh">Refresh</button></header>
+                <div id="vaultPending" role="region" aria-label="Pending vault approvals"></div>
+              </div>
+            </section>
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>For developers</h2><p>Troubleshooting details and access for tools on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
