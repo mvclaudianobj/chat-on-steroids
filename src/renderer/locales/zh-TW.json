@@ -3152,5 +3152,8 @@
   "Allow in this chat until app exits": "在應用程式關閉前允許此聊天",
   "Chat": "聊天",
   "SSH": "SSH",
-  "Trust host fingerprint": "信任主機指紋"
+  "Trust host fingerprint": "信任主機指紋",
+  "Select a copy of remote-targets.json": "選取 remote-targets.json 的副本",
+  "JSON files": "JSON 檔案",
+  "Close a terminal before opening another (maximum 8)": "開啟其他終端前請先關閉一個終端機（最多 8 個）"
 }

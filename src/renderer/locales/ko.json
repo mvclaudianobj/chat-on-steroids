@@ -3152,5 +3152,8 @@
   "Allow in this chat until app exits": "앱 종료 시까지 이 채팅에서 허용",
   "Chat": "채팅",
   "SSH": "SSH",
-  "Trust host fingerprint": "호스트 지문 신뢰"
+  "Trust host fingerprint": "호스트 지문 신뢰",
+  "Select a copy of remote-targets.json": "remote-targets.json 사본 선택",
+  "JSON files": "JSON 파일",
+  "Close a terminal before opening another (maximum 8)": "새 터미널을 열기 전에 기존 터미널을 닫으세요(최대 8개)"
 }

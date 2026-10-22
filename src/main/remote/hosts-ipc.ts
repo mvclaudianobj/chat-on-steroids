@@ -4,6 +4,7 @@ import { listRemoteHosts, saveRemoteHost, deleteRemoteHost, previewRemoteTargets
 import { remoteApprovals, decideRemoteApproval, onRemoteApprovalsChanged } from './approval.js';
 import { addRemoteProject } from '../projects.js';
 import { importRemoteHosts } from './hosts.js';
+import { dialogLabel, mainText } from '../main-texts.js';
 
 let preview: HostProfile[] | null = null;
 const fingerprints = new Map<string, { fingerprint: string; keys: string }>();
@@ -56,7 +57,7 @@ export function registerRemoteHostsIpc(getWindow: () => BrowserWindow | null): v
   register('preview', async () => {
     preview = null;
     const window = getWindow(); if (!window) return [];
-    const selection = await dialog.showOpenDialog(window, { title: 'Select a copy of remote-targets.json', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] });
+    const selection = await dialog.showOpenDialog(window, { ...dialogLabel('Select a copy of remote-targets.json'), properties: ['openFile'], filters: [{ name: mainText('JSON files'), extensions: ['json'] }] });
     if (selection.canceled || !selection.filePaths[0]) return [];
     preview = await previewRemoteTargets(selection.filePaths[0]); return preview;
   });

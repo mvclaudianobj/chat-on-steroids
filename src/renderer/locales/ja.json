@@ -3152,5 +3152,8 @@
   "Allow in this chat until app exits": "アプリ終了までこのチャットで許可",
   "Chat": "チャット",
   "SSH": "SSH",
-  "Trust host fingerprint": "ホストの指紋を信頼する"
+  "Trust host fingerprint": "ホストの指紋を信頼する",
+  "Select a copy of remote-targets.json": "remote-targets.json のコピーを選択",
+  "JSON files": "JSON ファイル",
+  "Close a terminal before opening another (maximum 8)": "別のターミナルを開く前に既存のターミナルを閉じてください（最大8件）"
 }

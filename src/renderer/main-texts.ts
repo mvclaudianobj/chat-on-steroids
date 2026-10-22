@@ -71,6 +71,8 @@ export function mainTexts(): Record<MainText, string> {
     'Import GPG secrets': t('Import GPG secrets'),
     'Chat Marks vault': t('Chat Marks vault'),
     'GPG encrypted files': t('GPG encrypted files'),
+    'Select a copy of remote-targets.json': t('Select a copy of remote-targets.json'),
+    'JSON files': t('JSON files'),
   };
 }
 

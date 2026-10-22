@@ -3152,5 +3152,8 @@
   "Allow in this chat until app exits": "Cho phép trong cuộc trò chuyện này cho đến khi đóng ứng dụng",
   "Chat": "Trò chuyện",
   "SSH": "SSH",
-  "Trust host fingerprint": "Tin cậy dấu vân tay máy chủ"
+  "Trust host fingerprint": "Tin cậy dấu vân tay máy chủ",
+  "Select a copy of remote-targets.json": "Chọn bản sao của remote-targets.json",
+  "JSON files": "Tệp JSON",
+  "Close a terminal before opening another (maximum 8)": "Đóng một terminal trước khi mở terminal khác (tối đa 8)"
 }

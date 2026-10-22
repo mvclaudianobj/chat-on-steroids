@@ -3198,5 +3198,8 @@
   "Allow in this chat until app exits": "Uygulama kapanana kadar bu sohbette izin ver",
   "Chat": "Sohbet",
   "SSH": "SSH",
-  "Trust host fingerprint": "Ana bilgisayar parmak izine güven"
+  "Trust host fingerprint": "Ana bilgisayar parmak izine güven",
+  "Select a copy of remote-targets.json": "remote-targets.json dosyasının bir kopyasını seçin",
+  "JSON files": "JSON dosyaları",
+  "Close a terminal before opening another (maximum 8)": "Başka bir terminal açmadan önce bir terminali kapatın (en fazla 8)"
 }

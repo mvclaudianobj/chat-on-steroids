@@ -3290,5 +3290,8 @@
   "Allow in this chat until app exits": "Разрешить в этом чате до закрытия приложения",
   "Chat": "Чат",
   "SSH": "SSH",
-  "Trust host fingerprint": "Доверять отпечатку хоста"
+  "Trust host fingerprint": "Доверять отпечатку хоста",
+  "Select a copy of remote-targets.json": "Выберите копию remote-targets.json",
+  "JSON files": "Файлы JSON",
+  "Close a terminal before opening another (maximum 8)": "Закройте терминал перед открытием следующего (максимум 8)"
 }
