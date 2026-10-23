@@ -846,6 +846,7 @@ describe('who is allowed to talk to it', () => {
 
   it('publishes external expiry while the CoS companion continues polling', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
     try {
@@ -1173,6 +1174,7 @@ describe('provisioning', () => {
 
   it('does not treat a persisted pairing token as proof the browser is present after restart', async () => {
     await pair();
+    await request('GET', '/status', { host: 'browser' });
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
 
     // Pairing is durable authorization; browser presence belongs to this app process. A
@@ -1184,6 +1186,7 @@ describe('provisioning', () => {
 
   it('requires a fresh browser sighting after the local bridge itself restarts', async () => {
     await pair();
+    await request('GET', '/status', { host: 'browser' });
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
 
     await stopBridge();
@@ -1194,7 +1197,7 @@ describe('provisioning', () => {
     expect(await bridgeStatus()).toMatchObject({ running: true, paired: true, present: false, lastSeenAt: null });
 
     // Authorization survived, so the first normal extension poll proves presence again.
-    expect((await request('GET', '/status')).status).toBe(200);
+    expect((await request('GET', '/status', { host: 'browser' })).status).toBe(200);
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
   });
 });
@@ -5116,7 +5119,10 @@ describe('delivering a bootstrap', () => {
       expect(userPromptText(command.text)).toContain('PROJECT_TASK_PRESERVED');
       expect(userPromptText(command.text)).not.toMatch(/SCOPED_AGENTS|Cut off/);
     } else {
-      expect(command.text).not.toContain('[[COS_CONTEXT:');
+      // Compact & Resume starts a new ChatGPT document, so the short Marks persona
+      // now belongs in that opening; the full AGENTS/setup instructions still do not.
+      expect(command.text).toContain('[[COS_CONTEXT:');
+      expect(command.text).toContain('Você é Marks');
       expect(command.text).not.toContain('SCOPED_AGENTS_HEAD');
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }
