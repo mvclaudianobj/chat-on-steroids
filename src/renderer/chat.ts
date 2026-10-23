@@ -11,7 +11,7 @@ import { createWorkspaceDocks } from './workspace-docks.js';
 import { showMarksProjectDockPicker } from './marks-project-dock.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
 import { APP_COMMANDS, initSkills } from './skills.js';
-import { openBrainRecall, rememberBrainSelection } from './brain-ui.js';
+import { openBrainRecall, rememberBrainSelection, rememberChatContext, rememberLatestAnswer } from './brain-ui.js';
 import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
@@ -1301,7 +1301,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
 
 /** Slash commands that act on the open chat; New Chat does not offer them. */
-const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find']);
+const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find', 'remember-answer']);
 /** The commands that switch how the next message is sent; their rest is that message. */
 const MODE_COMMANDS = new Set(['plan', 'goal', 'loop']);
 /** The draft a typed /image is being sent from (#1701): that one message asks for a picture. */
@@ -1351,7 +1351,7 @@ async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'aft
   }
   if (name === 'remember' && rest.trim()) {
     // Chat Marks: a typed `/remember <text>` saves that text and clears it, so it is not sent too.
-    void rememberBrainSelection(api, input, { clearOnSave: true });
+    void rememberBrainSelection(api, input, { clearOnSave: true, sessionId: openChatSummary()?.id ?? null });
     return;
   }
   // The menu's Plan is a toggle; a typed /plan only arms, so an armed Plan stays armed.
@@ -1413,7 +1413,8 @@ function runSlashCommand(name: string): void {
   else if (name === 'status') afterClick(() => { const meter = $('contextMeterButton'); if (meter.getAttribute('aria-expanded') !== 'true') meter.click(); });
   else if (name === 'review') prefillComposer(t('Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.'));
   else if (name === 'recall') afterClick(() => openBrainRecall(api, $<HTMLTextAreaElement>('chatInput')));
-  else if (name === 'remember') void rememberBrainSelection(api, $<HTMLTextAreaElement>('chatInput'));
+  else if (name === 'remember') void rememberCommand();
+  else if (name === 'remember-answer' && chat) void rememberLatestAnswer(api, chat.id);
   else if (name === 'init') prefillComposer(t('Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.'));
   else if (name === 'usage') openSettingsTab('usage');
   else if (name === 'feedback') openSettingsTab('activity');
@@ -1424,6 +1425,31 @@ function runSlashCommand(name: string): void {
   else if (name === 'export' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'session', target: 'file' }))
     .then(result => { if (result?.done === 'saved') toast(t('Saved {0}', [result.name])); });
   else if (name === 'find' && chat) afterClick(() => chatFind?.open());
+}
+
+/**
+ * Chat Marks `/remember`: text selected or left in the composer is saved as it is; with nothing
+ * there, the open chat's own model is asked to save the conversation's durable knowledge through
+ * `memory_save` (each memory passes its approval card), sent like any message the user sends.
+ */
+async function rememberCommand(): Promise<void> {
+  const input = $<HTMLTextAreaElement>('chatInput');
+  const chat = openChatSummary();
+  if (input.value.trim()) { void rememberBrainSelection(api, input, { sessionId: chat?.id ?? null }); return; }
+  if (!chat) { void rememberBrainSelection(api, input); return; }
+  const generation = selectionGeneration, key = draftKey();
+  await rememberChatContext(api, {
+    sessionId: chat.id,
+    openBrain: () => openSettingsTab('brain'),
+    send: async text => {
+      // Another chat opened, or the user started typing or attached files meanwhile: not for this send.
+      if (selectedId !== chat.id || selectionGeneration !== generation || draftKey() !== key || input.value.trim()) return false;
+      if (imageDrafts.get(key)?.length) { toast(t('Send or remove the attached files first, then use /remember again.')); return false; }
+      input.value = text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return await sendComposer() !== false;
+    }
+  });
 }
 
 function startRename(summary: SessionSummary): void {

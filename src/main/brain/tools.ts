@@ -9,6 +9,7 @@ import { brainSave } from './store.js';
 import { combinedRecall, syncSavedMemory } from './recall.js';
 import { logInfo, logWarn } from '../logger.js';
 import { getBrainSettings } from './settings.js';
+import { brainProjectScope } from './chat-memory.js';
 
 export function registerBrainTools(reg: SurfaceRegistrar, audience: 'core' | 'api' = 'core'): void {
   const { caps, exposedCaps, ctx } = reg;
@@ -52,7 +53,9 @@ export function registerBrainTools(reg: SurfaceRegistrar, audience: 'core' | 'ap
     if (!session || session.id !== caller.sessionId) return failIdentity('Chat session changed before Brain write');
     if (ctx.readOnly || !caps.edit) return fail('Brain write capability was revoked');
     try {
-      const memory = await brainSave({ content, title, tags, provenance: { source: 'chat', sessionId: caller.sessionId } });
+      // Chat Marks: the chat's project is the memory's scope (`/remember` asks the model to save there).
+      const memory = await brainSave({ content, title, tags, scope: brainProjectScope(session.projectId),
+        provenance: { source: 'chat', sessionId: caller.sessionId, engine: audience === 'core' ? 'chatgpt' : 'cliproxy' } });
       logInfo(`brain: saved memory (source=chat, ${memory.content.length} chars)`);
       const synced = await syncSavedMemory(memory);
       const remote = synced.filter(row => row.ok).map(row => row.source);

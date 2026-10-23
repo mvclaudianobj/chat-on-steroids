@@ -2996,8 +2996,25 @@ Brain tools default Off separately for native ChatGPT Core and CLIProxy API chat
 context, then human approval by default. Native chats use an ephemeral exact-chat pending
 approval, and API chats reuse the existing per-turn approval gate. Validate the exact
 session and active capability after approval before writing. The settings page and the
-explicit `/remember` command are user-authored saves; `/recall` inserts a bounded
-`<memory-context>` draft without sending it. The `marksBrain:request` IPC is a fixed,
+explicit `/remember <text>` are user-authored saves; `/recall` inserts a bounded
+`<memory-context>` draft without sending it.
+
+`/remember` memorizes the chat it is called in (`renderer/brain-ui.ts` `rememberChatContext`,
+`main/brain/chat-memory.ts`). Bare, with nothing selected or left in the composer, it asks main
+`chat.tools` whether that chat's model has `memory_save` now (ChatGPT: `chatgptTools`, edit
+permission and a `current` Core refresh; CLIProxy: `apiChatTools`; Claude Code/Codex/OpenCode:
+`enginesEnabled`, not on Windows, not MarksCode). Available: one localized instruction (review the
+conversation, one memory per decision/fact/preference/next step, title and tags, no chit-chat or
+secrets) goes through the ordinary `sendComposer` path, so each proposed memory meets the usual
+approval card. Unavailable: nothing is sent; a toast names the switch, with Open Brain and Save
+last answer buttons. `/remember-answer` (and that button) is the model-free fallback
+`chat.saveLatestAnswer`: the newest finished answer (`latestAnswer`, overflow read back, 3,600
+characters at most, redacted by `brainSave`), titled with the chat. `/remember <text>` and selected
+or drafted text in a chat go through `chat.save`. Every chat-made memory, model or user, gets
+`{source:'chat', sessionId, engine}` (`chatgpt`, `cliproxy` or the engine id) and scope
+`project:<projectId>` (`global` without a project) resolved in main; the renderer sends only the
+session id and cannot set scope or provenance. Proof: `test/brain-chat-memory.test.ts` and the
+`/remember` cases of `test/renderer-timeline.test.ts`. The `marksBrain:request` IPC is a fixed,
 Zod-validated action list guarded to the main window/frame. Its preload is not a generic
 filesystem bridge. Keep the few Core/API registration hooks marked `Chat Marks:`.
 
