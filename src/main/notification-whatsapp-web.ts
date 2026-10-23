@@ -2,7 +2,7 @@
 import { app } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
-import makeWASocket, { DisconnectReason, useMultiFileAuthState, type WASocket } from '@whiskeysockets/baileys';
+import { makeWASocket, DisconnectReason, useMultiFileAuthState, type WASocket } from '@whiskeysockets/baileys';
 import type { WhatsAppSetupIssue } from '../shared/notification-center.js';
 
 export interface WhatsAppWebStatus { state: 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'; qr?: string; reason?: WhatsAppSetupIssue; stage?: 'storage' | 'auth' | 'socket' | 'network' | 'qr' | 'ready' }

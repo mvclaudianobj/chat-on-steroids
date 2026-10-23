@@ -1,16 +1,26 @@
 import { promises as fs } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   directory: '', startError: null as Error | null, authError: null as Error | null, authStuck: false, authCalls: 0, saveStarted: false, saveBarrier: null as Promise<void> | null, registered: false,
   sockets: [] as Array<{ ev: import('node:events').EventEmitter; ws: { close: ReturnType<typeof vi.fn> }; sendMessage: ReturnType<typeof vi.fn>; logout: ReturnType<typeof vi.fn> }>
 }));
+it('uses the named socket factory exported by the actual Baileys CommonJS entry', () => {
+  const actual = createRequire(import.meta.url)('@whiskeysockets/baileys') as {
+    default: unknown; makeWASocket: unknown; useMultiFileAuthState: unknown
+  };
+  expect(typeof actual).toBe('object');
+  expect(typeof actual.makeWASocket).toBe('function');
+  expect(actual.makeWASocket).toBe(actual.default);
+  expect(typeof actual.useMultiFileAuthState).toBe('function');
+});
 vi.mock('electron', () => ({ app: { getPath: () => mocks.directory } }));
 vi.mock('@whiskeysockets/baileys', async () => {
   const { EventEmitter } = await import('node:events');
   return {
-    default: vi.fn(() => {
+    makeWASocket: vi.fn(() => {
       if (mocks.startError) throw mocks.startError;
       const sock = { ev: new EventEmitter(), ws: { close: vi.fn() }, sendMessage: vi.fn(async () => undefined), logout: vi.fn(async () => undefined) };
       mocks.sockets.push(sock);
