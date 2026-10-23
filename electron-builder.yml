@@ -1,11 +1,11 @@
 appId: com.chatonsteroids.app
 productName: Chat Marks
 copyright: MIT licensed
-# Product revision 2.1.44.1; npm uses SemVer build metadata +1.
-buildVersion: 2.1.44.1
+# Product revision 2.1.45.1; npm uses SemVer build metadata +1.
+buildVersion: 2.1.45.1
 buildNumber: '1'
 extraMetadata:
-  version: 2.1.44.1
+  version: 2.1.45.1
 
 directories:
   output: release
