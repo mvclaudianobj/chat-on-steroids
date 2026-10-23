@@ -15,7 +15,7 @@ import { sendWhatsAppWeb } from '../src/main/notification-whatsapp-web.js';
 
 const event = { event: 'turn-completed' as const, title: 'Finished', project: 'Synthetic project', excerpt: 'Synthetic private conversation' };
 describe('notification center outbound channels', () => {
-  beforeEach(() => { vi.clearAllMocks(); state.secret = 'synthetic-test-token'; });
+  beforeEach(() => { vi.clearAllMocks(); state.secret = 'synthetic-test-token'; state.snapshot = null; });
   it('migrates saved 2.1.45 settings by adding disabled WhatsApp Web', async () => {
     const settings = structuredClone(await notificationSettings());
     settings.channels.telegram.destinations = ['original-id'];
@@ -37,6 +37,8 @@ describe('notification center outbound channels', () => {
     await expect(dispatchNotice(event, { now: 110000 })).rejects.toMatchObject({ failure: { code: 'whatsapp_disconnected', channel: 'whatsapp-web' } });
     expect(sendWhatsAppWeb).toHaveBeenCalledTimes(1);
     expect(sendSmtp).not.toHaveBeenCalled();
+    settings.channels['whatsapp-web'].enabled = false;
+    await saveNotificationSettings(settings);
   });
   it('uses per-channel events and excludes chat excerpts by default', async () => {
     const settings = structuredClone(await notificationSettings());
