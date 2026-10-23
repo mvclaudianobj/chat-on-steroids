@@ -3830,5 +3830,14 @@
   "No secret with that name.": "Không có bí mật nào có tên đó.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "Chuỗi khóa của hệ thống không khả dụng, nên không thể dùng kho trên máy này.",
   "Check this field: {0}.": "Hãy kiểm tra trường này: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Đã tạo kho. Mật khẩu chính chỉ được hỏi lại cho việc quản trị: thêm, hiển thị, xuất hoặc nhập bí mật."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Đã tạo kho. Mật khẩu chính chỉ được hỏi lại cho việc quản trị: thêm, hiển thị, xuất hoặc nhập bí mật.",
+  "Vault, notifications, Brain memory and new ways to work with agents.": "Kho bảo mật, thông báo, bộ nhớ Brain và cách mới để làm việc với tác nhân.",
+  "Vault and notifications": "Kho bảo mật và thông báo",
+  "Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.": "Bảo vệ bí mật trong kho và cấu hình thông báo bằng kiểm tra kênh và ghim chứng chỉ SMTP.",
+  "Brain memory": "Bộ nhớ Brain",
+  "Recall and save local memories, connect optional sources and selectively import past conversations.": "Tìm và lưu ký ức cục bộ, kết nối nguồn tùy chọn và nhập chọn lọc hội thoại cũ.",
+  "Agent routes and remote labs": "Tuyến tác nhân và môi trường từ xa",
+  "Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.": "Chọn tuyến Codex hoặc Claude, quản lý máy chủ SSH, VM và bản mẫu công ty tác nhân.",
+  "Jarvis and ZeroClaw": "Jarvis và ZeroClaw",
+  "Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.": "Nói chuyện với CLIProxy qua Jarvis và xem lại hồ sơ MarksClaw trước khi nhập vào ZeroClaw."
 }

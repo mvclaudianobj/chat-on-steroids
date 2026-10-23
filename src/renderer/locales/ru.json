@@ -3974,5 +3974,14 @@
   "No secret with that name.": "Секрета с таким именем нет.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "Системная связка ключей недоступна, поэтому хранилище нельзя использовать на этом компьютере.",
   "Check this field: {0}.": "Проверьте это поле: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Хранилище создано. Мастер-пароль запрашивается снова только для администрирования: добавления, показа, экспорта или импорта секретов."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Хранилище создано. Мастер-пароль запрашивается снова только для администрирования: добавления, показа, экспорта или импорта секретов.",
+  "Vault, notifications, Brain memory and new ways to work with agents.": "Хранилище, уведомления, память Brain и новые возможности работы с агентами.",
+  "Vault and notifications": "Хранилище и уведомления",
+  "Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.": "Храните секреты в защищённом хранилище и настройте уведомления с проверкой каналов и закреплением сертификата SMTP.",
+  "Brain memory": "Память Brain",
+  "Recall and save local memories, connect optional sources and selectively import past conversations.": "Ищите и сохраняйте локальные воспоминания, подключайте дополнительные источники и выборочно импортируйте старые беседы.",
+  "Agent routes and remote labs": "Маршруты агентов и удалённые лаборатории",
+  "Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.": "Выбирайте маршруты Codex или Claude, управляйте SSH, виртуальными машинами и прототипом компании агентов.",
+  "Jarvis and ZeroClaw": "Jarvis и ZeroClaw",
+  "Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.": "Общайтесь голосом в CLIProxy через Jarvis и проверяйте профили MarksClaw перед импортом в ZeroClaw."
 }

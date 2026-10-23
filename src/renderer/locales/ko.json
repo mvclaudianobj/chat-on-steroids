@@ -3830,5 +3830,14 @@
   "No secret with that name.": "그 이름의 비밀이 없습니다.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "시스템 키링을 사용할 수 없어 이 컴퓨터에서는 보관함을 쓸 수 없습니다.",
   "Check this field: {0}.": "이 항목을 확인하세요: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "보관함을 만들었습니다. 마스터 비밀번호는 관리 작업(비밀 추가, 보기, 내보내기, 가져오기)에서만 다시 묻습니다."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "보관함을 만들었습니다. 마스터 비밀번호는 관리 작업(비밀 추가, 보기, 내보내기, 가져오기)에서만 다시 묻습니다.",
+  "Vault, notifications, Brain memory and new ways to work with agents.": "Vault, 알림, Brain 메모리와 새로운 에이전트 작업 방식.",
+  "Vault and notifications": "Vault와 알림",
+  "Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.": "Vault에 비밀 정보를 보관하고 채널 테스트와 SMTP 인증서 고정으로 알림을 설정하세요.",
+  "Brain memory": "Brain 메모리",
+  "Recall and save local memories, connect optional sources and selectively import past conversations.": "로컬 메모리를 검색하고 저장하며 선택적 소스 연결과 이전 대화 가져오기를 지원합니다.",
+  "Agent routes and remote labs": "에이전트 경로와 원격 실습 환경",
+  "Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.": "Codex 또는 Claude 경로를 선택하고 SSH 호스트, VM 및 에이전트 회사 프로토타입을 관리하세요.",
+  "Jarvis and ZeroClaw": "Jarvis와 ZeroClaw",
+  "Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.": "Jarvis로 CLIProxy 채팅에 음성 입력하고 MarksClaw 프로필을 검토한 뒤 ZeroClaw로 가져오세요."
 }

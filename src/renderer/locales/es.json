@@ -3926,5 +3926,14 @@
   "No secret with that name.": "No hay ningún secreto con ese nombre.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "El llavero del sistema no está disponible, así que el almacén no se puede usar en este equipo.",
   "Check this field: {0}.": "Revisa este campo: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Almacén creado. La contraseña maestra solo se vuelve a pedir para administrar: añadir, mostrar, exportar o importar secretos."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Almacén creado. La contraseña maestra solo se vuelve a pedir para administrar: añadir, mostrar, exportar o importar secretos.",
+  "Vault, notifications, Brain memory and new ways to work with agents.": "Bóveda, notificaciones, memoria Brain y nuevas formas de trabajar con agentes.",
+  "Vault and notifications": "Bóveda y notificaciones",
+  "Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.": "Protege secretos en la bóveda y configura notificaciones con pruebas de canales y anclaje de certificados SMTP.",
+  "Brain memory": "Memoria Brain",
+  "Recall and save local memories, connect optional sources and selectively import past conversations.": "Consulta y guarda memorias locales, conecta fuentes opcionales e importa conversaciones anteriores de forma selectiva.",
+  "Agent routes and remote labs": "Rutas de agentes y laboratorios remotos",
+  "Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.": "Elige rutas de Codex o Claude y gestiona servidores SSH, VM y el prototipo de empresa de agentes.",
+  "Jarvis and ZeroClaw": "Jarvis y ZeroClaw",
+  "Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.": "Habla con chats CLIProxy mediante Jarvis y revisa perfiles MarksClaw antes de importarlos a ZeroClaw."
 }

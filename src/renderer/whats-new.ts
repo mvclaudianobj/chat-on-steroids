@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.45.2': {
+    lead: () => t("Vault, notifications, Brain memory and new ways to work with agents."),
+    highlights: [
+      { icon: 'i-lock', title: () => t("Vault and notifications"), text: () => t("Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.") },
+      { icon: 'i-search', title: () => t("Brain memory"), text: () => t("Recall and save local memories, connect optional sources and selectively import past conversations.") },
+      { icon: 'i-terminal', title: () => t("Agent routes and remote labs"), text: () => t("Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.") },
+      { icon: 'i-chat', title: () => t("Jarvis and ZeroClaw"), text: () => t("Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.") }
+    ]
+  },
   '2.1.45.1': {
     lead: () => t("Chat groups, bookmarks, drafts that wait for you, and a better Review."),
     highlights: [

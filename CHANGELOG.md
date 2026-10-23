@@ -9,6 +9,26 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.45.2] — Chat Marks: Brain, Vault, Notifications and agents
+
+This release brings the community 2.1.45 improvements and the integrated Chat Marks modules into a single reviewed product revision.
+
+### Chat Marks
+
+- **Vault K:** encrypted local secret storage with controlled access, credential redaction, and actionable errors; notification credentials and optional SSH key passphrases are stored through the vault.
+- **Notification Center I:** dedicated Settings page with channel preferences, test sends, events, import/export of settings without credentials, vault-backed secrets, precise delivery errors and optional SMTP server certificate SHA-256 pinning.
+- **Brain H:** opt-in local SQLite memory, explicit `/recall` and `/remember`, read/search/save approvals; optional ai-memory, OpenViking and Marks API sources, agent-engine memory tools, and selective review/import of old MarksCode history. Memory providers and automated injection remain opt-in.
+- **Claude Code Router P:** managed module plus a per-chat choice between each Codex/Claude CLI account and the detected router, with real model identifiers. Codex and Claude Code CLI update/version management is available in Modules (U).
+- **Remote hosts L:** SSH host profiles, host-key confirmation, master-key setup via system SSH, reviewed import preview, project terminals and `remote_exec` with an explicit command approval.
+- **VMs N:** optional isolated Vagrant/Ansible lab foundation and host prerequisite checks. **Company O:** an agent company board/office prototype; executing a full autonomous organization is a later phase.
+- **Jarvis J/J2:** opt-in push-to-talk, CLIProxy chat routing and optional system TTS; Windows dictation and Linux microphone capture with a configured transcription engine, subject to local engine/CLIProxy availability.
+- **MarksClaw → ZeroClaw ZC:** preview and selective import of compatible profiles/agents with a private full backup, review of collisions, and imported agents disabled until enabled. Windows/WSL import is not implemented; credentials and sessions remain in the backup.
+- **Everyday chat improvements:** approvals from sub-agents appear in the app window; ZeroClaw has a dedicated page; the update notice follows the selected browser's extension; direct Codex/Claude routes preserve existing chat history as appropriate.
+
+### Community v2.1.45
+
+- Project chat groups, bookmarked answers and persistent unsent drafts; Review `.gitignore` actions; code blocks and terminal improvements, project usage CSV, optional Goal completion review, translated errors and Free-plan Compact & Resume improvements.
+
 ## [2.1.45.1] — Chat Marks on community v2.1.45
 
 - Integrated the complete community 2.1.45 release with every Marks integration preserved (MarksPanel login, Marks modules and project terminals, CLIProxy module and chats, agent engines, the bridge instance, the dev profile, the extension build stamp, Chat Marks branding and icons, four-part release versions and Marks release links).
