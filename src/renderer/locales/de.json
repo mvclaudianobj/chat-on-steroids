@@ -3660,5 +3660,18 @@
   "Speak replies": "Antworten vorlesen",
   "Optional system speech synthesis, off by default.": "Optionale Sprachausgabe des Systems, standardmäßig deaktiviert.",
   "Voice": "Stimme",
-  "Choose a voice installed in your operating system.": "Wähle eine Stimme, die auf deinem System installiert ist."
+  "Choose a voice installed in your operating system.": "Wähle eine Stimme, die auf deinem System installiert ist.",
+  "Secret value": "Wert des Geheimnisses",
+  "Allowed origin": "Erlaubte Herkunft",
+  "Header": "Header",
+  "GPG passphrase": "GPG-Passphrase",
+  "Type the master password (at least 12 characters) for this action.": "Gib das Master-Passwort (mindestens 12 Zeichen) für diese Aktion ein.",
+  "The master password does not match this vault.": "Das Master-Passwort passt nicht zu diesem Tresor.",
+  "The vault already exists. Use the master password to add or change secrets.": "Der Tresor existiert bereits. Nutze das Master-Passwort, um Geheimnisse hinzuzufügen oder zu ändern.",
+  "Create the vault first.": "Lege zuerst den Tresor an.",
+  "This computer needs the master password once to unlock the vault (Recover).": "Dieser Computer braucht das Master-Passwort einmal, um den Tresor zu entsperren (Wiederherstellen).",
+  "No secret with that name.": "Kein Geheimnis mit diesem Namen.",
+  "The system keyring is not available, so the vault cannot be used on this computer.": "Der System-Schlüsselbund ist nicht verfügbar, daher kann der Tresor auf diesem Computer nicht genutzt werden.",
+  "Check this field: {0}.": "Prüfe dieses Feld: {0}.",
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Tresor angelegt. Das Master-Passwort wird nur für die Verwaltung erneut abgefragt: Geheimnisse hinzufügen, anzeigen, exportieren oder importieren."
 }

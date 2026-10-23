@@ -3614,5 +3614,18 @@
   "Speak replies": "朗讀回覆",
   "Optional system speech synthesis, off by default.": "系統語音合成為選用功能，預設關閉。",
   "Voice": "語音",
-  "Choose a voice installed in your operating system.": "選擇作業系統已安裝的語音。"
+  "Choose a voice installed in your operating system.": "選擇作業系統已安裝的語音。",
+  "Secret value": "密鑰值",
+  "Allowed origin": "允許的來源",
+  "Header": "請求標頭",
+  "GPG passphrase": "GPG 密語",
+  "Type the master password (at least 12 characters) for this action.": "請為此操作輸入主密碼（至少 12 個字元）。",
+  "The master password does not match this vault.": "主密碼與此保險庫不符。",
+  "The vault already exists. Use the master password to add or change secrets.": "保險庫已存在。請使用主密碼新增或修改密鑰。",
+  "Create the vault first.": "請先建立保險庫。",
+  "This computer needs the master password once to unlock the vault (Recover).": "這台電腦需要輸入一次主密碼來解鎖保險庫（復原）。",
+  "No secret with that name.": "沒有該名稱的密鑰。",
+  "The system keyring is not available, so the vault cannot be used on this computer.": "系統金鑰圈無法使用，因此無法在這台電腦上使用保險庫。",
+  "Check this field: {0}.": "請檢查此欄位：{0}。",
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "保險庫已建立。只有在管理時（新增、顯示、匯出或匯入密鑰）才會再次要求主密碼。"
 }

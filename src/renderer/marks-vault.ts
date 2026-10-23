@@ -3,7 +3,25 @@ import type { AppApi } from '../preload/index.js';
 import { toast } from './dom.js';
 import { onLanguageChange, t, ui } from './i18n.js';
 
-interface VaultResult { ok: boolean; data?: unknown; error?: string }
+interface VaultResult { ok: boolean; data?: unknown; error?: string; field?: string }
+const FIELD_LABELS: Record<string, () => string> = {
+  name: () => t('Secret name'), value: () => t('Secret value'), origin: () => t('Allowed origin'),
+  header: () => t('Header'), newPassword: () => t('New master password'), gpgPassword: () => t('GPG passphrase'), entry: () => t('Secret')
+};
+/** What the person reads for each refusal code main returns. */
+function vaultMessage(result: VaultResult): string {
+  switch (result.error) {
+    case 'password_required': return t('Type the master password (at least 12 characters) for this action.');
+    case 'wrong_password': return t('The master password does not match this vault.');
+    case 'vault_exists': return t('The vault already exists. Use the master password to add or change secrets.');
+    case 'vault_missing': return t('Create the vault first.');
+    case 'needs_recovery': return t('This computer needs the master password once to unlock the vault (Recover).');
+    case 'secret_not_found': return t('No secret with that name.');
+    case 'keyring_unavailable': return t('The system keyring is not available, so the vault cannot be used on this computer.');
+    case 'invalid_field': return t('Check this field: {0}.', [(FIELD_LABELS[result.field ?? ''] ?? (() => result.field ?? t('Secret')))()]);
+    default: return t('Vault action failed. Verify master password and permissions.');
+  }
+}
 export function initMarksVaultUi(api: AppApi): void {
   const root = document.getElementById('marksVault');
   if (!root) return;
@@ -37,11 +55,19 @@ export function initMarksVaultUi(api: AppApi): void {
   floating.style.cssText = 'position:fixed;z-index:1200;right:16px;bottom:16px;max-width:min(500px,90vw);padding:16px;border:1px solid var(--border, #777);border-radius:12px;background:var(--surface, #202027);color:inherit;box-shadow:0 4px 24px #0005;';
   floating.hidden = true;
   document.body.append(floating);
-  const action = async (fn: () => Promise<VaultResult>, refreshAfter = true): Promise<void> => {
+  // Actions that take the master password; the field is cleared after each one, so it is asked for
+  // again instead of an empty password reaching main and coming back as a misleading refusal.
+  const NEEDS_PASSWORD = new Set(['vaultCreate', 'vaultRecover', 'vaultSave', 'vaultRemove', 'vaultImport', 'vaultImportGpg', 'vaultExport', 'vaultChangePassword', 'vaultReveal']);
+  const action = async (fn: () => Promise<VaultResult>, refreshAfter = true, id = ''): Promise<void> => {
     try {
+      if (NEEDS_PASSWORD.has(id) && pass().length < 12) {
+        toast(t('Type the master password (at least 12 characters) for this action.'));
+        ($('vaultMaster') as HTMLInputElement).focus();
+        return;
+      }
       const result = await fn();
-      if (!result.ok) throw new Error('Operation failed');
-      toast(t('Vault operation completed.'));
+      if (!result.ok) { toast(vaultMessage(result)); return; }
+      toast(id === 'vaultCreate' ? t('Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.') : t('Vault operation completed.'));
       if (refreshAfter) await refresh();
     } catch { toast(t('Vault action failed. Verify master password and permissions.')); }
     finally { ($('vaultMaster') as HTMLInputElement).value = ''; ($('vaultGpgPassword') as HTMLInputElement).value = ''; ($('vaultNewPassword') as HTMLInputElement).value = ''; }
@@ -98,7 +124,7 @@ export function initMarksVaultUi(api: AppApi): void {
     vaultExport: () => call('export', { password: pass() }),
     vaultChangePassword: () => call('changePassword', { oldPassword: pass(), newPassword: entry('NewPassword') })
   };
-  for (const [id, fn] of Object.entries(buttons)) $(id).addEventListener('click', () => void action(fn));
+  for (const [id, fn] of Object.entries(buttons)) $(id).addEventListener('click', () => void action(fn, true, id));
   $('vaultReveal').addEventListener('click', () => void action(async () => {
     const result = await call('reveal', { password: pass(), name: entry('Name') });
     if (result.ok) {
@@ -109,7 +135,7 @@ export function initMarksVaultUi(api: AppApi): void {
       toast(t('Secret loaded into the protected password input.'));
     }
     return result;
-  }, false));
+  }, false, 'vaultReveal'));
   $('vaultPendingRefresh').addEventListener('click', () => void refreshPending());
   // A pending approval must be noticed even when the user is in a chat, not only when General
   // Settings is open. Main announces each change; a 2.5 s poll that was never cleared kept every

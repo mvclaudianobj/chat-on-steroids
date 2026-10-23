@@ -3614,5 +3614,18 @@
   "Speak replies": "朗读回复",
   "Optional system speech synthesis, off by default.": "系统语音合成为可选功能，默认关闭。",
   "Voice": "语音",
-  "Choose a voice installed in your operating system.": "选择操作系统已安装的语音。"
+  "Choose a voice installed in your operating system.": "选择操作系统已安装的语音。",
+  "Secret value": "密钥值",
+  "Allowed origin": "允许的来源",
+  "Header": "请求头",
+  "GPG passphrase": "GPG 口令",
+  "Type the master password (at least 12 characters) for this action.": "请为此操作输入主密码（至少 12 个字符）。",
+  "The master password does not match this vault.": "主密码与此保险库不匹配。",
+  "The vault already exists. Use the master password to add or change secrets.": "保险库已存在。请使用主密码添加或修改密钥。",
+  "Create the vault first.": "请先创建保险库。",
+  "This computer needs the master password once to unlock the vault (Recover).": "这台电脑需要输入一次主密码来解锁保险库（恢复）。",
+  "No secret with that name.": "没有该名称的密钥。",
+  "The system keyring is not available, so the vault cannot be used on this computer.": "系统密钥环不可用，因此无法在这台电脑上使用保险库。",
+  "Check this field: {0}.": "请检查此字段：{0}。",
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "保险库已创建。只有在管理时（添加、显示、导出或导入密钥）才会再次要求主密码。"
 }

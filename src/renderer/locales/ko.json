@@ -3614,5 +3614,18 @@
   "Speak replies": "답변 읽어주기",
   "Optional system speech synthesis, off by default.": "시스템 음성 합성은 선택 사항이며 기본적으로 꺼져 있습니다.",
   "Voice": "음성",
-  "Choose a voice installed in your operating system.": "운영 체제에 설치된 음성을 선택하세요."
+  "Choose a voice installed in your operating system.": "운영 체제에 설치된 음성을 선택하세요.",
+  "Secret value": "비밀 값",
+  "Allowed origin": "허용된 출처",
+  "Header": "헤더",
+  "GPG passphrase": "GPG 암호 문구",
+  "Type the master password (at least 12 characters) for this action.": "이 작업에는 마스터 비밀번호(12자 이상)를 입력하세요.",
+  "The master password does not match this vault.": "마스터 비밀번호가 이 보관함과 일치하지 않습니다.",
+  "The vault already exists. Use the master password to add or change secrets.": "보관함이 이미 있습니다. 비밀을 추가하거나 바꾸려면 마스터 비밀번호를 사용하세요.",
+  "Create the vault first.": "먼저 보관함을 만드세요.",
+  "This computer needs the master password once to unlock the vault (Recover).": "이 컴퓨터에서 보관함을 열려면 마스터 비밀번호가 한 번 필요합니다(복구).",
+  "No secret with that name.": "그 이름의 비밀이 없습니다.",
+  "The system keyring is not available, so the vault cannot be used on this computer.": "시스템 키링을 사용할 수 없어 이 컴퓨터에서는 보관함을 쓸 수 없습니다.",
+  "Check this field: {0}.": "이 항목을 확인하세요: {0}.",
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "보관함을 만들었습니다. 마스터 비밀번호는 관리 작업(비밀 추가, 보기, 내보내기, 가져오기)에서만 다시 묻습니다."
 }
