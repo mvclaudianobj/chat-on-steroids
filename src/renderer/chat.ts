@@ -1268,7 +1268,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
           paintSessions();
           // The row moved: keep the keyboard on the same chat's menu button. Its button shows only
           // while the row has focus, so the row takes focus first.
-          const rebuilt = $('sessionList').querySelector<HTMLElement>(`.sess[data-id="${CSS.escape(summary.id)}"]`);
+          const rebuilt = [...$('sessionList').querySelectorAll<HTMLElement>('.sess')]
+            .find(row => row.dataset.id === summary.id);
           rebuilt?.querySelector<HTMLElement>('.sess-top')?.focus({ preventScroll: true });
           rowMenuButton(owner)?.focus({ preventScroll: true });
         }

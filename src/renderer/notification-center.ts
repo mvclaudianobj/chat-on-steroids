@@ -20,6 +20,9 @@ const CHANNELS: Record<NotificationChannel, { name: string; description: string;
     name: 'Telegram', description: 'Send bot messages to chats, groups or channels.', destination: 'Chat IDs',
     secret: 'Bot token', fields: [{ key: 'apiBase', label: 'Telegram API base (optional)', placeholder: 'https://api.telegram.org' }]
   },
+  'whatsapp-web': {
+    name: 'WhatsApp Web (QR)', description: 'Pair this computer directly to WhatsApp without a server. Unofficial integration: WhatsApp may block your number.', destination: 'Phone numbers', secret: '', fields: []
+  },
   'whatsapp-cloud': {
     name: 'WhatsApp Cloud (Meta)', description: 'Send WhatsApp messages through the Meta Cloud API.', destination: 'Phone numbers',
     secret: 'Meta access token', fields: [
@@ -81,7 +84,8 @@ export function notificationFailureMessage(failure: NotificationFailure): string
 }
 type Service = Pick<AppApi,
   'notificationCenterGet' | 'notificationCenterSave' | 'notificationCenterSetCredential' |
-  'notificationCenterTest' | 'notificationCenterExport' | 'notificationCenterImport' | 'vault'
+  'notificationCenterTest' | 'notificationCenterExport' | 'notificationCenterImport' | 'vault' |
+  'notificationWhatsAppStart' | 'notificationWhatsAppStatus' | 'notificationWhatsAppDisconnect' | 'notificationTelegramPairStart' | 'notificationTelegramPairCheck' | 'notificationTelegramPairCancel'
 >;
 
 function settingLabel(title: string, detail: string, control: HTMLElement): HTMLLabelElement {
@@ -340,11 +344,11 @@ export function installNotificationCenter(api: Service): void {
       store.id = 'notificationStore-' + channel;
       controls.push(store);
       secretRow.append(field(spec.secret, secret), field('Master password to store credential', master), store);
-      fields.append(secretRow);
+      if (channel !== 'whatsapp-web') fields.append(secretRow);
       const credentialNote = el('p', 'notification-channel-note');
       credentialNote.setAttribute('role', 'status');
       credentialStatus.set(channel, credentialNote);
-      section.append(credentialNote);
+      if (channel !== 'whatsapp-web') section.append(credentialNote);
       const vaultNotice = el('div', 'notification-vault-notice');
       vaultNotice.hidden = true;
       vaultNotice.append(el('span', '', () => t('Vault not created. Open General settings and create a vault first.')));
@@ -352,8 +356,8 @@ export function installNotificationCenter(api: Service): void {
       openGeneral.addEventListener('click', () => document.querySelector<HTMLButtonElement>('[data-tab="general"]')?.click());
       vaultNotice.append(openGeneral);
       vaultHelp.set(channel, vaultNotice);
-      section.append(vaultNotice);
-      credentialState(channel);
+      if (channel !== 'whatsapp-web') section.append(vaultNotice);
+      if (channel !== 'whatsapp-web') credentialState(channel);
       store.addEventListener('click', async () => {
         if (busy) return;
         if (!master.value) {
@@ -381,11 +385,75 @@ export function installNotificationCenter(api: Service): void {
         }, view => {
           vaultNotice.hidden = true;
           credentials = view.credentials;
-          credentialState(channel);
+          if (channel !== 'whatsapp-web') credentialState(channel);
           credentialNote.textContent = t('Credential saved.');
         }, credentialNote);
         if (!successful) credentialNote.textContent = t('Could not save credential. Verify the master password and vault in General settings.');
       });
+      if (channel === 'telegram' || channel === 'whatsapp-web') {
+        const pairingBox = el('div', 'notification-channel-pairing');
+        const qrImage = document.createElement('img');
+        qrImage.alt = t('Scan this QR code with your phone');
+        qrImage.width = 230;
+        qrImage.height = 230;
+        qrImage.hidden = true;
+        const info = el('p', 'notification-channel-note');
+        info.setAttribute('role', 'status');
+        const startPair = button(channel === 'telegram' ? 'Generate Telegram QR code' : 'Connect WhatsApp with QR');
+        startPair.id = 'notificationPair-' + channel;
+        const disconnect = button(channel === 'telegram' ? 'Cancel pairing' : 'Disconnect WhatsApp');
+        disconnect.id = 'notificationDisconnect-' + channel;
+        let poll: ReturnType<typeof setInterval> | null = null;
+        const stopPoll = () => { if (poll) clearInterval(poll); poll = null; };
+        const setQr = (qr?: string) => {
+          qrImage.hidden = !qr;
+          if (qr) qrImage.src = qr;
+          else qrImage.removeAttribute('src');
+        };
+        const refresh = async () => {
+          if (channel === 'telegram') {
+            const response = await api.notificationTelegramPairCheck();
+            if (!response.ok) { stopPoll(); info.textContent = t('Could not check pairing. Try again.'); return; }
+            if (response.data.state === 'paired') {
+              stopPoll(); setQr();
+              entry.destinations = [...new Set([...entry.destinations, response.data.chatId!])];
+              targets.value = entry.destinations.join('\n');
+              info.textContent = t('Telegram connected successfully.');
+            } else if (response.data.state === 'expired') {
+              stopPoll(); setQr(); info.textContent = t('QR code expired. Generate another.');
+            }
+          } else {
+            const response = await api.notificationWhatsAppStatus();
+            if (!response.ok) { info.textContent = t('Could not check pairing. Try again.'); return; }
+            const result = response.data;
+            setQr(result.state === 'qr' ? result.qr : undefined);
+            info.textContent = t(result.state === 'connected' ? 'WhatsApp connected.' : result.state === 'disconnected' ? 'WhatsApp disconnected.' : result.state === 'error' ? 'WhatsApp connection failed.' : 'Waiting for WhatsApp pairing…');
+            if (result.state === 'connected' || result.state === 'disconnected') stopPoll();
+          }
+        };
+        startPair.addEventListener('click', async () => {
+          if (busy) return;
+          info.textContent = t('Preparing QR code…');
+          const response = channel === 'telegram' ? await api.notificationTelegramPairStart() : await api.notificationWhatsAppStart();
+          if (!response.ok) { info.textContent = t('Could not prepare QR code. Check the connection and saved bot token.'); return; }
+          if (channel === 'telegram') {
+            setQr(response.data.qr);
+            info.textContent = t('On your phone, scan the QR code and tap Start in Telegram.');
+          } else {
+            setQr(response.data.qr);
+            info.textContent = t('Open WhatsApp > Linked devices > Link a device, then scan the QR code.');
+          }
+          stopPoll(); poll = setInterval(() => { void refresh(); }, 2500);
+        });
+        disconnect.addEventListener('click', async () => {
+          stopPoll(); setQr();
+          const result = channel === 'telegram' ? await api.notificationTelegramPairCancel() : await api.notificationWhatsAppDisconnect();
+          info.textContent = t(result.ok ? 'Pairing stopped.' : 'Could not disconnect the channel.');
+        });
+        if (channel === 'telegram') pairingBox.append(el('p', 'notification-channel-note', () => t('Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.')));
+        pairingBox.append(startPair, disconnect, qrImage, info);
+        section.append(pairingBox);
+      }
       const actions = el('div', 'notification-channel-actions');
       const test = button('Send test');
       test.id = 'notificationTest-' + channel;

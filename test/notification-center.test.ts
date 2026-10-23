@@ -14,6 +14,15 @@ import { sendSmtp } from '../src/main/notification-smtp.js';
 const event = { event: 'turn-completed' as const, title: 'Finished', project: 'Synthetic project', excerpt: 'Synthetic private conversation' };
 describe('notification center outbound channels', () => {
   beforeEach(() => { vi.clearAllMocks(); state.secret = 'synthetic-test-token'; });
+  it('migrates saved 2.1.45 settings by adding disabled WhatsApp Web', async () => {
+    const settings = structuredClone(await notificationSettings());
+    settings.channels.telegram.destinations = ['original-id'];
+    delete (settings.channels as Partial<typeof settings.channels>)['whatsapp-web'];
+    const result = await saveNotificationSettings(settings);
+    expect(result.settings.channels.telegram.destinations).toEqual(['original-id']);
+    expect(result.settings.channels['whatsapp-web'].enabled).toBe(false);
+    expect(result.settings.channels['whatsapp-web'].destinations).toEqual([]);
+  });
   it('uses per-channel events and excludes chat excerpts by default', async () => {
     const settings = structuredClone(await notificationSettings());
     settings.channels.telegram = { ...settings.channels.telegram, enabled: true, events: { ...settings.channels.telegram.events, 'turn-completed': true }, destinations: ['1234', '2345'], titleTemplate: '{title}', bodyTemplate: '{project} {excerpt}' };

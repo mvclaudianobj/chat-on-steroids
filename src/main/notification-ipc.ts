@@ -1,3 +1,6 @@
+import { startWhatsAppWeb, disconnectWhatsAppWeb, getWhatsAppWebStatus } from './notification-whatsapp-web.js';
+import { startTelegramPairing, checkTelegramPairing, cancelTelegramPairing } from './notification-telegram-pair.js';
+import QRCode from 'qrcode';
 import { dialog, ipcMain, type BrowserWindow } from 'electron';
 import { constants } from 'node:fs';
 import { promises as fs } from 'node:fs';
@@ -12,6 +15,12 @@ import { dialogLabel, mainText } from './main-texts.js';
 
 const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
+  z.object({ action: z.literal('wa-start') }).strict(),
+  z.object({ action: z.literal('wa-status') }).strict(),
+  z.object({ action: z.literal('wa-disconnect') }).strict(),
+  z.object({ action: z.literal('tg-start') }).strict(),
+  z.object({ action: z.literal('tg-check') }).strict(),
+  z.object({ action: z.literal('tg-cancel') }).strict(),
   z.object({ action: z.literal('save'), settings: z.unknown() }).strict(),
   z.object({ action: z.literal('credential'), channel: z.enum(NOTIFICATION_CHANNELS), credential: z.string().max(4096), masterPassword: z.string().max(1024) }).strict(),
   z.object({ action: z.literal('test'), channel: z.enum(NOTIFICATION_CHANNELS) }).strict(),
@@ -77,6 +86,12 @@ export function registerNotificationCenterIpc(getWindow: () => BrowserWindow | n
       let data: unknown;
       switch (parsed.action) {
         case 'get': data = await notificationView(); break;
+        case 'wa-start': { const status = await startWhatsAppWeb(); data = { ...status, qr: status.qr ? await QRCode.toDataURL(status.qr) : undefined }; break; }
+        case 'wa-status': { const status = await getWhatsAppWebStatus(); data = { ...status, qr: status.qr ? await QRCode.toDataURL(status.qr) : undefined }; break; }
+        case 'wa-disconnect': data = await disconnectWhatsAppWeb(); break;
+        case 'tg-start': { const result = await startTelegramPairing(); data = { ...result, qr: await QRCode.toDataURL(result.url) }; break; }
+        case 'tg-check': data = await checkTelegramPairing(); break;
+        case 'tg-cancel': cancelTelegramPairing(); data = true; break;
         case 'save': data = await saveNotificationSettings(parsed.settings); break;
         case 'credential': data = await setNotificationCredential(parsed.channel, parsed.credential, parsed.masterPassword); break;
         case 'test': data = await testNotificationChannel(parsed.channel); break;

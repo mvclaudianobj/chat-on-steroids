@@ -3,6 +3,8 @@ const { app, BrowserWindow } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const assert = require('node:assert/strict');
+const QRCode = require('qrcode');
+let qrFixtureData = '';
 const root = process.env.COS_UI_ROOT || path.resolve(__dirname, '..');
 const output = path.resolve(process.env.COS_UI_OUTPUT || path.join(root, '.tmp', 'notification-center'));
 const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require(path.join(root, 'scripts/fixtures/app-defaults.cjs'));
@@ -14,7 +16,7 @@ let server, win;
 const fixture = `(() => {
   const old=window.api,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
   const events=['turn-completed','turn-failed','approval-pending','module-update','app-release'];
-  const channels=['smtp','telegram','whatsapp-cloud','whatsapp-evolution'];
+  const channels=['smtp','telegram','whatsapp-web','whatsapp-cloud','whatsapp-evolution'];
   const base=()=>({enabled:false,events:Object.fromEntries(events.map(e=>[e,false])),destinations:[],titleTemplate:'{title}',bodyTemplate:'{project} — {event}',includeExcerpt:false,config:{}});
   let settings={channels:Object.fromEntries(channels.map(c=>[c,base()])),throttleMinutes:1,batchWindowSeconds:10};
   const credentials=Object.fromEntries(channels.map(c=>[c,false]));
@@ -22,6 +24,12 @@ const fixture = `(() => {
   const methods={
     markWhatsNewSeen:()=>ok(null),
     getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'en',theme:'dark'};return r;},
+    notificationWhatsAppStart:()=>ok({state:'qr',qr:'__SYNTHETIC_QR_IMAGE__'}),
+    notificationWhatsAppStatus:()=>ok({state:'connected'}),
+    notificationWhatsAppDisconnect:()=>ok({state:'disconnected'}),
+    notificationTelegramPairStart:()=>ok({url:'https://t.me/example_bot?start=synthetic',expires:Date.now()+60000,qr:'__SYNTHETIC_QR_IMAGE__'}),
+    notificationTelegramPairCheck:()=>ok({state:'paired',chatId:'90001'}),
+    notificationTelegramPairCancel:()=>ok(true),
     notificationCenterGet:()=>ok({settings,credentials}),
     notificationCenterSave:next=>{settings=structuredClone(next);return ok({settings,credentials});},
     notificationCenterSetCredential:(channel,key,masterPassword)=>{window.notifyFixture.savedKeys.push({channel,length:key.length,masterLength:masterPassword.length});credentials[channel]=key.length>0;return ok({settings,credentials});},
@@ -38,12 +46,13 @@ const fixture = `(() => {
   window.api=new Proxy(methods,{get:(target,key)=>key in target?target[key]:old[key]});
 })();`;
 app.whenReady().then(async () => {
+  qrFixtureData = await QRCode.toDataURL('https://t.me/synthetic_bot?start=local-test-code');
   const { createServer } = await import('vite');
   server = await createServer({ configFile:false, root:path.join(root,'src/renderer'), cacheDir:path.join(output,'vite'), logLevel:'error',
     resolve:{alias:{'@phosphor-icons/web':path.join(root,'node_modules/@phosphor-icons/web/src')}},
     server:{host:'127.0.0.1',port:0,fs:{allow:[root,fs.realpathSync(path.join(root,'node_modules/@phosphor-icons/web/src'))]}},
     plugins:[{name:'notification-center-fixture',transformIndexHtml:html=>html.replace('</head>','<script src="/notification-fixture.js"></script></head>'),
-      configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url!=='/notification-fixture.js')return next();res.setHeader('Content-Type','text/javascript');res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixture);});}}] });
+      configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url!=='/notification-fixture.js')return next();res.setHeader('Content-Type','text/javascript');res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixture.replaceAll('__SYNTHETIC_QR_IMAGE__', qrFixtureData));});}}] });
   await server.listen();
   win = new BrowserWindow({show:false,width:1300,height:900,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false}});
   const errors=[];
@@ -104,6 +113,15 @@ app.whenReady().then(async () => {
   assert.equal(await js(`document.getElementById('notificationMasterPassword-telegram').value`),'');
   await js(`document.getElementById('notificationTitle-telegram').scrollIntoView({block:'center'})`);
   await capture('notification-center-telegram.png');
+  await js(`document.getElementById('notificationPair-telegram').click()`);
+  await until(`document.querySelector('#notificationTitle-telegram + *') === null || !!document.querySelector('.notification-channel-pairing img[src^="data:image/png"]')`);
+  await js(`document.getElementById('notificationPair-telegram').scrollIntoView({block:'center'})`);
+  await capture('notification-telegram-qr-synthetic.png');
+  await js(`document.getElementById('notificationDisconnect-telegram').click()`);
+  await js(`document.getElementById('notificationPair-whatsapp-web').click()`);
+  await until(`document.querySelector('#notificationTitle-whatsapp-web').closest('section').querySelector('.notification-channel-pairing img').src.startsWith('data:image/png')`);
+  await js(`document.getElementById('notificationPair-whatsapp-web').scrollIntoView({block:'center'})`);
+  await capture('notification-whatsapp-qr-synthetic.png');
   await js(`document.getElementById('notificationTitle-whatsapp-cloud').scrollIntoView({block:'center'})`);
   await capture('notification-center-whatsapp.png');
   assert.deepEqual(errors,[]);

@@ -5104,7 +5104,7 @@ marks. Do not add hand-drawn SVG icons; the sprite keeps only the product mark.
 Chat Marks' outbound **Notification Center** (`renderer/notification-center.ts`,
 `main/notification-{center,credentials,ipc,events,smtp}.ts`, `shared/notification-center.ts`)
 is a dedicated Settings > Notifications page, independent of native desktop notices.
-The four channels (SMTP, Telegram, Meta WhatsApp Cloud and Evolution API) are disabled
+The five channels (SMTP, Telegram, local WhatsApp Web, Meta WhatsApp Cloud and Evolution API) are disabled
 by default. The main process exclusively owns delivery and credentials: validated
 non-secret channel settings live in the `marks-notification-center` durable record;
 provider credentials are entries `notification/<channel>` in Vault K's portable,
@@ -5157,6 +5157,17 @@ with in-memory test certificates from `test/fixtures/test-certificate.ts`),
 Vault K, fake transports and real Electron UI without real credentials. Real-provider
 delivery still requires separate manual homologation. This item is stacked on Vault
 K's PR: do not merge, tag or release it before the Vault contract is integrated.
+
+QR setup: Telegram pairs the user's own BotFather token (stored only in Vault K) to a
+private chat with a random, single-use `/start` code expiring after three minutes.
+`main/notification-telegram-pair.ts` owns the code and `getUpdates` polling; no webhook
+is installed or modified. WhatsApp Web is a separate channel backed by Baileys in
+`main/notification-whatsapp-web.ts`; its session is stored under
+`<userData>/notifications/whatsapp-web/` (0700), and only registered sessions reconnect
+on restart. Disconnect attempts a remote logout and removes local session files. This
+is unofficial and WhatsApp can block the number. QR images are generated locally in
+authenticated IPC. Cloud API and Evolution remain advanced options. Details and
+synthetic screenshots: `docs/feature-notes/notifications-qr.md`.
 
 `renderer/pet-machine.ts` owns the optional Tur Tur Sahur companion's gesture,
 animation and autonomous-action state. `renderer/pet.ts` projects it with Pointer
