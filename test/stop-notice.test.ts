@@ -53,3 +53,17 @@ it('shows the published translation and keeps English for anything it does not k
   notice.noticeChatStopped('A chat stopped', 'Recovery stopped', 's1');
   expect(shown.at(-1)).toEqual(['A chat stopped', 'Recuperación detenida']);
 });
+
+it('says whether the approval notice was shown, so a focused window gets it later', async () => {
+  const notice = await import('../src/main/stuck-notice.js');
+  let focused = true;
+  const shown: string[] = [];
+  notice.setStuckNotifier((_title, _body, sessionId) => { if (focused) return false; shown.push(sessionId); return true; });
+  expect(notice.noticeApprovalWaiting('worker-session')).toBe(false);
+  focused = false;
+  expect(notice.noticeApprovalWaiting('worker-session')).toBe(true);
+  expect(shown).toEqual(['worker-session']);
+  // A notifier that throws is not retried every poll.
+  notice.setStuckNotifier(() => { throw new Error('no notification surface'); });
+  expect(notice.noticeApprovalWaiting('worker-session')).toBe(true);
+});

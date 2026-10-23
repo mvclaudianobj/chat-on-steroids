@@ -45,7 +45,8 @@ async function status(caller: Caller) {
     enabled();
     workers.push({ id: worker.id, runId: worker.runId ?? null, label: worker.label, state: worker.state,
       conversationId: worker.conversationId, sessionId: session?.id ?? null, revivable: worker.revivable,
-      pending: worker.pending, awaitingAck: worker.awaitingAck, contextTokens: worker.contextTokens });
+      pending: worker.pending, awaitingAck: worker.awaitingAck, contextTokens: worker.contextTokens,
+    result: worker.result ? redactSecretText(worker.result).slice(0, 1200) : null });
   }
   return { runId: current.runId, freeWorkerSlots: current.freeWorkerSlots, retainedHistory: current.state.retainedHistory === true, workers };
 }

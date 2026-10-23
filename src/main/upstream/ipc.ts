@@ -21,13 +21,16 @@ const SPECS: Readonly<Record<UpstreamModuleId, UpstreamSpec>> = { opencode: OPEN
 const LATEST_TTL_MS = 60 * 60_000;
 const latest = new Map<UpstreamModuleId, { at: number; version: string }>();
 const lastInstall = new Map<UpstreamModuleId, UpstreamInstallProgress>();
+const latestAnnouncement = new Map<UpstreamModuleId, string>();
 
 const module = z.enum(UPSTREAM_MODULE_IDS);
 const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status'), module, refresh: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('install'), module, mode: z.enum(['install', 'update']), version: z.string().regex(UPSTREAM_VERSION) }).strict(),
   z.object({ action: z.literal('service'), module: z.literal('opencode'), op: z.enum(['start', 'stop', 'restart']) }).strict(),
-  z.object({ action: z.literal('facts'), module: z.literal('zeroclaw') }).strict()
+  z.object({ action: z.literal('facts'), module: z.literal('zeroclaw') }).strict(),
+  z.object({ action: z.literal('marksclaw-preview'), module: z.literal('zeroclaw') }).strict(),
+  z.object({ action: z.literal('marksclaw-import'), module: z.literal('zeroclaw'), ticket: z.string().uuid() }).strict()
 ]);
 
 export interface UpstreamIpcDeps {
@@ -46,6 +49,7 @@ export function setUpstreamIpcDepsForTests(next: Partial<UpstreamIpcDeps> | null
   deps = next ? { ...defaultDeps, ...next } : defaultDeps;
   latest.clear();
   lastInstall.clear();
+  latestAnnouncement.clear();
 }
 
 /** What this app supports of a module's version: OpenCode has a gate, ZeroClaw is a terminal only. */
@@ -77,6 +81,13 @@ export async function upstreamVersions(id: UpstreamModuleId, refresh = false): P
   const inUse = binaries.managed ?? binaries.unmanaged;
   const latestSupport = supportOf(id, found.version);
   const newer = isNewerVersion(binaries.managed, found.version);
+  // Only the version owner's observed result may announce module updates.
+  if (newer && found.version && latestAnnouncement.get(id) !== found.version) {
+    latestAnnouncement.set(id, found.version);
+    void import('../notification-center.js').then(({ queueOutboundNotice }) =>
+      queueOutboundNotice({ event: 'module-update', title: `${id} ${found.version}`, project: 'Chat Marks' })
+    ).catch(() => undefined);
+  }
   return {
     installed: binaries.managed, unmanaged: binaries.unmanaged, latest: found.version,
     updateAvailable: newer && latestSupport !== 'unsupported',
@@ -132,6 +143,8 @@ export function registerUpstreamIpc(getWindow: () => BrowserWindow | null): void
         case 'status': return { ok: true, data: await upstreamStatus(input.module, input.refresh) };
         case 'install': return { ok: true, data: await upstreamInstall(input.module, input.mode, input.version, progress) };
         case 'facts': return { ok: true, data: await (await import('../zeroclaw/settings.js')).zeroclawFacts() };
+        case 'marksclaw-preview': return { ok: true, data: await (await import('../zeroclaw/migration.js')).marksClawMigrationPreview() };
+        case 'marksclaw-import': return { ok: true, data: await (await import('../zeroclaw/migration.js')).importMarksClaw(input.ticket) };
         case 'service': {
           await (await import('../opencode/service.js')).openCodeServiceAction(input.op);
           return { ok: true, data: await upstreamStatus('opencode') };

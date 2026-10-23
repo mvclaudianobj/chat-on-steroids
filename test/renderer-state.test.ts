@@ -570,6 +570,40 @@ const projectSidebarFixture = () => {
   return { project, session };
 };
 
+it('places CLI sessions in their exact project groups without a global CSS object', async () => {
+  const ids = ['project"quote', 'project\\backslash', 'project]#selector', 'project:colon'];
+  const projects = ids.map((id, index) => ({ id, name: `Project ${index}`, path: `C:\\repo${index}`, createdAt: index + 1 }));
+  const cliSessions = ids.map((projectId, index) => ({
+    id: `cli-${index}`, module: 'codex', projectId, title: `CLI ${index}`, createdAt: 1, updatedAt: index + 1
+  }));
+  cliSessions.push({ id: 'cli-orphan', module: 'codex', projectId: 'missing"project', title: 'Orphan', createdAt: 1, updatedAt: 10 });
+  const previousCss = (globalThis as any).CSS;
+  delete (globalThis as any).CSS;
+  try {
+    const mounted = await mountChat({}, [], {
+      listProjects: async () => ({ ok: true, data: projects }),
+      listSessions: async () => listed([]),
+      cliStatus: async () => ({ ok: true, data: [{ id: 'codex', name: 'Codex', enabled: true, detail: 'Ready', installed: true, running: false }] }),
+      cliSessions: async () => ({ ok: true, data: cliSessions })
+    });
+    const doc = mounted.window.document;
+    await waitFor(() => expect(doc.querySelectorAll('.project-group[data-project-id]')).toHaveLength(ids.length));
+    await waitFor(() => expect(doc.querySelectorAll('.cli-module-chat')).toHaveLength(cliSessions.length));
+    const groups = [...doc.querySelectorAll<HTMLElement>('.project-group[data-project-id]')];
+    for (let index = 0; index < ids.length; index++) {
+      const group = groups.find(candidate => candidate.dataset.projectId === ids[index]);
+      expect(group?.querySelector('.cli-module-chat-title')?.textContent).toBe(`CLI ${index}`);
+      expect(group?.querySelectorAll('.cli-module-chat')).toHaveLength(1);
+    }
+    expect(doc.querySelector('#cliModuleChats .cli-module-chat-title')?.textContent).toBe('Orphan');
+    mounted.push(structuredClone(mounted.state));
+    await waitFor(() => expect(doc.querySelectorAll('.cli-module-chat')).toHaveLength(cliSessions.length));
+  } finally {
+    if (previousCss === undefined) delete (globalThis as any).CSS;
+    else (globalThis as any).CSS = previousCss;
+  }
+});
+
 it('starts project groups collapsed and deliberately expands the project selected for a new chat', async () => {
   const { project, session } = projectSidebarFixture();
   const mounted = await mountChat({}, [], {
@@ -584,7 +618,7 @@ it('starts project groups collapsed and deliberately expands the project selecte
   expect(create.dataset.newProject).toBe(project.id);
   expect(create.nextElementSibling?.classList.contains('project-menu')).toBe(true);
   const item = rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')!;
-  expect([...mounted.window.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(row => row.dataset.rowAction)).toEqual(['new-chat', 'color', 'remove']);
+  expect([...mounted.window.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(row => row.dataset.rowAction)).toEqual(['new-chat', 'group-new', 'color', 'remove']);
   expect(item.textContent).toBe('New chat in this project');
   expect(item.dataset.newProject).toBe(project.id);
   expect(mounted.window.document.activeElement).toBe(item);
@@ -976,6 +1010,32 @@ it('ranks the inbox by what each chat needs: approval, stopped recovery, blocked
   expect(inboxCardState(doc, 'approval').card.title).toMatch(/^approval · Needs approval · /);
 });
 
+it('keeps Draft in the title of an inbox card and a settled row that say Failed', async () => {
+  const old = Date.now() - 3 * DAY;
+  const sessions = [
+    inboxChat('rest', { updatedAt: Date.now() }),
+    inboxChat('failed', { updatedAt: Date.now() - 3000, lastTurnOutcome: 'failed' }),
+    inboxChat('settled', { startedAt: old, updatedAt: old, lastTurnOutcome: 'failed' })
+  ];
+  const mounted = await mountInbox({ listSessions: async () => listed(sessions) });
+  const doc = mounted.window.document;
+  const row = (id: string) => doc.querySelector<HTMLElement>(`#sessionList .sess[data-id="${id}"]`)!;
+  await vi.waitFor(() => expect(row('settled')).not.toBeNull(), { timeout: 5000 });
+  expect(row('settled').classList.contains('sess-settled')).toBe(true);
+  expect(row('failed').classList.contains('sess-card')).toBe(true);
+  const input = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  for (const id of ['failed', 'settled']) {
+    row(id).querySelector<HTMLElement>('[data-session-select]')!.click(); await settle();
+    input.value = `Unsent ${id}`; input.dispatchEvent(new mounted.window.Event('input'));
+  }
+  row('rest').querySelector<HTMLElement>('[data-session-select]')!.click(); await settle();
+  for (const id of ['failed', 'settled']) {
+    expect(row(id).querySelector('.sess-draft-mark'), id).not.toBeNull();
+    expect(row(id).title, id).toContain('Failed');
+    expect(row(id).title, id).toContain('Draft');
+  }
+});
+
 it('calls an unread reply a New response on its card, the word its row badge already uses', async () => {
   const now = Date.now();
   const mounted = await mountInbox({
@@ -1203,6 +1263,100 @@ it('marks a collapsed chat whose sub-agent needs you, over its own spinner, in t
   expect(marks('parent').map(mark => mark.className)).toEqual(['session-status is-active']);
 });
 
+it('names a worker waiting on ChatGPT\'s approval card in the window, answerable there, through the redraw flicker', async () => {
+  // Live 2.1.44.1, 2026-10-22: two workers of the open prime waited 85 minutes on the card; the
+  // prime's chat said nothing and the window had focus, so no desktop notice came either.
+  const now = Date.now();
+  const sessions = [
+    inboxChat('parent', { title: 'Parent task', updatedAt: now }),
+    inboxChat('w1', { updatedAt: now - 1, origin: { kind: 'worker', fromSessionId: 'parent', agentId: 'worker-1', task: '' } }),
+    inboxChat('w2', { updatedAt: now - 2, origin: { kind: 'worker', fromSessionId: 'parent', agentId: 'worker-2', task: '' } }),
+    inboxChat('solo', { title: 'Solo chat', updatedAt: now - 3 })
+  ];
+  let approval = ['c-w1', 'c-w2'];
+  let changed: () => void = () => undefined;
+  const answers: unknown[][] = [];
+  const card = (id: string) => ({ id: `card-${id}`, lines: ['Allow ChatGPT to use Chat Marks Core?', 'Run one command.'], allow: true, answer: null });
+  const mounted = await mountChat({}, [], {
+    listSessions: async () => listed(sessions, { approval }),
+    onSessionChanged: (fn: () => void) => { changed = fn; return () => undefined; },
+    approvalCard: async (id: string) => ({ ok: true, data: card(id) }),
+    answerApproval: async (...args: unknown[]) => { answers.push(args); return { ok: true, data: { ok: true } }; }
+  });
+  const doc = mounted.window.document;
+  const notice = doc.getElementById('approvalNotice')!;
+  const lines = () => [...notice.querySelectorAll<HTMLElement>('.approval-notice-line')];
+  const texts = () => lines().map(line => line.querySelector('.approval-notice-text')!.textContent);
+  const row = (id: string) => doc.querySelector<HTMLElement>(`#chatList .sess[data-id="${id}"]`);
+  await waitFor(() => expect(row('parent')).not.toBeNull());
+  // Nothing open yet: both workers, named with the chat they work for.
+  await waitFor(() => expect(texts()).toEqual(['worker-1 · Parent task waits for your approval', 'worker-2 · Parent task waits for your approval']));
+  expect(notice.hidden).toBe(false);
+  // The prime open: its workers by name, with the card's words and the same Deny and Allow once.
+  row('parent')!.querySelector<HTMLElement>('.sess-top')!.click();
+  await waitFor(() => expect(texts()).toEqual(['worker-1 waits for your approval', 'worker-2 waits for your approval']));
+  await waitFor(() => expect(lines()[0]!.querySelector<HTMLElement>('.approval-card')!.hidden).toBe(false));
+  expect(lines()[0]!.querySelector('.approval-card-words')!.textContent).toContain('Run one command.');
+  // The collapsed prime row says a sub-agent needs the person.
+  expect(row('parent')!.title).toContain('2 sub-agents need attention');
+
+  // The flicker from the log: gone for one poll, then the same card again. The line comes back.
+  const first = lines()[0];
+  approval = []; changed();
+  await waitFor(() => expect(notice.hidden).toBe(true));
+  approval = ['c-w1', 'c-w2']; changed();
+  await waitFor(() => expect(texts()).toHaveLength(2));
+  expect(row('parent')!.title).toContain('2 sub-agents need attention');
+  expect(lines()[0]).not.toBe(first);
+  // A repaint keeps the same lines, so an answer being sent is not lost.
+  const kept = lines()[0];
+  changed();
+  await settle();
+  expect(lines()[0]).toBe(kept);
+
+  // Answered inline, for exactly the card shown.
+  await waitFor(() => expect(kept!.querySelector<HTMLElement>('.approval-card')!.hidden).toBe(false));
+  [...kept!.querySelectorAll<HTMLButtonElement>('.approval-card-actions button')].find(button => button.textContent === 'Allow once')!.click();
+  await waitFor(() => expect(answers).toEqual([['w1', 'card-w1', 'allow']]));
+
+  // Open shows that worker's chat, whose own row has the card; the notice keeps the other one.
+  [...lines()[1]!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open')!.click();
+  await waitFor(() => expect(row('w2')?.classList.contains('is-sel')).toBe(true));
+  await waitFor(() => expect(texts()).toEqual(['worker-1 · Parent task waits for your approval']));
+  // Any other chat's card is named by its title; nothing waiting, no notice.
+  approval = ['c-solo']; changed();
+  await waitFor(() => expect(texts()).toEqual(['Solo chat waits for your approval']));
+  approval = []; changed();
+  await waitFor(() => expect(notice.hidden).toBe(true));
+});
+
+it('names a waiting approval on any page of the window, and Open brings back the chat', async () => {
+  // Off the Chat page the list is not reread; the waiting set still reaches the notice.
+  const sessions = [
+    inboxChat('parent', { title: 'Parent task', updatedAt: Date.now() }),
+    inboxChat('w1', { origin: { kind: 'worker', fromSessionId: 'parent', agentId: 'worker-1', task: '' } })
+  ];
+  let approval: string[] = [];
+  let changed: () => void = () => undefined;
+  const mounted = await mountChat({}, [], {
+    listSessions: async () => listed(sessions, { approval }),
+    onSessionChanged: (fn: () => void) => { changed = fn; return () => undefined; }
+  });
+  const doc = mounted.window.document;
+  const notice = doc.getElementById('approvalNotice')!;
+  await waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="parent"]')).not.toBeNull());
+  doc.getElementById('sidebarPlugins')!.click();
+  await waitFor(() => expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('library'));
+  approval = ['c-w1']; changed();
+  await waitFor(() => expect(notice.querySelector('.approval-notice-text')?.textContent).toBe('worker-1 · Parent task waits for your approval'));
+  expect(notice.hidden).toBe(false);
+  [...notice.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Open')!.click();
+  await waitFor(() => expect(doc.querySelector<HTMLElement>('.app')!.dataset.screen).toBe('chat'));
+  await waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="w1"]')?.classList.contains('is-sel')).toBe(true));
+  // The chat on screen shows its own card in its timeline, so the window's line goes.
+  await waitFor(() => expect(notice.hidden).toBe(true));
+});
+
 it('keeps a number setting as it was when its field is left empty', async () => {
   // Number('') is 0: an emptied threshold field was saved as its 10,000-token minimum, so every
   // chat would compact almost at once, and an emptied worker limit fell to 1.
@@ -1425,12 +1579,19 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
     lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
     estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null };
   const chat = { ...base, id: 'menu-chat-0001', title: 'A chat', conversationId: 'menu-conversation-0001', chatIds: ['menu-conversation-0001'] };
-  const loose = { ...base, id: 'menu-loose-0001', title: '', conversationId: null, chatIds: [] };
+  const loose = { ...base, id: 'menu-loose-0001', title: 'Unattributed activity', conversationId: null, chatIds: [] };
+  // #1759: a new chat whose first message is still held (its ChatGPT Project is being created, or
+  // could not be) has no conversation yet either, but it is a chat, not the unattributed bucket.
+  const projectId = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001';
+  const pending = { ...base, id: 'menu-pending-0001', title: 'Buenas!', conversationId: null, chatIds: [], projectId };
+  // Renamed to the bucket's own title, a waiting chat is still a chat: only the bucket has no origin.
+  const renamed = { ...base, id: 'menu-pending-0002', title: 'Unattributed activity', conversationId: null, chatIds: [], projectId,
+    origin: { kind: 'desktop' as const, fromSessionId: null, agentId: null, task: '' } };
   const deleteSession = vi.fn(async () => ({ ok: true, data: true }));
   const openSessionChat = vi.fn(async () => ({ ok: true, data: true }));
   const mounted = await mountChat({}, [], {
-    listProjects: async () => ({ ok: true, data: [] }),
-    listSessions: async () => ({ ok: true, data: { sessions: [chat, loose], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    listProjects: async () => ({ ok: true, data: [{ id: projectId, name: 'Website', path: '/work/website', createdAt: 1 }] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [chat, loose, pending, renamed], activeId: null, pressure: [], blocked: [], trusted: [] } }),
     deleteSession, openSessionChat
   });
   const doc = mounted.window.document;
@@ -1447,6 +1608,25 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   await waitFor(() => expect(row(loose.id)).not.toBeNull());
   rowMenuItem(row(loose.id), 'block');
   expect(actions()).toEqual(['block', 'remove']);
+  closeRowMenus(doc);
+  const shown = (id: string) => `${row(id).textContent} ${[...row(id).querySelectorAll<HTMLElement>('[title]'), row(id)].map(node => node.getAttribute('title') ?? '').join(' ')}`;
+  expect(shown(loose.id)).toContain('not a chat');
+  // A chat still waiting for its ChatGPT conversation: no "not a chat", no unattributed switch,
+  // and nothing that needs a ChatGPT link yet (open, copy link, block).
+  await waitFor(() => expect(row(pending.id)).not.toBeNull());
+  expect(shown(pending.id)).not.toContain('not a chat');
+  expect(shown(pending.id)).not.toContain('blocked');
+  // It is listed with the chats, not under "Unattributed activity" (which still holds the bucket).
+  expect(row(pending.id).closest('.session-diagnostics')).toBeNull();
+  expect(row(loose.id).closest('.session-diagnostics')).not.toBeNull();
+  // Groups are kept by the chat's own id, so it can be sorted into one of its project's groups already.
+  rowMenuItem(row(pending.id), 'rename');
+  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
+  closeRowMenus(doc);
+  expect(row(renamed.id).closest('.session-diagnostics')).toBeNull();
+  expect(shown(renamed.id)).not.toContain('not a chat');
+  rowMenuItem(row(renamed.id), 'rename');
+  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   // A right click opens the same menu; its items run their action.
   row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
@@ -4475,6 +4655,41 @@ it('notifies when a chat finishes unless switched off', async () => {
   notify.dispatchEvent(new w.Event('change', { bubbles: true }));
   await settle();
   expect(mounted.calls.at(-1)?.ui.turnNotifications).toBe(false);
+});
+
+it('saves and restores Review Goal completion, off by default', async () => {
+  const first = await mountChat({});
+  let setting = first.window.document.getElementById('finishHoldOnStop') as HTMLInputElement;
+  expect(setting.checked).toBe(false);
+  const firstSaveCount = first.calls.length;
+  setting.checked = true;
+  setting.dispatchEvent(new first.window.Event('change', { bubbles: true }));
+  await settle();
+  expect(first.calls).toHaveLength(firstSaveCount + 1);
+  expect(first.calls.at(-1)?.ui.finishHoldOnStop).toBe(true);
+
+  const firstSaved = first.calls.at(-1)!;
+  const secondConfig = structuredClone(first.state.config);
+  secondConfig.ui = { ...secondConfig.ui, ...firstSaved.ui };
+  first.window.close();
+  vi.resetModules();
+  const second = await mountChat({ config: secondConfig });
+  setting = second.window.document.getElementById('finishHoldOnStop') as HTMLInputElement;
+  expect(setting.checked).toBe(true);
+  const secondSaveCount = second.calls.length;
+  setting.checked = false;
+  setting.dispatchEvent(new second.window.Event('change', { bubbles: true }));
+  await settle();
+  expect(second.calls).toHaveLength(secondSaveCount + 1);
+  expect(second.calls.at(-1)?.ui.finishHoldOnStop).toBe(false);
+
+  const secondSaved = second.calls.at(-1)!;
+  const thirdConfig = structuredClone(second.state.config);
+  thirdConfig.ui = { ...thirdConfig.ui, ...secondSaved.ui };
+  second.window.close();
+  vi.resetModules();
+  const third = await mountChat({ config: thirdConfig });
+  expect((third.window.document.getElementById('finishHoldOnStop') as HTMLInputElement).checked).toBe(false);
 });
 
 // #1402: long turns continue in a fresh one, every 30 minutes unless changed or off.

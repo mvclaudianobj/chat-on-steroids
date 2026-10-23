@@ -9,6 +9,83 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.45.2] — Chat Marks: Brain, Vault, Notifications and agents
+
+This release brings the community 2.1.45 improvements and the integrated Chat Marks modules into a single reviewed product revision.
+
+### Chat Marks
+
+- **Vault K:** encrypted local secret storage with controlled access, credential redaction, and actionable errors; notification credentials and optional SSH key passphrases are stored through the vault.
+- **Notification Center I:** dedicated Settings page with channel preferences, test sends, events, import/export of settings without credentials, vault-backed secrets, precise delivery errors and optional SMTP server certificate SHA-256 pinning.
+- **Brain H:** opt-in local SQLite memory, explicit `/recall` and `/remember`, read/search/save approvals; optional ai-memory, OpenViking and Marks API sources, agent-engine memory tools, and selective review/import of old MarksCode history. Memory providers and automated injection remain opt-in.
+- **Claude Code Router P:** managed module plus a per-chat choice between each Codex/Claude CLI account and the detected router, with real model identifiers. Codex and Claude Code CLI update/version management is available in Modules (U).
+- **Remote hosts L:** SSH host profiles, host-key confirmation, master-key setup via system SSH, reviewed import preview, project terminals and `remote_exec` with an explicit command approval.
+- **VMs N:** optional isolated Vagrant/Ansible lab foundation and host prerequisite checks. **Company O:** an agent company board/office prototype; executing a full autonomous organization is a later phase.
+- **Jarvis J/J2:** opt-in push-to-talk, CLIProxy chat routing and optional system TTS; Windows dictation and Linux microphone capture with a configured transcription engine, subject to local engine/CLIProxy availability.
+- **MarksClaw → ZeroClaw ZC:** preview and selective import of compatible profiles/agents with a private full backup, review of collisions, and imported agents disabled until enabled. Windows/WSL import is not implemented; credentials and sessions remain in the backup.
+- **Everyday chat improvements:** approvals from sub-agents appear in the app window; ZeroClaw has a dedicated page; the update notice follows the selected browser's extension; direct Codex/Claude routes preserve existing chat history as appropriate.
+
+### Community v2.1.45
+
+- Project chat groups, bookmarked answers and persistent unsent drafts; Review `.gitignore` actions; code blocks and terminal improvements, project usage CSV, optional Goal completion review, translated errors and Free-plan Compact & Resume improvements.
+
+## [2.1.45.1] — Chat Marks on community v2.1.45
+
+- Integrated the complete community 2.1.45 release with every Marks integration preserved (MarksPanel login, Marks modules and project terminals, CLIProxy module and chats, agent engines, the bridge instance, the dev profile, the extension build stamp, Chat Marks branding and icons, four-part release versions and Marks release links).
+- From the community: chat groups in a project's ⋯ menu; bookmarks on finished answers; drafts that survive a restart; Review can add untracked files to .gitignore; code blocks show their language, wrap and save as a file; send selected terminal output to the message box, and terminal tabs come back after a restart; Usage by project with Export CSV; Mark all as seen; optional Review Goal completion.
+- Also from the community: fewer ChatGPT permission prompts for the app's own connector; Goal and Loop see the chat's first message; Compact & Resume on the Free plan; the Windows Desktop connector refresh confirms with its full tool list; PowerShell tables return output; illustrations show in the app's copy of an answer; about 70 more error messages translated.
+
+### Chat Marks
+
+- **A route for each Codex and Claude Code chat.** Claude Code Router writes itself into `~/.claude/settings.json` and `~/.codex/config.toml`, so every Codex and Claude Code chat silently ran through the router. Each chat now has a route: the CLI's own account (direct, the default for new chats) or Claude Code Router, chosen in the composer when a router is detected and shown in the chat header. The app reads those files only and never writes them; the direct overrides apply only to the processes it starts. Existing chats keep the route they ran with. A Claude Code chat keeps its session when the route changes; a Codex chat starts a new thread on the other route and keeps its history.
+- **Real model names.** Model lists come from each route and show the concrete model with its version, as in `opus (claude-opus-5-5)` or `GPT-6.1-Sol (gpt-6.1-sol)`, instead of bare aliases or only the router's model.
+- **Direct Claude Code needs its own sign-in.** A direct Claude Code chat without an account of its own is refused before anything is sent and says to run `claude auth login`. Codex direct uses the CLI's ChatGPT account.
+- **ZeroClaw has its own page.** A ZeroClaw item right below Pets in the sidebar (shown while the module is enabled) opens a page with Status, Configure agent and Settings; Settings → Modules keeps install and update and links there.
+- **Configure agent draws.** The setup terminal opened with no height and was refused before it started; it now fills the page, terminal sizes are kept to what the app accepts, and when the setup ends the page says so and keeps its last output. ZeroClaw runs with private folder permissions, so its daemon no longer refuses `~/.zeroclaw/data` and exits before drawing.
+- **The right extension update notice.** The extension version the app reports now comes from the browser chosen for ChatGPT, so an older copy still running in another browser no longer asks you to update the built-in browser's extension.
+- **Pacote de homologação Marks (a detalhar):** cofre de segredos (K), notificações (I), Brain (H), módulo Claude Code Router, atualizações das CLIs (U), projetos remotos (L), VMs (N), empresa (O), Jarvis (J/J2) e importação do ZeroClaw (ZC).
+
+## [2.1.45] — Chat groups, bookmarks, drafts that wait for you, and a better Review
+
+Sort a project's chats into groups, bookmark answers to find them again, and see at a glance which chats hold an unsent message. Review can add files to .gitignore, Compact & Resume works on the Free plan, and ChatGPT asks for permission less often.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### ✨ New
+
+- **Chat groups.** A project's ⋯ menu has **New group**. Move a chat into a group from its own ⋯ menu (**Move to group**), drag groups into the order you like, and rename or delete a group from its menu. Deleting a group keeps its chats in the project.
+- **Bookmarks.** Every finished answer has a bookmark button next to Copy. Once a chat has bookmarks, its header shows them with a count; pick one to jump back to that answer.
+- **Drafts that wait for you.** A chat with a half-written message shows a small pencil in the sidebar, and drafts come back after a restart or an update.
+- **Review: add to .gitignore.** Right-click an untracked file to add it, or its folder, to .gitignore.
+- **Code blocks** show their language, wrap long lines on request, and can be saved as a file.
+- **Terminal:** select output and send it to the message box as a code block. Terminal tabs come back after a restart; press **Start shell here** to open one again.
+- **Usage by project, and as a file.** Settings → Usage shows how much went to each project, and **Export CSV** saves the page as a spreadsheet.
+- **Mark all as seen.** One click clears every "New response" dot, or just one project's from its menu.
+- **Check Goal's "done" yourself.** Settings → Agents & automation → **Review Goal completion** (off by default) keeps a chat waiting for you when Goal says the work is finished, instead of ending on its own.
+
+### 💪 Better
+
+- **Fewer permission prompts from ChatGPT.** ChatGPT asked to approve some Chat On Steroids commands even with "Allow all", flagging the app's own connector text as a "Suspicious instruction". That text is now plain facts, and in our tests the prompts stopped.
+- **Goal and Loop keep your original request in mind.** Their helper now also sees the first message of the chat (shortened if it is very long), so requirements from the start aren't lost in long chats.
+- **Chats you start on chatgpt.com inside a linked Project** now show up in their Chat On Steroids project.
+- **Windows: Store apps take clicks and typing** (such as Calculator or Settings) while the Chat On Steroids window is in front.
+- **Illustrations ChatGPT draws** now show in the app's copy of an answer. Only ChatGPT's own image server is allowed.
+- **The connection to ChatGPT starts more reliably.** The bundled OpenAI tunnel client is updated to v0.0.17. When starting, it now retries short failures instead of giving up.
+- **More of the app speaks your language.** About 70 error messages showed in English in every language: /copy and Export, bookmarks, the SSH project dialog, setup profiles, the terminal, attachments, Git Review and secure storage.
+
+### 🛠 Fixed
+
+- **Compact & Resume on the Free plan** gave up before sending, because ChatGPT shows no model picker there. The new chat now starts on ChatGPT's current model.
+- **Windows: automatic refresh of the Desktop connector** never finished, because its tool list was larger than the app expected. It now confirms like the others.
+- **Windows: apps opened by the desktop tools stay open** when the app restarts its desktop helper. Before, they closed with it.
+- **PowerShell commands that print a table** (such as `Get-Location` or `Select-Object`) returned nothing, and a batch of commands could lose all of its output.
+- **A new chat waiting for its first message** was shown as "blocked · not a chat" under Unattributed activity. It now shows as a normal chat in its project.
+- **A new chat's first message after its project was removed** waited without saying why. It now says to add the folder again or cancel the message.
+- **A bookmark whose answer is no longer in the chat** can be removed: opening it removes it and says so.
+- **A message to a chat whose ChatGPT tab was closed** could wait 15 minutes and then say it "may already have been sent", without being sent. It now goes out.
+
 ## [2.1.44.1] — Chat Marks on community v2.1.44
 
 - Integrated the complete community 2.1.44 release with every Marks integration preserved (MarksPanel login, Marks modules and project terminals, CLIProxy module and chats, agent engines, the bridge instance, the dev profile, the extension build stamp, branding and icons, and the four-part release version).

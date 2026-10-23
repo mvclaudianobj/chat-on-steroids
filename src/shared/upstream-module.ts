@@ -82,6 +82,16 @@ export interface ZeroClawFacts {
   error?: string;
 }
 
+/** No paths, secret values or configuration contents cross IPC. */
+export interface MarksClawMigrationPreview {
+  available: boolean; configuration: boolean; sessions: boolean; devices: boolean; encryptedCredentials: boolean;
+  agents: string[]; riskProfiles: string[]; runtimeProfiles: string[];
+  existingZeroClaw: boolean; conflicts: string[]; importable: number; ticket: string;
+}
+export interface MarksClawMigrationResult {
+  backupCreated: boolean; backupName: string; imported: number; skipped: number;
+}
+
 export interface UpstreamModuleStatus {
   module: UpstreamModuleId;
   versions: UpstreamModuleVersions;

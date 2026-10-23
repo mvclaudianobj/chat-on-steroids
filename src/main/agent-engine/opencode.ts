@@ -32,6 +32,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import { logInfo, logWarn } from '../logger.js';
+import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
 import { notifyChanged } from '../session/recorder.js';
 import { bindSessionProject, createSession, getSession, readEvents, upsertMessageEvent } from '../session/store.js';
 import { AGENT_ENGINE_LABELS } from '../../shared/agent-engine.js';
@@ -55,6 +56,7 @@ import {
 } from './opencode-client.js';
 import { opencodeSupport } from '../opencode/release.js';
 import { OPENCODE_SERVICE_FOREIGN as FOREIGN } from '../opencode/service.js';
+import { noteBrainEngineToolCall, wireOpenCodeBrain } from '../brain/engine-mcp.js';
 
 const ENGINE = 'opencode' as const;
 const LABEL = AGENT_ENGINE_LABELS.opencode;
@@ -486,6 +488,8 @@ async function handle(turn: Turn, event: OpenCodeEvent): Promise<void> {
       if (toolId && typeof data.name === 'string') turn.toolNames.set(toolId, data.name);
       return;
     case 'session.tool.called':
+      // Chat Marks: attributes a Brain save on the shared service to this chat.
+      if (toolId) noteBrainEngineToolCall(ENGINE, turn.sessionId, turn.toolNames.get(toolId) ?? '', data.input);
       if (turn.promptSent && toolId) await startTool(turn, toolId, turn.toolNames.get(toolId) ?? 'tool', data.input);
       return;
     case 'session.tool.success':
@@ -901,6 +905,8 @@ export const openCodeEngine: AgentEngine = {
     try {
       const client = await connect();
       if (await client.running(turn.backendId)) throw new Error('OpenCode is still working in this session (its terminal). Send again when it finishes.');
+      // Chat Marks: the Brain MCP server for this location (H1c), runtime-only; never blocks the turn.
+      await wireOpenCodeBrain(client, directory).catch(error => logWarn(`OpenCode Brain tools unavailable: ${(error as Error).message.slice(0, 200)}`));
       await turn.projector.start(question);
       started = true;
       void pump(turn);
@@ -908,7 +914,8 @@ export const openCodeEngine: AgentEngine = {
       if (turn.ended) throw new Error('The OpenCode event stream could not be opened');
       turn.promptAt = Date.now();
       turn.promptSent = true;
-      turn.promptMessageId = (await client.prompt(turn.backendId, question)).id;
+      const marks = (await readEvents(session.id, { kinds: ['turn_start'] })).length <= 1 ? currentMarksSystemPrompt('opencode') : '';
+      turn.promptMessageId = (await client.prompt(turn.backendId, marks ? `${marks}\n\n${question}` : question)).id;
       return { turnId: turn.turnId };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

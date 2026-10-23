@@ -16,6 +16,7 @@
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { logInfo, logWarn } from '../logger.js';
+import { brainContextBlock } from '../brain/context.js';
 import { currentCoreInstructions } from '../mcp/instructions.js';
 import { getSessionProject, projectWorkspace } from '../projects.js';
 import { strictChatAllowlistEnabled } from '../session/conversation-access.js';
@@ -35,7 +36,9 @@ import { assistantMessageId, MAX_ASSISTANT_CHARS, storedText, userMessageId } fr
 import { closeInterruptedTurn, recoversOwnTurns } from '../agent-engine/recovery.js';
 import { ApiChatHttpError, streamCompletion, type ApiChatMessage, type ApiCompletion, type ApiToolCall } from './client.js';
 import { apiChatTools, approvalSummary, argsHash, needsApproval, parseToolCall, runApiChatTool, toolDefinitions } from './tools.js';
+import { getBrainSettings } from '../brain/settings.js';
 import { apiChatKey, apiChatSettings, noteKeyRequired, noteModelAvailability, noteRecentModel } from './settings.js';
+import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
 
 export { API_CHAT_SESSIONS_STATE } from '../agent-engine/ledger.js';
 export const MAX_API_CHAT_INPUT_CHARS = 100_000;
@@ -183,13 +186,15 @@ export async function apiChatContext(sessionId: string): Promise<ApiChatMessage[
  */
 async function systemPrompt(sessionId: string): Promise<string> {
   const names = [...apiChatTools().keys()];
-  if (!names.length) return SYSTEM_PROMPT;
+  const marks = currentMarksSystemPrompt('cliproxy', names);
+  if (!names.length) return [marks, SYSTEM_PROMPT].filter(Boolean).join('\n\n');
   const project = await getSessionProject(sessionId);
   const core = await currentCoreInstructions().catch(error => {
     logWarn(`API chat ${sessionId}: Core instructions unavailable: ${(error as Error).message}`);
     return '';
   });
   return [
+    marks,
     `${SYSTEM_PROMPT} You can use this computer's local tools through function calls: ${names.join(', ')}. ` +
       'Other tools the instructions below may name are not available in this chat. Call tools one step at a time and keep going until the task is done; ' +
       'edits and commands may wait for the user\'s approval, and a declined action was not run.',
@@ -223,7 +228,8 @@ export async function sendApiChat(sessionId: string, text: string, fetchImpl?: t
     const settings = await apiChatSettings();
     const model = record.model ?? settings.model;
     if (!model) throw new Error('Choose a model for this chat first');
-    const messages: ApiChatMessage[] = [{ role: 'system', content: await systemPrompt(session.id) }, ...await apiChatContext(session.id), { role: 'user', content: text }];
+    // Chat Marks: optional Brain context each turn (H1c, `autoInject`), framed as data.
+    const messages: ApiChatMessage[] = [{ role: 'system', content: [await systemPrompt(session.id), await brainContextBlock(text)].filter(Boolean).join('\n\n') }, ...await apiChatContext(session.id), { role: 'user', content: text }];
     const startedAt = Date.now();
     // Open in the ledger before the boundary exists, so a crash after it is always closed.
     await updateChatRecord(session.id, current => ({ ...(current ?? record), openTurn: { turnId, startedAt } }));
@@ -322,7 +328,10 @@ async function executeCall(session: { id: string; conversationId: string }, turn
   const parsed = await parseToolCall(call, tools);
   const caller = { requestId: turn.requestId, conversationId: session.conversationId, sessionId: session.id, messageId: assistantMessageId(turn.turnId) };
   if (!parsed.ok) return parsed.error;
-  if (needsApproval(parsed.tool.name, parsed.args) && ((await storedChatRecord(session.id))?.approval ?? 'ask') !== 'auto') {
+  if (needsApproval(parsed.tool.name, parsed.args) && (
+    (parsed.tool.name === 'memory_save' && getBrainSettings().askBeforeSaving) ||
+    ((await storedChatRecord(session.id))?.approval ?? 'ask') !== 'auto'
+  )) {
     const approvedHash = argsHash(parsed.tool.name, parsed.args);
     const decision = await askApproval(turn, call, parsed.tool.name, parsed.args);
     if (decision === 'stop' || decision === 'resolved' || turn.stopped) return null;

@@ -40,10 +40,13 @@ export function mainTexts(): Record<MainText, string> {
     'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.':
       t('Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.'),
     'Export as Markdown': t('Export as Markdown'),
+    'Export usage as CSV': t('Export usage as CSV'),
     'Import CoS Pet folder': t('Import CoS Pet folder'),
     'Import SKILL.md': t('Import SKILL.md'),
     'Markdown files': t('Markdown files'),
     'Text files': t('Text files'),
+    'CSV files': t('CSV files'),
+    'Save code': t('Save code'),
     'Approve a folder for ChatGPT': t('Approve a folder for ChatGPT'),
     'Import Skill folder': t('Import Skill folder'),
     'Markdown skills': t('Markdown skills'),
@@ -66,6 +69,21 @@ export function mainTexts(): Record<MainText, string> {
     'Keep checkout': t('Keep checkout'),
     'Remove checkout; preserve Git branch': t('Remove checkout; preserve Git branch'),
     'ChatGPT finished.': t('ChatGPT finished.'),
+    'Export encrypted Chat Marks vault': t('Export encrypted Chat Marks vault'),
+    'Import encrypted Chat Marks vault': t('Import encrypted Chat Marks vault'),
+    'Import GPG secrets': t('Import GPG secrets'),
+    'Chat Marks vault': t('Chat Marks vault'),
+    'GPG encrypted files': t('GPG encrypted files'),
+    'Export Brain memories': t('Export Brain memories'),
+    'JSON Lines': t('JSON Lines'),
+    'Export notification settings': t('Export notification settings'),
+    'Import notification settings': t('Import notification settings'),
+    'Chat Marks notification settings': t('Chat Marks notification settings'),
+    'Select a copy of remote-targets.json': t('Select a copy of remote-targets.json'),
+    'JSON files': t('JSON files'),
+    'Goal result needs review': t('Goal result needs review'),
+    'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.':
+      t('The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'),
   };
 }
 

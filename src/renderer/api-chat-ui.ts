@@ -13,8 +13,8 @@
 import type { AppApi } from '../preload/index.js';
 import { isApiConversationId, type ApiChatApprovalDecision, type ApiChatApprovalMode, type ApiChatEffort, type ApiChatModel, type ApiChatView } from '../shared/api-chat.js';
 import {
-  AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, ENGINE_TERMINAL_OPEN_ELSEWHERE, ENGINE_TERMINAL_OPEN_IN_APP,
-  type AgentEngineId, type AgentEngineInfo, type AgentEngineTerminalMode
+  AGENT_ENGINE_IDS, AGENT_ENGINE_LABELS, DEFAULT_AGENT_ENGINE, DEFAULT_AGENT_ENGINE_ROUTE, ENGINE_TERMINAL_OPEN_ELSEWHERE, ENGINE_TERMINAL_OPEN_IN_APP,
+  ROUTED_AGENT_ENGINES, type AgentEngineId, type AgentEngineInfo, type AgentEngineRoute, type AgentEngineTerminalMode
 } from '../shared/agent-engine.js';
 import { setIcon, toast } from './dom.js';
 import { chatTypeIcon, chatTypeMark, chatTypeOf } from './chat-types.js';
@@ -51,6 +51,21 @@ const ENGINE_MENU: Readonly<Record<AgentEngineId, { title(): string; project(): 
   codex: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.codex]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.codex]) },
   claude: { title: () => t('Chat with {0}', [AGENT_ENGINE_LABELS.claude]), project: () => t('New {0} chat in this project', [AGENT_ENGINE_LABELS.claude]) }
 };
+
+/**
+ * A model as the list and the header show it: the engine's own label with the exact id
+ * (`GPT-6.1-Sol (gpt-6.1-sol)`), or a label that already carries it (`opus (claude-opus-5-5)`).
+ */
+export function modelText(item: Pick<ApiChatModel, 'id' | 'label'>): string {
+  const label = item.label?.trim();
+  if (!label || label === item.id) return item.id;
+  return label.includes(item.id) ? label : `${label} (${item.id})`;
+}
+
+/** The route as the chat header says it (Codex and Claude Code chats). */
+const routeShort = (route: AgentEngineRoute): string => route === 'router' ? t('via Claude Code Router') : t('direct');
+/** The route as its choice and the model list's group say it. */
+const routeLong = (route: AgentEngineRoute): string => route === 'router' ? t('Via Claude Code Router') : t('CLI account (direct)');
 
 /** New chat's engine item ids: their own namespace, never a terminal module's (`new-terminal-<id>`). */
 export const engineMenuAction = (id: AgentEngineId): string => `new-chat-engine-${id}`;
@@ -89,6 +104,18 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   controls.className = 'api-chat-controls';
   controls.id = 'apiChatControls';
   controls.hidden = true;
+  // Codex and Claude Code: the CLI's own account, or a detected Claude Code Router (main/agent-engine/router.ts).
+  const route = document.createElement('select');
+  route.id = 'apiChatComposerRoute';
+  route.hidden = true;
+  ui(route, 'aria-label', () => t('Route'));
+  ui(route, 'title', () => t('Route'));
+  for (const value of ['direct', 'router'] as const) {
+    const option = document.createElement('option');
+    option.value = value;
+    ui(option, 'textContent', () => routeLong(value));
+    route.append(option);
+  }
   const model = document.createElement('select');
   model.id = 'apiChatComposerModel';
   model.setAttribute('translate', 'no');
@@ -123,7 +150,14 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   terminal.hidden = true;
   ui(terminal, 'textContent', () => t('Open in terminal'));
   terminal.addEventListener('click', () => void openTerminal());
-  controls.append(model, effort, approval, terminal);
+  // A chat on "Via Claude Code Router" whose router is configured but not installed or not running:
+  // a row of the composer dock (above the composer), like the approval card.
+  const routeNotice = document.createElement('p');
+  routeNotice.id = 'apiChatRouteNotice';
+  routeNotice.className = 'api-chat-route-notice';
+  routeNotice.setAttribute('role', 'status');
+  routeNotice.hidden = true;
+  controls.append(route, model, effort, approval, terminal);
 
   // The paused call of the running turn: tool, readable arguments and the three answers.
   const card = document.createElement('section');
@@ -179,9 +213,9 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   ui(cardTitle, 'textContent', () => t('Approve this action?'));
   // A row of the composer dock, like the queue and plan rows: directly above the composer.
   const dockBody = document.querySelector('#composerDock .composer-dock-body');
-  if (dockBody) dockBody.append(card, takeBack);
-  else if (composer) composer.before(card, takeBack);
-  else host.append(card, takeBack);
+  if (dockBody) dockBody.append(card, takeBack, routeNotice);
+  else if (composer) composer.before(card, takeBack, routeNotice);
+  else host.append(card, takeBack, routeNotice);
   const modelMenu = document.getElementById('modelMenu');
   if (modelMenu?.parentElement) modelMenu.before(controls);
   else composer?.querySelector('.composer-toolbar')?.append(controls);
@@ -213,11 +247,14 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   let terminalEngines = new Map<AgentEngineId, AgentEngineTerminalMode>();
   let shownFor: string | null = null;
   let view: ApiChatView | null = null;
-  /** Each engine's chat models, loaded once per engine. */
-  const modelsBy = new Map<AgentEngineId, ApiChatModel[]>();
-  const modelsLoading = new Set<AgentEngineId>();
+  /** Each engine's chat models, loaded once per engine and route (`codex:direct`, `cliproxy`). */
+  const modelsBy = new Map<string, ApiChatModel[]>();
+  const modelsLoading = new Set<string>();
   // Before the chat's view answers, the engine the chat list projected for it.
   const engineOf = (): AgentEngineId => view?.engine ?? (shownFor ? hooks.selectedChat?.()?.engine : undefined) ?? DEFAULT_AGENT_ENGINE;
+  /** The chat's route; null for an engine without routes. */
+  const routeOfChat = (): AgentEngineRoute | null => ROUTED_AGENT_ENGINES.has(engineOf()) ? view?.route ?? DEFAULT_AGENT_ENGINE_ROUTE : null;
+  const modelsKey = (engine: AgentEngineId, chosen: AgentEngineRoute | null): string => chosen ? `${engine}:${chosen}` : engine;
   let busy = false;
   let answering = false;
 
@@ -235,22 +272,45 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     nativeMark.hidden = !!id || !selected || chatTypeOf(selected) !== 'chatgpt';
     paintApproval(id ? view?.pending ?? null : null);
     paintTakeBack();
-    if (!id) return;
+    if (!id) { routeNotice.hidden = true; return; }
     setIcon(labelIcon, chatTypeIcon(engineOf()), 'ico chat-type-icon api-chat-label-icon');
     labelIcon.dataset.chatType = engineOf();
-    labelText.textContent = `${AGENT_ENGINE_LABELS[engineOf()] ?? AGENT_ENGINE_LABELS.cliproxy} · ${view?.model ?? '—'}`;
-    const models = modelsBy.get(engineOf()) ?? [];
+    const chosenRoute = routeOfChat();
+    const models = modelsBy.get(modelsKey(engineOf(), chosenRoute)) ?? [];
     const current = view?.model ?? '';
+    const shownModel = current ? modelText(models.find(item => item.id === current) ?? { id: current }) : '—';
+    labelText.textContent = `${AGENT_ENGINE_LABELS[engineOf()] ?? AGENT_ENGINE_LABELS.cliproxy} · ${shownModel}${chosenRoute ? ` · ${routeShort(chosenRoute)}` : ''}`;
     const options: HTMLOptionElement[] = [];
     const option = (value: string, text: string): HTMLOptionElement => Object.assign(document.createElement('option'), { value, textContent: text });
     if (!current) options.push(option('', '—'));
     if (current && !models.some(item => item.id === current)) options.push(option(current, current));
     // Favorites and recents first, as the catalog returns them.
-    for (const item of models) options.push(option(item.id, `${item.favorite ? '★ ' : ''}${item.id}`));
-    model.replaceChildren(...options);
+    const listed = models.map(item => option(item.id, `${item.favorite ? '★ ' : ''}${modelText(item)}`));
+    // With a router detected, the list says which route's models these are.
+    const routes = view?.routes ?? [];
+    if (chosenRoute && routes.length > 1 && listed.length) {
+      const group = document.createElement('optgroup');
+      group.label = routeLong(chosenRoute);
+      group.append(...listed);
+      model.replaceChildren(...options, group);
+    } else model.replaceChildren(...options, ...listed);
     model.value = current;
     effort.value = view?.effort ?? '';
     approval.value = view?.approval ?? 'ask';
+    // Both routes while the router is usable; a chat stored on the router while it is unavailable
+    // may still move to direct (its router choice stays visible, disabled).
+    route.hidden = !chosenRoute || !(routes.length > 1 || (routes.length === 1 && !routes.includes(chosenRoute)));
+    for (const option of route.options) option.disabled = !routes.includes(option.value as AgentEngineRoute) && option.value !== chosenRoute;
+    route.value = chosenRoute ?? DEFAULT_AGENT_ENGINE_ROUTE;
+    const notice = chosenRoute === 'router' ? view?.routeNotice : undefined;
+    routeNotice.hidden = !notice;
+    routeNotice.textContent = !notice ? '' : `${notice === 'not_installed'
+      ? t('Claude Code Router is not installed. Install it from Settings > Modules.')
+      : t('Claude Code Router is not running. Start it from Settings > Modules.')} ${engineOf() === 'codex'
+      ? t('This Codex chat cannot answer until then; switch to "CLI account (direct)" to continue in a new Codex thread.')
+      : t('Until then this chat answers with the CLI account (direct).')}`;
+    // Between turns only: the next message runs on the other route.
+    route.disabled = !view || busy || view.running;
     model.disabled = !view || busy;
     effort.disabled = !view || busy;
     approval.disabled = !view || busy;
@@ -353,17 +413,18 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     const reply = await api.apiChatChatSettings(id).catch(() => null);
     if (shownFor !== id) return;
     if (reply?.ok) view = reply.data;
-    void loadModels(engineOf());
+    void loadModels(engineOf(), routeOfChat());
     paint();
   }
 
-  /** The chat's own engine decides which list its model select shows. */
-  async function loadModels(engine: AgentEngineId): Promise<void> {
-    if (modelsBy.has(engine) || modelsLoading.has(engine)) return;
-    modelsLoading.add(engine);
-    const reply = await api.apiChatModels('', 0, 200, false, engine).catch(() => null);
-    modelsLoading.delete(engine);
-    if (reply?.ok && Array.isArray(reply.data?.models)) modelsBy.set(engine, reply.data.models.filter(item => item.modality === 'chat'));
+  /** The chat's own engine (and route) decides which list its model select shows. */
+  async function loadModels(engine: AgentEngineId, chosen: AgentEngineRoute | null = null): Promise<void> {
+    const key = modelsKey(engine, chosen);
+    if (modelsBy.has(key) || modelsLoading.has(key)) return;
+    modelsLoading.add(key);
+    const reply = await (chosen ? api.apiChatModels('', 0, 200, false, engine, chosen) : api.apiChatModels('', 0, 200, false, engine)).catch(() => null);
+    modelsLoading.delete(key);
+    if (reply?.ok && Array.isArray(reply.data?.models)) modelsBy.set(key, reply.data.models.filter(item => item.modality === 'chat'));
     paint();
   }
 
@@ -377,20 +438,29 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     paint();
   }
 
-  async function change(settings: { model?: string; effort?: ApiChatEffort | null; approval?: ApiChatApprovalMode }): Promise<void> {
+  async function change(settings: { model?: string; effort?: ApiChatEffort | null; approval?: ApiChatApprovalMode; route?: AgentEngineRoute }): Promise<void> {
     const id = shownFor;
     if (!id) return;
+    const before = view?.route;
     busy = true;
     paint();
     try {
       const reply = await api.apiChatSetChatSettings(id, settings);
       if (!reply.ok) toast(t(reply.error));
-      else if (shownFor === id) view = reply.data;
+      else if (shownFor === id) {
+        view = reply.data;
+        if (settings.route && settings.route !== before) {
+          void loadModels(view.engine, view.route ?? settings.route);
+          // A Codex thread keeps the provider it started with; Claude Code resumes the same session.
+          if (view.engine === 'codex') toast(t('Codex threads do not move between routes. Your next message starts a new Codex thread in this chat; Codex will not see the earlier messages.'));
+        }
+      }
     } finally {
       busy = false;
       paint();
     }
   }
+  route.addEventListener('change', () => void change({ route: route.value === 'router' ? 'router' : 'direct' }));
   model.addEventListener('change', () => { if (model.value) void change({ model: model.value }); });
   effort.addEventListener('change', () => void change({ effort: (effort.value || null) as ApiChatEffort | null }));
   approval.addEventListener('change', () => void change({ approval: approval.value === 'auto' ? 'auto' : 'ask' }));
@@ -418,7 +488,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     await hooks.selectChat?.(reply.data.sessionId);
     shownFor = reply.data.sessionId;
     view = reply.data;
-    void loadModels(engineOf());
+    void loadModels(engineOf(), routeOfChat());
     paint();
     input?.focus();
   }

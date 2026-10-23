@@ -15,6 +15,7 @@ const { resetRecorderForTests } = await import('../src/main/session/recorder.js'
 const executor = await import('../src/main/api-chat/executor.js');
 const ledger = await import('../src/main/agent-engine/ledger.js');
 const engine = await import('../src/main/agent-engine/opencode.js');
+const { currentMarksSystemPrompt } = await import('../src/main/marks-system-prompt.js');
 const { SseParser, basicAuth } = await import('../src/main/agent-engine/opencode-client.js');
 const service = await import('../src/main/opencode/service.js');
 const { TurnProjector, storeProjectorSink } = await import('../src/main/agent-engine/projector.js');
@@ -386,7 +387,7 @@ describe('OpenCode 2.x agent engine (fake HTTP+SSE service)', () => {
         metadata: { files: [{ file: 'src/sum.ts', patch: '--- src/sum.ts\n+++ src/sum.ts\n@@ -1,1 +1,1 @@\n-a - b\n+a + b\n', status: 'modified', additions: 1, deletions: 1 }] } });
     };
     const { turnId } = await engine.openCodeEngine.send(view.sessionId, 'Fix the bug');
-    expect(fake.calls('POST', `/api/session/${sessionID}/prompt`)[0]!.body).toEqual({ text: 'Fix the bug' });
+    expect(fake.calls('POST', `/api/session/${sessionID}/prompt`)[0]!.body).toEqual({ text: `${currentMarksSystemPrompt('opencode')}\n\nFix the bug` });
     await until(async () => !!(await engine.openCodeEngine.view(view.sessionId)).pending);
     await engine.openCodeEngine.approve(view.sessionId, (await engine.openCodeEngine.view(view.sessionId)).pending!.approvalId, 'approve');
     fake.emit('session.tool.success', { sessionID, assistantMessageID: 'msg_a2', id: 'call_2', content: [{ type: 'text', text: 'Created file successfully: src/sum.ts' }], metadata: { truncated: false }, executed: false });

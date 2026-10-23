@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { UPSTREAM_VERSION } from '../shared/upstream-module.js';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -9,9 +10,10 @@ import { projectWorkspace } from './projects.js';
 import { getConfig, effectiveCapabilities } from './config.js';
 import { readDurable, writeDurableNow } from './durable.js';
 import { normalizeEnvironment, deleteEnvValue } from './env.js';
-import { installPublishedCli } from './cli-source-install.js';
+import { installPublishedCli, publishedLatest, publishedUpdateAvailable, verifiedVersion, externalNpmPrefix } from './cli-source-install.js';
 import { localRunner, probeVersion, wslRunner } from './upstream/install.js';
 import { markspanelAccessBlocked } from './markspanel-auth.js';
+import { CLAUDE_DIRECT_SETTINGS } from './agent-engine/router.js';
 
 export const CLI_IDS = ['opencode', 'codex', 'claude', 'zeroclaw', 'markscode', 'marksclaw'] as const;
 export type CliId = typeof CLI_IDS[number];
@@ -39,6 +41,10 @@ export type CliModuleStatus = {
   legacy: boolean;
   /** The binary in use is the module folder's own (false: found on PATH). */
   managed: boolean;
+  latest?: string | null;
+  updateAvailable?: boolean;
+  external?: boolean;
+  restartPending?: boolean;
 };
 type Status = CliModuleStatus;
 const SESSION_NAME = new RegExp(`^marks_(${CLI_IDS.join('|')})_[0-9a-f]{18}$`);
@@ -104,10 +110,26 @@ const ABSOLUTE_DIR = /^\/[^\u0000-\u001f]{0,900}$/;
  * and updates it. The TUI reads the background service's URL and password itself.
  */
 export const OPENCODE_TERMINAL_SCRIPT = 'OPENCODE_DISABLE_AUTOUPDATE=1 exec "$@"';
+/**
+ * Every ZeroClaw terminal (`zeroclaw quickstart`, the `zerocode` TUI). ZeroClaw creates
+ * `~/.zeroclaw` and its `data/` with the user's umask, then its daemon refuses a `data/` that group
+ * or others can write ("config lifecycle directory … is writable by other users (mode 775)", 0.8.6
+ * under the usual umask 002), so `zerocode` exited before drawing. The script runs ZeroClaw under
+ * umask 077, removes only the group/other write bits of those two folders when they are real
+ * folders owned by the user (never through a link), and keeps the pane open after ZeroClaw exits,
+ * with its last output and exit status, until Enter.
+ */
+export const ZEROCLAW_TERMINAL_SCRIPT = 'umask 077; '
+  + 'for d in "$HOME/.zeroclaw" "$HOME/.zeroclaw/data"; do if [ -d "$d" ] && [ ! -L "$d" ] && [ -O "$d" ]; then chmod go-w "$d"; fi; done; '
+  + '"$@"; status=$?; printf \'\\n[%s exited with status %s. Press Enter to close.]\\n\' "${1##*/}" "$status"; read -r _; exit "$status"';
 /** The only argument shapes an engine terminal may carry, per module. */
 const validEngineArgs = (module: CliId, args: unknown): args is string[] => {
   if (!Array.isArray(args) || !args.every(arg => typeof arg === 'string')) return false;
-  if (module === 'claude') return args.length === 2 && ENGINE_TERMINAL_ARGS.test(args[0]!) && UUID.test(args[1]!);
+  // A direct chat's hand-over TUI carries the direct route's exact flag settings (router.ts) first.
+  if (module === 'claude') {
+    const session = args.length === 4 && args[0] === '--settings' && args[1] === CLAUDE_DIRECT_SETTINGS ? args.slice(2) : args;
+    return session.length === 2 && ENGINE_TERMINAL_ARGS.test(session[0]!) && UUID.test(session[1]!);
+  }
   if (module === 'markscode') return args.length === 3 && args[0] === '-s' && MARKSCODE_SESSION.test(args[1]!) && args[2] === '.';
   if (module === 'opencode') return args.length === 3 && args[0] === '-s' && OPENCODE_SESSION.test(args[1]!)
     && ABSOLUTE_DIR.test(args[2]!) && !args[2]!.split('/').includes('..');
@@ -182,6 +204,10 @@ async function executable(name: string): Promise<string | null> {
     try { const { access } = await import('node:fs/promises'); await access(compiled); return compiled; } catch {}
     const local = path.join(installedRoot(), module, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name);
     try { const { access } = await import('node:fs/promises'); await access(local); return local; } catch {}
+    if ((module === 'codex' || module === 'claude') && process.platform !== 'win32') {
+      const personal = path.join(app.getPath('home'), '.local', 'bin', name);
+      try { const { access } = await import('node:fs/promises'); await access(personal); return personal; } catch {}
+    }
   }
   const locate = process.platform === 'win32' ? 'where.exe' : '/usr/bin/env';
   const args = process.platform === 'win32' ? [name] : ['which', name];
@@ -228,7 +254,7 @@ export async function cliModulesRoot(): Promise<string> {
 
 /** Whether a resolved binary is the module folder's own (not one found on PATH). */
 async function isManaged(id: CliId, binary: string | null): Promise<boolean> {
-  return !!binary && binary === `${await cliModulesRoot()}/${id}/bin/${manifest[id].bin}`;
+  return !!binary && binary.startsWith(`${await cliModulesRoot()}/${id}/`) && (binary.endsWith(`/bin/${manifest[id].bin}`) || binary.endsWith(`/node_modules/.bin/${manifest[id].bin}`));
 }
 
 const upstreamProbes = new Map<string, { key: string; version: string | null }>();
@@ -274,6 +300,10 @@ async function version(id: CliId): Promise<string | null> {
   const bin = await runtimeBinary(id);
   if (!bin) return null;
   if (id === 'opencode' || id === 'zeroclaw') return (await cliUpstreamVersion(id, bin)) ?? 'Version unavailable';
+  if (id === 'codex' || id === 'claude') {
+    const result = await verifiedVersion(id, bin, `${await cliModulesRoot()}/${id}/.probe`);
+    return result ?? 'Version unavailable';
+  }
   try {
     const { stdout, stderr } = await run(process.platform === 'win32' ? 'wsl.exe' : bin,
       process.platform === 'win32' ? ['--exec', bin, '--version'] : ['--version'], { timeout: 6_000, maxBuffer: 4096 });
@@ -337,8 +367,11 @@ export async function cliStatus(): Promise<Status[]> {
     const legacy = !!manifest[id].legacy;
     const bin = legacy ? null : await runtimeBinary(id);
     const v = bin ? await version(id) : null;
+    const managed = await isManaged(id, bin);
+    const latest = id === 'codex' || id === 'claude' ? await publishedLatest(id) : null;
     return { id, name: manifest[id].name, installed: v !== null, enabled: enabled.has(id), running: runningSessions.some(s => s.startsWith(`marks_${id}_`)), version: v, supported,
-      upstream: !!manifest[id].upstream, legacy, managed: await isManaged(id, bin),
+      upstream: !!manifest[id].upstream, legacy, managed, latest, updateAvailable: (id === 'codex' || id === 'claude') && publishedUpdateAvailable(v, latest), external: !!bin && !managed,
+      restartPending: pendingRestarts.has(id),
       detail: legacy ? `${manifest[id].name} is retired; its data is left untouched. Stop its terminals, then disable it.`
         : !supported ? 'Persistent terminal requires tmux on Linux/macOS or WSL with tmux on Windows.'
           : v === 'Version unavailable' ? 'CLI found, but its version check failed; check the executable before opening.'
@@ -396,7 +429,26 @@ async function tmux(args: string[]): Promise<string> {
   return stdout;
 }
 
-export async function cliAction(id: CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'stop'): Promise<Status[]> {
+const pendingRestarts = new Set<CliId>();
+let restartTimer: NodeJS.Timeout | null = null;
+function deferIdleRestart(): void {
+  if (restartTimer) return;
+  restartTimer = setInterval(() => {
+    void (async () => {
+      if (pendingRestarts.has('codex')) {
+        const { codexEngine, codexHasActiveTurns } = await import('./agent-engine/codex.js');
+        if (!codexHasActiveTurns()) { codexEngine().shutdown(); pendingRestarts.delete('codex'); }
+      }
+      if (pendingRestarts.has('claude')) {
+        const { claudeEngine } = await import('./agent-engine/claude.js');
+        if (await claudeEngine.restartIdleHosts()) pendingRestarts.delete('claude');
+      }
+      if (!pendingRestarts.size && restartTimer) { clearInterval(restartTimer); restartTimer = null; }
+    })().catch(() => undefined);
+  }, 5000);
+  restartTimer.unref?.();
+}
+export async function cliAction(id: CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'update-external' | 'stop', expected?: string): Promise<Status[]> {
   await loadCliModules();
   if (!effectiveCapabilities(getConfig()).command) throw new Error('Command execution is disabled');
   await onModule(id, async () => {
@@ -416,7 +468,20 @@ export async function cliAction(id: CliId, action: 'enable' | 'disable' | 'insta
     if (installations.has(id)) throw new Error('This module is already being installed or updated');
     installations.add(id);
     try {
-      await installPublishedCli(id as 'codex' | 'claude', source.package);
+      if (id !== 'codex' && id !== 'claude') throw new Error('unsupported_module');
+      if (!expected || !UPSTREAM_VERSION.test(expected)) throw new Error('version_required');
+      const binary = await runtimeBinary(id);
+      const external = binary && !await isManaged(id, binary);
+      const home = process.platform === 'win32' ? await wslHome() : app.getPath('home');
+      const prefix = external && binary ? await externalNpmPrefix(id, binary, home) : null;
+      if (action === 'update-external' && (!external || !prefix)) throw new Error('external_not_writable');
+      if (action === 'update-external') {
+        if (id === 'codex' && (await import('./agent-engine/codex.js')).codexHasActiveTurns()) throw new Error('Wait for Codex to finish answering before updating its installed CLI');
+        if (id === 'claude' && (await import('./agent-engine/claude.js')).claudeEngine.hasActiveTurns()) throw new Error('Wait for Claude to finish answering before updating its installed CLI');
+      }
+      await installPublishedCli(id, source.package, expected, action, prefix);
+      pendingRestarts.add(id);
+      deferIdleRestart();
     } finally { installations.delete(id); }
     }
   });
@@ -653,7 +718,7 @@ export async function cliOpen(sessionId: string, cols: number, rows: number, att
 /**
  * The tmux command of a module terminal, argv only: `sh -c 'exec "$@"' marks-cli <bin> <args>`;
  * OpenCode's with its self-update off (`OPENCODE_TERMINAL_SCRIPT`); ZeroClaw runs its `zerocode`
- * TUI (or `zeroclaw quickstart`).
+ * TUI (or `zeroclaw quickstart`) through `ZEROCLAW_TERMINAL_SCRIPT`.
  */
 async function terminalCommand(id: CliId, bin: string, session: Readonly<CliSession>): Promise<string[]> {
   const script = id === 'opencode' ? OPENCODE_TERMINAL_SCRIPT : 'exec "$@"';
@@ -663,8 +728,8 @@ async function terminalCommand(id: CliId, bin: string, session: Readonly<CliSess
   }
   const terminalBin = manifest[id].terminalBin;
   if (terminalBin) {
-    if (validTerminalArgs(id, session.args)) return ['sh', '-c', 'exec "$@"', 'marks-cli', bin, ...session.args!];
-    return ['sh', '-c', 'exec "$@"', 'marks-cli', `${bin.slice(0, bin.lastIndexOf('/') + 1)}${terminalBin}`];
+    if (validTerminalArgs(id, session.args)) return ['sh', '-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', bin, ...session.args!];
+    return ['sh', '-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', `${bin.slice(0, bin.lastIndexOf('/') + 1)}${terminalBin}`];
   }
   return ['sh', '-c', script, 'marks-cli', bin];
 }
@@ -684,7 +749,7 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
     z.object({ action: z.literal('status') }).strict(),
     z.object({ action: z.literal('sessions') }).strict(),
     z.object({ action: z.literal('create'), module: id, projectId: z.string().uuid().nullable(), kind: z.literal('quickstart').optional() }).strict(),
-    z.object({ action: z.enum(['enable', 'disable', 'install', 'update', 'stop']), module: id }).strict(),
+    z.object({ action: z.enum(['enable', 'disable', 'install', 'update', 'update-external', 'stop']), module: id, version: z.string().regex(UPSTREAM_VERSION).optional() }).strict(),
     z.object({ action: z.literal('open'), sessionId: z.string().uuid(), attachmentId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(2).max(200) }).strict(),
     z.object({ action: z.literal('write'), attachmentId: z.string().uuid(), data: z.string().max(16_384) }).strict(),
     z.object({ action: z.literal('resize'), attachmentId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(2).max(200) }).strict(),
@@ -711,7 +776,7 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
       const data = input.action === 'status' ? await cliStatus()
         : input.action === 'sessions' ? await cliSessions()
           : input.action === 'create' ? await cliCreateSession(input.module, input.projectId, input.kind)
-        : ['enable', 'disable', 'install', 'update', 'stop'].includes(input.action) ? await cliAction((input as { module: CliId }).module, input.action as 'enable' | 'disable' | 'install' | 'update' | 'stop')
+        : ['enable', 'disable', 'install', 'update', 'update-external', 'stop'].includes(input.action) ? await cliAction((input as { module: CliId }).module, input.action as 'enable' | 'disable' | 'install' | 'update' | 'update-external' | 'stop', (input as { version?: string }).version)
           : input.action === 'open' ? await cliOpen(input.sessionId, input.cols, input.rows, input.attachmentId,
             () => owner !== event.sender || event.sender.isDestroyed())
             : input.action === 'write' ? await (async () => {

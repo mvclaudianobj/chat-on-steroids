@@ -61,3 +61,18 @@
 @media (prefers-reduced-motion: reduce) {
   .composer-dictation-button { transition: none; }
 }
+/* Jarvis J3: the visible turn state next to the push-to-talk button. */
+.composer-dictation-button:is([data-state='transcribing'],[data-state='thinking']) { color: var(--accent); }
+.composer-dictation-button[data-state='speaking'] { border-color: var(--accent-edge); color: var(--accent); }
+.jarvis-state[hidden] { display: none; }
+.jarvis-state {
+  align-self: center;
+  max-width: 14em;
+  padding: 0 4px;
+  overflow: hidden;
+  color: var(--soft);
+  font-size: calc(11px * var(--text-scale, 1));
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.jarvis-state:is([data-state='listening'],[data-state='speaking']) { color: var(--accent); }

@@ -1,0 +1,600 @@
+import { NOTIFICATION_CHANNELS, NOTIFICATION_EVENTS } from '../shared/notification-center.js';
+import type { NotificationChannel, NotificationCenterSettings, NotificationCenterView, NotificationEvent, NotificationFailure, WhatsAppSetupIssue } from '../shared/notification-center.js';
+import type { AppApi } from '../preload/index.js';
+import { el } from './dom.js';
+import { t, ui } from './i18n.js';
+
+type FieldSpec = { key: string; label: string; placeholder?: string; type?: string };
+const CHANNELS: Record<NotificationChannel, { name: string; description: string; destination: string; secret: string; fields: FieldSpec[] }> = {
+  smtp: {
+    name: 'Email (SMTP)', description: 'Send messages to email addresses.', destination: 'Recipient email addresses',
+    secret: 'SMTP password', fields: [
+      { key: 'host', label: 'SMTP host', placeholder: 'smtp.example.com' },
+      { key: 'port', label: 'SMTP port', placeholder: '587', type: 'number' },
+      { key: 'username', label: 'SMTP username' },
+      { key: 'security', label: 'Connection security', type: 'security' },
+      { key: 'from', label: 'Sender email address', placeholder: 'notifications@example.com' }
+    ]
+  },
+  telegram: {
+    name: 'Telegram', description: 'Send bot messages to chats, groups or channels.', destination: 'Chat IDs',
+    secret: 'Bot token', fields: [{ key: 'apiBase', label: 'Telegram API base (optional)', placeholder: 'https://api.telegram.org' }]
+  },
+  'whatsapp-web': {
+    name: 'WhatsApp Web (QR)', description: 'Pair this computer directly to WhatsApp without a server. Unofficial integration: WhatsApp may block your number.', destination: 'Phone numbers', secret: '', fields: []
+  },
+  'whatsapp-cloud': {
+    name: 'WhatsApp Cloud (Meta)', description: 'Send WhatsApp messages through the Meta Cloud API.', destination: 'Phone numbers',
+    secret: 'Meta access token', fields: [
+      { key: 'apiBase', label: 'Graph API URL', placeholder: 'https://graph.facebook.com/v23.0' },
+      { key: 'phoneId', label: 'Phone number ID' },
+      { key: 'template', label: 'Approved message template' },
+      { key: 'language', label: 'Template language', placeholder: 'en_US' },
+      { key: 'parameters', label: 'Template body fields (comma separated)', placeholder: 'title,body' }
+    ]
+  },
+  'whatsapp-evolution': {
+    name: 'WhatsApp Evolution', description: 'Send messages through an Evolution API instance.', destination: 'Phone numbers',
+    secret: 'Evolution API key', fields: [
+      { key: 'baseUrl', label: 'Evolution API URL', placeholder: 'https://evolution.example.com' },
+      { key: 'instance', label: 'Evolution instance' }
+    ]
+  }
+};
+const EVENT_LABELS: Record<NotificationEvent, string> = {
+  'turn-completed': 'Chat completed', 'turn-failed': 'Chat failed',
+  'approval-pending': 'Approval pending', 'module-update': 'Module update', 'app-release': 'App release'
+};
+
+type Reply<T> = { ok: true; data: T } | { ok: false; error: string; failure?: NotificationFailure };
+
+/** Shareable setup diagnostics, only fixed enums supplied by main; never include QR or error text. */
+function whatsappDiagnosis(issue?: WhatsAppSetupIssue, stage?: string): string {
+  const safeStage = ['storage', 'auth', 'socket', 'network', 'qr', 'ready'].includes(stage ?? '') ? stage! : 'unknown';
+  const safeIssue = issue ?? 'unknown';
+  return ` [WA-${safeIssue} / ${safeStage}]`;
+}
+
+/** UI-owned wording only: setup details from the main process are restricted to these codes. */
+export function whatsappSetupMessage(issue?: WhatsAppSetupIssue): string {
+  switch (issue) {
+    case 'storage_unavailable': return t('WhatsApp cannot access local session storage. Check folder permissions and free disk space.');
+    case 'session_invalid': return t('WhatsApp session data cannot be read. Check local permissions; do not delete your session files.');
+    case 'runtime_unavailable': return t('WhatsApp Web could not initialize. Check the installed application package.');
+    case 'connection_failed': return t('WhatsApp could not connect. Check the network and try again.');
+    case 'qr_timeout': return t('WhatsApp did not provide a QR code in time. Try connecting again.');
+    case 'qr_render_failed': return t('WhatsApp QR image could not be generated. Try again.');
+    default: return t('WhatsApp Web could not start. Check the connection and local session storage.');
+  }
+}
+
+/** What went wrong and what to do, from the main process's non-secret failure code. */
+export function notificationFailureMessage(failure: NotificationFailure): string {
+  const parts: string[] = [];
+  switch (failure.code) {
+    case 'config_incomplete': parts.push(t('The channel settings are incomplete or invalid. Check the host, sender, endpoint and destinations.')); break;
+    case 'credential_missing': parts.push(t('No credential is stored for this channel. Save it with the vault master password.')); break;
+    case 'credential_unavailable': parts.push(t('The stored credential could not be opened. Check the vault in General settings and save the credential again.')); break;
+    case 'dns_failed': parts.push(t('The server name could not be resolved. Check the host name.')); break;
+    case 'connect_timeout': parts.push(t('The server did not answer the connection in time. Check the host, port and firewall.')); break;
+    case 'connection_refused': parts.push(t('The server refused the connection on this port. Check the port and connection security.')); break;
+    case 'network_unreachable': parts.push(t('The server cannot be reached from this computer. Check the network connection.')); break;
+    case 'connection_closed': parts.push(t('The server closed the connection unexpectedly. Check the port and connection security (TLS or STARTTLS).')); break;
+    case 'server_timeout': parts.push(t('The server stopped answering. Try again later.')); break;
+    case 'tls_untrusted': parts.push(failure.pinned
+      ? t('The server presented a different certificate than the one you trusted. Trust it again only if the server administrator confirms the change.')
+      : t('The server certificate is not trusted (for example self-signed or from an unknown authority).')); break;
+    case 'tls_hostname_mismatch': parts.push(t('The server certificate does not match the configured host name.')); break;
+    case 'starttls_unavailable': parts.push(t('The server does not offer STARTTLS on this port. Use TLS (usually port 465) or a server that supports STARTTLS.')); break;
+    case 'auth_failed': parts.push(t('The server rejected the username or password.')); break;
+    case 'sender_rejected': parts.push(t('The server rejected the sender address. Use an address this account may send from.')); break;
+    case 'recipient_rejected': parts.push(t('The server rejected a recipient address.')); break;
+    case 'server_error': parts.push(t('The server refused the request.')); break;
+    case 'invalid_token': parts.push(t('The provider rejected the token or API key.')); break;
+    case 'unknown_destination': parts.push(t('The provider does not recognize a destination (chat ID or phone number), or may not send to it.')); break;
+    case 'rate_limited': parts.push(t('The provider is limiting requests. Wait a moment and try again.')); break;
+    case 'http_client_error': parts.push(t('The provider refused the request. Check the endpoint and settings.')); break;
+    case 'http_server_error': parts.push(t('The provider had a server error. Try again later.')); break;
+    default: parts.push(t('Check channel configuration and connection.'));
+  }
+  if (failure.cloudflare) parts.push(t('The host resolves to a Cloudflare proxy address, which does not carry SMTP. Use a DNS-only record or the MX host.'));
+  if (failure.smtpCode) parts.push(t('SMTP reply {0}.', [failure.smtpCode]));
+  if (failure.httpStatus) parts.push(t('HTTP status {0}.', [failure.httpStatus]));
+  return parts.join(' ');
+}
+type Service = Pick<AppApi,
+  'notificationCenterGet' | 'notificationCenterSave' | 'notificationCenterSetCredential' |
+  'notificationCenterTest' | 'notificationCenterExport' | 'notificationCenterImport' | 'vault' |
+  'notificationWhatsAppStart' | 'notificationWhatsAppStatus' | 'notificationWhatsAppDisconnect' | 'notificationTelegramPairStart' | 'notificationTelegramPairCheck' | 'notificationTelegramPairCancel'
+>;
+
+function settingLabel(title: string, detail: string, control: HTMLElement): HTMLLabelElement {
+  const label = document.createElement('label');
+  label.className = 'setting';
+  const copy = el('span', 'setting-text');
+  copy.append(el('b', '', () => t(title)), el('em', '', () => t(detail)));
+  label.append(copy, control);
+  return label;
+}
+function field(label: string, control: HTMLElement): HTMLElement {
+  const box = el('div', 'field notification-center-field');
+  const caption = el('label', '', () => t(label)) as HTMLLabelElement;
+  caption.htmlFor = control.id;
+  box.append(caption, control);
+  return box;
+}
+function input(id: string, type = 'text', placeholder?: string): HTMLInputElement {
+  const node = document.createElement('input');
+  node.id = id;
+  node.type = type;
+  node.autocomplete = 'off';
+  if (placeholder) ui(node, 'placeholder', () => t(placeholder));
+  return node;
+}
+function textarea(id: string, rows = 2): HTMLTextAreaElement {
+  const node = document.createElement('textarea');
+  node.id = id;
+  node.rows = rows;
+  node.spellcheck = false;
+  return node;
+}
+function number(id: string, minimum: number, maximum: number): HTMLInputElement {
+  const node = input(id, 'number');
+  node.min = String(minimum);
+  node.max = String(maximum);
+  node.step = '1';
+  return node;
+}
+function button(label: string): HTMLButtonElement {
+  const node = document.createElement('button');
+  node.type = 'button';
+  node.className = 'btn';
+  ui(node, 'textContent', () => t(label));
+  return node;
+}
+function destinations(value: string): string[] {
+  return [...new Set(value.split(/[,\n]/).map(item => item.trim()).filter(Boolean))];
+}
+function clone(settings: NotificationCenterSettings): NotificationCenterSettings {
+  return {
+    ...settings,
+    channels: Object.fromEntries(NOTIFICATION_CHANNELS.map(channel => {
+      const item = settings.channels[channel];
+      return [channel, { ...item, events: { ...item.events }, destinations: [...item.destinations], config: { ...item.config } }];
+    })) as NotificationCenterSettings['channels']
+  };
+}
+
+export function installNotificationCenter(api: Service): void {
+  const container = document.getElementById('notificationCenterSettings');
+  const status = document.getElementById('notificationCenterStatus');
+  if (!container || !status) return;
+  let draft: NotificationCenterSettings | null = null;
+  let credentials: NotificationCenterView['credentials'] | null = null;
+  let busy = false;
+  const controls: Array<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | HTMLButtonElement> = [];
+  const channelStatus = new Map<NotificationChannel, HTMLElement>();
+  const credentialStatus = new Map<NotificationChannel, HTMLElement>();
+  const tests = new Map<NotificationChannel, HTMLButtonElement>();
+  const vaultHelp = new Map<NotificationChannel, HTMLElement>();
+  const pairingCleanups: Array<() => void> = [];
+
+  function state(message: string, error = false): void {
+    ui(status!, 'textContent', () => t(message));
+    status!.classList.toggle('is-error', error);
+  }
+  function setBusy(value: boolean): void {
+    busy = value;
+    for (const control of controls) control.disabled = value;
+    for (const control of tests.values()) control.disabled = value;
+  }
+  async function request<T>(
+    perform: () => Promise<Reply<T>>, onSuccess: (data: T) => void, errorTarget: HTMLElement = status!,
+    errorText: (error: string, failure?: NotificationFailure) => string = error => t('Could not save notification settings: {0}', [error])
+  ): Promise<boolean> {
+    if (busy) return false;
+    setBusy(true);
+    try {
+      const reply = await perform();
+      if (!reply.ok) {
+        errorTarget.textContent = errorText(reply.error, reply.failure);
+        errorTarget.classList.add('is-error');
+        return false;
+      }
+      onSuccess(reply.data);
+      errorTarget.classList.remove('is-error');
+      return true;
+    } catch {
+      errorTarget.textContent = t('Notification service unavailable.');
+      errorTarget.classList.add('is-error');
+      return false;
+    } finally { setBusy(false); }
+  }
+  function credentialState(channel: NotificationChannel): void {
+    credentialStatus.get(channel)!.textContent = t(credentials?.[channel] ? 'Credential stored securely. Enter a new value to replace it.' : 'No credential stored.');
+  }
+  /** Saves only the pinned-certificate change on top of the saved settings the draft already holds. */
+  async function savePin(entry: NotificationCenterSettings['channels']['smtp'], fingerprint: string | null, note: HTMLElement, trust: HTMLElement, message: string): Promise<void> {
+    if (!draft) return;
+    if (fingerprint) entry.config.tlsFingerprint = fingerprint; else delete entry.config.tlsFingerprint;
+    const payload = clone(draft);
+    await request(() => api.notificationCenterSave(payload), view => {
+      credentials = view.credentials;
+      note.textContent = t(message);
+      showTrust(trust, entry, note, null);
+    }, note);
+  }
+  /**
+   * SMTP fallback for a server whose certificate is not publicly trusted: pin exactly the presented
+   * certificate after the user compared its fingerprint, or remove that pin again.
+   */
+  function showTrust(trust: HTMLElement, entry: NotificationCenterSettings['channels']['smtp'], note: HTMLElement, failure: NotificationFailure | null): void {
+    trust.replaceChildren();
+    const pinned = entry.config.tlsFingerprint;
+    const offered = failure && (failure.code === 'tls_untrusted' || failure.code === 'tls_hostname_mismatch') ? failure.certificate : undefined;
+    if (offered) {
+      const box = el('div', 'notification-certificate');
+      box.setAttribute('role', 'group');
+      box.setAttribute('aria-label', t('Certificate presented by the server'));
+      box.append(el('b', '', () => t('Certificate presented by the server')));
+      box.append(el('span', '', () => t('Names: {0}', [offered.names.join(', ') || '—'])));
+      const print = el('code', 'notification-fingerprint', () => offered.fingerprint256);
+      box.append(el('span', '', () => t('SHA-256 fingerprint:')), print);
+      if (offered.selfSigned) box.append(el('span', '', () => t('Self-signed certificate.')));
+      box.append(el('em', '', () => t('Recommended: install a certificate from a public authority (for example Let’s Encrypt) for this host name. Trusting this certificate is a fallback.')));
+      const accept = button('Trust this certificate');
+      accept.id = 'notificationTrustCertificate';
+      accept.addEventListener('click', async () => {
+        if (busy || !confirm(t('Trust only this exact certificate for SMTP? Compare its SHA-256 fingerprint with the server administrator first:\n{0}\nThe connection stays encrypted, and any other certificate will be refused.', [offered.fingerprint256]))) return;
+        await savePin(entry, offered.fingerprint256, note, trust, 'Certificate trusted. Send a test again.');
+      });
+      box.append(accept);
+      trust.append(box);
+    }
+    if (pinned) {
+      const row = el('div', 'notification-certificate');
+      row.append(el('b', '', () => t('Trusted server certificate')), el('code', 'notification-fingerprint', () => pinned));
+      row.append(el('em', '', () => t('Only this exact certificate is accepted for this server.')));
+      const remove = button('Remove trust');
+      remove.id = 'notificationRemoveTrust';
+      remove.addEventListener('click', async () => {
+        if (busy) return;
+        await savePin(entry, null, note, trust, 'Certificate trust removed.');
+      });
+      row.append(remove);
+      trust.append(row);
+    }
+    trust.hidden = !trust.childElementCount;
+  }
+  function build(): void {
+    if (!draft) return;
+    for (const cleanup of pairingCleanups.splice(0)) cleanup();
+    controls.length = 0;
+    channelStatus.clear();
+    credentialStatus.clear();
+    tests.clear();
+    vaultHelp.clear();
+    container!.replaceChildren();
+    const timing = el('div', 'notification-center-timing');
+    const throttle = number('notificationThrottleMinutes', 0, 1440);
+    throttle.value = String(draft.throttleMinutes);
+    throttle.addEventListener('input', () => { if (draft && throttle.validity.valid) draft.throttleMinutes = Number(throttle.value); });
+    const batch = number('notificationBatchSeconds', 0, 300);
+    batch.value = String(draft.batchWindowSeconds);
+    batch.addEventListener('input', () => { if (draft && batch.validity.valid) draft.batchWindowSeconds = Number(batch.value); });
+    controls.push(throttle, batch);
+    timing.append(field('Minimum minutes between notifications', throttle), field('Batch window (seconds)', batch));
+    container!.append(timing);
+
+    for (const channel of NOTIFICATION_CHANNELS) {
+      const spec = CHANNELS[channel];
+      const entry = draft.channels[channel];
+      const section = el('section', 'notification-channel');
+      const head = el('div', 'notification-channel-head');
+      const summary = el('div');
+      const title = el('h3', '', () => t(spec.name));
+      title.id = 'notificationTitle-' + channel;
+      section.setAttribute('aria-labelledby', title.id);
+      summary.append(title, el('p', '', () => t(spec.description)));
+      const enabled = input('notificationEnabled-' + channel, 'checkbox');
+      enabled.checked = entry.enabled;
+      enabled.setAttribute('aria-label', t('Enable {0}', [t(spec.name)]));
+      enabled.addEventListener('change', () => { entry.enabled = enabled.checked; });
+      controls.push(enabled);
+      head.append(summary, settingLabel('Enabled', 'Allow this channel to send notifications.', enabled));
+      section.append(head);
+
+      const fields = el('div', 'notification-channel-fields');
+      for (const item of spec.fields) {
+        let control: HTMLInputElement | HTMLSelectElement;
+        if (item.type === 'security') {
+          const security = document.createElement('select');
+          security.id = 'notification-' + channel + '-' + item.key;
+          for (const [value, label] of [['starttls', 'STARTTLS'], ['tls', 'TLS']] as const) {
+            const option = document.createElement('option');
+            option.value = value; option.textContent = t(label); security.append(option);
+          }
+          control = security;
+        } else {
+          control = input('notification-' + channel + '-' + item.key, item.type ?? 'text', item.placeholder);
+          if (item.type === 'number') { control.min = '1'; control.max = '65535'; }
+        }
+        control.value = entry.config[item.key] ?? '';
+        control.addEventListener('input', () => { entry.config[item.key] = control.value.trim(); });
+        controls.push(control);
+        fields.append(field(item.label, control));
+      }
+      const targets = textarea('notificationDestinations-' + channel);
+      targets.value = entry.destinations.join('\n');
+      targets.placeholder = t('One per line or separated by commas');
+      targets.addEventListener('input', () => { entry.destinations = destinations(targets.value); });
+      controls.push(targets);
+      fields.append(field(spec.destination, targets));
+      const heading = input('notificationHeading-' + channel);
+      heading.value = entry.titleTemplate;
+      heading.addEventListener('input', () => { entry.titleTemplate = heading.value; });
+      const body = textarea('notificationBody-' + channel, 3);
+      body.value = entry.bodyTemplate;
+      body.addEventListener('input', () => { entry.bodyTemplate = body.value; });
+      controls.push(heading, body);
+      fields.append(field('Title template', heading), field('Message template', body));
+      section.append(fields);
+
+      const eventGroup = document.createElement('fieldset');
+      eventGroup.className = 'notification-channel-events';
+      eventGroup.append(el('legend', '', () => t('Events to notify')));
+      for (const event of NOTIFICATION_EVENTS) {
+        const checkbox = input('notification-' + channel + '-' + event, 'checkbox');
+        checkbox.checked = entry.events[event];
+        checkbox.addEventListener('change', () => { entry.events[event] = checkbox.checked; });
+        controls.push(checkbox);
+        eventGroup.append(settingLabel(EVENT_LABELS[event], '', checkbox));
+      }
+      const excerpt = input('notificationExcerpt-' + channel, 'checkbox');
+      excerpt.checked = entry.includeExcerpt;
+      excerpt.addEventListener('change', () => { entry.includeExcerpt = excerpt.checked; });
+      controls.push(excerpt);
+      section.append(eventGroup, settingLabel('Include message excerpt', 'Include a short excerpt of the chat response when available.', excerpt));
+
+      const secretRow = el('div', 'notification-secret-row');
+      const secret = input('notificationCredential-' + channel, 'password');
+      ui(secret, 'placeholder', () => t('Enter a new credential'));
+      const master = input('notificationMasterPassword-' + channel, 'password');
+      master.autocomplete = 'off';
+      controls.push(secret, master);
+      const store = button('Save credential');
+      store.id = 'notificationStore-' + channel;
+      controls.push(store);
+      secretRow.append(field(spec.secret, secret), field('Master password to store credential', master), store);
+      if (channel !== 'whatsapp-web') fields.append(secretRow);
+      const credentialNote = el('p', 'notification-channel-note');
+      credentialNote.setAttribute('role', 'status');
+      credentialStatus.set(channel, credentialNote);
+      if (channel !== 'whatsapp-web') section.append(credentialNote);
+      const vaultNotice = el('div', 'notification-vault-notice');
+      vaultNotice.hidden = true;
+      vaultNotice.append(el('span', '', () => t('Vault not created. Open General settings and create a vault first.')));
+      const openGeneral = button('Open General');
+      openGeneral.addEventListener('click', () => document.querySelector<HTMLButtonElement>('[data-tab="general"]')?.click());
+      vaultNotice.append(openGeneral);
+      vaultHelp.set(channel, vaultNotice);
+      if (channel !== 'whatsapp-web') section.append(vaultNotice);
+      if (channel !== 'whatsapp-web') credentialState(channel);
+      store.addEventListener('click', async () => {
+        if (busy) return;
+        if (!master.value) {
+          credentialNote.textContent = t('Enter the vault master password to store the credential.');
+          credentialNote.classList.add('is-error');
+          return;
+        }
+        if (!secret.value) {
+          credentialNote.textContent = t('Enter a credential before saving.');
+          credentialNote.classList.add('is-error');
+          return;
+        }
+        const value = secret.value;
+        const masterPassword = master.value;
+        secret.value = '';
+        master.value = '';
+        const successful = await request(async () => {
+          const vault = await api.vault('status');
+          if (vault.ok && vault.data && typeof vault.data === 'object' &&
+            'created' in vault.data && vault.data.created === false) {
+            vaultNotice.hidden = false;
+            return { ok: false as const, error: t('Vault not created.') };
+          }
+          return api.notificationCenterSetCredential(channel, value, masterPassword);
+        }, view => {
+          vaultNotice.hidden = true;
+          credentials = view.credentials;
+          if (channel !== 'whatsapp-web') credentialState(channel);
+          credentialNote.textContent = t('Credential saved.');
+        }, credentialNote);
+        if (!successful) credentialNote.textContent = t('Could not save credential. Verify the master password and vault in General settings.');
+      });
+      if (channel === 'telegram' || channel === 'whatsapp-web') {
+        const pairingBox = el('div', 'notification-channel-pairing');
+        const qrImage = document.createElement('img');
+        qrImage.alt = t('Scan this QR code with your phone');
+        qrImage.width = 230;
+        qrImage.height = 230;
+        qrImage.hidden = true;
+        const info = el('p', 'notification-channel-note');
+        info.setAttribute('role', 'status');
+        const startPair = button(channel === 'telegram' ? 'Generate Telegram QR code' : 'Connect WhatsApp with QR');
+        startPair.id = 'notificationPair-' + channel;
+        const disconnect = button(channel === 'telegram' ? 'Cancel pairing' : 'Disconnect WhatsApp');
+        disconnect.id = 'notificationDisconnect-' + channel;
+        let poll: ReturnType<typeof setInterval> | null = null;
+        let pairingEpoch = 0;
+        const stopPoll = () => { if (poll) clearInterval(poll); poll = null; };
+        pairingCleanups.push(() => { pairingEpoch++; stopPoll(); });
+        const setQr = (qr?: string) => {
+          qrImage.hidden = !qr;
+          if (qr) qrImage.src = qr;
+          else qrImage.removeAttribute('src');
+        };
+        const refresh = async () => {
+          const epoch = pairingEpoch;
+          if (channel === 'telegram') {
+            const response = await api.notificationTelegramPairCheck();
+            if (epoch !== pairingEpoch) return;
+            if (!response.ok) { stopPoll(); info.textContent = t('Could not check pairing. Try again.'); return; }
+            if (response.data.state === 'paired') {
+              stopPoll(); setQr();
+              entry.destinations = [...new Set([...entry.destinations, response.data.chatId!])];
+              targets.value = entry.destinations.join('\n');
+              info.textContent = t('Telegram connected successfully.');
+            } else if (response.data.state === 'expired') {
+              stopPoll(); setQr(); info.textContent = t('QR code expired. Generate another.');
+            }
+          } else {
+            let response: Awaited<ReturnType<typeof api.notificationWhatsAppStatus>>;
+            try { response = await api.notificationWhatsAppStatus(); }
+            catch { if (epoch === pairingEpoch) info.textContent = whatsappSetupMessage(); return; }
+            if (epoch !== pairingEpoch) return;
+            if (!response.ok) { info.textContent = whatsappSetupMessage(response.setupCode) + whatsappDiagnosis(response.setupCode, response.setupStage); return; }
+            const result = response.data;
+            setQr(result.state === 'qr' ? result.qr : undefined);
+            info.textContent = result.state === 'error'
+              ? whatsappSetupMessage(result.reason) + whatsappDiagnosis(result.reason, result.stage)
+              : t(result.state === 'connected' ? 'WhatsApp connected.' : result.state === 'disconnected' ? 'WhatsApp disconnected.' : result.state === 'qr' ? 'Open WhatsApp > Linked devices > Link a device, then scan the QR code.' : 'Waiting for WhatsApp pairing…');
+            if (result.state === 'connected' || result.state === 'disconnected') stopPoll();
+          }
+        };
+        startPair.addEventListener('click', async () => {
+          if (busy) return;
+          // A retry supersedes the previous QR status watcher. Otherwise a late
+          // "connected" poll can overwrite the diagnosis of a failed retry.
+          const epoch = ++pairingEpoch;
+          stopPoll();
+          info.textContent = t('Preparing QR code…');
+          let response: Awaited<ReturnType<typeof api.notificationTelegramPairStart | typeof api.notificationWhatsAppStart>>;
+          try { response = channel === 'telegram' ? await api.notificationTelegramPairStart() : await api.notificationWhatsAppStart(); }
+          catch { if (epoch === pairingEpoch) info.textContent = channel === 'telegram' ? t('Could not prepare QR code. Check the connection and saved bot token.') : whatsappSetupMessage(); return; }
+          if (epoch !== pairingEpoch) return;
+          if (!response.ok) {
+            info.textContent = channel === 'telegram'
+              ? t('Could not prepare QR code. Check the connection and saved bot token.')
+              : whatsappSetupMessage('setupCode' in response ? response.setupCode : undefined) + whatsappDiagnosis('setupCode' in response ? response.setupCode : undefined, 'setupStage' in response ? response.setupStage : undefined);
+            return;
+          }
+          if (channel === 'telegram') {
+            setQr(response.data.qr);
+            info.textContent = t('On your phone, scan the QR code and tap Start in Telegram.');
+          } else if ('state' in response.data) {
+            const result = response.data;
+            setQr(result.state === 'qr' ? result.qr : undefined);
+            info.textContent = result.state === 'error'
+              ? whatsappSetupMessage(result.reason) + whatsappDiagnosis(result.reason, result.stage)
+              : t(result.state === 'qr' ? 'Open WhatsApp > Linked devices > Link a device, then scan the QR code.' : result.state === 'connected' ? 'WhatsApp connected.' : 'Waiting for WhatsApp pairing…');
+          }
+          stopPoll(); poll = setInterval(() => { void refresh(); }, 2500);
+        });
+        disconnect.addEventListener('click', async () => {
+          const epoch = ++pairingEpoch;
+          stopPoll(); setQr();
+          const result = channel === 'telegram' ? await api.notificationTelegramPairCancel() : await api.notificationWhatsAppDisconnect();
+          if (epoch === pairingEpoch) info.textContent = t(result.ok ? 'Pairing stopped.' : 'Could not disconnect the channel.');
+        });
+        if (channel === 'telegram') pairingBox.append(el('p', 'notification-channel-note', () => t('Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.')));
+        pairingBox.append(startPair, disconnect, qrImage, info);
+        section.append(pairingBox);
+      }
+      const actions = el('div', 'notification-channel-actions');
+      const test = button('Send test');
+      test.id = 'notificationTest-' + channel;
+      tests.set(channel, test);
+      const result = el('p', 'notification-channel-note');
+      result.setAttribute('role', 'status');
+      channelStatus.set(channel, result);
+      test.addEventListener('click', async () => {
+        if (!draft || busy) return;
+        if (controls.some(control => 'validity' in control && !control.validity.valid)) {
+          result.textContent = t('Check the notification fields before sending a test.');
+          result.classList.add('is-error');
+          return;
+        }
+        const payload = clone(draft);
+        let sending = false;
+        result.textContent = t('Saving notification settings…');
+        await request(async () => {
+          const saved = await api.notificationCenterSave(payload);
+          if (!saved.ok) return saved;
+          credentials = saved.data.credentials;
+          for (const name of NOTIFICATION_CHANNELS) credentialState(name);
+          sending = true;
+          result.textContent = t('Sending test notification…');
+          return api.notificationCenterTest(channel);
+        }, outcome => {
+          result.textContent = t('Test delivered to {0} destination(s).', [outcome.delivered]);
+          if (trust) showTrust(trust, entry, result, null);
+        }, result, (error, failure) => {
+          if (trust) showTrust(trust, entry, result, failure ?? null);
+          if (!sending) return t('Could not save notification settings: {0}', [error]);
+          return t('Could not send test notification: {0}', [failure ? notificationFailureMessage(failure) : error]);
+        });
+      });
+      actions.append(test, result);
+      section.append(actions);
+      const trust = channel === 'smtp' ? el('div', 'notification-trust') : null;
+      if (trust) { showTrust(trust, entry, result, null); section.append(trust); }
+      container!.append(section);
+    }
+    const footer = el('div', 'notification-center-footer');
+    const exports = button('Export settings');
+    const imports = button('Import settings');
+    exports.id = 'notificationExport';
+    imports.id = 'notificationImport';
+    controls.push(exports, imports);
+    exports.addEventListener('click', async () => {
+      if (busy) return;
+      state('Exporting notification settings…');
+      await request(() => api.notificationCenterExport(), exported => {
+        state(exported ? 'Notification settings exported. Credentials are not included.' : 'Export cancelled.');
+      }, status!, error => t('Could not export notification settings: {0}', [error]));
+    });
+    imports.addEventListener('click', async () => {
+      if (busy) return;
+      state('Importing notification settings…');
+      await request<NotificationCenterView | null>(async () => {
+        const result = await api.notificationCenterImport();
+        if (!result.ok) return result;
+        if (!result.data.imported) return { ok: true, data: null };
+        return api.notificationCenterGet();
+      }, view => {
+        if (!view) { state('Import cancelled.'); return; }
+        draft = clone(view.settings);
+        credentials = view.credentials;
+        build();
+        state('Settings imported. Credentials must be added again for each channel.');
+      }, status!, error => t('Could not import notification settings: {0}', [error]));
+    });
+    const save = button('Save notification settings');
+    save.id = 'notificationSave';
+    controls.push(save);
+    save.addEventListener('click', async () => {
+      if (!draft || busy) return;
+      if (controls.some(control => 'validity' in control && !control.validity.valid)) {
+        state('Check the notification fields before saving.', true); return;
+      }
+      const payload = clone(draft);
+      state('Saving notification settings…');
+      await request(() => api.notificationCenterSave(payload), view => {
+        credentials = view.credentials;
+        // The local draft remains authoritative if a user changed values in flight.
+        state('Notification settings saved.');
+        for (const channel of NOTIFICATION_CHANNELS) credentialState(channel);
+      });
+    });
+    footer.append(exports, imports, save);
+    container!.append(footer);
+  }
+  void api.notificationCenterGet().then(reply => {
+    if (!reply.ok) { state(t('Could not load notification settings: {0}', [reply.error]), true); return; }
+    draft = clone(reply.data.settings);
+    credentials = reply.data.credentials;
+    state('');
+    build();
+  }).catch(() => state('Notification service unavailable.', true));
+}

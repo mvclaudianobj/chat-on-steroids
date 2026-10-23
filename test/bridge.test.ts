@@ -682,6 +682,7 @@ describe('who is allowed to talk to it', () => {
   // Its moz-extension:// origin says it is Firefox too.
   it('tells an older Firefox add-on apart by its origin', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
     const firefox = 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b';
     await request('GET', '/status', { host: 'browser', origin: firefox, extensionVersion: '2.1.37.1002' });
     expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
@@ -693,6 +694,7 @@ describe('who is allowed to talk to it', () => {
   // record. Its user agent is on every one.
   it('keeps an older Firefox add-on apart on requests that carry no origin', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
     const firefox = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0';
     await request('GET', '/status', { host: 'browser', origin: 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b', extensionVersion: '2.1.37.1002', userAgent: firefox });
     await request('GET', '/status', { host: 'browser', origin: null, extensionVersion: '2.1.37.1002', userAgent: firefox });
@@ -731,10 +733,10 @@ describe('who is allowed to talk to it', () => {
     } finally { unsubscribe(); }
   });
 
-  // 2.1.41 bug hunt: with Chrome current and Firefox still on the add-on it had not updated yet, the one
-  // reported version followed whichever browser asked last, and the update notice came and went.
-  it('reports the oldest extension among connected browsers, with its engine, until that browser goes quiet', async () => {
+  // An older Firefox add-on must be reported when Firefox is selected, even as Chrome keeps polling.
+  it('reports the oldest selected-browser extension until it goes quiet', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
     const chrome = 'a'.repeat(32), firefox = 'b'.repeat(32);
@@ -742,7 +744,7 @@ describe('who is allowed to talk to it', () => {
       request('POST', '/status', { host: 'browser', browser, extensionVersion, engine, body: { openConversations: [] } });
     try {
       await ask(chrome, APP_VERSION);
-      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: null });
       expect((await bridgeStatus()).extensionEngine).toBeUndefined();
       await ask(firefox, '0.0.1', 'gecko');
       for (let i = 0; i < 3; i++) {
@@ -757,8 +759,9 @@ describe('who is allowed to talk to it', () => {
       changed.mockClear();
       await vi.advanceTimersByTimeAsync(20_002);
       expect(changed).toHaveBeenCalled();
-      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
-      expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+      // With no live Firefox sighting, keep its last reported version until another Firefox
+      // comes back; Chrome's version must not masquerade as Firefox's.
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
       // The same browser updated in place replaces its own entry.
       await ask(firefox, '0.0.1', 'gecko');
       expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
@@ -767,8 +770,83 @@ describe('who is allowed to talk to it', () => {
     } finally { unsubscribe(); vi.useRealTimers(); }
   });
 
+  it('keeps old external extensions out of the native-browser update notice', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+    const native = 'c'.repeat(32), external = 'e'.repeat(32);
+    const status = (host: string, browser: string, extensionVersion: string) =>
+      request('POST', '/status', { host, browser, extensionVersion, body: { openConversations: [] } });
+    await status('browser', external, '2.1.42.1');
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: null, externalExtension: { version: '2.1.42.1' } });
+    await status('cos', native, APP_VERSION);
+    for (let i = 0; i < 2; i++) {
+      await status('browser', external, i === 0 ? '2.1.42.1' : '2.1.43.1');
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION, cosExtension: { present: true } });
+    }
+    // A genuinely outdated native extension still needs its warning, despite external Chrome
+    // being up to date. Once native reloads, only that updated version should be reported.
+    await status('cos', native, '2.1.43.1');
+    await status('browser', external, APP_VERSION);
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.43.1' });
+    await status('cos', native, APP_VERSION);
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    await status('browser', external, '2.1.42.1');
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.42.1' });
+  });
+
+  it('does not report the selected built-in browser connected only because external Chrome is paired', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+    const native = 'c'.repeat(32), external = 'e'.repeat(32);
+    const poll = (host: string, browser: string) => request('POST', '/status', {
+      host, browser, body: { openConversations: [] }
+    });
+    await poll('browser', external);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: false, extensionVersion: null,
+      externalExtension: { present: true }, cosExtension: { present: false } });
+    await poll('cos', native);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    // Chrome continues polling after the native browser closes. The external profile's
+    // valid shared credential must not make the selected native browser look connected.
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      await vi.advanceTimersByTimeAsync(40_000);
+      await poll('browser', external);
+      await vi.advanceTimersByTimeAsync(20_002);
+      expect(await bridgeStatus()).toMatchObject({ paired: true, present: false,
+        externalExtension: { present: true }, cosExtension: { present: false } });
+      await poll('cos', native);
+      expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('projects Firefox and Chromium presence independently while sharing one valid pairing', async () => {
+    const credential = await pair();
+    const chrome = 'c'.repeat(32), firefox = 'f'.repeat(32);
+    const poll = (browser: string, engine?: string) => request('POST', '/status', {
+      host: 'browser', browser, engine, auth: credential, body: { openConversations: [] }
+    });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: false, extensionVersion: null });
+    await poll(firefox, 'gecko');
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true,
+      extensionVersion: APP_VERSION, extensionEngine: 'gecko' });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true,
+      extensionVersion: APP_VERSION, extensionEngine: 'gecko' });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+    // Switching browsers changes the UI projection, not the pairing credential itself.
+    expect((await request('GET', '/status', { host: 'browser', browser: firefox, engine: 'gecko', auth: credential })).status).toBe(200);
+  });
+
   it('publishes external expiry while the CoS companion continues polling', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
     try {
@@ -1096,6 +1174,7 @@ describe('provisioning', () => {
 
   it('does not treat a persisted pairing token as proof the browser is present after restart', async () => {
     await pair();
+    await request('GET', '/status', { host: 'browser' });
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
 
     // Pairing is durable authorization; browser presence belongs to this app process. A
@@ -1107,6 +1186,7 @@ describe('provisioning', () => {
 
   it('requires a fresh browser sighting after the local bridge itself restarts', async () => {
     await pair();
+    await request('GET', '/status', { host: 'browser' });
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
 
     await stopBridge();
@@ -1117,7 +1197,7 @@ describe('provisioning', () => {
     expect(await bridgeStatus()).toMatchObject({ running: true, paired: true, present: false, lastSeenAt: null });
 
     // Authorization survived, so the first normal extension poll proves presence again.
-    expect((await request('GET', '/status')).status).toBe(200);
+    expect((await request('GET', '/status', { host: 'browser' })).status).toBe(200);
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
   });
 });
@@ -1375,9 +1455,42 @@ describe('extension update holds', () => {
     expect(lines().at(-1)!.message).toContain('already tried this update once; reload it in chrome://extensions');
     await status('browser-updates-itself');
     expect(lines().at(-1)!.message).toContain('Firefox updates the signed add-on itself');
-    // An unknown reason is not logged, and a report without a hold resets it.
+    // An unknown reason is not logged; going back to an earlier reason is a change and is logged.
     await status('made-up'); await status(); await status('chat-busy');
     expect(lines().slice(before)).toHaveLength(4);
+  });
+
+  // VM, 2026-10-20/21: Firefox suspends the add-on's background page between polls, and each wake
+  // reported no hold first, so the same "Firefox updates the signed add-on itself" was logged 907
+  // times in 36 hours. A report without a hold no longer forgets the reason already logged.
+  it('logs a hold once while its browser keeps reporting no hold in between, and again after six hours', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = (updateHold?: string) => request('POST', '/status', { browser: 'firefoxbrowser0000002',
+      body: { openConversations: [], ...(updateHold ? { updateHold } : {}) } });
+    for (let round = 0; round < 5; round += 1) { await status(); await status('browser-updates-itself'); }
+    expect(lines().slice(before)).toHaveLength(1);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 6 * 60 * 60_000 + 1);
+    try {
+      await status('browser-updates-itself');
+      expect(lines().slice(before)).toHaveLength(2);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('logs the same hold again when this app ships a different extension build', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = () => request('POST', '/status', { browser: 'firefoxbrowser0000003', body: { openConversations: [], updateHold: 'browser-updates-itself' } });
+    try {
+      setShippedExtensionBuildForTest('aaaaaaaaaaaa');
+      await status(); await status();
+      setShippedExtensionBuildForTest('bbbbbbbbbbbb');
+      await status(); await status();
+      expect(lines().slice(before)).toHaveLength(2);
+    } finally { setShippedExtensionBuildForTest(); }
   });
 
   // 2.1.39 release round: Chrome (updated) and Firefox (waiting for its signed add-on) both report
@@ -5006,11 +5119,50 @@ describe('delivering a bootstrap', () => {
       expect(userPromptText(command.text)).toContain('PROJECT_TASK_PRESERVED');
       expect(userPromptText(command.text)).not.toMatch(/SCOPED_AGENTS|Cut off/);
     } else {
-      expect(command.text).not.toContain('[[COS_CONTEXT:');
+      // Compact & Resume starts a new ChatGPT document, so the short Marks persona
+      // now belongs in that opening; the full AGENTS/setup instructions still do not.
+      expect(command.text).toContain('[[COS_CONTEXT:');
+      expect(command.text).toContain('Você é Marks');
       expect(command.text).not.toContain('SCOPED_AGENTS_HEAD');
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }
     expect(command.text).not.toContain('SCOPED_AGENTS_TAIL');
+  });
+
+  it('puts a chat recorded inside a linked ChatGPT Project into its project before it runs commands (#1744)', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { addProject, armProjectCreate, claimProjectCreate, completeProjectCreate, getSessionProject } = await import('../src/main/projects.js');
+    const { getSession } = await import('../src/main/session/store.js');
+    const first = path.join(dir, 'first-root-1744');
+    const folder = path.join(dir, 'linked-project-1744');
+    await fs.mkdir(first, { recursive: true });
+    await fs.mkdir(folder, { recursive: true });
+    // Without the project, a command would run in the first approved folder.
+    await saveConfig({ ...suiteConfig, roots: [{ name: 'first', path: first }, { name: 'linked', path: folder }] });
+    const project = await addProject(folder);
+    const requestId = (project.chatgpt as { requestId: string }).requestId;
+    const chatgptProject = `g-p-${'c'.repeat(32)}`;
+    expect(await claimProjectCreate(requestId, 'page')).toBe(true);
+    expect(await armProjectCreate(requestId, 'page')).toBe(true);
+    expect(await completeProjectCreate(requestId, 'page', chatgptProject)).toBe(true);
+    await pair();
+    const record = (conversationId: string, extra: Record<string, unknown>) => request('POST', '/events', {
+      body: { conversationId, ...extra, events: [{ kind: 'user_message', time: Date.now(), text: 'list the files', messageId: `m-${conversationId}` }] }
+    });
+    const inside = await record('17440000-0000-4000-8000-000000000001', { chatgptProject });
+    expect(inside.body).toMatchObject({ stored: 1 });
+    expect((await getSession(inside.body.sessionId as string))?.projectId).toBe(project.id);
+    expect(await getSessionProject(inside.body.sessionId as string)).toMatchObject({ virtual: '/linked' });
+    // Outside any Project, or with a malformed value, a chat stays as it was.
+    const outside = await record('17440000-0000-4000-8000-000000000002', {});
+    expect((await getSession(outside.body.sessionId as string))?.projectId).toBeUndefined();
+    const odd = await record('17440000-0000-4000-8000-000000000003', { chatgptProject: 'g-p-../../x' });
+    expect(odd.status).toBe(200);
+    expect((await getSession(odd.body.sessionId as string))?.projectId).toBeUndefined();
+    // A worker's events (its origin may not be recorded yet) never pick a project this way.
+    const worker = await record('17440000-0000-4000-8000-000000000004', { chatgptProject, agent: 'worker-1' });
+    expect((await getSession(worker.body.sessionId as string))?.projectId).toBeUndefined();
   });
 
   it('redeems a restored broker-owned worktree as the worker cwd, preserves source instructions and rejects a lost lease', async () => {

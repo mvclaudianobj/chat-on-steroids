@@ -143,6 +143,10 @@ export const CHAT_BROWSERS = ['chrome', 'edge', 'brave', 'firefox', 'cos'] as co
 export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
 
 export interface UiPrefs {
+  /** Short general Marks persona prompt, enabled for new chats unless explicitly disabled. */
+  marksSystemPromptEnabled?: boolean;
+  /** How Marks should address the person; no personal name is inferred when absent. */
+  marksPreferredName?: string;
   /** Recover an unfinished silent executor turn only while Goal and Loop are both off. */
   autoContinue?: boolean;
   /** Preferred account-observed model for a fresh ordinary chat; omitted keeps the catalog fallback. */
@@ -166,6 +170,8 @@ export interface UiPrefs {
   finishTool?: boolean;
   planBackend?: 'chatgpt' | 'api';
   finishAction?: 'notify' | 'goal';
+  /** Leave unverified Goal completion pending; Session finish may notify. Off by default. */
+  finishHoldOnStop?: boolean;
   finishLeadMinutes?: number;
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
