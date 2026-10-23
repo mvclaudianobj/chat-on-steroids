@@ -68,6 +68,13 @@ function ensureLive(snapshot: CompanySnapshot): void {
   if (snapshot.demo) throw new Error('Synthetic company records cannot run real workers');
 }
 
+function hasActiveChiefSession(status: z.infer<typeof fleetStatus>, binding: NonNullable<CompanySnapshot['delegation']['binding']>): boolean {
+  return status.runId === binding.runId && status.workers.filter(worker=>
+    worker.id===binding.workerId && worker.runId===binding.runId &&
+    worker.label===binding.label && worker.state==='active' &&
+    worker.conversationId===binding.conversationId).length===1;
+}
+
 /** Explicit human action reserves a durable one-shot command BEFORE spawning. If an
  * ambiguous spawn fails, no second spawn is issued: reconcile the broker by exact label. */
 export function createCompanyBroker(backend: CompanyWorkerBackend = localCompanyWorkerBackend) {
@@ -91,7 +98,7 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
     const verified = status.workers.filter(worker=>worker.id===bound.workerId && worker.runId===bound.runId &&
       worker.label===labelFor(chief) && worker.state==='active' && typeof worker.conversationId==='string' &&
       worker.conversationId.length>0 && worker.conversationId.length<=160);
-    if (verified.length!==1)
+    if (status.runId!==bound.runId || verified.length!==1)
       throw new Error('Selected chief has no active authenticated worker session');
     const now=Date.now();
     return mutateCompany('delegationGrant',{delegate,scope,chiefTitle,binding:{seat:delegate,ownerId:chief.id,
@@ -113,9 +120,7 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
       source.execution.phase!=='running' || labelFor(source)!==binding.label)
       throw new Error('Chief binding changed');
     const status=await backend.status(binding.ownerId,binding.runId);
-    if (status.workers.filter(worker=>worker.id===binding.workerId && worker.runId===binding.runId &&
-      worker.label===binding.label && worker.state==='active' &&
-      worker.conversationId===binding.conversationId).length!==1)
+    if (!hasActiveChiefSession(status,binding))
       throw new Error('Chief worker no longer active');
     const reports=await backend.reports(binding.ownerId,binding.runId);
     for (const report of reports) {
@@ -138,6 +143,11 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
         if (completed) { await backend.ack(binding.ownerId,binding.runId,report.id); return getCompany(); }
         continue;
       }
+      // The broker may settle or retire this exact conversation between its first
+      // status response and the reports response. A receipt from the old session
+      // cannot approve a new decision after that transition.
+      if (!hasActiveChiefSession(await backend.status(binding.ownerId,binding.runId),binding))
+        throw new Error('Chief worker no longer active');
       // Store serializes epoch, TTL and one-shot decision with the ticket transition.
       await mutateCompany('delegationTriage',{id,seat,epoch:policy.epoch,ownerId:binding.ownerId,
         runId:binding.runId,workerId:binding.workerId,receiptId:report.id,receiptTime:report.time});

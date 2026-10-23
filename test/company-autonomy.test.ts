@@ -126,4 +126,34 @@ describe('O7 verified internal autonomy',()=>{
     const after=await getCompany();expect(after.requests.find(x=>x.id===target)?.status).toBe('inbox');
     expect(after.delegation).toMatchObject({mode:'manual',binding:null,epoch:2});
   });
+  it('refuses a report when the chief settles while the broker fetch is in flight',async()=>{
+    const target=await fixture();
+    const racing: CompanyWorkerBackend={...service,async reports() {
+      // Broker may receive a real worker finish between the status and reports HTTP requests.
+      statusState='sleeping';
+      return [{id:'finished-in-flight',from:workerId,runId,time:Date.now(),
+        origin:'authenticated-worker-message',text:`COMPANY_TRIAGE:${target}:assigned:marks1`}];
+    }};
+    const chief=createCompanyBroker(racing);
+    await chief.grantDelegation('marks2','internal-triage');
+    await expect(chief.applyDelegatedTriage()).rejects.toThrow('no longer active');
+    expect((await getCompany()).requests.find(row=>row.id===target)?.status).toBe('inbox');
+  });
+  it('refuses a different conversation after status even with the same run and worker labels',async()=>{
+    const target=await fixture();
+    let conversation='synthetic-authenticated-chief';
+    const raced: CompanyWorkerBackend={...service,
+      async status(){return {runId,workers:[{id:workerId,runId,label:`marks2:${chiefId}`,
+        state:'active',result:null,conversationId:conversation}]};},
+      async reports(){
+        conversation='different-broker-conversation';
+        return [{id:'rebound-in-flight',from:workerId,runId,time:Date.now(),
+          origin:'authenticated-worker-message',text:`COMPANY_TRIAGE:${target}:assigned:marks1`}];
+      }
+    };
+    const chief=createCompanyBroker(raced);
+    await chief.grantDelegation('marks2','internal-triage');
+    await expect(chief.applyDelegatedTriage()).rejects.toThrow('no longer active');
+    expect((await getCompany()).requests.find(row=>row.id===target)?.status).toBe('inbox');
+  });
 });
