@@ -1,9 +1,12 @@
 import { hasProviderDirective, resolvedCapture, withoutProviderDirectives } from '../shared/content-reference.js';
 import { completedDilText } from '../shared/dil-tables.js';
+import { markdownVisibleText } from '../shared/markdown-text.js';
+import { providerEntitiesAsMarkdown } from '../shared/content-reference.js';
 import { initChatSearch, type ChatSearch } from './chat-search.js';
 import { initChatFind } from './chat-find.js';
 import { initChatCycle } from './chat-cycle.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
+import { sendTerminalSelection } from './terminal-selection.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { showMarksProjectDockPicker } from './marks-project-dock.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
@@ -14,6 +17,9 @@ import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedCo
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
 import { safeExternalLink } from '../shared/external-link.js';
 import { AGENT_STATE_WORDS, createAgentPanel, workerName, workerSlotLimit } from './agent-panel.js';
+import type { ChatGroup, ChatGroupsState } from '../shared/chat-groups.js';
+import { chatGroupName, chatGroupOf } from '../shared/chat-groups.js';
+import { requestName } from './name-dialog.js';
 import { KIND_ICON } from './agent-activity.js';
 import { createFilePanel } from './file-panel.js';
 import { renderAgentPlan } from './agent-plan.js';
@@ -27,6 +33,7 @@ import { shownSessionTitle } from './session-title.js';
 import { preserveTimelineViewport, ROUNDING_PX } from './timeline-scroll.js';
 import { createSidebarOrder, SIDEBAR_PROJECT_SCOPE } from './sidebar-order.js';
 import { createSidebarPins, pinnedSortScope } from './sidebar-pins.js';
+import { createComposerDrafts } from './composer-drafts.js';
 import { createSidebarCompletionState } from './sidebar-completion.js';
 import { toolResultText } from './tool-result.js';
 import { renderEditCards } from './tool-artifacts.js';
@@ -63,6 +70,7 @@ import type {
   Handoff,
   MessageReference,
   RunningToolActivity,
+  SessionBookmark,
   SessionChange,
   SessionEvent,
   SessionSearchLocation,
@@ -75,10 +83,12 @@ import type {
 } from '../shared/session.js';
 import {
   ATTRIBUTION_LABELS,
+  BOOKMARK_EXCERPT_MAX,
   CHAT_ACTIVE_MS,
   committedResumeAncestorsFromSummary,
   continuationMarkerOf,
   DEFAULT_RECORDING_STORAGE_GIB,
+  isUnattributedSession,
   RECORDING_STORAGE_LIMITS_GIB,
   TURN_OUTCOME_LABELS,
   foldProgress,
@@ -101,7 +111,7 @@ import { browserExtensionRequired, type AppState, type Config } from '../shared/
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
-import { openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
+import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
 import { primaryShortcut } from './shortcuts.js';
 import { initSshProjectDialog } from './ssh-project-dialog.js';
@@ -182,6 +192,86 @@ const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}
 let projects: LocalProject[] = [];
 /** Window-local disclosure intent. Project groups start closed until the user or selection opens one. */
 const expandedProjects = new Set<string>();
+/** Chat groups inside projects (#1038): loaded once, replaced by every change's reply. */
+let chatGroups: ChatGroupsState = { version: 1, groups: [], members: {} };
+/** Groups the person closed; a new group, or one holding the open chat, shows open. */
+const collapsedGroups = new Set<string>();
+const groupVisibleCounts = new Map<string, number>();
+/** A chat group's drag scope among its project's groups, and the scope of its own chats. */
+const chatGroupsScope = (projectId: string): string => `groups:${projectId}`;
+const chatGroupScope = (groupId: string): string => `group:${groupId}`;
+
+/** A project's groups, in the order the person gave them. */
+function projectChatGroups(projectId: string): ChatGroup[] {
+  const groups = chatGroups.groups.filter(group => group.projectId === projectId);
+  return sidebarOrder ? sidebarOrder.ordered(chatGroupsScope(projectId), groups) : groups;
+}
+
+/** The sidebar list a chat sorts in: its group, its project, or the main list (''). */
+function chatSortList(entry: SessionSummary): string {
+  const group = chatGroupOf(chatGroups, entry);
+  return group && projectGroup(entry.projectId) === group.projectId ? chatGroupScope(group.id) : projectGroup(entry.projectId) ?? '';
+}
+
+async function applyChatGroups(reply: Promise<{ ok: true; data: ChatGroupsState } | { ok: false; error: string }>): Promise<boolean> {
+  const next = await run(reply);
+  if (!next) return false;
+  chatGroups = next;
+  paintSessions();
+  return true;
+}
+
+function askChatGroupName(title: string, confirm: string, initial = ''): Promise<string | null> {
+  return requestName({
+    title, confirm, initial, maxLength: 240,
+    validate: value => chatGroupName(value) ? null : t('A group name needs 1 to 60 characters')
+  });
+}
+
+/** Asks for a name, creates the group in its project, opens it, and moves `sessionId` into it when given. */
+async function newChatGroup(projectId: string, sessionId: string | null = null): Promise<void> {
+  const name = await askChatGroupName(t('New group'), t('Create'));
+  if (!name) return;
+  const created = await run(api.createChatGroup(projectId, name));
+  if (!created) return;
+  chatGroups = created.state;
+  expandedProjects.add(projectId);
+  collapsedGroups.delete(created.group.id);
+  if (sessionId) await applyChatGroups(api.assignChatGroup(sessionId, created.group.id));
+  else paintSessions();
+}
+
+async function renameChatGroup(group: ChatGroup): Promise<void> {
+  const name = await askChatGroupName(t('Rename group'), t('Rename'), group.name);
+  if (name && chatGroupName(name) !== group.name) await applyChatGroups(api.renameChatGroup(group.id, name));
+}
+
+/** Removes a group; its chats stay in the project, ungrouped, and nothing about them changes. */
+async function deleteChatGroup(group: ChatGroup): Promise<void> {
+  if (await applyChatGroups(api.deleteChatGroup(group.id))) toast(t('Group deleted. Its chats stay in the project.'));
+}
+
+/** The chat menu's group items, for a main chat of a project. */
+function chatGroupMenuItems(summary: SessionSummary): RowMenuItem[] {
+  const projectId = projectGroup(summary.projectId);
+  // Kept by session id: a new chat still waiting for its conversation can be grouped too (#1759).
+  if (!projectId || summary.origin?.kind === 'worker' || isUnattributedSession(summary)) return [];
+  const current = chatGroupOf(chatGroups, summary);
+  const groups = projectChatGroups(projectId);
+  return [{
+    action: 'move-to-group', icon: 'i-group', label: () => t('Move to group'), title: () => t('Sort this chat into a group of its project'),
+    submenu: () => [
+      ...groups.map(group => ({
+        action: `group-${group.id}`, checked: current?.id === group.id, label: () => group.name,
+        run: () => { if (current?.id !== group.id) void applyChatGroups(api.assignChatGroup(summary.id, group.id)); }
+      } satisfies RowMenuItem)),
+      { action: 'group-new', icon: 'i-plus', separated: groups.length > 0, label: () => t('New group…'), run: () => void newChatGroup(projectId, summary.id) }
+    ]
+  }, ...(current ? [{
+    action: 'remove-from-group', icon: 'i-x', label: () => t('Remove from group'), title: () => t('Keep this chat in its project without a group'),
+    run: () => void applyChatGroups(api.assignChatGroup(summary.id, null))
+  } satisfies RowMenuItem] : [])];
+}
 const projectVisibleCounts = new Map<string, number>();
 function projectGroup(id: string | null | undefined): string | null {
   return id && !projects.find(project => project.id === id)?.ungrouped ? id : null;
@@ -217,6 +307,8 @@ function projectMenuItems(id: string): RowMenuItem[] {
     // Chat Marks: a CLIProxy chat that belongs to this project.
     ...(project ? deps.projectChatItems?.(project.id) ?? [] : []),
     ...(newTerminal ? [newTerminal] : []),
+    { action: 'group-new', icon: 'i-group', label: () => t('New group'), title: () => t('Add a group to sort this project\'s chats'),
+      run: () => void newChatGroup(id) },
     // Only when its native ChatGPT Project could not be created; otherwise nothing about it shows.
     ...(link?.state === 'failed' || link?.state === 'uncertain' ? [{
       action: 'chatgpt-retry', icon: 'i-retry', disabled: retryingChatgptProject.has(id),
@@ -225,6 +317,11 @@ function projectMenuItems(id: string): RowMenuItem[] {
         ? t('ChatGPT may already have created it; retrying can leave a second Project')
         : t('Create this project in ChatGPT again'),
       run: () => void retryChatgptProject(id)
+    } satisfies RowMenuItem] : []),
+    // Only while one of its chats shows New response, so the menu does not offer what does nothing.
+    ...(sessions.some(entry => newResponse(entry) && projectGroup(entry.projectId) === id) ? [{
+      action: 'mark-seen', icon: 'i-checks', label: () => t('Mark all as seen'),
+      title: () => t("Clear New response from this project's finished chats"), run: () => markAllSeen(id)
     } satisfies RowMenuItem] : []),
     {
       action: 'color', icon: 'i-palette', label: () => t('Color'), title: () => t('Change project color'),
@@ -259,11 +356,15 @@ async function retryChatgptProject(id: string): Promise<void> {
  * Why a new chat of this project is still waiting, while its native ChatGPT Project is being
  * created or could not be; null once it exists or for a project without one.
  */
-function chatgptProjectWait(entry: InputEntry): 'chatgpt-project' | 'chatgpt-project-failed' | null {
+function chatgptProjectWait(entry: InputEntry): 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | null {
   if (!entry.projectId) return null;
   if (entry.sessionId && sessions.find(session => session.id === entry.sessionId)?.conversationId) return null;
-  const link = projects.find(row => row.id === entry.projectId)?.chatgpt;
+  const project = projects.find(row => row.id === entry.projectId);
+  const link = project?.chatgpt;
   if (!link || link.state === 'linked') return null;
+  // Removed from the sidebar: nothing creates its ChatGPT Project any more and it has no menu to
+  // retry from. Adding the folder again restores both, and the message goes out.
+  if (project.ungrouped) return 'project-removed';
   return link.state === 'failed' || link.state === 'uncertain' ? 'chatgpt-project-failed' : 'chatgpt-project';
 }
 
@@ -397,7 +498,13 @@ let agentPanel: ReturnType<typeof createAgentPanel> | null = null;
 let filePanel: ReturnType<typeof createFilePanel> | null = null;
 let reviewPanel: ReturnType<typeof createFilePanel> | null = null;
 const expandedWorkers = new Set<string>();
-const inputDrafts = new Map<string, string>();
+const inputDrafts = createComposerDrafts({
+  // A chat's row shows whether it holds a draft, so a draft that comes or goes in a chat other
+  // than the open one repaints the list. The open chat's row shows no mark.
+  onDraftedChange: key => { if (key !== draftKey() && sessions.some(row => row.id === key)) paintSessions(); },
+  // A restart ends an edit the way leaving its chat does: the draft from before it comes back.
+  savedText: (key, text) => editingQuestion?.sessionId === key ? editingQuestion.previousDraft : text
+});
 const newChatTasks = new Map<string, { objective: string; automation: string; loopDelivery: string }>();
 const imageDrafts = new Map<string, Array<InputImage | InputAttachment>>();
 const startingInputs = new Map<string, InputEntry>();
@@ -907,11 +1014,13 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   const origin = summary.origin;
   // The one session that is not a chat. Saying so on the row is what stops it reading
   // as a chat that mysteriously lost its name.
-  if (summary.conversationId === null) {
+  if (isUnattributedSession(summary)) {
     return unattributedBlocked()
       ? [{ text: 'blocked', tone: 'is-failed' }, { text: 'not a chat', tone: '' }]
       : [{ text: 'not a chat', tone: '' }];
   }
+  // A new chat whose first message has not gone out yet (#1759): nothing to say about it until it has a conversation.
+  if (summary.conversationId === null) return badges;
   // First, and in the failure tone: the states that need the person, most pressing first. A chat
   // waiting on an approval card or a recovery that gave up cannot go on without them, and a blocked
   // chat is the app actively refusing its work; the user came to the list to find them at a glance.
@@ -949,8 +1058,22 @@ function sessionBadges(summary: SessionSummary): Badge[] {
   else if (!agent && workerReportedFinish(summary)) badges.push(AGENT_BADGE.sleeping);
   else if (sessionWorking(summary)) badges.push(AGENT_BADGE.active);
   else if (agent && agent.role !== 'prime') badges.push(AGENT_BADGE[agent.state]);
-  if (!sessionWorking(summary) && sidebarCompletion?.isUnseen(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
+  if (newResponse(summary)) badges.push({ text: 'New response', tone: 'is-unseen' });
   return badges;
+}
+
+/** The row's New response badge: a finished reply not yet seen on this device. A chat working again shows its spinner instead. */
+function newResponse(summary: SessionSummary): boolean {
+  return !sessionWorking(summary) && sidebarCompletion?.isUnseen(summary) === true;
+}
+
+/**
+ * Mark all as seen: clears New response from every chat that shows it, or from one project's chats,
+ * as opening each would. A working chat keeps its spinner and its next reply still arrives as new.
+ */
+function markAllSeen(projectId?: string): void {
+  const shown = sessions.filter(entry => newResponse(entry) && (projectId === undefined || projectGroup(entry.projectId) === projectId));
+  if (sidebarCompletion?.markAllSeen(shown)) paintSessions();
 }
 
 /** The chat whose tooltip a click put away, until the pointer leaves its row. */
@@ -963,9 +1086,13 @@ function placeSessionTooltip(tip: HTMLElement, row: HTMLElement): void {
   tip.style.top = `${Math.min(bounds.top, window.innerHeight - 110)}px`;
 }
 
+/** Unsent text waits in this chat's composer. The open chat shows its draft itself, so it never counts. */
+function draftedChat(summary: SessionSummary): boolean { return summary.id !== selectedId && inputDrafts.has(summary.id); }
+
 /** A row's tooltip: its name, then `state` when a card says more than its badges, then the badges and its age. */
 function sessionRowTitle(summary: SessionSummary, pinned: boolean, badges: Badge[], state: string[] = []): string {
-  return [shownSessionTitle(summary), ...state, ...(pinned ? [t("Pinned")] : []), ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
+  return [shownSessionTitle(summary), ...state, ...(pinned ? [t("Pinned")] : []), ...(draftedChat(summary) ? [t('Draft')] : []),
+    ...badges.map((badge) => t(badge.text)), ago(summary.updatedAt)].join(' · ');
 }
 
 function sessionRow(summary: SessionSummary): HTMLElement {
@@ -995,6 +1122,13 @@ function sessionRow(summary: SessionSummary): HTMLElement {
   if (pinned) {
     row.classList.add('is-pinned');
     const mark = icon('i-pinned', 'ico sess-pin-mark');
+    top.append(mark);
+  }
+  if (draftedChat(summary)) {
+    // The row's tooltip says "Draft" to a pointer; the mark says it to a screen reader on the focused chat.
+    const mark = icon('i-pencil', 'ico sess-draft-mark');
+    mark.removeAttribute('aria-hidden'); mark.setAttribute('role', 'img');
+    ui(mark, 'aria-label', () => t('Draft'));
     top.append(mark);
   }
   ui(row, 'title', () => sessionRowTitle(summary, pinned, badges));
@@ -1045,7 +1179,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     title: () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."),
     run: () => void deleteSession(summary.id)
   };
-  if (summary.conversationId === null) {
+  if (isUnattributedSession(summary)) {
     // Strict mode cannot trust an unattributed stream by definition. Do not offer an "Allow"
     // that the kernel will intentionally ignore; the Settings checkbox explains that
     // unattributed calls stay blocked until strict mode is turned off.
@@ -1062,6 +1196,10 @@ function sessionRow(summary: SessionSummary): HTMLElement {
         run: () => void toggleUnattributedBlock(!blocked)
       });
     }
+  } else if (summary.conversationId === null) {
+    // A new chat whose first message has not gone out yet (#1759): no ChatGPT link to open, copy or block.
+    items.push({ action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t("Rename this chat in the app. Its title in ChatGPT stays the same."), run: () => startRename(summary) });
+    items.push(...chatGroupMenuItems(summary));
   } else {
     const policyLineage = [
       summary.conversationId,
@@ -1090,6 +1228,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
       { action: 'copy-link', icon: 'i-copy', label: () => t('Copy link'), title: () => t("Copy this chat's ChatGPT link"),
         run: async () => { if (await run(api.writeClipboard(`https://chatgpt.com/c/${summary.conversationId}`))) toast(t('Link copied')); } }
     );
+    items.push(...chatGroupMenuItems(summary));
     // The stop this app can actually make. It does not touch the running ChatGPT turn — nothing
     // here can — it takes this chat's tools away, and a model whose every call is refused with
     // an instruction to stop finishes its turn on its own.
@@ -1375,6 +1514,8 @@ async function deleteSession(id: string): Promise<void> {
   const done = await run(api.deleteSession(id));
   if (done === null) return;
   sessions = sessions.filter((entry) => entry.id !== id);
+  // Its saved draft goes with the chat; text still on screen stays in the composer.
+  inputDrafts.delete(id);
   pressure.delete(id);
   sessionTotal = Math.max(0, sessionTotal - 1);
   if (selectedId === id) {
@@ -1487,8 +1628,7 @@ async function loadMoreSessions(): Promise<void> {
 
 /** A chat the project's section can show: workers alone leave it looking empty. */
 function projectShowsChat(id: string): boolean {
-  return sessions.some(entry => projectGroup(entry.projectId) === id && entry.origin?.kind !== 'worker' &&
-    (!!entry.conversationId || entry.origin?.kind === 'desktop'));
+  return sessions.some(entry => projectGroup(entry.projectId) === id && entry.origin?.kind !== 'worker' && !isUnattributedSession(entry));
 }
 
 /**
@@ -1793,7 +1933,8 @@ function paintInbox(): void {
   const children = workerChildren();
   const busy = new Map([...children].map(([key, workers]) => [key, busyWorkers(workers)]));
   const inProject = (entry: SessionSummary) => !inboxProject || projectGroup(entry.projectId) === inboxProject;
-  const attributed = (entry: SessionSummary) => !!entry.conversationId || entry.origin?.kind === 'desktop';
+  // Everything but the unattributed bucket is a chat, a new one still waiting for its conversation too (#1759).
+  const attributed = (entry: SessionSummary) => !isUnattributedSession(entry);
   const shown = sessions.filter(entry => entry.origin?.kind !== 'worker' && attributed(entry) && inProject(entry));
   // What the tree puts under "Unattributed activity", under the same disclosure here.
   const diagnostics = sessions.filter(entry => entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
@@ -1949,7 +2090,7 @@ function inboxEmpty(id: string | null): HTMLElement {
 function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<{ id: string; scope: string }> {
   const ids = new Set(projects.filter(project => !project.ungrouped).map(project => project.id));
   for (const entry of sessions) {
-    if (entry.origin?.kind === 'worker' || (!entry.conversationId && entry.origin?.kind !== 'desktop')) continue;
+    if (entry.origin?.kind === 'worker' || isUnattributedSession(entry)) continue;
     const id = groupOf(entry.projectId);
     if (id) ids.add(id);
   }
@@ -2009,6 +2150,74 @@ function workerChildren(): Map<string, SessionSummary[]> {
  * A chat's sub-agents: the arrow that shows or hides them, on the chat's row (or alone in `target`),
  * and while they are expanded their rows after it. Both sidebar layouts draw them this way.
  */
+/** A main chat of a project as the sidebar lists it: the chat, its sub-agents, and whether it is the open one. */
+type ProjectTask = { entry: SessionSummary; workers?: SessionSummary[]; selected: boolean };
+
+/**
+ * One chat group in its project (#1038): a disclosure with its chats, paged like the project's own
+ * list. A group holding the open chat shows open whatever the person last chose for it.
+ */
+function chatGroupSection(group: ChatGroup, tasks: ProjectTask[]): HTMLElement {
+  const section = document.createElement('details'); section.className = 'chat-group'; section.dataset.groupId = group.id;
+  section.dataset.sortId = group.id; section.dataset.sortScope = chatGroupsScope(group.projectId);
+  const holdsSelected = tasks.some(task => task.selected);
+  section.open = holdsSelected || !collapsedGroups.has(group.id);
+  const heading = el('summary', 'chat-group-heading');
+  heading.dataset.sortHandle = '';
+  heading.setAttribute('aria-keyshortcuts', 'Alt+ArrowUp Alt+ArrowDown');
+  const name = el('span', 'chat-group-name', group.name); name.dir = 'auto';
+  heading.append(icon('i-group'), name, el('span', 'chat-group-count', String(tasks.length)));
+  heading.title = group.name;
+  // Like a project's disclosure: committed synchronously, so an activity repaint cannot lose the click.
+  heading.addEventListener('click', event => {
+    event.preventDefault();
+    const open = collapsedGroups.has(group.id);
+    if (open) collapsedGroups.delete(group.id); else collapsedGroups.add(group.id);
+    section.open = open || holdsSelected;
+  });
+  const owner = `group:${group.id}`;
+  const more = el('button', 'btn row-menu-button chat-group-menu') as HTMLButtonElement;
+  more.type = 'button'; more.dataset.rowMenu = owner; more.append(icon('i-more-vertical'));
+  more.setAttribute('aria-haspopup', 'menu'); more.setAttribute('aria-expanded', String(rowMenuOpenFor(owner)));
+  ui(more, 'title', () => t('More options'));
+  ui(more, 'aria-label', () => t('More options'));
+  const menu = (at?: { x: number; y: number }): RowMenuOptions => ({
+    owner, at, label: () => group.name, anchor: () => rowMenuButton(owner), items: () => [
+      { action: 'rename', icon: 'i-pencil', label: () => t('Rename'), title: () => t('Rename this group'), run: () => void renameChatGroup(group) },
+      { action: 'delete', icon: 'i-trash', danger: true, separated: true, label: () => t('Delete group'),
+        title: () => t('Delete this group; its chats stay in the project'), run: () => void deleteChatGroup(group) }
+    ]
+  });
+  more.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); toggleRowMenu(menu()); });
+  heading.addEventListener('contextmenu', event => { event.preventDefault(); openRowMenu(menu({ x: event.clientX, y: event.clientY })); });
+  heading.append(more);
+  section.append(heading);
+  // Pinned chats lead the group, then the person's own order within it.
+  const order = (pinned: boolean): ProjectTask[] => {
+    const members = tasks.filter(task => pinnedChat(task.entry) === pinned).map(task => ({ ...task, id: task.entry.id }));
+    return sidebarOrder ? sidebarOrder.ordered(pinnedSortScope(chatGroupScope(group.id), pinned), members) : members;
+  };
+  const ordered = [...order(true), ...order(false)];
+  const limit = groupVisibleCounts.get(group.id) ?? PROJECT_TASK_PAGE_SIZE;
+  const shown = ordered.filter((task, index) => index < limit || task.selected);
+  const rows: HTMLElement[] = [];
+  for (const task of shown) {
+    const row = sessionRow(task.entry);
+    row.dataset.sortScope = pinnedSortScope(chatGroupScope(group.id), pinnedChat(task.entry));
+    rows.push(row);
+    if (task.workers) workerGroup(task.entry.id, task.workers, row, rows);
+  }
+  section.append(...rows);
+  if (!tasks.length) section.append(el('p', 'chat-group-empty', () => t("Move a chat here from its menu.")));
+  if (shown.length < ordered.length) {
+    const showMore = el('button', 'btn project-show-more chat-group-show-more', () => t("Show more")) as HTMLButtonElement;
+    showMore.type = 'button'; ui(showMore, 'aria-label', () => t("Show more chats in {0}", [group.name]));
+    showMore.addEventListener('click', () => { groupVisibleCounts.set(group.id, limit + PROJECT_TASK_PAGE_INCREMENT); paintSessions(); });
+    section.append(showMore);
+  }
+  return section;
+}
+
 function workerGroup(key: string, workers: SessionSummary[], parentRow: HTMLElement | undefined, target: HTMLElement[]): void {
   const button = el('button', 'worker-toggle');
   button.append(disclosureChevron());
@@ -2072,10 +2281,19 @@ function paintSessions(): void {
   if (renaming && (document.activeElement as HTMLElement | null)?.classList.contains('sess-rename')) return;
   const layout = sidebarLayout();
   paintedLayout = layout;
+  // The header's Mark all as seen shows only while a chat shows New response.
+  const markAllSeenButton = $('markAllSeen'), markAllSeenFocused = document.activeElement === markAllSeenButton;
+  markAllSeenButton.hidden = !sessions.some(newResponse);
+  // It also hides when another path acknowledges the last one (an open chat's detail read), not only on its own click.
+  const keepFocus = () => {
+    // The keyboard goes on to search, beside it in either layout; the inbox draws its search control with the list.
+    if (markAllSeenFocused && markAllSeenButton.hidden) (layout === 'inbox' ? $('chatList').querySelector<HTMLElement>('[data-inbox-control="search"]') : $('searchChatsButton'))?.focus({ preventScroll: true });
+  };
   $('sessionList').classList.toggle('is-inbox', layout === 'inbox');
   if (layout !== 'inbox') inboxPicker.close();
   if (layout === 'inbox') {
     paintInbox();
+    keepFocus();
     syncSelectedWorkspace();
     scheduleToolActivityExpiry();
     return;
@@ -2086,13 +2304,14 @@ function paintSessions(): void {
   // composer or settings. A keyboard user tabbing to a project's buttons lost focus to the
   // page on the next repaint, and so did the color button after a pick.
   const restoreFocus = sidebarFocus(projectList, 'data-project-id', ['.project-heading', '.project-new', '.project-menu', '.project-show-more']);
+  const restoreGroupFocus = sidebarFocus(projectList, 'data-group-id', ['.chat-group-heading', '.chat-group-menu', '.chat-group-show-more']);
   const children = workerChildren();
   const rows: HTMLElement[] = [];
   // A task and its expanded workers are one sidebar item for project pagination.
   // Store lightweight owners until the visible page is known. Creating DOM for
   // hundreds of older, off-page project tasks on every activity push stalls the renderer
   // even though those nodes are immediately discarded by the project page limit.
-  const projectRows = new Map<string, Array<{ entry: SessionSummary; workers?: SessionSummary[]; selected: boolean }>>();
+  const projectRows = new Map<string, ProjectTask[]>();
   const diagnostics: SessionSummary[] = [];
   // Pinned chats lead their own list (#1133). Resolve project membership once for
   // this paint: scanning all sessions for each project and then searching the project
@@ -2117,7 +2336,7 @@ function paintSessions(): void {
   });
   for (const entry of orderedSessions) {
     if (entry.origin?.kind === 'worker') continue;
-    if (!entry.conversationId && entry.origin?.kind !== 'desktop') { diagnostics.push(entry); continue; }
+    if (isUnattributedSession(entry)) { diagnostics.push(entry); continue; }
     const projectId = groupOf(entry.projectId);
     const workers = children.get(entry.id);
     if (projectId) {
@@ -2176,7 +2395,16 @@ function paintSessions(): void {
       create.addEventListener('click', event => { event.preventDefault(); event.stopPropagation(); selectNewChat(id); });
       heading.append(create, more);
     }
-    const tasks = projectRows.get(id) ?? [];
+    // The project's chat groups lead its list (#1038); each holds its own chats, in its own order.
+    const tasks: ProjectTask[] = [];
+    const groupedTasks = new Map<string, ProjectTask[]>();
+    for (const task of projectRows.get(id) ?? []) {
+      const group = chatGroupOf(chatGroups, task.entry);
+      if (!group || group.projectId !== id) { tasks.push(task); continue; }
+      const members = groupedTasks.get(group.id);
+      if (members) members.push(task); else groupedTasks.set(group.id, [task]);
+    }
+    for (const group of projectChatGroups(id)) section.append(chatGroupSection(group, groupedTasks.get(group.id) ?? []));
     const count = projectVisibleCounts.get(id) ?? PROJECT_TASK_PAGE_SIZE;
     const shown = tasks.filter((task, index) => index < count || task.selected);
     const shownRows: HTMLElement[] = [];
@@ -2236,6 +2464,8 @@ function paintSessions(): void {
     }
   }
   restoreFocus();
+  restoreGroupFocus();
+  keepFocus();
   syncSelectedWorkspace();
   $('projectsEmpty').hidden = projectSections.length > 0;
   $('sessionsEmpty').hidden = rows.length > 0;
@@ -2255,6 +2485,7 @@ function syncSelectedWorkspace(): void {
   // Branch in new chat and Edit: the composer notices and the link back follow the selection in either layout.
   paintBranchNotices();
   paintEditNotice();
+  syncBookmarks();
 }
 
 /**
@@ -2488,6 +2719,119 @@ function laterMessageCounts(items: readonly TimelineItem[]): Map<number, number>
 function olderHistoryPending(): boolean {
   const oldest = events.reduce((least, event) => Math.min(least, residenceOf(event)), Infinity);
   return Number.isFinite(oldest) && oldest > 1 && oldest !== historyStart;
+}
+
+/**
+ * Bookmarked answers of the open chat: marked with the bookmark under an answer, listed by the
+ * header's bookmark button to jump back to them. Kept by main in the chat's own folder.
+ */
+let bookmarks: { sessionId: string; marks: SessionBookmark[] } | null = null;
+let bookmarksLoading: string | null = null;
+
+function bookmarked(sessionId: string, messageId: string): boolean {
+  return bookmarks?.sessionId === sessionId && bookmarks.marks.some(mark => mark.messageId === messageId.toLowerCase());
+}
+
+/** The answer's start as one plain line, as its bookmark is listed; cut here so a long one is still accepted. */
+function bookmarkExcerpt(text: string): string {
+  const line = markdownVisibleText(providerEntitiesAsMarkdown(withoutMessageReaction(text)), { codeBlocks: false })
+    .split(/\n\s*\n/).map(part => part.replace(/\s+/g, ' ').trim()).find(Boolean) ?? '';
+  // A cut never leaves half of an emoji (a lone high surrogate) before the ellipsis.
+  return line.length <= BOOKMARK_EXCERPT_MAX ? line : `${line.slice(0, BOOKMARK_EXCERPT_MAX - 1).replace(/[\uD800-\uDBFF]$/, '').trimEnd()}…`;
+}
+
+function bookmarkButton(sessionId: string, messageId: string, answer: { text: string; time: number }): HTMLButtonElement {
+  const button = el('button', 'answer-action answer-bookmark') as HTMLButtonElement;
+  button.type = 'button';
+  button.dataset.bookmarkFor = messageId.toLowerCase();
+  button.append(icon('i-bookmark'));
+  paintBookmarkButton(button, bookmarked(sessionId, messageId));
+  button.addEventListener('click', async () => {
+    if (selectedId !== sessionId || button.dataset.busy) return;
+    const on = !bookmarked(sessionId, messageId);
+    button.dataset.busy = 'true';
+    try {
+      const marks = await run(api.setBookmark(sessionId, messageId, bookmarkExcerpt(answer.text) || t('Answer'), answer.time, on));
+      if (Array.isArray(marks) && selectedId === sessionId) { bookmarks = { sessionId, marks }; paintBookmarks(); }
+    } finally { delete button.dataset.busy; }
+  });
+  return button;
+}
+
+function paintBookmarkButton(button: HTMLElement, on: boolean): void {
+  if (button.classList.contains('is-on') === on && button.dataset.painted) return;
+  button.dataset.painted = 'true';
+  button.classList.toggle('is-on', on);
+  button.setAttribute('aria-pressed', String(on));
+  setIcon(button.querySelector<HTMLElement>('i')!, on ? 'i-bookmark-fill' : 'i-bookmark');
+  const label = () => on ? t('Remove bookmark') : t('Bookmark answer');
+  ui(button, 'title', label); ui(button, 'aria-label', label);
+}
+
+/** Loads the open chat's bookmarks each time it is opened, then paints them. */
+function syncBookmarks(): void {
+  const id = !newChatSelected ? selectedId : null;
+  if (bookmarks && bookmarks.sessionId !== id) bookmarks = null;
+  if (!id) { paintBookmarks(); return; }
+  if (bookmarks?.sessionId === id || bookmarksLoading === id) { paintBookmarks(); return; }
+  bookmarksLoading = id;
+  paintBookmarks();
+  void Promise.resolve(api.listBookmarks(id)).catch(() => null).then(result => {
+    if (bookmarksLoading === id) bookmarksLoading = null;
+    if (selectedId !== id) return;
+    // An unreadable list shows no marks; the answers still offer theirs.
+    bookmarks = { sessionId: id, marks: result?.ok && Array.isArray(result.data) ? result.data : [] };
+    paintBookmarks();
+  });
+}
+
+/** The header's bookmark button and every answer's bookmark, for the open chat. */
+function paintBookmarks(): void {
+  const id = !newChatSelected ? selectedId : null;
+  const marks = id && bookmarks?.sessionId === id ? bookmarks.marks : [];
+  const button = $<HTMLButtonElement>('chatBookmarks');
+  // A button about to hide hands its focus to the message box, never to nothing.
+  if (!marks.length && !button.hidden && document.activeElement === button) $<HTMLTextAreaElement>('chatInput').focus();
+  button.hidden = marks.length === 0;
+  button.querySelector('.chat-bookmarks-count')!.textContent = String(marks.length);
+  const label = () => tn('{0} bookmark in this chat', '{0} bookmarks in this chat', marks.length);
+  ui(button, 'title', label); ui(button, 'aria-label', label);
+  if (!marks.length && rowMenuOpenFor('bookmarks')) closeRowMenu();
+  for (const answer of $('timeline').querySelectorAll<HTMLElement>('.answer-bookmark[data-bookmark-for]'))
+    paintBookmarkButton(answer, marks.some(mark => mark.messageId === answer.dataset.bookmarkFor));
+}
+
+function bookmarkMenuItems(): RowMenuItem[] {
+  const id = selectedId;
+  if (!id || bookmarks?.sessionId !== id) return [];
+  return bookmarks.marks.map(mark => ({
+    action: 'bookmark',
+    icon: 'i-bookmark-fill',
+    label: () => mark.excerpt || t('Answer'),
+    title: () => mark.excerpt,
+    hint: () => clockTime(mark.messageTime),
+    data: { bookmark: mark.messageId },
+    run: () => void openBookmark(id, mark)
+  }));
+}
+
+/**
+ * Scrolls the open chat to a bookmarked answer, loading the history around it when needed. An
+ * answer the recorded chat no longer holds takes its bookmark with it: its own button is gone, so
+ * nothing else could remove it. A history that could not be read keeps the bookmark.
+ */
+async function openBookmark(sessionId: string, mark: SessionBookmark): Promise<void> {
+  const selection = selectionGeneration;
+  const reply = await Promise.resolve(api.locateMessage(sessionId, mark.messageId)).catch((error: unknown) => ({ ok: false as const, error: String(error) }));
+  if (selection !== selectionGeneration || selectedId !== sessionId) return;
+  if (!reply.ok) { toast(t(reply.error)); return; }
+  if (reply.data) { await revealChatLocation(sessionId, reply.data); return; }
+  const removed = await Promise.resolve(api.setBookmark(sessionId, mark.messageId, mark.excerpt, mark.messageTime, false))
+    .catch((error: unknown) => ({ ok: false as const, error: String(error) }));
+  // Another chat opened meanwhile: its view stays as it is, and it gets no message about this one.
+  if (selection !== selectionGeneration || selectedId !== sessionId) return;
+  if (removed.ok && bookmarks?.sessionId === sessionId) { bookmarks = { sessionId, marks: removed.data }; paintBookmarks(); }
+  toast(t(removed.ok ? 'This answer is no longer in the chat, so its bookmark was removed.' : 'This answer is no longer in the chat.'));
 }
 
 /** The Edit action under one of your questions. */
@@ -3876,6 +4220,18 @@ export function renderedMarkdown(source: string, capture?: StoredText, reference
   return box;
 }
 
+/** A fence's language (`language-ts`, written by marked and by ChatGPT's page alike), read before the sanitizer drops classes. */
+const CODE_LANGUAGE = /(?:^|\s)language-([\w+#.-]{1,32})(?=\s|$)/;
+/** The extension a block's Save offers; any other language saves as text. */
+// A Map, so a fence named `constructor` or `__proto__` finds nothing instead of Object's own members.
+const CODE_EXTENSIONS: ReadonlyMap<string, string> = new Map(Object.entries({
+  ts: 'ts', typescript: 'ts', tsx: 'tsx', js: 'js', javascript: 'js', jsx: 'jsx', mjs: 'mjs', json: 'json',
+  py: 'py', python: 'py', sh: 'sh', bash: 'sh', shell: 'sh', zsh: 'sh', ps1: 'ps1', powershell: 'ps1',
+  html: 'html', css: 'css', scss: 'scss', sql: 'sql', yaml: 'yml', yml: 'yml', toml: 'toml', xml: 'xml',
+  md: 'md', markdown: 'md', rs: 'rs', rust: 'rs', go: 'go', java: 'java', kt: 'kt', kotlin: 'kt',
+  swift: 'swift', c: 'c', cpp: 'cpp', 'c++': 'cpp', cs: 'cs', csharp: 'cs', rb: 'rb', ruby: 'rb', php: 'php', diff: 'diff'
+}));
+
 export function renderedMessage(html: StoredText | null | undefined, fallback: string): HTMLElement {
   const box = el('div', 'msg');
   // Same reason as textBlock, for the markdown path — and it is the fallback rather than the
@@ -3899,6 +4255,12 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
   // elements. These replacement nodes contain text only and undergo that same sanitizer.
   const prompts = nativePromptCards(template.content);
   for (const prompt of prompts) prompt.group.replaceWith(prompt.card);
+  // The sanitizer keeps each allowed `pre` as the same node, so its language can wait beside it.
+  const languages = new WeakMap<Element, string>();
+  for (const pre of template.content.querySelectorAll('pre')) {
+    const language = pre.querySelector('code')?.getAttribute('class')?.match(CODE_LANGUAGE)?.[1];
+    if (language) languages.set(pre, language);
+  }
   sanitizeHtmlTree(template.content, {
     allowedTags: RENDERED_TAGS,
     dropTags: DROP_RENDERED_TAGS,
@@ -3940,16 +4302,31 @@ export function renderedMessage(html: StoredText | null | undefined, fallback: s
     // sanitizing and after the empty-capture fallback has been decided.
     for (const pre of box.querySelectorAll('pre')) {
       const value = pre.textContent ?? '';
+      const language = languages.get(pre);
       const panel = el('div', 'markdown-code');
       const header = el('div', 'tool-output-header');
-      header.append(icon('i-terminal', 'ico'), el('strong', '', () => t('Code')));
+      header.append(icon('i-terminal', 'ico'), el('strong', '', language ?? (() => t('Code'))));
       const copy = el('button', 'tool-copy', () => t('Copy')) as HTMLButtonElement;
       copy.type = 'button';
       copy.addEventListener('click', () => void (async () => {
         if (await run(api.writeClipboard(value))) ui(copy, 'textContent', () => t('Copied'));
         else toast(t('Could not copy text.'));
       })());
-      header.append(copy);
+      // Long lines scroll by default, as ChatGPT draws them; Wrap folds this block's lines to the column.
+      const wrap = el('button', 'tool-copy code-wrap', () => t('Wrap')) as HTMLButtonElement;
+      wrap.type = 'button';
+      wrap.setAttribute('aria-pressed', 'false');
+      wrap.addEventListener('click', () => {
+        wrap.setAttribute('aria-pressed', String(panel.classList.toggle('is-wrapped')));
+      });
+      const save = el('button', 'tool-copy code-save', () => t('Save')) as HTMLButtonElement;
+      save.type = 'button';
+      save.addEventListener('click', () => void (async () => {
+        const name = `snippet.${CODE_EXTENSIONS.get(language?.toLowerCase() ?? '') ?? 'txt'}`;
+        const result = await run(api.saveCode({ text: value, name }));
+        if (result?.done === 'saved') toast(t('Saved {0}', [result.name]));
+      })());
+      header.append(copy, wrap, save);
       pre.replaceWith(panel);
       panel.append(header, pre);
     }
@@ -4716,6 +5093,10 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
       return box;
     }
     case 'progress': {
+      if (event.source === 'app' && event.progressId?.startsWith('goal-helper-stop:') &&
+          event.message.text === goalErrorMessage('goal_helper_stop_unverified')) {
+        return el('p', 'meta is-progress', () => t(goalErrorMessage('goal_helper_stop_unverified')));
+      }
       if (event.progressId?.startsWith(STRICT_REFUSAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', () => trustNoticeText(event.message.text));
       if (!event.progressId?.startsWith(APPROVAL_PROGRESS_PREFIX)) return el('p', 'meta is-progress', event.message.text);
       // ChatGPT's own tool approval card stands in this chat's page (approval-wait.ts). The app
@@ -4831,7 +5212,7 @@ function eventBody(event: SessionEvent, context?: { id: string; current: () => b
  * builds the text from the log, reading back answers that were cut there, so a long answer
  * copies and exports whole; the timeline only decides where the actions appear.
  */
-function answerActions(turnId: string | null, messageId?: string): HTMLElement {
+function answerActions(turnId: string | null, messageId?: string, answer?: { text: string; time: number }): HTMLElement {
   const bar = el('div', 'answer-actions');
   const sessionId = selectedId;
   // A turn's answer is named by its turn; one recorded outside any turn by its message.
@@ -4877,6 +5258,7 @@ function answerActions(turnId: string | null, messageId?: string): HTMLElement {
   });
   menu.addEventListener('keydown', event => { if (event.key === 'Escape') { menu.open = false; trigger.focus(); } });
   bar.append(copy, menu);
+  if (sessionId && messageId && NATIVE_ID.test(messageId) && answer) bar.append(bookmarkButton(sessionId, messageId, answer));
   const branch = branchPoint(messageId);
   if (branch) {
     // Branch in new chat (#482): ChatGPT's own branch at this reply, made with the first message.
@@ -5896,7 +6278,8 @@ function paintDetail(followBottom = historyBefore === null): void {
     const built = item.kind === 'compaction' ? compactionRow(item.block, cached?.row, item === latestCompaction)
       : item.kind === 'earlier' ? earlierVersionsRow(item.fold, key) : eventRow(held ?? item.event);
     if (answerTurn || looseAnswer) built.querySelector('.said')?.append(answerActions(answerTurn,
-      item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined));
+      item.kind === 'event' && item.event.kind === 'assistant_message' ? item.event.messageId : undefined,
+      item.kind === 'event' && item.event.kind === 'assistant_message' ? { text: item.event.message.text, time: item.event.time } : undefined));
     if (item.kind === 'event' && editableQuestion(item.event, events)) {
       built.querySelector('.ev-body')?.append(questionActions(item.event, laterMessages.get(item.event.seq) ?? 0));
       built.dataset.questionId = item.event.messageId;
@@ -6152,7 +6535,7 @@ async function stopBackgroundProcess(row: RunningExecProcess, restoreFocus: bool
   backgroundProcessStopping = null;
   paintBackgroundProcessStops();
   if (!reply.ok || !reply.data) {
-    toast(reply.ok ? t('Background process is no longer running') : reply.error);
+    toast(reply.ok ? t('Background process is no longer running') : t(reply.error));
     refreshBackgroundProcesses();
     return;
   }
@@ -6677,7 +7060,7 @@ function stateLine(): { text: string; tone: '' | 'is-live' | 'is-bad'; working?:
   // from another browser or from another machine can only be recorded as what it is:
   // real, complete, and not placeable in any chat this app can observe.
   const selected = sessions.find((entry) => entry.id === selectedId) ?? null;
-  if (selected && selected.conversationId === null) {
+  if (selected && isUnattributedSession(selected)) {
     return {
       text: t("Work this app could not place in a chat — driven from another device, or with no ChatGPT tab open"),
       tone: ''
@@ -7334,7 +7717,7 @@ const CHAT_INPUTS = [
   'chatBrowser', 'cosBrowserMinimize', 'browserBridgePort',
   'goalIncludeToolCalls',
   'planBackend',
-  'finishTool', 'finishLeadMinutes', 'rotateTurnMinutes', 'rotateStopFallback', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
+  'finishTool', 'finishHoldOnStop', 'finishLeadMinutes', 'rotateTurnMinutes', 'rotateStopFallback', 'localAppUsage', 'defaultChatModel', 'defaultChatReasoning', 'workerModel', 'workerReasoning', 'autoSelectSkills', 'backgroundChats', 'backgroundPlacement', 'browserOnly', 'autoRefreshPlugins',
   'goalBackend',
   'loopBackend',
   'helperModel', 'helperReasoning',
@@ -7386,7 +7769,7 @@ let bridgePresent = true;
  * ChatGPT would otherwise keep that call's result (#1231). Mid-turn sends do not wait for calls,
  * and an after-turn message also waits for the answer to end, so neither claims this reason.
  */
-function queuedWaitReason(entry: InputEntry): 'extension' | 'tool-call' | 'chatgpt-project' | 'chatgpt-project-failed' | null {
+function queuedWaitReason(entry: InputEntry): 'extension' | 'tool-call' | 'chatgpt-project' | 'chatgpt-project-failed' | 'project-removed' | null {
   if (entry.state !== 'queued' || entry.error || entry.dueAt > Date.now() || entry.delivery === 'tool') return null;
   if (!bridgePresent) return 'extension';
   const project = chatgptProjectWait(entry);
@@ -7585,7 +7968,7 @@ function inputMessageRow(entry: InputEntry, notice: boolean): HTMLElement {
   if (!visibleInputIds.has(entry.id)) row.classList.add('is-entering');
   visibleInputIds.add(entry.id);
   if (visibleInputIds.size > 100) visibleInputIds.delete(visibleInputIds.values().next().value!);
-  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
+  const status = () => entry.error ? t(entry.error) : held ? t("Sending in a moment…") : waiting === 'extension' ? t("Waiting for the browser extension to connect") : waiting === 'tool-call' ? t("Waiting for the running tool call to finish") : waiting === 'chatgpt-project' ? t("Creating this project in ChatGPT…") : waiting === 'chatgpt-project-failed' ? t("This project's ChatGPT Project isn't available. Retry it from the project's menu.") : waiting === 'project-removed' ? t("This chat's project was removed from the sidebar. Add its folder again to send this message, or cancel it.") : (entry.state === 'failed' ? t("Delivery not confirmed") : entry.state === 'decision' ? t("Preparing follow-up") : entry.state === 'browser' ? t("Delivery confirmation pending") : entry.state === 'tool' ? t("Sent to the active turn · awaiting receipt") : entry.dueAt > Date.now() ? t("Scheduled {0}", [new Date(entry.dueAt).toLocaleString(currentLanguage())]) : entry.delivery === 'tool' ? t("Waiting for the next tool call") : t("Queued"));
   const files = el('div', 'message-attachments');
   if (entry.attachments?.length) files.append(...entry.attachments.map(file => attachmentCard(file)));
   for (const image of entry.images ?? []) { const preview = document.createElement('img'); preview.src = image.dataUrl; preview.alt = image.name; files.append(preview); }
@@ -8246,9 +8629,11 @@ export function initChat(next: Deps): void {
   sidebarPins = createSidebarPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
     ...projectSortEntries(),
-    ...sessions.filter(entry => (entry.conversationId || entry.origin?.kind === 'desktop') && entry.origin?.kind !== 'worker')
-      .map(entry => ({ id: entry.id, scope: pinnedSortScope(projectGroup(entry.projectId) ?? '', pinnedChat(entry)) }))
+    ...chatGroups.groups.map(group => ({ id: group.id, scope: chatGroupsScope(group.projectId) })),
+    ...sessions.filter(entry => !isUnattributedSession(entry) && entry.origin?.kind !== 'worker')
+      .map(entry => ({ id: entry.id, scope: pinnedSortScope(chatSortList(entry), pinnedChat(entry)) }))
   ], paintSessions);
+  void run(api.chatGroups()).then(state => { if (state) { chatGroups = state; paintSessions(); } });
   deps = next;
   initComposerDictation();
   const stopComposerHeightMotion = installComposerHeightMotion($('composer'));
@@ -8494,11 +8879,12 @@ export function initChat(next: Deps): void {
     onEscape: () => { docks.setOpen(false); docks.rightToggle.focus(); }
   });
   reviewPanel.update(selectedRightDockProject());
+  const onSendSelection = (text: string): boolean => sendTerminalSelection($<HTMLTextAreaElement>('chatInput'), text);
   workspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.bottomBody,
-    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false) });
+    { onEmpty: () => docks.setBottomOpen(false), onClosePanel: () => docks.setBottomOpen(false), onSendSelection });
   workspaceTerminal.update(selectedLocalProject());
   rightWorkspaceTerminal = createWorkspaceTerminal(() => docks.toggleBottomTerminal(), docks.body,
-    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync() });
+    { id: 'workspaceTerminalRight', dockedTabs: true, onTabsChanged: () => docks.sync(), onSendSelection });
   rightWorkspaceTerminal.update(selectedLocalProject());
   docks.register('review', 'Review', 'i-git-diff', mount => {
     if (!selectedRightDockProject()) { showProjectPicker('review', mount); return; }
@@ -8510,7 +8896,8 @@ export function initChat(next: Deps): void {
     hide: () => rightWorkspaceTerminal?.hide(), canCreate: () => true,
     newTab: () => rightWorkspaceTerminal?.newTab() ?? null,
     tabs: () => rightWorkspaceTerminal?.tabs() ?? [],
-    selectTab: id => rightWorkspaceTerminal?.selectTab(id), closeTab: id => rightWorkspaceTerminal?.closeTab(id)
+    selectTab: id => rightWorkspaceTerminal?.selectTab(id), closeTab: id => rightWorkspaceTerminal?.closeTab(id),
+    moveTab: (id, index) => rightWorkspaceTerminal?.moveTab(id, index)
   }, {
     show: (mount, createIfEmpty) => workspaceTerminal?.show(mount, createIfEmpty),
     hide: () => workspaceTerminal?.hide()
@@ -8785,6 +9172,10 @@ export function initChat(next: Deps): void {
     } else void sendComposer(undefined, undefined, undefined, controlAction);
   });
 
+  $('chatBookmarks').addEventListener('click', () => toggleRowMenu({
+    owner: 'bookmarks', anchor: () => $('chatBookmarks'), label: () => t('Bookmarks'), items: bookmarkMenuItems, wide: true
+  }));
+  onRowMenuChange(() => $('chatBookmarks').setAttribute('aria-expanded', String(rowMenuOpenFor('bookmarks'))));
   chatFind = initChatFind({
     selectedId: () => selectedId,
     find: async (id, query) => (await run(api.findInChat(id, query))) ?? null,
@@ -8799,7 +9190,7 @@ export function initChat(next: Deps): void {
     selectedId: () => selectedId,
     // The chats the sidebar lists, newest first: sub-agents, helpers and diagnostics rows stay out.
     recent: () => sessions
-      .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && (!!entry.conversationId || entry.origin?.kind === 'desktop'))
+      .filter(entry => entry.origin?.kind !== 'worker' && entry.origin?.kind !== 'helper' && !isUnattributedSession(entry))
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .map(entry => ({ id: entry.id, title: entry.title }))
   });
@@ -8908,6 +9299,7 @@ export function initChat(next: Deps): void {
   });
 
   $('chatRefresh').addEventListener('click', event => { event.preventDefault(); void refreshAll(); });
+  $('markAllSeen').addEventListener('click', () => markAllSeen());
 
   $('copyHandoff').addEventListener('click', async () => {
     if (!handoff) return;

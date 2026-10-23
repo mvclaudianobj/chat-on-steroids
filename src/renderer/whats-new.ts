@@ -14,6 +14,24 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.45.1': {
+    lead: () => t("Chat groups, bookmarks, drafts that wait for you, and a better Review."),
+    highlights: [
+      { icon: 'i-group', title: () => t("Chat groups"), text: () => t("Sort a project's chats into groups from its ⋯ menu.") },
+      { icon: 'i-bookmark-fill', title: () => t("Bookmarks"), text: () => t("Bookmark an answer and jump back to it from the chat's header.") },
+      { icon: 'i-pencil', title: () => t("Drafts that wait"), text: () => t("A pencil marks chats with an unsent message, and drafts come back after a restart.") },
+      { icon: 'i-git-diff', title: () => t("A better Review"), text: () => t("Right-click an untracked file to add it, or its folder, to .gitignore.") }
+    ]
+  },
+  '2.1.45': {
+    lead: () => t("Chat groups, bookmarks, drafts that wait for you, and a better Review."),
+    highlights: [
+      { icon: 'i-group', title: () => t("Chat groups"), text: () => t("Sort a project's chats into groups from its ⋯ menu.") },
+      { icon: 'i-bookmark-fill', title: () => t("Bookmarks"), text: () => t("Bookmark an answer and jump back to it from the chat's header.") },
+      { icon: 'i-pencil', title: () => t("Drafts that wait"), text: () => t("A pencil marks chats with an unsent message, and drafts come back after a restart.") },
+      { icon: 'i-git-diff', title: () => t("A better Review"), text: () => t("Right-click an untracked file to add it, or its folder, to .gitignore.") }
+    ]
+  },
   '2.1.44.2': {
     lead: () => t("A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice."),
     highlights: [
