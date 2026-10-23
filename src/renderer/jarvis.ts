@@ -276,14 +276,21 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   function paint(): void {
     button.hidden = !preferences.enabled;
     button.disabled = !mode() || !consented || !eligible() || stopping;
+    const reason = !preferences.enabled ? '' : !eligible()
+      ? t('Jarvis works in a CLIProxy API chat. The g4f.space preset configures speech services, not a chat. Open or create a CLIProxy chat.')
+      : !consented ? t('Enable microphone and audio transmission consent in Jarvis settings for this session.')
+      : !recorderAvailable && mode() !== 'windows' ? t('This app cannot access microphone recording. Check system permissions and restart the app.')
+      : !mode() ? t('No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.')
+      : '';
     const shown = running ? stopping ? 'stopping' : 'listening' : phase;
     button.dataset.state = shown;
     button.setAttribute('aria-pressed', String(running));
-    button.title = (phase === 'speaking' ? t('Press to interrupt Jarvis') : t('Hold to speak to Jarvis')) + ` (${preferences.key})`;
+    button.title = reason || (phase === 'speaking' ? t('Press to interrupt Jarvis') : t('Hold to speak to Jarvis')) + ` (${preferences.key})`;
     if (stateLabel) {
       stateLabel.dataset.state = shown;
-      stateLabel.textContent = preferences.enabled ? phaseText() : '';
-      stateLabel.hidden = !preferences.enabled || shown === 'idle';
+      stateLabel.textContent = preferences.enabled ? reason || phaseText() : '';
+      stateLabel.title = reason;
+      stateLabel.hidden = !preferences.enabled || (!reason && shown === 'idle');
     }
     if (!mode()) status.textContent = t('No transcription engine available. Configure a voice provider, a CLIProxy audio model, an installed local Whisper engine, or Windows speech recognition.') + (capability.error ? ` ${capability.error}` : '');
     else if (!consented) status.textContent = t('Enable microphone consent to use Jarvis.');

@@ -17,10 +17,13 @@ const voice = { baseUrl: 'https://voice.test/v1', sttMode: 'transcriptions', stt
 let page: JSDOM | null = null;
 afterEach(() => { page?.window.close(); page = null; vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers(); });
 
-async function fixture(options: { tts?: boolean; continuous?: boolean; providerTranscribe?: 'ok' | 'fail' } = {}) {
+async function fixture(options: { tts?: boolean; continuous?: boolean; providerTranscribe?: 'ok' | 'fail';
+  selected?: { id: string; conversationId: string | null; engine?: string } | null; consent?: boolean; noAudioEngines?: boolean;
+  g4f?: boolean } = {}) {
   page = new JSDOM(skeleton, { url: 'https://local.test/' });
   const window = page.window;
-  window.localStorage.setItem('chat-marks.jarvis.settings.v1', JSON.stringify({ enabled: true, tts: options.tts ?? true, continuous: options.continuous ?? false, earcons: false, provider: voice, version: 2 }));
+  window.localStorage.setItem('chat-marks.jarvis.settings.v1', JSON.stringify({ enabled: true, tts: options.tts ?? true, continuous: options.continuous ?? false, earcons: false,
+    provider: options.g4f ? { baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_synthetic:gemini', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' } : voice, version: 2 }));
   Object.assign(globalThis, { window, document: window.document, localStorage: window.localStorage, Event: window.Event, Option: window.Option });
   const tracks = [{ stop: vi.fn() }];
   const getUserMedia = vi.fn(async () => ({ getTracks: () => tracks }));
@@ -58,7 +61,7 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   const send = vi.fn(async () => ({ ok: true as const, data: { turnId: 'turn-01' } }));
   const api = {
     dictationSupported: false,
-    jarvisAudioStatus: async () => ({ ok: true as const, data: { models: ['whisper-1'], local: false, windows: false, error: null } }),
+    jarvisAudioStatus: async () => ({ ok: true as const, data: { models: options.noAudioEngines ? [] : ['whisper-1'], local: false, windows: false, error: null } }),
     jarvisVoiceStatus: async () => ({ ok: true as const, data: { models: [], stt: ['whisper-1'], tts: ['gpt-4o-mini-tts'], primary: true, fallback: true, ffmpeg: true, error: null } }),
     jarvisTranscribe: transcribe, jarvisSpeak: speak, jarvisSpeakCancel: speakCancel,
     jarvisCancel: async () => ({ ok: true as const, data: null }),
@@ -67,11 +70,12 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     onSessionChanged: (callback: typeof changed) => { changed = callback; return () => undefined; },
     getSession: vi.fn(async () => ({ ok: true as const, data: { events, summary: null, total: events.length, nextFrom: 0 } }))
   };
-  initJarvis(api as unknown as AppApi, () => ({ id: 'test-jarvis-0001', conversationId: 'cosapi-test-jarvis', engine: 'cliproxy' }));
+  initJarvis(api as unknown as AppApi, () => options.selected === undefined
+    ? ({ id: 'test-jarvis-0001', conversationId: 'cosapi-test-jarvis', engine: 'cliproxy' }) : options.selected);
   const element = <T extends HTMLElement>(id: string): T => window.document.getElementById(id) as T;
   const flush = async () => { for (let n = 0; n < 30; n++) await Promise.resolve(); };
   await flush();
-  const consent = element<HTMLInputElement>('jarvisConsent'); consent.checked = true; consent.dispatchEvent(new window.Event('change'));
+  const consent = element<HTMLInputElement>('jarvisConsent'); consent.checked = options.consent !== false; consent.dispatchEvent(new window.Event('change'));
   const hold = () => element<HTMLTextAreaElement>('chatInput').dispatchEvent(new window.KeyboardEvent('keydown', { code: 'F8', bubbles: true }));
   const release = () => window.dispatchEvent(new window.KeyboardEvent('keyup', { code: 'F8', bubbles: true }));
   const stream = async (text: string, final = false, ended = false, turnId = 'turn-01') => {
@@ -86,6 +90,34 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
 }
 
 describe('Jarvis voice provider in the conversation', () => {
+  it('explains in the composer that g4f.space is a voice provider but a CLIProxy chat is required', async () => {
+    const f = await fixture({ g4f: true, selected: { id: 'browser-chat', conversationId: 'chatgpt-realistic', engine: 'chatgpt' } });
+    const button = f.element<HTMLButtonElement>('jarvisTalk');
+    expect(button.hidden).toBe(false);
+    expect(button.disabled).toBe(true);
+    expect(f.element('jarvisStatus').hidden).toBe(false);
+    expect(f.element('jarvisStatus').textContent).toMatch(/CLIProxy/);
+    expect(button.title).toMatch(/CLIProxy/);
+    f.hold(); await f.flush();
+    expect(f.getUserMedia).not.toHaveBeenCalled();
+  });
+
+  it('guides session-only consent and does not request a microphone until expressly checked', async () => {
+    const f = await fixture({ g4f: true, consent: false, noAudioEngines: true });
+    expect(f.element('jarvisStatus').textContent).toMatch(/consent/i);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(true);
+    f.hold(); await f.flush();
+    expect(f.getUserMedia).not.toHaveBeenCalled();
+    const consent = f.element<HTMLInputElement>('jarvisConsent');
+    consent.checked = true; consent.dispatchEvent(new page!.window.Event('change'));
+    await f.flush();
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(false);
+    f.hold(); await f.flush();
+    expect(f.getUserMedia).toHaveBeenCalledTimes(1);
+    f.release(); await f.flush();
+    expect(f.transcribe).toHaveBeenCalledWith('provider', '', '', 'audio/webm', expect.any(Uint8Array), expect.objectContaining({ baseUrl: 'https://g4f.space/v1' }));
+  });
+
   it('rejects an old CLIProxy send receipt after a new PTT interrupts thinking', async () => {
     let resolveOld!: (result: { ok: true; data: { turnId: string } }) => void;
     const oldReceipt = new Promise<{ ok: true; data: { turnId: string } }>(resolve => { resolveOld = resolve; });

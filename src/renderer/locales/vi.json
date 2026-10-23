@@ -3998,5 +3998,9 @@
   "Expires at": "Expires at",
   "Chief designation": "Chief designation",
   "Director": "Director",
-  "Coordinator": "Coordinator"
+  "Coordinator": "Coordinator",
+  "Jarvis works in a CLIProxy API chat. The g4f.space preset configures speech services, not a chat. Open or create a CLIProxy chat.": "Jarvis hoạt động trong cuộc trò chuyện API CLIProxy. Cấu hình g4f.space thiết lập dịch vụ giọng nói, không tạo cuộc trò chuyện. Hãy mở hoặc tạo cuộc trò chuyện CLIProxy.",
+  "Enable microphone and audio transmission consent in Jarvis settings for this session.": "Hãy cho phép micrô và truyền âm thanh trong cài đặt Jarvis cho phiên này.",
+  "This app cannot access microphone recording. Check system permissions and restart the app.": "Ứng dụng không thể ghi âm micrô. Hãy kiểm tra quyền hệ thống và khởi động lại.",
+  "No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.": "Chưa có bộ nhận dạng giọng nói sẵn sàng. Kiểm tra URL, khóa và mô hình STT của nhà cung cấp hoặc chọn mô hình CLIProxy."
 }
