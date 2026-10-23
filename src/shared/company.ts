@@ -19,6 +19,7 @@ export const companyChiefTitleSchema = z.enum(['operations', 'director', 'manage
 export const companyChiefBindingSchema = z.object({
   seat: companySeatSchema, ownerId: z.string().uuid(), runId: z.string().uuid(),
   workerId: z.string().regex(/^worker-[1-9][0-9]*$/), label: safeText(80),
+  conversationId: safeText(160).optional(),
   verifiedAt: tick, expiresAt: tick
 }).strict();
 export const companyDelegationSchema = z.object({

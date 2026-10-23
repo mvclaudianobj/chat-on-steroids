@@ -14,7 +14,7 @@ const runId='00000000-0000-4000-8000-000000000141';
 const workerId='worker-1';
 const service: CompanyWorkerBackend={
   async spawn() { throw new Error('Workers cannot be spawned by triage'); },
-  async status() { return {runId,workers:[{id:workerId,runId,label:`marks2:${chiefId}`,state:statusState,result:null}]}; },
+  async status() { return {runId,workers:[{id:workerId,runId,label:`marks2:${chiefId}`,state:statusState,result:null,conversationId:'synthetic-authenticated-chief'}]}; },
   async reports() { return incoming; },
   async send() { throw new Error('Triage cannot send external messages'); },
   async ack() { return; }
@@ -56,6 +56,15 @@ describe('O7 verified internal autonomy',()=>{
     expect((await getCompany()).delegation.mode).toBe('manual');
     statusState='active';
     await expect(broker.grantDelegation('marks-coo','internal-triage')).rejects.toThrow('Role identity');
+  });
+  it('rejects an active worker with no server-bound conversation or a changed session',async()=>{
+    await fixture();
+    const absent={...service,status:async()=>({runId,workers:[{id:workerId,runId,label:`marks2:${chiefId}`,state:'active',result:null,conversationId:null}]})};
+    await expect(createCompanyBroker(absent).grantDelegation('marks2','internal-triage')).rejects.toThrow('authenticated worker session');
+    const broker=createCompanyBroker(service);
+    await broker.grantDelegation('marks2','internal-triage');
+    const replaced={...service,status:async()=>({runId,workers:[{id:workerId,runId,label:`marks2:${chiefId}`,state:'active',result:null,conversationId:'replacement-chief-chat'}]})};
+    await expect(createCompanyBroker(replaced).applyDelegatedTriage()).rejects.toThrow('no longer active');
   });
   it('binds configured seat and exact broker owner/run/worker and survives recovery',async()=>{
     await fixture();const state=await createCompanyBroker(service).grantDelegation('marks2','internal-triage','director');

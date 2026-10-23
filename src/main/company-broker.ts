@@ -9,7 +9,7 @@ import type { CompanyRequest, CompanySnapshot } from '../shared/company.js';
 const workerId = z.string().regex(/^worker-[1-9][0-9]*$/);
 const uuid = z.string().uuid();
 const workerStatus = z.object({ id: workerId, runId: uuid.nullable(), label: z.string(), state: z.string(),
-  result: z.string().nullable().optional() });
+  result: z.string().nullable().optional(), conversationId: z.string().nullable().optional() });
 const fleetStatus = z.object({ runId: uuid.nullable(), workers: z.array(workerStatus) });
 const reportSchema = z.object({ id: z.string().min(1).max(100), from: z.string(), runId: uuid.nullable(), time: z.number().int().nonnegative(), text: z.string(),
   origin: z.enum(['authenticated-worker-message','broker-event']).optional() });
@@ -88,12 +88,15 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
     if (candidates.length !== 1) throw new Error('A unique active broker-bound chief worker is required');
     const chief=candidates[0]!, bound=chief.execution!;
     const status=await backend.status(chief.id,bound.runId!);
-    if (status.workers.filter(worker=>worker.id===bound.workerId && worker.runId===bound.runId &&
-      worker.label===labelFor(chief) && worker.state==='active').length!==1)
+    const verified = status.workers.filter(worker=>worker.id===bound.workerId && worker.runId===bound.runId &&
+      worker.label===labelFor(chief) && worker.state==='active' && typeof worker.conversationId==='string' &&
+      worker.conversationId.length>0 && worker.conversationId.length<=160);
+    if (verified.length!==1)
       throw new Error('Selected chief has no active authenticated worker session');
     const now=Date.now();
     return mutateCompany('delegationGrant',{delegate,scope,chiefTitle,binding:{seat:delegate,ownerId:chief.id,
-      runId:bound.runId,workerId:bound.workerId,label:labelFor(chief),verifiedAt:now,expiresAt:now+5*60_000}});
+      runId:bound.runId,workerId:bound.workerId,label:labelFor(chief),conversationId:verified[0]!.conversationId,
+      verifiedAt:now,expiresAt:now+5*60_000}});
   }
 
   /** Poll-based, idempotent internal triage. Worker report provenance is validated by
@@ -104,13 +107,15 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
     if (policy.mode!=='delegated' || !policy.scopes.includes('internal-triage') || !binding)
       throw new Error('Internal triage delegation not active');
     if (Date.now()>=binding.expiresAt) throw new Error('Chief delegation expired');
+    if (!binding.conversationId) throw new Error('Chief session has no server-bound conversation proof');
     const source=ticket(snapshot,binding.ownerId);
     if (source.seat!==binding.seat || source.execution?.runId!==binding.runId || source.execution.workerId!==binding.workerId ||
       source.execution.phase!=='running' || labelFor(source)!==binding.label)
       throw new Error('Chief binding changed');
     const status=await backend.status(binding.ownerId,binding.runId);
     if (status.workers.filter(worker=>worker.id===binding.workerId && worker.runId===binding.runId &&
-      worker.label===binding.label && worker.state==='active').length!==1)
+      worker.label===binding.label && worker.state==='active' &&
+      worker.conversationId===binding.conversationId).length!==1)
       throw new Error('Chief worker no longer active');
     const reports=await backend.reports(binding.ownerId,binding.runId);
     for (const report of reports) {

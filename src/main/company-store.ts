@@ -57,7 +57,7 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
         const delegate = fields?.delegate ?? 'marks-coo';
         const seat = current.company.seats.includes(delegate as `marks${number}`);
         if (!seat && delegate !== 'marks-coo') throw new Error('Selected chief not eligible');
-        if (seat && (!fields?.binding || fields.binding.seat !== delegate ||
+        if (seat && (!fields?.binding || !fields.binding.conversationId || fields.binding.seat !== delegate ||
           fields.binding.expiresAt <= now || fields.binding.verifiedAt > now ||
           !current.requests.some(row => row.id === fields.binding!.ownerId && row.seat === delegate &&
             row.execution?.mode === 'live' && row.execution.ownerId === fields.binding!.ownerId &&
