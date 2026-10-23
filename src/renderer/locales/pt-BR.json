@@ -3862,5 +3862,18 @@
   "Drafts that wait": "Rascunhos que esperam",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Um lápis marca os chats com uma mensagem não enviada, e os rascunhos voltam após reiniciar.",
   "A better Review": "Uma Revisão melhor",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Clique com o botão direito em um arquivo não rastreado para adicionar o arquivo ou a pasta dele ao .gitignore."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Clique com o botão direito em um arquivo não rastreado para adicionar o arquivo ou a pasta dele ao .gitignore.",
+  "Secret value": "Valor do segredo",
+  "Allowed origin": "Origem permitida",
+  "Header": "Header",
+  "GPG passphrase": "Senha do GPG",
+  "Type the master password (at least 12 characters) for this action.": "Digite a senha mestra (pelo menos 12 caracteres) para esta ação.",
+  "The master password does not match this vault.": "A senha mestra não corresponde a este cofre.",
+  "The vault already exists. Use the master password to add or change secrets.": "O cofre já existe. Use a senha mestra para adicionar ou alterar segredos.",
+  "Create the vault first.": "Crie o cofre primeiro.",
+  "This computer needs the master password once to unlock the vault (Recover).": "Este computador precisa da senha mestra uma vez para desbloquear o cofre (Recuperar).",
+  "No secret with that name.": "Nenhum segredo com esse nome.",
+  "The system keyring is not available, so the vault cannot be used on this computer.": "O keyring do sistema não está disponível, então o cofre não pode ser usado neste computador.",
+  "Check this field: {0}.": "Confira este campo: {0}.",
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Cofre criado. A senha mestra só é pedida de novo para administração: adicionar, revelar, exportar ou importar segredos."
 }

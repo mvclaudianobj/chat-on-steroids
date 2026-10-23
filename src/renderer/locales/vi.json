@@ -3766,5 +3766,18 @@
   "Drafts that wait": "Bản nháp chờ bạn",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Một cây bút đánh dấu các cuộc trò chuyện có tin nhắn chưa gửi, và bản nháp quay lại sau khi khởi động lại.",
   "A better Review": "Phần Xem lại tốt hơn",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Nhấp chuột phải vào một tệp chưa được theo dõi để thêm tệp đó hoặc thư mục của nó vào .gitignore."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Nhấp chuột phải vào một tệp chưa được theo dõi để thêm tệp đó hoặc thư mục của nó vào .gitignore.",
+  "Secret value": "Giá trị bí mật",
+  "Allowed origin": "Nguồn được phép",
+  "Header": "Tiêu đề",
+  "GPG passphrase": "Cụm mật khẩu GPG",
+  "Type the master password (at least 12 characters) for this action.": "Nhập mật khẩu chính (ít nhất 12 ký tự) cho thao tác này.",
+  "The master password does not match this vault.": "Mật khẩu chính không khớp với kho này.",
+  "The vault already exists. Use the master password to add or change secrets.": "Kho đã tồn tại. Dùng mật khẩu chính để thêm hoặc thay đổi bí mật.",
+  "Create the vault first.": "Hãy tạo kho trước.",
+  "This computer needs the master password once to unlock the vault (Recover).": "Máy tính này cần mật khẩu chính một lần để mở khóa kho (Khôi phục).",
+  "No secret with that name.": "Không có bí mật nào có tên đó.",
+  "The system keyring is not available, so the vault cannot be used on this computer.": "Chuỗi khóa của hệ thống không khả dụng, nên không thể dùng kho trên máy này.",
+  "Check this field: {0}.": "Hãy kiểm tra trường này: {0}.",
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Đã tạo kho. Mật khẩu chính chỉ được hỏi lại cho việc quản trị: thêm, hiển thị, xuất hoặc nhập bí mật."
 }

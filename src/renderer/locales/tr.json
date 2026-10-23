@@ -3814,5 +3814,18 @@
   "Drafts that wait": "Bekleyen taslaklar",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Bir kalem, gönderilmemiş mesajı olan sohbetleri işaretler ve taslaklar yeniden başlatmadan sonra geri gelir.",
   "A better Review": "Daha iyi bir İnceleme",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "İzlenmeyen bir dosyaya sağ tıklayarak onu ya da klasörünü .gitignore dosyasına ekleyin."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "İzlenmeyen bir dosyaya sağ tıklayarak onu ya da klasörünü .gitignore dosyasına ekleyin.",
+  "Secret value": "Gizli bilgi değeri",
+  "Allowed origin": "İzin verilen köken",
+  "Header": "Üst bilgi",
+  "GPG passphrase": "GPG parolası",
+  "Type the master password (at least 12 characters) for this action.": "Bu işlem için ana parolayı (en az 12 karakter) yazın.",
+  "The master password does not match this vault.": "Ana parola bu kasayla eşleşmiyor.",
+  "The vault already exists. Use the master password to add or change secrets.": "Kasa zaten var. Gizli bilgi eklemek veya değiştirmek için ana parolayı kullanın.",
+  "Create the vault first.": "Önce kasayı oluşturun.",
+  "This computer needs the master password once to unlock the vault (Recover).": "Bu bilgisayar kasanın kilidini açmak için ana parolaya bir kez ihtiyaç duyuyor (Kurtar).",
+  "No secret with that name.": "Bu adla bir gizli bilgi yok.",
+  "The system keyring is not available, so the vault cannot be used on this computer.": "Sistem anahtarlığı kullanılamıyor, bu nedenle kasa bu bilgisayarda kullanılamaz.",
+  "Check this field: {0}.": "Bu alanı kontrol edin: {0}.",
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Kasa oluşturuldu. Ana parola yalnızca yönetim için tekrar istenir: gizli bilgi eklemek, göstermek, dışa veya içe aktarmak."
 }

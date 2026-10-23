@@ -3766,5 +3766,18 @@
   "Drafts that wait": "待っていてくれる下書き",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "未送信のメッセージがあるチャットに鉛筆が付き、下書きは再起動後も戻ります。",
   "A better Review": "より良いレビュー",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "未追跡のファイルを右クリックすると、そのファイルまたはフォルダーを .gitignore に追加できます。"
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "未追跡のファイルを右クリックすると、そのファイルまたはフォルダーを .gitignore に追加できます。",
+  "Secret value": "シークレットの値",
+  "Allowed origin": "許可するオリジン",
+  "Header": "ヘッダー",
+  "GPG passphrase": "GPG パスフレーズ",
+  "Type the master password (at least 12 characters) for this action.": "この操作にはマスターパスワード（12文字以上）を入力してください。",
+  "The master password does not match this vault.": "マスターパスワードがこの保管庫と一致しません。",
+  "The vault already exists. Use the master password to add or change secrets.": "保管庫はすでにあります。シークレットの追加や変更にはマスターパスワードを使ってください。",
+  "Create the vault first.": "先に保管庫を作成してください。",
+  "This computer needs the master password once to unlock the vault (Recover).": "このコンピューターで保管庫を開くには、マスターパスワードが一度必要です（復元）。",
+  "No secret with that name.": "その名前のシークレットはありません。",
+  "The system keyring is not available, so the vault cannot be used on this computer.": "システムのキーリングが使えないため、このコンピューターでは保管庫を使えません。",
+  "Check this field: {0}.": "この項目を確認してください: {0}。",
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "保管庫を作成しました。マスターパスワードは管理操作（シークレットの追加・表示・書き出し・読み込み）のときだけ再度求められます。"
 }

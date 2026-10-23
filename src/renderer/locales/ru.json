@@ -3910,5 +3910,18 @@
   "Drafts that wait": "Черновики, которые ждут",
   "A pencil marks chats with an unsent message, and drafts come back after a restart.": "Карандаш отмечает чаты с неотправленным сообщением, а черновики возвращаются после перезапуска.",
   "A better Review": "Улучшенная «Проверка»",
-  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Щёлкните правой кнопкой по неотслеживаемому файлу, чтобы добавить его или его папку в .gitignore."
+  "Right-click an untracked file to add it, or its folder, to .gitignore.": "Щёлкните правой кнопкой по неотслеживаемому файлу, чтобы добавить его или его папку в .gitignore.",
+  "Secret value": "Значение секрета",
+  "Allowed origin": "Разрешённый источник",
+  "Header": "Заголовок",
+  "GPG passphrase": "Парольная фраза GPG",
+  "Type the master password (at least 12 characters) for this action.": "Введите мастер-пароль (не менее 12 символов) для этого действия.",
+  "The master password does not match this vault.": "Мастер-пароль не подходит к этому хранилищу.",
+  "The vault already exists. Use the master password to add or change secrets.": "Хранилище уже существует. Используйте мастер-пароль, чтобы добавить или изменить секреты.",
+  "Create the vault first.": "Сначала создайте хранилище.",
+  "This computer needs the master password once to unlock the vault (Recover).": "Этому компьютеру нужен мастер-пароль один раз, чтобы разблокировать хранилище (Восстановить).",
+  "No secret with that name.": "Секрета с таким именем нет.",
+  "The system keyring is not available, so the vault cannot be used on this computer.": "Системная связка ключей недоступна, поэтому хранилище нельзя использовать на этом компьютере.",
+  "Check this field: {0}.": "Проверьте это поле: {0}.",
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Хранилище создано. Мастер-пароль запрашивается снова только для администрирования: добавления, показа, экспорта или импорта секретов."
 }
