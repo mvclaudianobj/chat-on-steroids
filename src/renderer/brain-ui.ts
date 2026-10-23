@@ -387,18 +387,73 @@ function providerPanel(api: AppApi, changed: () => void): { paint: (settings: Br
   };
 }
 
-/** /remember only persists what the human explicitly selected or left in the composer. */
-export async function rememberBrainSelection(api: AppApi, draft: HTMLTextAreaElement, options: { clearOnSave?: boolean } = {}): Promise<boolean> {
+type SavedReply = { synced?: Array<{ source: BrainRecallItem['source']; ok: boolean }> };
+function toastSaved(saved: SavedReply | null): void {
+  const synced = (saved?.synced ?? []).filter(row => row.ok).map(row => SOURCE_LABELS[row.source]);
+  toast(synced.length ? t('Memory saved and synced to {0}', [synced.join(', ')]) : t('Memory saved'));
+}
+
+/**
+ * `/remember <text>` (or text selected or left in the composer) saves exactly that text. In a chat
+ * it is saved through `chat.save`, so main gives it the chat's provenance and project scope.
+ */
+export async function rememberBrainSelection(api: AppApi, draft: HTMLTextAreaElement, options: { clearOnSave?: boolean; sessionId?: string | null } = {}): Promise<boolean> {
   const start = draft.selectionStart ?? 0, end = draft.selectionEnd ?? 0;
   const text = (end > start ? draft.value.slice(start, end) : draft.value).trim();
-  if (!text) { toast(t('Select or type text to remember.')); return false; }
+  if (!text) { toast(t('Open a chat to remember its conversation, or type /remember followed by the text to save.')); return false; }
   try {
-    const saved = await request<{ synced?: Array<{ source: BrainRecallItem['source']; ok: boolean }> }>(api, 'memories.save', { content: text.slice(0, 4000) });
-    const synced = (saved?.synced ?? []).filter(row => row.ok).map(row => SOURCE_LABELS[row.source]);
-    toast(synced.length ? t('Memory saved and synced to {0}', [synced.join(', ')]) : t('Memory saved'));
+    const content = text.slice(0, 4000);
+    const saved = options.sessionId
+      ? await request<SavedReply>(api, 'chat.save', { sessionId: options.sessionId, content })
+      : await request<SavedReply>(api, 'memories.save', { content });
+    toastSaved(saved);
     // A typed `/remember <text>` leaves nothing behind that could be sent by mistake.
     if (options.clearOnSave && draft.value.trim() === text) { draft.value = ''; draft.dispatchEvent(new Event('input', { bubbles: true })); }
     return true;
   }
   catch (error) { toast((error as Error).message); return false; }
+}
+
+/** The model-free fallback: the chat's newest finished answer, bounded and redacted in main, as one memory. */
+export async function rememberLatestAnswer(api: AppApi, sessionId: string): Promise<boolean> {
+  try {
+    const saved = await request<SavedReply | null>(api, 'chat.saveLatestAnswer', { sessionId });
+    if (!saved) { toast(t('This chat has no finished answer to remember yet.')); return false; }
+    toastSaved(saved);
+    return true;
+  } catch (error) { toast((error as Error).message); return false; }
+}
+
+/** What `/remember` asks the chat's model to do; sent as an ordinary message in the user's language. */
+export const rememberChatInstruction = (): string => t('Review our conversation so far and save what is worth keeping with the memory_save tool: decisions, facts, preferences and open next steps. Save one memory per distinct item, each with a clear title and a few tags. Skip small talk, and never save passwords, keys or other secrets. I will approve each memory before it is saved.');
+
+type ChatTools = { available: boolean; reason?: 'chatgpt-off' | 'chatgpt-refresh' | 'api-off' | 'engines-off' | 'engine-unsupported' | 'read-only' };
+function missingToolsText(reason: ChatTools['reason']): string {
+  switch (reason) {
+    case 'chatgpt-off': return t('This chat cannot save memories yet. Turn on “ChatGPT memory tools” on the Brain page.');
+    case 'chatgpt-refresh': return t('ChatGPT has not refreshed the Core plugin with the memory tools yet. Refresh the Core plugin in ChatGPT, then use /remember again.');
+    case 'api-off': return t('This chat cannot save memories yet. Turn on “API chat memory tools” on the Brain page.');
+    case 'engines-off': return t('This chat cannot save memories yet. Turn on “Agent engine memory tools” on the Brain page; it applies to new engine processes.');
+    case 'read-only': return t('Saving memories needs the Edit permission. Turn off read-only mode or allow editing in Settings.');
+    default: return t('Memory tools are not available for this chat here. You can save its last answer instead.');
+  }
+}
+
+/**
+ * `/remember` with nothing to save in a chat: asks the chat's own model to save the conversation's
+ * durable knowledge through `memory_save`, whose approval card shows each memory first. When the
+ * chat's model has no memory tools, nothing is sent: the toast names the switch to turn on.
+ */
+export async function rememberChatContext(api: AppApi, chat: { sessionId: string; send: (text: string) => Promise<boolean>; openBrain: () => void }): Promise<'sent' | 'unavailable' | 'failed'> {
+  let tools: ChatTools;
+  try { tools = await request<ChatTools>(api, 'chat.tools', { sessionId: chat.sessionId }); }
+  catch (error) { toast((error as Error).message); return 'failed'; }
+  if (!tools.available) {
+    toast(missingToolsText(tools.reason), [
+      { label: t('Open Brain'), run: chat.openBrain },
+      { label: t('Save last answer'), run: () => { void rememberLatestAnswer(api, chat.sessionId); } }
+    ]);
+    return 'unavailable';
+  }
+  return await chat.send(rememberChatInstruction()) ? 'sent' : 'failed';
 }

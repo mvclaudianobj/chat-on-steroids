@@ -11,12 +11,16 @@ import { brainDelete, brainDoctor, brainGet, brainList, brainSave, brainSearch, 
 import { getBrainSettings, setBrainSettings } from './settings.js';
 import { BRAIN_IMPORT_ACTIONS } from '../../shared/brain-import.js';
 import { isBrainImportAction, runBrainImport } from './import/ipc.js';
+import { brainChatOf, brainChatTools, brainLatestAnswer } from './chat-memory.js';
 
 const empty = z.object({}).strict();
 const query = z.object({ query: z.string().min(1).max(1000), limit: z.number().int().min(1).max(100).optional() }).strict();
 const identifier = z.object({ id: z.string().uuid() }).strict();
 const save = brainSaveSchema.omit({ provenance: true });
-const actionSchema = z.enum(['status','doctor','sources','settings.get','settings.set','recall','memories.list','memories.search','memories.get','memories.save','memories.update','memories.delete','memories.export','pending.list','pending.decide','providers.test','providers.setKey','providers.importMarksCode', ...BRAIN_IMPORT_ACTIONS]);
+/** `/remember` in a chat: the text, and the chat whose provenance and project scope it gets. */
+const chatSave = save.omit({ scope: true }).extend({ sessionId: z.string().min(1).max(120) }).strict();
+const chatOnly = z.object({ sessionId: z.string().min(1).max(120) }).strict();
+const actionSchema = z.enum(['status','doctor','sources','settings.get','settings.set','recall','memories.list','memories.search','memories.get','memories.save','chat.tools','chat.save','chat.saveLatestAnswer','memories.update','memories.delete','memories.export','pending.list','pending.decide','providers.test','providers.setKey','providers.importMarksCode', ...BRAIN_IMPORT_ACTIONS]);
 const providerId = z.enum(BRAIN_PROVIDER_IDS);
 /** Chat Marks H1b: whether ChatGPT still has to refresh the Core plugin to see the Brain tools. */
 async function chatgptRefreshState(): Promise<string | null> {
@@ -79,6 +83,30 @@ export function registerBrainIpc(getWindow: () => BrowserWindow | null): void {
         case 'memories.save': {
           const memory = await brainSave({ ...save.parse(payload), provenance: { source: 'user' } });
           logInfo(`brain: saved memory (source=user, ${memory.content.length} chars)`);
+          const synced = await syncSavedMemory(memory);
+          data = { ...memory, synced };
+          break;
+        }
+        // Chat Marks: `/remember` in a chat. Main resolves the chat; the renderer names only its id.
+        case 'chat.tools': {
+          const chat = await brainChatOf(chatOnly.parse(payload).sessionId);
+          if (!chat) throw new Error('chat not found');
+          data = await brainChatTools(chat);
+          break;
+        }
+        case 'chat.save':
+        case 'chat.saveLatestAnswer': {
+          const input = action === 'chat.save' ? chatSave.parse(payload) : chatOnly.parse(payload);
+          const chat = await brainChatOf(input.sessionId);
+          if (!chat) throw new Error('chat not found');
+          const answer = action === 'chat.saveLatestAnswer' ? await brainLatestAnswer(chat.sessionId) : null;
+          // No finished answer yet: nothing to save, which the renderer says in the user's language.
+          if (action === 'chat.saveLatestAnswer' && !answer) { data = null; break; }
+          const { sessionId: _sessionId, ...fields } = input as z.infer<typeof chatSave>;
+          void _sessionId;
+          const memory = await brainSave({ ...(answer ? { content: answer, title: chat.title || undefined } : fields),
+            scope: chat.scope, provenance: { source: 'chat', sessionId: chat.sessionId, engine: chat.engine } });
+          logInfo(`brain: saved memory (source=chat, ${action === 'chat.save' ? 'typed' : 'latest answer'}, ${memory.content.length} chars)`);
           const synced = await syncSavedMemory(memory);
           data = { ...memory, synced };
           break;

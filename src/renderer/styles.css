@@ -3662,6 +3662,24 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
   z-index: 10;
 }
 
+/* Chat Marks: a toast that offers what to do next (e.g. /remember without memory tools). */
+.toast-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.toast-action {
+  background: transparent;
+  color: inherit;
+  border: 1px solid currentColor;
+  border-radius: 8px;
+  padding: 3px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+.toast-action:hover { background: rgb(255 255 255 / 14%); }
+
 /* ------------------------------------------------------------- the goal loop */
 
 /* The missing-key notice is a whole sentence and the one thing on the row worth reading, so

@@ -49,7 +49,7 @@ beforeEach(() => {
   folders.push(userData);
   configureBrainForTests(path.join(userData, 'brain.sqlite'));
   initBrainEngineMcp(userData, {
-    session: async id => id.startsWith('gone') ? null : { id, conversationId: `cosapi-${id}` },
+    session: async id => id.startsWith('gone') ? null : { id, conversationId: `cosapi-${id}`, ...(id === SESSION ? { projectId: '6f1c2a34-1b2c-4d5e-8f90-123456789abc' } : {}) },
     engine: async id => id.startsWith('oc-') ? 'opencode' : id.startsWith('cx-') ? 'codex' : 'claude'
   });
 });
@@ -160,7 +160,8 @@ describe('Brain engine MCP wiring (H1c)', () => {
     await vi.waitFor(() => expect(brainPendingApprovals()).toHaveLength(1));
     decideBrainSaveApproval(brainPendingApprovals()[0]!.id, true);
     expect(resultText(await accepted)).toMatch(/^Memory saved locally/);
-    expect((await brainList())[0]).toMatchObject({ content: 'User prefers tabs', provenance: { source: 'chat', sessionId: SESSION, engine: 'claude' } });
+    // The chat's project is the memory's scope (`/remember` asks the model to save there).
+    expect((await brainList())[0]).toMatchObject({ content: 'User prefers tabs', scope: 'project:6f1c2a34-1b2c-4d5e-8f90-123456789abc', provenance: { source: 'chat', sessionId: SESSION, engine: 'claude' } });
   });
 
   it('attributes a shared-engine save only to the one chat that reported the same call', async () => {

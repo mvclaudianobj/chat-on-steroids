@@ -32,6 +32,7 @@ import { toolSchema } from '../mcp/tool-declarations.js';
 import { requestBrainSaveApproval } from './approval.js';
 import { getBrainSettings } from './settings.js';
 import { brainSave, brainSearch } from './store.js';
+import { brainProjectScope } from './chat-memory.js';
 import { BRAIN_CODEX_SERVER, BRAIN_MCP_SERVER, BRAIN_MCP_TOOLS, brainToolOf, type BrainTool } from './engine-names.js';
 
 export { BRAIN_CODEX_SERVER, BRAIN_MCP_SERVER, BRAIN_MCP_TOOLS, brainToolOf } from './engine-names.js';
@@ -46,7 +47,7 @@ const FORWARDED = ['forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwar
 
 export interface BrainMcpDeps {
   /** The app session of an engine chat, or null (deleted, not an engine chat). */
-  session(sessionId: string): Promise<{ id: string; conversationId: string | null } | null>;
+  session(sessionId: string): Promise<{ id: string; conversationId: string | null; projectId?: string } | null>;
   /** The engine the chat's ledger names. */
   engine(sessionId: string): Promise<AgentEngineId | null>;
 }
@@ -55,7 +56,7 @@ const defaultDeps: BrainMcpDeps = {
   session: async sessionId => {
     const { getSession } = await import('../session/store.js');
     const summary = await getSession(sessionId);
-    return summary ? { id: summary.id, conversationId: summary.conversationId ?? null } : null;
+    return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, ...(summary.projectId ? { projectId: summary.projectId } : {}) } : null;
   },
   engine: async sessionId => {
     const { storedChatRecord } = await import('../agent-engine/ledger.js');
@@ -196,18 +197,21 @@ async function saveFor(grant: EngineGrant, args: z.infer<typeof saveInput>): Pro
   if (!brainEnginesEnabled()) return text('Brain tools are disabled in Chat Marks.', true);
   const sessionId = grant.sessionId ?? await claimFor(grant.engine, 'memory_save', args);
   if (!sessionId) return text('This memory could not be attributed to a Chat Marks chat, so it was not saved.', true);
-  const verify = async (): Promise<{ conversationId: string } | null> => {
+  const verify = async (): Promise<{ conversationId: string; projectId?: string } | null> => {
     const session = await deps.session(sessionId).catch(() => null);
     if (!session?.conversationId || !isApiConversationId(session.conversationId)) return null;
-    return await deps.engine(sessionId).catch(() => null) === grant.engine ? { conversationId: session.conversationId } : null;
+    return await deps.engine(sessionId).catch(() => null) === grant.engine ? { conversationId: session.conversationId, projectId: session.projectId } : null;
   };
   const chat = await verify();
   if (!chat) return text('This chat is no longer a Chat Marks engine chat; nothing was saved.', true);
   if (getBrainSettings().askBeforeSaving && !await requestBrainSaveApproval(chat.conversationId, args.content))
     return text('The user denied this memory, or the approval timed out. Nothing was saved.', true);
-  if (!brainEnginesEnabled() || !await verify()) return text('The chat or Brain setting changed before the write; nothing was saved.', true);
+  const current = brainEnginesEnabled() ? await verify() : null;
+  if (!current) return text('The chat or Brain setting changed before the write; nothing was saved.', true);
   try {
-    const memory = await brainSave({ content: args.content, title: args.title, tags: args.tags, provenance: { source: 'chat', sessionId, engine: grant.engine } });
+    // Chat Marks: the chat's project is the memory's scope.
+    const memory = await brainSave({ content: args.content, title: args.title, tags: args.tags, scope: brainProjectScope(current.projectId),
+      provenance: { source: 'chat', sessionId, engine: grant.engine } });
     return text(`Memory saved locally: ${memory.id}`);
   } catch { return text('The local Brain memory could not be saved.', true); }
 }
