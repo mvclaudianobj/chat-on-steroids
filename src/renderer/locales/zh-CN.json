@@ -3817,5 +3817,14 @@
   "No secret with that name.": "没有该名称的密钥。",
   "The system keyring is not available, so the vault cannot be used on this computer.": "系统密钥环不可用，因此无法在这台电脑上使用保险库。",
   "Check this field: {0}.": "请检查此字段：{0}。",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "保险库已创建。只有在管理时（添加、显示、导出或导入密钥）才会再次要求主密码。"
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "保险库已创建。只有在管理时（添加、显示、导出或导入密钥）才会再次要求主密码。",
+  "Vault, notifications, Brain memory and new ways to work with agents.": "保险库、通知、Brain 记忆以及新的智能体工作方式。",
+  "Vault and notifications": "保险库和通知",
+  "Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.": "在保险库中保护密钥，通过频道测试和 SMTP 证书固定配置通知。",
+  "Brain memory": "Brain 记忆",
+  "Recall and save local memories, connect optional sources and selectively import past conversations.": "搜索和保存本地记忆，连接可选来源，并有选择地导入旧对话。",
+  "Agent routes and remote labs": "智能体路由与远程实验环境",
+  "Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.": "选择 Codex 或 Claude 路由，管理 SSH 主机、虚拟机和智能体公司原型。",
+  "Jarvis and ZeroClaw": "Jarvis 与 ZeroClaw",
+  "Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.": "使用 Jarvis 向 CLIProxy 聊天语音输入，并在导入 ZeroClaw 前审查 MarksClaw 配置。"
 }

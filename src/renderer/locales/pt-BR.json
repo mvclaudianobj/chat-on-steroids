@@ -3913,5 +3913,14 @@
   "No secret with that name.": "Nenhum segredo com esse nome.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "O keyring do sistema não está disponível, então o cofre não pode ser usado neste computador.",
   "Check this field: {0}.": "Confira este campo: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Cofre criado. A senha mestra só é pedida de novo para administração: adicionar, revelar, exportar ou importar segredos."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Cofre criado. A senha mestra só é pedida de novo para administração: adicionar, revelar, exportar ou importar segredos.",
+  "Vault, notifications, Brain memory and new ways to work with agents.": "Cofre, notificações, memória Brain e novas formas de trabalhar com agentes.",
+  "Vault and notifications": "Cofre e notificações",
+  "Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.": "Proteja segredos no cofre e configure notificações com testes de canais e fixação de certificado SMTP.",
+  "Brain memory": "Memória Brain",
+  "Recall and save local memories, connect optional sources and selectively import past conversations.": "Recupere e salve memórias locais, conecte fontes opcionais e importe conversas antigas seletivamente.",
+  "Agent routes and remote labs": "Rotas de agentes e laboratórios remotos",
+  "Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.": "Escolha rotas do Codex ou Claude e gerencie hosts SSH, VMs e o protótipo de empresa de agentes.",
+  "Jarvis and ZeroClaw": "Jarvis e ZeroClaw",
+  "Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.": "Converse por voz com chats CLIProxy usando Jarvis e revise perfis MarksClaw antes de importar para ZeroClaw."
 }

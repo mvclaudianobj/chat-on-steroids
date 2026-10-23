@@ -3865,5 +3865,14 @@
   "No secret with that name.": "Kein Geheimnis mit diesem Namen.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "Der System-Schlüsselbund ist nicht verfügbar, daher kann der Tresor auf diesem Computer nicht genutzt werden.",
   "Check this field: {0}.": "Prüfe dieses Feld: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Tresor angelegt. Das Master-Passwort wird nur für die Verwaltung erneut abgefragt: Geheimnisse hinzufügen, anzeigen, exportieren oder importieren."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Tresor angelegt. Das Master-Passwort wird nur für die Verwaltung erneut abgefragt: Geheimnisse hinzufügen, anzeigen, exportieren oder importieren.",
+  "Vault, notifications, Brain memory and new ways to work with agents.": "Tresor, Benachrichtigungen, Brain-Speicher und neue Wege mit Agenten.",
+  "Vault and notifications": "Tresor und Benachrichtigungen",
+  "Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.": "Schütze Geheimnisse im Tresor und richte Benachrichtigungen mit Kanaltests und SMTP-Zertifikatbindung ein.",
+  "Brain memory": "Brain-Speicher",
+  "Recall and save local memories, connect optional sources and selectively import past conversations.": "Lokale Erinnerungen abrufen und speichern, optionale Quellen verbinden und alte Chats gezielt importieren.",
+  "Agent routes and remote labs": "Agentenrouten und entfernte Labore",
+  "Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.": "Wähle Codex- oder Claude-Routen und verwalte SSH-Hosts, VMs und den Firmenprototyp.",
+  "Jarvis and ZeroClaw": "Jarvis und ZeroClaw",
+  "Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.": "Sprich mit CLIProxy-Chats über Jarvis und prüfe MarksClaw-Profile vor dem ZeroClaw-Import."
 }

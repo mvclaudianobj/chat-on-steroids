@@ -3865,5 +3865,14 @@
   "No secret with that name.": "Bu adla bir gizli bilgi yok.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "Sistem anahtarlığı kullanılamıyor, bu nedenle kasa bu bilgisayarda kullanılamaz.",
   "Check this field: {0}.": "Bu alanı kontrol edin: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Kasa oluşturuldu. Ana parola yalnızca yönetim için tekrar istenir: gizli bilgi eklemek, göstermek, dışa veya içe aktarmak."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Kasa oluşturuldu. Ana parola yalnızca yönetim için tekrar istenir: gizli bilgi eklemek, göstermek, dışa veya içe aktarmak.",
+  "Vault, notifications, Brain memory and new ways to work with agents.": "Kasa, bildirimler, Brain belleği ve aracılarla çalışmanın yeni yolları.",
+  "Vault and notifications": "Kasa ve bildirimler",
+  "Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.": "Gizli bilgileri kasada koruyun, kanal testleri ve SMTP sertifika sabitlemeyle bildirimleri ayarlayın.",
+  "Brain memory": "Brain belleği",
+  "Recall and save local memories, connect optional sources and selectively import past conversations.": "Yerel anıları arayıp kaydedin, isteğe bağlı kaynakları bağlayın ve geçmiş sohbetleri seçerek içe aktarın.",
+  "Agent routes and remote labs": "Aracı yolları ve uzak laboratuvarlar",
+  "Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.": "Codex veya Claude yolunu seçin; SSH sunucularını, VM’leri ve aracı şirketi prototipini yönetin.",
+  "Jarvis and ZeroClaw": "Jarvis ve ZeroClaw",
+  "Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.": "Jarvis ile CLIProxy sohbetlerine konuşun ve ZeroClaw’a aktarmadan önce MarksClaw profillerini inceleyin."
 }

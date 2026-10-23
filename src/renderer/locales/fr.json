@@ -3913,5 +3913,14 @@
   "No secret with that name.": "Aucun secret portant ce nom.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "Le trousseau du système n’est pas disponible : le coffre ne peut pas être utilisé sur cet ordinateur.",
   "Check this field: {0}.": "Vérifiez ce champ : {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Coffre créé. Le mot de passe maître n’est redemandé que pour l’administration : ajouter, afficher, exporter ou importer des secrets."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Coffre créé. Le mot de passe maître n’est redemandé que pour l’administration : ajouter, afficher, exporter ou importer des secrets.",
+  "Vault, notifications, Brain memory and new ways to work with agents.": "Coffre, notifications, mémoire Brain et nouvelles façons de travailler avec les agents.",
+  "Vault and notifications": "Coffre et notifications",
+  "Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.": "Protégez les secrets dans le coffre et configurez les notifications avec tests de canal et épinglage de certificat SMTP.",
+  "Brain memory": "Mémoire Brain",
+  "Recall and save local memories, connect optional sources and selectively import past conversations.": "Retrouvez et enregistrez des souvenirs locaux, connectez des sources facultatives et importez des conversations de façon sélective.",
+  "Agent routes and remote labs": "Routage des agents et laboratoires distants",
+  "Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.": "Choisissez les routes Codex ou Claude et gérez les hôtes SSH, les VM et le prototype d’entreprise d’agents.",
+  "Jarvis and ZeroClaw": "Jarvis et ZeroClaw",
+  "Speak to CLIProxy chats with Jarvis and review MarksClaw profiles before importing into ZeroClaw.": "Parlez aux chats CLIProxy avec Jarvis et vérifiez les profils MarksClaw avant import dans ZeroClaw."
 }
