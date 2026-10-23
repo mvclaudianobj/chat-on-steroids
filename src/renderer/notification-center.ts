@@ -450,6 +450,9 @@ export function installNotificationCenter(api: Service): void {
         };
         startPair.addEventListener('click', async () => {
           if (busy) return;
+          // A retry supersedes the previous QR status watcher. Otherwise a late
+          // "connected" poll can overwrite the diagnosis of a failed retry.
+          stopPoll();
           info.textContent = t('Preparing QR code…');
           let response: Awaited<ReturnType<typeof api.notificationTelegramPairStart | typeof api.notificationWhatsAppStart>>;
           try { response = channel === 'telegram' ? await api.notificationTelegramPairStart() : await api.notificationWhatsAppStart(); }
