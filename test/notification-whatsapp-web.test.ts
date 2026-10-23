@@ -143,6 +143,41 @@ it('does not keep a stale QR after first-QR timeout and explicit retry', async (
   } finally { vi.useRealTimers(); }
 });
 
+it('expires a silent QR and reconnects instead of returning a permanently stale code', async () => {
+  vi.useFakeTimers();
+  try {
+    await web.startWhatsAppWeb();
+    const first = mocks.sockets[0]!;
+    first.ev.emit('connection.update', { qr: 'SYNTHETIC-FIRST-QR' });
+    await vi.advanceTimersByTimeAsync(65_100);
+    const afterExpiry = await web.getWhatsAppWebStatus();
+    expect(afterExpiry).not.toHaveProperty('qr');
+    expect(afterExpiry.state).not.toBe('qr');
+    await vi.advanceTimersByTimeAsync(3_100);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(mocks.sockets).toHaveLength(2));
+    expect(first.ws.close).toHaveBeenCalledTimes(1);
+    mocks.sockets[1]!.ev.emit('connection.update', { qr: 'SYNTHETIC-SECOND-QR' });
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'qr', qr: 'SYNTHETIC-SECOND-QR' });
+  } finally { vi.useRealTimers(); }
+});
+
+it('keeps fresh QR rotations available without creating redundant sockets', async () => {
+  vi.useFakeTimers();
+  try {
+    await web.startWhatsAppWeb();
+    const active = mocks.sockets[0]!;
+    active.ev.emit('connection.update', { qr: 'SYNTHETIC-QR-1' });
+    await vi.advanceTimersByTimeAsync(19_000);
+    active.ev.emit('connection.update', { qr: 'SYNTHETIC-QR-2' });
+    await vi.advanceTimersByTimeAsync(19_000);
+    active.ev.emit('connection.update', { qr: 'SYNTHETIC-QR-3' });
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'qr', qr: 'SYNTHETIC-QR-3' });
+    expect(mocks.sockets).toHaveLength(1);
+    expect(active.ws.close).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
+
 
 it('classifies an authentication initialization timeout and allows another attempt', async () => {
   mocks.authStuck = true;

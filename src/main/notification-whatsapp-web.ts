@@ -29,6 +29,9 @@ let connecting: Promise<void> | null = null;
 let saving: Promise<void> = Promise.resolve();
 let retryCount = 0;
 let qrDeadline: ReturnType<typeof setTimeout> | null = null;
+let qrRefreshDeadline: ReturnType<typeof setTimeout> | null = null;
+const FIRST_QR_VALIDITY_MS = 65_000;
+const REFRESH_QR_VALIDITY_MS = 25_000;
 const SETUP_IO_TIMEOUT_MS = 12_000;
 function bounded<T>(work: Promise<T>, timeoutMs: number, issue: WhatsAppSetupIssue): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -47,12 +50,26 @@ export async function getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> { retur
 function closeSocket(): void {
   if (restart) { clearTimeout(restart); restart = null; }
   if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
+  if (qrRefreshDeadline) { clearTimeout(qrRefreshDeadline); qrRefreshDeadline = null; }
   if (socket) {
     const previous = socket; socket = null;
     previous.ev.removeAllListeners('connection.update'); previous.ev.removeAllListeners('creds.update');
     // Baileys 7 closes asynchronously; never leave an unhandled rejection on a stale socket.
     try { void Promise.resolve(previous.ws.close()).catch(() => undefined); } catch { /* Socket already closed. */ }
   }
+}
+function scheduleReconnect(): void {
+  if (!wantConnection || restart) return;
+  const backoff = Math.min(3000 * 2 ** retryCount++, 30_000);
+  restart = setTimeout(() => {
+    restart = null;
+    void beginConnect().catch(error => {
+      if (wantConnection) status = {
+        state: 'error', reason: error instanceof WhatsAppPairingError ? error.issue : 'unknown', stage: status.stage
+      };
+    });
+  }, backoff);
+  restart.unref();
 }
 async function connect(): Promise<void> {
   const epoch = ++generation;
@@ -101,30 +118,35 @@ async function connect(): Promise<void> {
     if (epoch !== generation) return;
     if (update.qr) {
       if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
+      if (qrRefreshDeadline) { clearTimeout(qrRefreshDeadline); qrRefreshDeadline = null; }
+      const validity = status.state === 'qr' ? REFRESH_QR_VALIDITY_MS : FIRST_QR_VALIDITY_MS;
       status = { state: 'qr', qr: update.qr, stage: 'qr' };
       retryCount = 0;
+      // Baileys 7 supplies the first QR for 60s and rotates later codes after 20s.
+      // If the socket stalls, never offer an expired code indefinitely to the user.
+      qrRefreshDeadline = setTimeout(() => {
+        if (epoch !== generation || status.state !== 'qr') return;
+        status = { state: 'error', reason: 'qr_timeout', stage: 'qr' };
+        closeSocket();
+        scheduleReconnect();
+      }, validity);
+      qrRefreshDeadline.unref();
     }
     if (update.connection === 'open') {
       if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
+      if (qrRefreshDeadline) { clearTimeout(qrRefreshDeadline); qrRefreshDeadline = null; }
       status = { state: 'connected', stage: 'ready' };
       retryCount = 0;
     }
     if (update.connection === 'close') {
-      if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
-      socket = null;
+      // Baileys may still have a transport object; release all listeners/socket
+      // before retrying, even when the network closes without a new QR.
+      closeSocket();
       const code = (update.lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
       // Never erase authentication automatically: only explicit Disconnect may revoke it.
       if (code === DisconnectReason.loggedOut) { wantConnection = false; status = { state: 'error', reason: 'session_invalid', stage: 'auth' }; return; }
       status = { state: 'error', reason: 'connection_failed', stage: 'network' };
-      if (wantConnection) {
-        restart = setTimeout(() => {
-          restart = null;
-          void beginConnect().catch(error => {
-            if (wantConnection) status = { state: 'error', reason: error instanceof WhatsAppPairingError ? error.issue : 'unknown', stage: status.stage };
-          });
-        }, Math.min(3000 * 2 ** retryCount++, 30000));
-        restart.unref();
-      }
+      scheduleReconnect();
     }
   });
 }
