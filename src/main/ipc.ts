@@ -20,6 +20,7 @@ import { registerJarvisAudioIpc } from './jarvis-audio.js';
 import { registerVaultIpc } from './marks-vault-ipc.js';
 import { registerBrainIpc } from './brain/ipc.js';
 import { registerCompanyIpc } from './company-ipc.js';
+import { initializeCompanyObservability } from './company-observability.js';
 import { initCompanyStore } from './company-store.js';
 import { revokeVaultChat } from './marks-vault-approval.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
@@ -672,6 +673,7 @@ export async function openSessionChat(id: string): Promise<void> {
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerVmsIpc(getWindow);
   initCompanyStore(app.getPath('userData'));
+  initializeCompanyObservability(app.getPath('userData'));
   registerCompanyIpc(getWindow);
   registerNotificationCenterIpc(getWindow);
   registerWorkspaceTerminalIpc(getWindow);

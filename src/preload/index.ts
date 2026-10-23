@@ -112,6 +112,7 @@ export interface SessionDetail {
 }
 
 const api = {
+  companyObserve: () => call<import('../main/company-observability.js').CompanyObservabilityView>('marksCompany:request', {action:'observe'}),
   company: (request: import('../main/company-ipc.js').CompanyIpcRequest) => call<import('../shared/company.js').CompanySnapshot>('marksCompany:request', request),
   notificationWhatsAppStart: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-start' }) as Promise<
     { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |

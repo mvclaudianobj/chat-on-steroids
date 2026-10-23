@@ -3,9 +3,11 @@ import { z } from 'zod';
 import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema } from '../shared/company.js';
 import { getCompany, mutateCompany } from './company-store.js';
 import { createCompanyBroker } from './company-broker.js';
+import { createCompanyObserver } from './company-observability.js';
 
 export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
+  z.object({ action: z.literal('observe') }).strict(),
   z.object({ action: z.literal('dispatch'), payload: z.object({ id: z.string().uuid(), consent: z.literal(true) }).strict() }).strict(),
   z.object({ action: z.literal('refreshBroker'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
   z.object({ action: z.literal('reviewBroker'), payload: z.object({ id: z.string().uuid(), evidence: z.string().trim().min(3).max(400), consent: z.literal(true) }).strict() }).strict(),
@@ -26,6 +28,7 @@ export const companyIpcSchema = z.discriminatedUnion('action', [
 export type CompanyIpcRequest = z.infer<typeof companyIpcSchema>;
 export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void {
   const broker = createCompanyBroker();
+  const observer = createCompanyObserver();
   ipcMain.handle('marksCompany:request', async (event, payload: unknown) => {
     const window = getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame)
@@ -47,6 +50,7 @@ export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void 
           return { ok: false, error: 'Human authorization was not granted' };
       }
       const data = request.action === 'get' ? await getCompany() :
+        request.action === 'observe' ? await observer.snapshot() :
         request.action === 'dispatch' ? await broker.dispatch(request.payload.id) :
         request.action === 'refreshBroker' ? await broker.refresh(request.payload.id) :
         request.action === 'reviewBroker' ? await broker.review(request.payload.id,request.payload.evidence) :

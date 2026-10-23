@@ -1,5 +1,6 @@
 import type { AppApi } from '../preload/index.js';
 import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, companyRestingSeats, companySeatView, type CompanyRequest, type CompanySeatState, type CompanySnapshot } from '../shared/company.js';
+import type { CompanyObservabilityView } from '../main/company-observability.js';
 import { t, onLanguageChange } from './i18n.js';
 
 const names: Record<string, string> = { inbox: 'Inbox', assigned: 'Assigned', working: 'Working', review: 'Review', 'needs-ceo': 'Needs CEO', done: 'Done' };
@@ -24,7 +25,8 @@ const seatStateLabels: Record<CompanySeatState, string> = {
 
 export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   let snapshot: CompanySnapshot | null = null;
-  let view: 'board' | 'office' = 'board';
+  let observed: CompanyObservabilityView | null = null;
+  let view: 'board' | 'office' | 'rpg' = (() => { try { const stored=localStorage.getItem('company:view'); return stored==='rpg'||stored==='office'?stored:'board'; } catch { return 'board'; } })();
   let loading = false;
   const dialog = $('companyDialog') as HTMLDialogElement;
   const content = $('companyDialogContent');
@@ -213,12 +215,64 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     office.append(lounge);
     if (snapshot.meetings.length) { const meeting = el('section', 'company-room company-meeting'); meeting.append(el('h2', '', t('Meeting room'))); for (const row of snapshot.meetings) { meeting.append(button(row.title,()=>meetingDetail(row.id),'company-ceo-action'), el('p', '', `${row.participants.join(' · ')} · ${row.durationMinutes} min`), el('p', '', row.minutes)); for (const decision of row.decisions) meeting.append(el('p', 'company-dialog-hint', `• ${decision}`)); } office.append(meeting); }
   }
+  function workerInspector(seat:string):void {
+    const data=observed?.seats.find(row=>row.seat===seat);
+    if(!data)return;
+    open('Worker inspector');
+    content.append(el('h3','',seat),el('p','company-dialog-hint',`${t('Observed state')}: ${t(data.state)} · ${t('Source')}: ${data.source}`),
+      el('p','company-dialog-hint',`${t('Status since')}: ${new Date(data.statusSince).toLocaleString()}`),
+      el('p','company-dialog-hint',`${t('Last verified')}: ${data.observedAt?new Date(data.observedAt).toLocaleString():t('Unavailable')}`),
+      el('p','company-dialog-hint',`${t('Provenance')}: ${data.provenance}`),
+      el('p','company-dialog-hint',`${t('Tokens reported')}: ${data.tokensUsed??t('Unavailable')} · ${t('Minutes reported')}: ${data.minutesUsed??t('Unavailable')}`));
+    const timeline=el('ol','company-observe-events');timeline.setAttribute('aria-label',t('Worker timeline'));
+    for(const event of observed?.events.filter(e=>e.seat===seat).slice(0,30)??[]){timeline.append(el('li','',`${new Date(event.at).toLocaleString()} · ${t(event.kind)} (${event.source})`));}
+    content.append(el('h4','',t('Worker timeline')),timeline);
+    if(data.ticketId)actions.append(button('Request details',()=>detail(data.ticketId!)));
+  }
+  function paintObservation():void {
+    const panel=$('companyObservePanel');panel.replaceChildren();
+    const head=el('div','company-observe-head');head.append(el('h2','',t('Worker observability')),
+      button('Refresh observations',()=>void loadObservation()));panel.append(head);
+    if(!observed){panel.append(el('p','company-muted',t('Observation unavailable')));return;}
+    panel.append(el('p','company-muted',observed.demo?t('Synthetic example · not live worker status'):
+      `${observed.seats.length} ${t('Configured seats')} · ${observed.attention} ${t('Needs CEO')}`));
+    const list=el('ul','company-observe-list');list.setAttribute('aria-label',t('Observed worker states'));
+    for(const row of observed.seats){const item=el('li');const label=t(row.state);item.append(button(`${row.seat} · ${label} · ${row.source}`,()=>workerInspector(row.seat),'company-observe-worker'));list.append(item);}
+    panel.append(list);
+    const feed=el('ol','company-observe-events');feed.setAttribute('aria-label',t('Worker timeline'));
+    for(const event of observed.events.slice(0,8))feed.append(el('li','',`${event.seat} · ${t(event.kind)} · ${new Date(event.at).toLocaleString()}`));
+    panel.append(feed);
+  }
+  function paintRpg():void {
+    const scene=$('companyRpg');scene.replaceChildren();if(!snapshot)return;
+    const title=el('h2','company-rpg-heading',t('Company RPG · live states only'));scene.append(title);
+    const rooms=el('div','company-rpg-rooms');
+    const defs=[['desks','Work desks'],['meeting','Meeting room'],['rest','Rest room'],['attention','Needs CEO'],['offline','Unverified / disconnected']] as const;
+    const containers=new Map<string,HTMLElement>();
+    for(const [key,name] of defs){const room=el('section',`company-rpg-room company-rpg-${key}`);room.append(el('h3','',t(name)));const group=el('ul','company-rpg-actors');group.setAttribute('aria-label',t(name));room.append(group);containers.set(key,group);rooms.append(room);}
+    for(const seat of snapshot.company.seats.slice(0,10)){
+      const entry=observed?.seats.find(row=>row.seat===seat);
+      const state=entry?.state??'unverified';
+      const room=state==='meeting-present'?'meeting':state==='available-confirmed'?'rest':state==='needs-ceo'?'attention':state==='working'||state==='shell-wait'||state==='review'?'desks':'offline';
+      const li=el('li','company-rpg-actor');li.dataset.seat=seat;li.dataset.state=state;
+      const glyph=el('span','company-rpg-glyph','◆');glyph.setAttribute('aria-hidden','true');
+      li.append(button(`${seat} · ${t(state)}`,()=>workerInspector(seat),'company-rpg-agent'));li.prepend(glyph);
+      containers.get(room)?.append(li);
+    }
+    scene.append(rooms);
+    scene.append(el('p','company-muted',t('Only broker-confirmed transitions move workers; unknown states remain unverified.')));
+  }
+  async function loadObservation():Promise<void>{
+    try{const result=await api.companyObserve();if(!result.ok)throw Error(result.error);observed=result.data;}
+    catch{observed=null;}paintObservation();paintRpg();
+  }
+  function switchView(next:'board'|'office'|'rpg'):void{view=next;try{localStorage.setItem('company:view',view);}catch{}paint();}
   function paint(): void {
     if (!snapshot) return;
     $('companyTitle').textContent = snapshot.company.name;
-    $('companyBoard').hidden = view !== 'board'; $('companyOffice').hidden = view !== 'office';
-    $('companyBoardTab').classList.toggle('is-sel', view === 'board'); $('companyOfficeTab').classList.toggle('is-sel', view === 'office');
-    $('companyBoardTab').setAttribute('aria-pressed', String(view === 'board')); $('companyOfficeTab').setAttribute('aria-pressed', String(view === 'office'));
+    $('companyBoard').hidden = view !== 'board'; $('companyOffice').hidden = view !== 'office'; $('companyRpg').hidden=view!=='rpg';
+    $('companyBoardTab').classList.toggle('is-sel', view === 'board'); $('companyOfficeTab').classList.toggle('is-sel', view === 'office'); $('companyRpgTab').classList.toggle('is-sel',view==='rpg');
+    $('companyBoardTab').setAttribute('aria-pressed', String(view === 'board')); $('companyOfficeTab').setAttribute('aria-pressed', String(view === 'office')); $('companyRpgTab').setAttribute('aria-pressed',String(view==='rpg'));
     const empty = snapshot.requests.length === 0; $('companyEmpty').hidden = !empty || view === 'office'; $('companyBoard').hidden ||= empty;
     const working = snapshot.requests.filter(r => r.status === 'working').length;
     const attention = snapshot.requests.filter(r => r.status === 'needs-ceo').length;
@@ -226,7 +280,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     for (const [label, number, description] of [[t('Open requests'), snapshot.requests.filter(r => r.status !== 'done').length, t('Across all projects')], [t('In progress'), working, t('Assigned to employees')], [t('Needs your decision'), attention, t('CEO attention required')], [t('Tokens recorded'), snapshot.requests.reduce((sum, r) => sum + r.tokensUsed, 0), t('Synthetic estimates in demo')]] as const) {
       const metric = el('div', 'company-metric'); metric.append(el('span', '', label), el('strong', '', fmt(number)), el('small', '', description)); metrics.append(metric);
     }
-    paintBoard(); paintOffice();
+    paintBoard(); paintOffice(); paintRpg(); paintObservation();
     const ceo = $('companyCeo'); ceo.replaceChildren();
     const requests = snapshot.requests.filter(r => r.status === 'needs-ceo');
     if (!requests.length) ceo.append(el('p', 'company-muted', t('All clear. Nothing needs your decision.')));
@@ -237,15 +291,16 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     if (!snapshot.activities.length) activity.append(el('p', 'company-muted', t('No activity yet.')));
   }
   async function refresh(): Promise<void> {
-    try { const reply = await api.company({ action: 'get' }); if (!reply.ok) throw new Error(reply.error); snapshot = reply.data; paint(); }
+    try { const reply = await api.company({ action: 'get' }); if (!reply.ok) throw new Error(reply.error); snapshot = reply.data; paint(); await loadObservation(); }
     catch (error) { $('companyEmpty').hidden = false; $('companyEmpty').append(el('p', 'company-error', (error as Error).message)); }
   }
   $('companyNewRequest').addEventListener('click', newRequest);
   $('companyMeetingCreate').addEventListener('click', newMeeting);
   $('companySettings').addEventListener('click', settings);
   $('companyLoadDemo').addEventListener('click', () => void change({ action: 'demo' }));
-  $('companyBoardTab').addEventListener('click', () => { view = 'board'; paint(); });
-  $('companyOfficeTab').addEventListener('click', () => { view = 'office'; paint(); });
+  $('companyBoardTab').addEventListener('click', () => switchView('board'));
+  $('companyOfficeTab').addEventListener('click', () => switchView('office'));
+  $('companyRpgTab').addEventListener('click', () => switchView('rpg'));
   onLanguageChange(() => { if (snapshot) paint(); });
   return { refresh };
 }

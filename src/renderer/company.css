@@ -29,3 +29,20 @@
 .company-rest-review {background:none;border:0;color:var(--accent);cursor:pointer;font-size:11px;text-decoration:underline;text-underline-offset:2px;padding:5px}
 .company-rest-review:focus-visible {outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
 .company-rest-demo {margin-top:15px!important}
+
+/* O5: optional original CSS RPG, no external artwork or simulation timers. */
+.company-rpg[hidden],.company-observe-panel[hidden]{display:none!important}
+.company-rpg{padding:18px;border:1px solid var(--line);border-radius:14px;background:var(--sunk)}
+.company-rpg-heading{font-size:16px;margin:0 0 18px}
+.company-rpg-rooms{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+.company-rpg-room{min-height:146px;border:2px solid var(--line);border-radius:9px;background:var(--card);padding:13px}
+.company-rpg-room h3{font-size:12px;margin:0 0 13px}
+.company-rpg-actors,.company-observe-list{list-style:none;padding:0;display:flex;flex-wrap:wrap;gap:10px}
+.company-rpg-actor{display:flex;align-items:center;gap:4px;padding:5px;border:1px solid var(--line);border-radius:8px}
+.company-rpg-glyph{color:var(--accent);font-size:18px}
+.company-rpg-agent,.company-observe-worker{border:0;background:transparent;color:var(--ink);cursor:pointer;font-size:12px}
+.company-rpg-agent:focus-visible,.company-observe-worker:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
+.company-rpg-meeting{border-style:dashed}.company-rpg-attention{border-color:var(--red)}
+.company-observe-panel{margin-top:16px}.company-observe-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.company-observe-events{max-height:180px;overflow:auto;font-size:11px;color:var(--soft);padding-left:22px}
+@media(prefers-reduced-motion:reduce){.company-rpg *{transition:none!important;animation:none!important}}

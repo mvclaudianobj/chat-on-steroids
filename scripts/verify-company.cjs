@@ -71,7 +71,20 @@ app.whenReady().then(async()=>{
   await js("document.documentElement.dataset.theme='light'; const sheet=document.createElement('style');sheet.id='company-fixture-light';sheet.textContent=':root, :root[data-theme=dark] {--page:#f4f4f5!important;--card:#ffffff!important;--ink:#0c0c0e!important;--soft:#56565e!important;--line:#e7e7ea!important;--sunk:#f7f7f8!important;--accent:#486f9d!important;--red:#b4262c!important;}';document.head.append(sheet)");
   await screenshot('company-office-light.png');
   await screenshot('company-rest-light.png');
+  await js("document.getElementById('companyRpgTab').click()");
+  await until("!document.getElementById('companyRpg').hidden");
+  assert.equal(await js("document.querySelectorAll('.company-rpg-room').length"),5);
+  assert.equal(await js("document.querySelectorAll('.company-rpg-actor').length"),6);
+  assert.equal(await js("document.querySelectorAll('.company-rpg-meeting .company-rpg-actor').length"),0);
+  assert.equal(await js("document.querySelectorAll('.company-rpg-rest .company-rpg-actor').length"),0);
+  await screenshot('company-rpg-light.png');
+  await js("document.getElementById('companyOfficeTab').click()");
+  assert.equal(await js("document.getElementById('companyOffice').hidden"),false);
+  await js("document.getElementById('companyRpgTab').click()");
+  assert.equal(await js("localStorage.getItem('company:view')"),'rpg');
   await js("document.getElementById('companyBoardTab').click()");
+  await screenshot('company-rpg-dark.png');
+
   await screenshot('company-board-light.png');
   await js("document.querySelector('.company-ticket').click()");
   assert.equal(await js("document.getElementById('companyDialog').open"),true);
