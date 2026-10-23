@@ -3971,5 +3971,8 @@
   "WhatsApp could not connect. Check the network and try again.": "O WhatsApp não conseguiu ligar-se. Verifique a rede e tente novamente.",
   "WhatsApp did not provide a QR code in time. Try connecting again.": "O WhatsApp não apresentou um código QR a tempo. Tente ligar novamente.",
   "WhatsApp QR image could not be generated. Try again.": "Não foi possível gerar a imagem do código QR do WhatsApp. Tente novamente.",
-  "WhatsApp Web could not start. Check the connection and local session storage.": "O WhatsApp Web não iniciou. Verifique a ligação e o armazenamento local da sessão."
+  "WhatsApp Web could not start. Check the connection and local session storage.": "O WhatsApp Web não iniciou. Verifique a ligação e o armazenamento local da sessão.",
+  "Select or type text to remember.": "Selecione ou digite o texto a memorizar.",
+  "Save selected or drafted text as a local Brain memory.": "Salvar texto selecionado ou rascunho como memória local do Brain.",
+  "Meeting": "Reunião"
 }

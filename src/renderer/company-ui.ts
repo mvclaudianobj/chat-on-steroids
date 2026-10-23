@@ -67,7 +67,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     if (!snapshot) return;
     open('Company settings');
     const name = input(snapshot.company.name);
-    const count = input(String(snapshot.company.seatCount), 'number'); count.min = '1'; count.max = '50';
+    const count = input(String(snapshot.company.seatCount), 'number'); count.min = '1'; count.max = String(Math.max(10, snapshot.company.seatCount));
     content.append(field('Company name', name), field('Employee seats', count), el('p', 'company-dialog-hint', t('Management roles stay fixed. Employee seats are named marks1 through marksN.')));
     actions.append(button('Save settings', () => void change({ action: 'configure', payload: { name: name.value.trim(), seatCount: Number(count.value) } }), 'btn btn-solid'));
   }
@@ -81,6 +81,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     content.append(el('h4', '', t('Acceptance criteria')), el('p', '', request.acceptance));
     content.append(el('p', 'company-dialog-hint', `${t('Token budget')}: ${fmt(request.tokensUsed)} / ${fmt(request.tokenBudget)} · ${t('Time budget (minutes)')}: ${request.minutesUsed} / ${request.timeBudgetMinutes}`));
     content.append(el('h4', '', 'RACI'), el('p', 'company-dialog-hint', `R: ${request.raci.responsible} · A: ${request.raci.accountable} · C: ${request.raci.consulted.join(', ')} · I: ${request.raci.informed.join(', ')}`));
+    if (request.execution) content.append(el('p','company-dialog-hint',`Execution: ${request.execution.phase} · ${request.execution.workerId ?? 'unbound'} · ${request.execution.evidence ?? 'No verified report'}`));
     content.append(el('h4', '', t('History')));
     const history = el('div', 'company-history'); for (const item of request.history.slice(-10).reverse()) history.append(el('p', '', `${date(item.at)} · ${item.actor}: ${item.note}`)); content.append(history);
     actions.append(button('Save assignment', () => void change({ action: 'seat', payload: { id, seat: seat.value || null } })));
@@ -111,6 +112,25 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
       board.append(column);
     }
   }
+  function newMeeting(): void {
+    if (!snapshot) return;
+    open('Convene all workers');
+    const meetingTitle = input('Coordination meeting');
+    const agenda = el('textarea'); agenda.value = 'Review priorities, dependencies and next actions.';
+    const minutes = input('30','number'); minutes.min='1'; minutes.max='480';
+    content.append(field('Meeting title',meetingTitle),field('Agenda',agenda),field('Duration (minutes)',minutes),el('p','company-dialog-hint',`${snapshot.company.seats.length} seats will be invited. Invitation does not imply attendance.`));
+    actions.append(button('Send invitations',()=>void change({action:'meeting',payload:{title:meetingTitle.value.trim(),agenda:agenda.value.trim(),durationMinutes:Number(minutes.value)}}),'btn btn-solid'));
+  }
+  function meetingDetail(id:string):void {
+    const meeting = snapshot?.meetings.find(item=>item.id===id); if(!meeting) return;
+    open('Meeting room');
+    content.append(el('h3','',meeting.title),el('p','company-dialog-hint',meeting.agenda ?? '' ));
+    for (const invite of meeting.invitations ?? []) content.append(el('p','company-dialog-hint',`${invite.seat} · ${invite.state} ${invite.confirmedAt ? '✓' : ''} ${invite.contribution}`));
+    content.append(el('p','company-dialog-hint','Presence requires independent worker acknowledgement; no invitation is attendance.'));
+    const notes=el('textarea');notes.value=meeting.minutes;notes.rows=4; content.append(field('Minutes',notes));
+    const decisions=el('textarea'); decisions.value=meeting.decisions.join('\n');content.append(field('Decisions (one per line)',decisions));
+    actions.append(button('Save minutes',()=>void change({action:'minutes',payload:{id,minutes:notes.value,decisions:decisions.value.split('\n').map(x=>x.trim()).filter(Boolean)}}),'btn btn-solid'));
+  }
   function paintOffice(): void {
     const office = $('companyOffice'); office.replaceChildren(); if (!snapshot) return;
     COMPANY_ROLES.forEach((role, index) => {
@@ -134,7 +154,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
       }
       room.append(desks); office.append(room);
     });
-    if (snapshot.meetings.length) { const meeting = el('section', 'company-room company-meeting'); meeting.append(el('h2', '', t('Meeting room'))); for (const row of snapshot.meetings) { meeting.append(el('strong', '', row.title), el('p', '', `${row.participants.join(' · ')} · ${row.durationMinutes} min`), el('p', '', row.minutes)); for (const decision of row.decisions) meeting.append(el('p', 'company-dialog-hint', `• ${decision}`)); } office.append(meeting); }
+    if (snapshot.meetings.length) { const meeting = el('section', 'company-room company-meeting'); meeting.append(el('h2', '', t('Meeting room'))); for (const row of snapshot.meetings) { meeting.append(button(row.title,()=>meetingDetail(row.id),'company-ceo-action'), el('p', '', `${row.participants.join(' · ')} · ${row.durationMinutes} min`), el('p', '', row.minutes)); for (const decision of row.decisions) meeting.append(el('p', 'company-dialog-hint', `• ${decision}`)); } office.append(meeting); }
   }
   function paint(): void {
     if (!snapshot) return;
@@ -164,6 +184,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     catch (error) { $('companyEmpty').hidden = false; $('companyEmpty').append(el('p', 'company-error', (error as Error).message)); }
   }
   $('companyNewRequest').addEventListener('click', newRequest);
+  $('companyMeetingCreate').addEventListener('click', newMeeting);
   $('companySettings').addEventListener('click', settings);
   $('companyLoadDemo').addEventListener('click', () => void change({ action: 'demo' }));
   $('companyBoardTab').addEventListener('click', () => { view = 'board'; paint(); });

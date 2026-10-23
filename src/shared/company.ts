@@ -11,12 +11,13 @@ export const companyStateNameSchema = z.enum(COMPANY_STATES);
 export const companySeatSchema = z.string().regex(/^marks(?:[1-9][0-9]?)$/);
 const safeText = (limit: number) => z.string().trim().min(1).max(limit);
 const tick = z.number().int().min(0);
+export const companyPresenceSchema = z.enum(['invited','accepted','declined','present']);
 const actor = z.union([z.literal('ceo'), companyRoleSchema, companySeatSchema]);
 export const companySchema = z.object({
   name: safeText(100),
-  seatCount: z.number().int().min(1).max(50).default(5),
+  seatCount: z.number().int().min(1).max(99).default(5),
   roles: z.tuple([z.literal('marks-coo'), z.literal('marks-cto'), z.literal('marks-cio'), z.literal('marks-cpo'), z.literal('marks-cko'), z.literal('marks-cqo'), z.literal('marks-cco')]),
-  seats: z.array(companySeatSchema).min(1).max(50)
+  seats: z.array(companySeatSchema).min(1).max(99)
 }).strict().superRefine((data, context) => {
   if (data.seats.length !== data.seatCount || data.seats.some((seat, index) => seat !== `marks${index + 1}`))
     context.addIssue({ code: 'custom', path: ['seats'], message: 'Seats must be marks1..N' });
@@ -29,10 +30,12 @@ export const companyRequestSchema = z.object({
   tokensUsed: z.number().int().min(0).max(10_000_000), minutesUsed: z.number().int().min(0).max(525600),
   dueAt: tick.nullable(), status: companyStateNameSchema,
   raci: z.object({ responsible: actor, accountable: actor, consulted: z.array(actor).max(20), informed: z.array(actor).max(20) }).strict(),
+  execution: z.object({ mode: z.enum(['simulated','live']), phase: z.enum(['awaiting-authorization','admitted','running','reported','failed']), ownerId: z.string().uuid().nullable(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/).nullable(), runId: z.string().uuid().nullable(), reportId: z.string().max(100).nullable(), result: z.string().max(1200).nullable(), evidence: z.string().max(1200).nullable(), authorizedAt: tick.nullable() }).strict().optional(),
   history: z.array(companyHistorySchema).max(300), createdAt: tick, updatedAt: tick
 }).strict();
 export const companyMeetingSchema = z.object({
-  id: z.string().uuid(), title: safeText(160), participants: z.array(actor).min(2).max(30),
+  id: z.string().uuid(), title: safeText(160), participants: z.array(actor).min(2).max(101),
+  invitations: z.array(z.object({ seat: companySeatSchema, state: companyPresenceSchema, contribution: z.string().max(1600), confirmedAt: tick.nullable(), evidence: z.string().max(400).nullable() }).strict()).max(99).optional(), agenda: z.string().max(2400).optional(),
   at: tick, durationMinutes: z.number().int().min(1).max(480), minutes: z.string().max(5000),
   decisions: z.array(safeText(800)).max(30), brainSync: z.literal('pending')
 }).strict();

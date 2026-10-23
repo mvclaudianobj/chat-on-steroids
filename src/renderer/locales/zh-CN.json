@@ -3875,5 +3875,8 @@
   "WhatsApp could not connect. Check the network and try again.": "WhatsApp could not connect. Check the network and try again.",
   "WhatsApp did not provide a QR code in time. Try connecting again.": "WhatsApp did not provide a QR code in time. Try connecting again.",
   "WhatsApp QR image could not be generated. Try again.": "WhatsApp QR image could not be generated. Try again.",
-  "WhatsApp Web could not start. Check the connection and local session storage.": "WhatsApp Web could not start. Check the connection and local session storage."
+  "WhatsApp Web could not start. Check the connection and local session storage.": "WhatsApp Web could not start. Check the connection and local session storage.",
+  "Select or type text to remember.": "选择或键入要记住的文本。",
+  "Save selected or drafted text as a local Brain memory.": "将选定或起草的文本保存为本地大脑记忆。",
+  "Meeting": "会议"
 }

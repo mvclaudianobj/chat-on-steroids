@@ -28,12 +28,13 @@ describe('company durable store', () => {
   it('creates, moves, assigns and persists one request across reads', async () => {
     const added = await mutateCompany('create', create);
     const id = added.requests[0]!.id;
-    await mutateCompany('move', { id, status: 'working' });
-    expect((await getCompany()).requests[0]).toMatchObject({ seat: 'marks1', status: 'working' });
+    await mutateCompany('seat', { id, seat: 'marks1' });
+    await mutateCompany('move', { id, status: 'assigned' });
+    expect((await getCompany()).requests[0]).toMatchObject({ seat: 'marks1', status: 'assigned' });
     await mutateCompany('seat', { id, seat: 'marks3' });
     const stored = JSON.parse(await fs.readFile(path.join(dir, 'company', 'company.json'), 'utf8'));
-    expect(companySnapshotSchema.parse(stored).requests[0]).toMatchObject({ seat: 'marks3', status: 'working' });
-    expect((await getCompany()).activities).toHaveLength(3);
+    expect(companySnapshotSchema.parse(stored).requests[0]).toMatchObject({ seat: 'marks3', status: 'assigned' });
+    expect((await getCompany()).activities).toHaveLength(4);
   });
   it('does not mutate an existing file on invalid reassignment or rejected capacity reduction', async () => {
     const added = await mutateCompany('create', create); const id = added.requests[0]!.id;
@@ -51,5 +52,52 @@ describe('company durable store', () => {
   it('inserts sample data only with an explicit action', async () => {
     const sample = await mutateCompany('demo', undefined); expect(sample.demo).toBe(true);
     await expect(mutateCompany('demo', undefined)).rejects.toThrow('empty company');
+  });
+});
+
+
+describe('phase 2 pilot safety', () => {
+  it('keeps explicit seat and blocks false Done until matching worker report', async () => {
+    const ticket = (await mutateCompany('create', create)).requests[0]!;
+    await expect(mutateCompany('move',{id:ticket.id,status:'working'})).rejects.toThrow('Working requires verified broker admission');
+    await mutateCompany('seat',{id:ticket.id,seat:'marks5'});
+    await mutateCompany('move',{id:ticket.id,status:'assigned'});
+    await expect(mutateCompany('move',{id:ticket.id,status:'done'})).rejects.toThrow('Verified report required');
+    expect((await getCompany()).requests[0]!.seat).toBe('marks5');
+    const ownerId='00000000-0000-4000-8000-000000000201', runId='00000000-0000-4000-8000-000000000202';
+    await mutateCompany('authorize',{id:ticket.id,ownerId,runId,workerId:'worker-5',consent:true});
+    await expect(mutateCompany('seat',{id:ticket.id,seat:'marks2'})).rejects.toThrow('Cannot silently replace');
+    await expect(mutateCompany('report',{id:ticket.id,runId,workerId:'worker-4',reportId:'r1',result:'Done',evidence:'run receipt',outcome:'completed'})).rejects.toThrow('Worker identity mismatch');
+    expect((await getCompany()).requests[0]!.status).toBe('working');
+    await mutateCompany('report',{id:ticket.id,runId,workerId:'worker-5',reportId:'r1',result:'Finished review',evidence:'session event #123',outcome:'completed'});
+    expect((await getCompany()).requests[0]).toMatchObject({status:'review',seat:'marks5',execution:{phase:'reported',reportId:'r1'}});
+    await mutateCompany('move',{id:ticket.id,status:'done'});
+    expect((await getCompany()).requests[0]!.status).toBe('done');
+  });
+  it('invites all seats; never presumes presence or saves minutes to Brain', async () => {
+    await mutateCompany('configure',{name:'Pilot',seatCount:10});
+    const snapshot = await mutateCompany('meeting',{title:'Team sync',agenda:'Planning',durationMinutes:30});
+    const meeting = snapshot.meetings[0]!;
+    expect(meeting.invitations).toHaveLength(10);
+    expect(meeting.invitations!.every(i=>i.state==='invited' && i.confirmedAt===null)).toBe(true);
+    await expect(mutateCompany('attendance',{id:meeting.id,seat:'marks1',state:'present',contribution:'Here',evidence:'simulated-signature'})).rejects.toThrow('Presence requires acceptance');
+    await mutateCompany('attendance',{id:meeting.id,seat:'marks1',state:'accepted',contribution:'',evidence:'simulated-ack'});
+    await mutateCompany('attendance',{id:meeting.id,seat:'marks1',state:'present',contribution:'I can check the tests',evidence:'simulated-message-1'});
+    await mutateCompany('minutes',{id:meeting.id,minutes:'Synthetic agenda minutes',decisions:['Continue review']});
+    const persisted=(await getCompany()).meetings[0]!;
+    expect(persisted.invitations!.filter(i=>i.state==='present')).toHaveLength(1);
+    expect(persisted.invitations![1]!.state).toBe('invited');
+    expect(persisted.brainSync).toBe('pending');
+  });
+  it('keeps legacy configurations above ten without deleting seats or tickets', async () => {
+    const old = emptyCompany(); old.company.seatCount=20; old.company.seats=Array.from({length:20},(_,i)=>`marks${i+1}`);
+    await fs.mkdir(path.join(dir,'company'),{recursive:true});
+    await fs.writeFile(path.join(dir,'company','company.json'),JSON.stringify(old));
+    const ticket=(await mutateCompany('create',create)).requests[0]!;
+    await mutateCompany('seat',{id:ticket.id,seat:'marks20'});
+    await mutateCompany('configure',{name:'Still legacy',seatCount:20});
+    expect((await getCompany()).company.seats).toContain('marks20');
+    await expect(mutateCompany('configure',{name:'Shrink',seatCount:10})).rejects.toThrow('Reassign');
+    expect((await getCompany()).requests[0]!.seat).toBe('marks20');
   });
 });
