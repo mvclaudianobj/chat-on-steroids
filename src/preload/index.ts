@@ -116,7 +116,8 @@ const api = {
   notificationCenterGet: () => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'get' }),
   notificationCenterSave: (settings: import('../shared/notification-center.js').NotificationCenterSettings) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'save', settings }),
   notificationCenterSetCredential: (channel: import('../shared/notification-center.js').NotificationChannel, credential: string, masterPassword: string) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'credential', channel, credential, masterPassword }),
-  notificationCenterTest: (channel: import('../shared/notification-center.js').NotificationChannel) => call<{ delivered: number }>('marksNotify:request', { action: 'test', channel }),
+  notificationCenterTest: (channel: import('../shared/notification-center.js').NotificationChannel) =>
+    ipcRenderer.invoke('marksNotify:request', { action: 'test', channel }) as Promise<{ ok: true; data: { delivered: number } } | { ok: false; error: string; failure?: import('../shared/notification-center.js').NotificationFailure }>,
   notificationCenterExport: () => call<boolean>('marksNotify:request', { action: 'export' }),
   notificationCenterImport: () => call<{ imported: boolean }>('marksNotify:request', { action: 'import' }),
   /** System.Speech is available only through Windows PowerShell. */

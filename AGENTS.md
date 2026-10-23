@@ -5126,8 +5126,33 @@ and the version owners report availability; notifications only observe those eve
 and never answer a permission prompt or start an update. Per-event throttling,
 per-channel hourly limits, bounded batch windows, opt-in excerpts, HTTPS/TLS
 enforcement and restricted template substitution belong to the main process.
+A failed test or send is a `NotificationDeliveryError` (`main/notification-failure.ts`) carrying
+only a `NotificationFailure` from `shared/notification-center.ts`: a code from
+`NOTIFICATION_FAILURE_CODES` (DNS, connect timeout, refused, closed, TLS untrusted or name
+mismatch, STARTTLS missing, auth/sender/recipient refused, server error; for HTTP providers
+invalid token, unknown chat/number, rate limited, 4xx/5xx), the channel, the numeric SMTP reply
+or HTTP status, a `cloudflare` flag when a resolved address is in Cloudflare's published proxy
+ranges (embedded as data; proxied records carry no SMTP), and for TLS failures the presented
+certificate's names, self-signed flag and SHA-256 fingerprint. Provider response text is read
+only to classify and is never kept; passwords, tokens, URLs and bodies never enter a failure.
+IPC returns it as `failure` beside the fixed English error, the log line names the code, and the
+renderer's `notificationFailureMessage` translates an actionable sentence per code (12 catalogs).
+`main/notification-smtp.ts` decides trust itself after the handshake (`rejectUnauthorized: false`
+plus an explicit check of `authorized`, the host name and the pin) before writing anything over
+TLS, so no AUTH or mail ever follows an unchecked certificate; replies sent in plain text before
+the STARTTLS handshake are discarded. As a documented fallback for a server without a publicly
+trusted certificate, the SMTP card offers "Trust this certificate" after a `tls_untrusted` or
+`tls_hostname_mismatch` failure: after an explicit confirm showing the fingerprint, the exact
+`fingerprint256` is stored as the non-secret SMTP setting `tlsFingerprint` (validated form).
+With a pin, only that certificate is accepted (still encrypted, STARTTLS still mandatory, host
+names no longer checked); any other one fails `tls_untrusted` with `pinned`. "Remove trust"
+deletes it. A certificate from a public authority for the configured host is the recommendation.
+`sendSmtp(..., { inspectOnly: true, connectAddress })` stops after the certificate check
+without credentials, for diagnostics.
 `test/notification-center.test.ts`, `test/notification-persistence.test.ts`,
-`test/notification-http-providers.test.ts`, `test/notification-smtp.test.ts` and
+`test/notification-http-providers.test.ts`, `test/notification-smtp.test.ts` (local fake SMTP
+with in-memory test certificates from `test/fixtures/test-certificate.ts`),
+`test/notification-center-renderer.test.ts` and
 `scripts/verify-notification-center.cjs` cover settings import/export round trips,
 Vault K, fake transports and real Electron UI without real credentials. Real-provider
 delivery still requires separate manual homologation. This item is stacked on Vault

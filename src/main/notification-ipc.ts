@@ -7,6 +7,7 @@ import { z } from 'zod';
 import { NOTIFICATION_CHANNELS } from '../shared/notification-center.js';
 import { importNotificationSettings, notificationSettings, notificationView, saveNotificationSettings, setNotificationCredential, testNotificationChannel } from './notification-center.js';
 import { logWarn } from './logger.js';
+import { describeFailure, NotificationDeliveryError } from './notification-failure.js';
 import { dialogLabel, mainText } from './main-texts.js';
 
 const request = z.discriminatedUnion('action', [
@@ -85,8 +86,15 @@ export function registerNotificationCenterIpc(getWindow: () => BrowserWindow | n
       return { ok: true, data };
     } catch (error) {
       // Never echo exception text from transport: fetch errors may carry endpoint/token URLs.
-      logWarn(`Notification IPC: request refused (${error instanceof z.ZodError ? 'invalid schema' : 'permission, credential, setting or provider failure'}); sensitive details omitted`);
-      return { ok: false, error: error instanceof z.ZodError ? 'Invalid notification settings' : 'Notification request failed. Check channel configuration and connection.' };
+      // A classified delivery failure carries only a code and public context (SMTP/HTTP status,
+      // the presented certificate's names and fingerprint), which the renderer translates.
+      if (error instanceof z.ZodError) {
+        logWarn('Notification IPC: request refused (invalid schema)');
+        return { ok: false, error: 'Invalid notification settings' };
+      }
+      const failure = error instanceof NotificationDeliveryError ? error.failure : null;
+      logWarn(`Notification IPC: request refused (${failure ? describeFailure(failure) : 'permission, credential or setting failure'}); secrets and provider text omitted`);
+      return { ok: false, error: 'Notification request failed. Check channel configuration and connection.', ...(failure ? { failure } : {}) };
     }
   });
 }

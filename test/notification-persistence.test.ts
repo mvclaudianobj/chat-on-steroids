@@ -212,8 +212,26 @@ describe('notification center persistent state', () => {
     // The old encrypted Vault K entry remains intact, but the imported configuration cannot reuse it.
     expect((await vault.listVault()).some(entry => entry.name === 'notification/telegram')).toBe(true);
     await expect(center.dispatchNotice({ event: 'turn-completed', title: 'Synthetic', project: 'test' }, { channel: 'telegram', test: true }))
-      .rejects.toThrow(/must be saved/);
+      .rejects.toThrow(/credential_missing/);
     expect(await invoke({ action: 'credential', channel: 'telegram', credential: 'new-synthetic-token', masterPassword })).toMatchObject({ ok: true, data: { credentials: { telegram: true } } });
+  });
+
+  it('returns the classified failure of a channel test over IPC and keeps a pinned certificate', async () => {
+    const { center } = await boot();
+    const settings = structuredClone(await center.notificationSettings());
+    const pin = Array.from({ length: 32 }, (_, index) => index.toString(16).padStart(2, '0').toUpperCase()).join(':');
+    settings.channels.smtp.destinations = ['to@example.com'];
+    settings.channels.smtp.config = { host: 'mail.example.com', port: '587', security: 'starttls', username: 'u', from: 'from@example.com', tlsFingerprint: pin };
+    await center.saveNotificationSettings(settings);
+    expect(JSON.parse(await fs.readFile(settingsFile(), 'utf8')).channels.smtp.config.tlsFingerprint).toBe(pin);
+    const malformed = structuredClone(settings);
+    malformed.channels.smtp.config.tlsFingerprint = 'not-a-fingerprint';
+    expect(() => center.saveNotificationSettings(malformed)).toThrow(/fingerprint/);
+    const sender = { isDestroyed: () => false, mainFrame: {} };
+    const { registerNotificationCenterIpc } = await import('../src/main/notification-ipc.js');
+    registerNotificationCenterIpc(() => ({ webContents: sender, isDestroyed: () => false }) as never);
+    const reply = await ipcHandlers.get('marksNotify:request')!({ sender, senderFrame: sender.mainFrame }, { action: 'test', channel: 'smtp' });
+    expect(reply).toEqual({ ok: false, error: 'Notification request failed. Check channel configuration and connection.', failure: { code: 'credential_missing', channel: 'smtp' } });
   });
 
   it('rejects malformed imported files without changing settings', async () => {
