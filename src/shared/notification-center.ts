@@ -23,7 +23,7 @@ export interface NotificationCenterView {
 
 /** The only details about WhatsApp setup that may cross IPC. Never include OS/provider messages. */
 export const WHATSAPP_SETUP_ISSUES = [
-  'storage_unavailable', 'session_invalid', 'runtime_unavailable',
+  'storage_unavailable', 'session_invalid', 'runtime_unavailable', 'initialization_failed',
   'connection_failed', 'qr_timeout', 'qr_render_failed', 'unknown'
 ] as const;
 export type WhatsAppSetupIssue = typeof WHATSAPP_SETUP_ISSUES[number];
@@ -35,7 +35,7 @@ export type WhatsAppSetupIssue = typeof WHATSAPP_SETUP_ISSUES[number];
  */
 export const NOTIFICATION_FAILURE_CODES = [
   'config_incomplete', 'credential_missing', 'credential_unavailable',
-  'dns_failed', 'connect_timeout', 'connection_refused', 'network_unreachable', 'connection_closed', 'server_timeout',
+  'dns_failed', 'connect_timeout', 'connection_refused', 'network_unreachable', 'connection_closed', 'server_timeout', 'whatsapp_disconnected',
   'tls_untrusted', 'tls_hostname_mismatch', 'starttls_unavailable',
   'auth_failed', 'sender_rejected', 'recipient_rejected', 'server_error',
   'invalid_token', 'unknown_destination', 'rate_limited', 'http_client_error', 'http_server_error',

@@ -210,7 +210,7 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
     } else if (channel === 'whatsapp-web') {
       for (const number of choice.destinations) {
         try { await sendWhatsAppWeb(number, `${title}\n${body}`); }
-        catch { throw deliveryFailure('connection_closed'); }
+        catch { throw deliveryFailure('whatsapp_disconnected'); }
         delivered++;
       }
     } else if (channel === 'whatsapp-cloud') {

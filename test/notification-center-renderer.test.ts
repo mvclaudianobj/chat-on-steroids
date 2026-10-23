@@ -14,6 +14,16 @@ afterEach(() => { vi.unstubAllGlobals(); dom.window.close(); });
 
 const FINGERPRINT = '6E:41:27:0A:BC:66:6B:87:94:3D:D1:34:B3:AF:AB:B6:4C:6F:E1:84:94:9B:42:34:C1:D5:30:C0:68:75:83:52';
 
+it('keeps WhatsApp disconnected guidance separate from SMTP TLS errors', async () => {
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  const { notificationFailureMessage, whatsappSetupMessage } = await import('../src/renderer/notification-center.js');
+  setLanguage('pt-BR');
+  expect(notificationFailureMessage({ code: 'whatsapp_disconnected', channel: 'whatsapp-web' })).toContain('QR code');
+  expect(notificationFailureMessage({ code: 'whatsapp_disconnected', channel: 'whatsapp-web' })).not.toContain('STARTTLS');
+  expect(notificationFailureMessage({ code: 'connection_closed', channel: 'smtp' })).toContain('STARTTLS');
+  expect(whatsappSetupMessage('initialization_failed')).not.toContain('pacote');
+});
+
 it.each(languages)('explains every failure code in %s', async locale => {
   const { setLanguage } = await import('../src/renderer/i18n.js');
   const { notificationFailureMessage } = await import('../src/renderer/notification-center.js');

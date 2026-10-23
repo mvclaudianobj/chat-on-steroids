@@ -61,6 +61,7 @@ export function whatsappSetupMessage(issue?: WhatsAppSetupIssue): string {
     case 'storage_unavailable': return t('WhatsApp cannot access local session storage. Check folder permissions and free disk space.');
     case 'session_invalid': return t('WhatsApp session data cannot be read. Check local permissions; do not delete your session files.');
     case 'runtime_unavailable': return t('WhatsApp Web could not initialize. Check the installed application package.');
+    case 'initialization_failed': return t('WhatsApp Web failed to initialize its connection. Try again or update the application.');
     case 'connection_failed': return t('WhatsApp could not connect. Check the network and try again.');
     case 'qr_timeout': return t('WhatsApp did not provide a QR code in time. Try connecting again.');
     case 'qr_render_failed': return t('WhatsApp QR image could not be generated. Try again.');
@@ -80,6 +81,7 @@ export function notificationFailureMessage(failure: NotificationFailure): string
     case 'connection_refused': parts.push(t('The server refused the connection on this port. Check the port and connection security.')); break;
     case 'network_unreachable': parts.push(t('The server cannot be reached from this computer. Check the network connection.')); break;
     case 'connection_closed': parts.push(t('The server closed the connection unexpectedly. Check the port and connection security (TLS or STARTTLS).')); break;
+    case 'whatsapp_disconnected': parts.push(t('WhatsApp is disconnected. Connect it using the QR code before sending a test.')); break;
     case 'server_timeout': parts.push(t('The server stopped answering. Try again later.')); break;
     case 'tls_untrusted': parts.push(failure.pinned
       ? t('The server presented a different certificate than the one you trusted. Trust it again only if the server administrator confirms the change.')

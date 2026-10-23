@@ -18,7 +18,7 @@ function startupIssue(error: unknown, phase: 'storage' | 'auth' | 'runtime'): Wh
   if (['EACCES', 'EPERM', 'EROFS', 'ENOSPC', 'EDQUOT', 'EIO', 'ENOTDIR'].includes(code)) return 'storage_unavailable';
   if (phase === 'auth' && (error instanceof SyntaxError || code === 'ERR_INVALID_ARG_TYPE')) return 'session_invalid';
   if (phase === 'runtime' && ['MODULE_NOT_FOUND', 'ERR_MODULE_NOT_FOUND'].includes(code)) return 'runtime_unavailable';
-  return phase === 'storage' ? 'storage_unavailable' : phase === 'auth' ? 'session_invalid' : 'runtime_unavailable';
+  return phase === 'storage' ? 'storage_unavailable' : phase === 'auth' ? 'session_invalid' : 'initialization_failed';
 }
 let socket: WASocket | null = null;
 let status: WhatsAppWebStatus = { state: 'disconnected' };

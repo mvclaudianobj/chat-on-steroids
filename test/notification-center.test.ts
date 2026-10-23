@@ -8,8 +8,10 @@ vi.mock('../src/main/notification-credentials.js', () => ({
 }));
 vi.mock('../src/main/durable.js', () => ({ readDurable: vi.fn(async () => state.snapshot), writeDurableNow: vi.fn(async (_key, next) => { state.snapshot = next; }) }));
 vi.mock('../src/main/notification-smtp.js', () => ({ sendSmtp: vi.fn(async () => undefined) }));
+vi.mock('../src/main/notification-whatsapp-web.js', () => ({ sendWhatsAppWeb: vi.fn(async () => { throw new Error('synthetic disconnected socket'); }) }));
 import { dispatchNotice, notificationSettings, saveNotificationSettings, setNotificationCredential } from '../src/main/notification-center.js';
 import { sendSmtp } from '../src/main/notification-smtp.js';
+import { sendWhatsAppWeb } from '../src/main/notification-whatsapp-web.js';
 
 const event = { event: 'turn-completed' as const, title: 'Finished', project: 'Synthetic project', excerpt: 'Synthetic private conversation' };
 describe('notification center outbound channels', () => {
@@ -22,6 +24,19 @@ describe('notification center outbound channels', () => {
     expect(result.settings.channels.telegram.destinations).toEqual(['original-id']);
     expect(result.settings.channels['whatsapp-web'].enabled).toBe(false);
     expect(result.settings.channels['whatsapp-web'].destinations).toEqual([]);
+  });
+  it('reports a disconnected WhatsApp socket without a misleading SMTP/TLS error or duplicate delivery', async () => {
+    const settings = structuredClone(await notificationSettings());
+    for (const channel of Object.values(settings.channels)) channel.enabled = false;
+    settings.channels['whatsapp-web'] = {
+      ...settings.channels['whatsapp-web'], enabled: true,
+      events: { ...settings.channels['whatsapp-web'].events, 'turn-completed': true },
+      destinations: ['5511999999999']
+    };
+    await saveNotificationSettings(settings);
+    await expect(dispatchNotice(event, { now: 110000 })).rejects.toMatchObject({ failure: { code: 'whatsapp_disconnected', channel: 'whatsapp-web' } });
+    expect(sendWhatsAppWeb).toHaveBeenCalledTimes(1);
+    expect(sendSmtp).not.toHaveBeenCalled();
   });
   it('uses per-channel events and excludes chat excerpts by default', async () => {
     const settings = structuredClone(await notificationSettings());

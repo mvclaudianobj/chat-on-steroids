@@ -67,8 +67,8 @@ it('does not delete or reveal a malformed local session', async () => {
 });
 it('classifies Baileys initialization errors without echoing private exception messages', async () => {
   mocks.startError = new Error('PRIVATE SYNTHETIC INTERNAL TOKEN');
-  await expect(web.startWhatsAppWeb()).rejects.toMatchObject({ issue: 'runtime_unavailable' });
-  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'error', reason: 'runtime_unavailable' });
+  await expect(web.startWhatsAppWeb()).rejects.toMatchObject({ issue: 'initialization_failed' });
+  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'error', reason: 'initialization_failed', stage: 'socket' });
   expect(JSON.stringify(await web.getWhatsAppWebStatus())).not.toContain('TOKEN');
   mocks.startError = null;
   expect(await web.startWhatsAppWeb()).toMatchObject({ state: 'connecting' });
