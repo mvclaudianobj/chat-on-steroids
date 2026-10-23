@@ -89,3 +89,68 @@ it('offers to pin the presented certificate after an explicit confirmation and c
   await vi.waitFor(() => expect(saves.at(-1)?.channels.smtp.config).not.toHaveProperty('tlsFingerprint'));
   await vi.waitFor(() => expect($('notificationRemoveTrust')).toBeNull());
 });
+
+it('shows WhatsApp setup failures without suggesting a Telegram bot token', async () => {
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('pt-BR');
+  const { installNotificationCenter } = await import('../src/renderer/notification-center.js');
+  const credentials = Object.fromEntries(NOTIFICATION_CHANNELS.map(c => [c, false])) as never;
+  const api = {
+    notificationCenterGet: async () => ({ ok: true as const, data: { settings: settings(), credentials } }),
+    notificationWhatsAppStart: vi.fn(async () => ({ ok: false as const, error: 'Internal synthetic sensitive path', setupCode: 'storage_unavailable', setupStage: 'storage' })),
+    notificationWhatsAppStatus: vi.fn(), notificationWhatsAppDisconnect: vi.fn(),
+    notificationTelegramPairStart: vi.fn(async () => ({ ok: false as const, error: 'synthetic failure' })),
+    notificationTelegramPairCheck: vi.fn(), notificationTelegramPairCancel: vi.fn(),
+    notificationCenterSave: vi.fn(), notificationCenterTest: vi.fn(), notificationCenterSetCredential: vi.fn(),
+    notificationCenterExport: vi.fn(), notificationCenterImport: vi.fn(), vault: vi.fn()
+  };
+  installNotificationCenter(api as never);
+  await vi.waitFor(() => expect(document.getElementById('notificationPair-whatsapp-web')).not.toBeNull());
+  document.getElementById('notificationPair-whatsapp-web')!.click();
+  const whatsapp = document.getElementById('notificationTitle-whatsapp-web')!.closest('section')!;
+  await vi.waitFor(() => expect(whatsapp.textContent).toContain('permissões da pasta'));
+  expect(whatsapp.textContent).not.toContain('token salvo do bot');
+  expect(whatsapp.textContent).not.toContain('sensitive');
+  expect(whatsapp.textContent).toContain('WA-storage_unavailable / storage');
+  document.getElementById('notificationPair-telegram')!.click();
+  const telegram = document.getElementById('notificationTitle-telegram')!.closest('section')!;
+  await vi.waitFor(() => expect(telegram.textContent).toContain('token salvo do bot'));
+});
+
+it('ignores a late WhatsApp status response from before a manual retry', async () => {
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  const { installNotificationCenter } = await import('../src/renderer/notification-center.js');
+  setLanguage('en');
+  let poll: (() => void) | undefined;
+  const realSetInterval = globalThis.setInterval;
+  vi.stubGlobal('setInterval', (_callback: () => void) => { poll = _callback; return 77; });
+  let finishOldPoll: (value: unknown) => void = () => undefined;
+  const oldPoll = new Promise(resolve => { finishOldPoll = resolve; });
+  const credentials = Object.fromEntries(NOTIFICATION_CHANNELS.map(channel => [channel, false]));
+  const api = {
+    notificationCenterGet: async () => ({ ok: true, data: { settings: settings(), credentials } }),
+    notificationWhatsAppStart: vi.fn()
+      .mockResolvedValueOnce({ ok: true, data: { state: 'connecting', stage: 'network' } })
+      .mockResolvedValueOnce({ ok: false, setupCode: 'storage_unavailable', setupStage: 'storage' }),
+    notificationWhatsAppStatus: vi.fn(() => oldPoll),
+    notificationWhatsAppDisconnect: vi.fn(), notificationTelegramPairStart: vi.fn(),
+    notificationTelegramPairCheck: vi.fn(), notificationTelegramPairCancel: vi.fn(),
+    notificationCenterSave: vi.fn(), notificationCenterTest: vi.fn(), notificationCenterSetCredential: vi.fn(),
+    notificationCenterExport: vi.fn(), notificationCenterImport: vi.fn(), vault: vi.fn()
+  };
+  try {
+    installNotificationCenter(api as never);
+    await vi.waitFor(() => expect(document.getElementById('notificationPair-whatsapp-web')).not.toBeNull());
+    const button = document.getElementById('notificationPair-whatsapp-web')!;
+    const card = document.getElementById('notificationTitle-whatsapp-web')!.closest('section')!;
+    button.click();
+    await vi.waitFor(() => expect(poll).toBeTypeOf('function'));
+    poll!();
+    await vi.waitFor(() => expect(api.notificationWhatsAppStatus).toHaveBeenCalledTimes(1));
+    button.click();
+    await vi.waitFor(() => expect(card.textContent).toContain('WA-storage_unavailable / storage'));
+    finishOldPoll({ ok: true, data: { state: 'connected', stage: 'ready' } });
+    await new Promise(resolve => realSetInterval(() => resolve(undefined), 1));
+    expect(card.textContent).toContain('WA-storage_unavailable / storage');
+  } finally { vi.unstubAllGlobals(); }
+});

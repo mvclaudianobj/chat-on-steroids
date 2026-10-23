@@ -3,8 +3,23 @@ import { app } from 'electron';
 import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import makeWASocket, { DisconnectReason, useMultiFileAuthState, type WASocket } from '@whiskeysockets/baileys';
+import type { WhatsAppSetupIssue } from '../shared/notification-center.js';
 
-export interface WhatsAppWebStatus { state: 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'; qr?: string }
+export interface WhatsAppWebStatus { state: 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'; qr?: string; reason?: WhatsAppSetupIssue; stage?: 'storage' | 'auth' | 'socket' | 'network' | 'qr' | 'ready' }
+export class WhatsAppPairingError extends Error {
+  constructor(readonly issue: WhatsAppSetupIssue) {
+    super(`WhatsApp setup failed (${issue})`);
+    this.name = 'WhatsAppPairingError';
+  }
+}
+/** Only errno/name is inspected. Native error messages can contain a file path or account data. */
+function startupIssue(error: unknown, phase: 'storage' | 'auth' | 'runtime'): WhatsAppSetupIssue {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : '';
+  if (['EACCES', 'EPERM', 'EROFS', 'ENOSPC', 'EDQUOT', 'EIO', 'ENOTDIR'].includes(code)) return 'storage_unavailable';
+  if (phase === 'auth' && (error instanceof SyntaxError || code === 'ERR_INVALID_ARG_TYPE')) return 'session_invalid';
+  if (phase === 'runtime' && ['MODULE_NOT_FOUND', 'ERR_MODULE_NOT_FOUND'].includes(code)) return 'runtime_unavailable';
+  return phase === 'storage' ? 'storage_unavailable' : phase === 'auth' ? 'session_invalid' : 'runtime_unavailable';
+}
 let socket: WASocket | null = null;
 let status: WhatsAppWebStatus = { state: 'disconnected' };
 let generation = 0;
@@ -12,42 +27,102 @@ let restart: ReturnType<typeof setTimeout> | null = null;
 let wantConnection = false;
 let connecting: Promise<void> | null = null;
 let saving: Promise<void> = Promise.resolve();
+let retryCount = 0;
+let qrDeadline: ReturnType<typeof setTimeout> | null = null;
+const SETUP_IO_TIMEOUT_MS = 12_000;
+function bounded<T>(work: Promise<T>, timeoutMs: number, issue: WhatsAppSetupIssue): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([work, new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new WhatsAppPairingError(issue)), timeoutMs);
+  })]).finally(() => { if (timer) clearTimeout(timer); });
+}
+function beginConnect(): Promise<void> {
+  if (connecting) return connecting;
+  const task = connect().finally(() => { if (connecting === task) connecting = null; });
+  connecting = task;
+  return task;
+}
 function directory(): string { return path.join(app.getPath('userData'), 'notifications', 'whatsapp-web'); }
 export async function getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> { return { ...status }; }
 function closeSocket(): void {
   if (restart) { clearTimeout(restart); restart = null; }
-  if (socket) { socket.ev.removeAllListeners('connection.update'); socket.ev.removeAllListeners('creds.update'); socket.ws.close(); socket = null; }
+  if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
+  if (socket) {
+    const previous = socket; socket = null;
+    previous.ev.removeAllListeners('connection.update'); previous.ev.removeAllListeners('creds.update');
+    // Baileys 7 closes asynchronously; never leave an unhandled rejection on a stale socket.
+    try { void Promise.resolve(previous.ws.close()).catch(() => undefined); } catch { /* Socket already closed. */ }
+  }
 }
 async function connect(): Promise<void> {
   const epoch = ++generation;
   closeSocket();
-  status = { state: 'connecting' };
+  status = { state: 'connecting', stage: 'storage' };
   const dir = directory();
-  await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  await fs.chmod(dir, 0o700);
-  const { state, saveCreds } = await useMultiFileAuthState(dir);
+  try {
+    await bounded(fs.mkdir(dir, { recursive: true, mode: 0o700 }), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
+    const directoryStat = await bounded(fs.lstat(dir), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
+    if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new WhatsAppPairingError('storage_unavailable');
+    await bounded(fs.chmod(dir, 0o700), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
+  } catch (error) { throw new WhatsAppPairingError(startupIssue(error, 'storage')); }
+  // Baileys' multi-file auth reads creds.json here. A rapid retry can otherwise read a
+  // partially-written session from the previous socket; never delete or overwrite it.
+  await bounded(saving.catch(() => undefined), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
   if (epoch !== generation || !wantConnection) return;
-  const active = makeWASocket({ auth: state, printQRInTerminal: false, logger: { level: 'silent', child() { return this; }, trace() {}, debug() {}, info() {}, warn() {}, error() {}, fatal() {} } as never });
+  status = { state: 'connecting', stage: 'auth' };
+  let auth: Awaited<ReturnType<typeof useMultiFileAuthState>>;
+  try { auth = await bounded(useMultiFileAuthState(dir), SETUP_IO_TIMEOUT_MS, 'session_invalid'); }
+  catch (error) { throw new WhatsAppPairingError(startupIssue(error, 'auth')); }
+  const { state, saveCreds } = auth;
+  if (epoch !== generation || !wantConnection) return;
+  status = { state: 'connecting', stage: 'socket' };
+  let active: WASocket;
+  try { active = makeWASocket({ auth: state, printQRInTerminal: false, logger: { level: 'silent', child() { return this; }, trace() {}, debug() {}, info() {}, warn() {}, error() {}, fatal() {} } as never }); }
+  catch (error) { throw new WhatsAppPairingError(startupIssue(error, 'runtime')); }
   socket = active;
+  status = { state: 'connecting', stage: 'network' };
+  if (!state.creds.registered) {
+    qrDeadline = setTimeout(() => {
+      if (epoch === generation && status.state === 'connecting') status = { state: 'error', reason: 'qr_timeout', stage: 'qr' };
+    }, 35_000);
+    qrDeadline.unref();
+  }
   active.ev.on('creds.update', () => {
     if (epoch !== generation || !wantConnection) return;
     saving = saving.catch(() => undefined).then(async () => {
       if (epoch !== generation || !wantConnection) return;
       await saveCreds();
       for (const file of await fs.readdir(dir)) if (file.endsWith('.json')) await fs.chmod(path.join(dir, file), 0o600);
+    }).catch(() => {
+      if (epoch === generation) status = { state: 'error', reason: 'storage_unavailable', stage: 'storage' };
     });
   });
   active.ev.on('connection.update', update => {
     if (epoch !== generation) return;
-    if (update.qr) status = { state: 'qr', qr: update.qr };
-    if (update.connection === 'open') status = { state: 'connected' };
+    if (update.qr) {
+      if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
+      status = { state: 'qr', qr: update.qr, stage: 'qr' };
+      retryCount = 0;
+    }
+    if (update.connection === 'open') {
+      if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
+      status = { state: 'connected', stage: 'ready' };
+      retryCount = 0;
+    }
     if (update.connection === 'close') {
+      if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
       socket = null;
       const code = (update.lastDisconnect?.error as { output?: { statusCode?: number } } | undefined)?.output?.statusCode;
-      if (code === DisconnectReason.loggedOut) { wantConnection = false; status = { state: 'disconnected' }; void fs.rm(dir, { recursive: true, force: true }).catch(() => undefined); return; }
-      status = { state: 'connecting' };
+      // Never erase authentication automatically: only explicit Disconnect may revoke it.
+      if (code === DisconnectReason.loggedOut) { wantConnection = false; status = { state: 'error', reason: 'session_invalid', stage: 'auth' }; return; }
+      status = { state: 'error', reason: 'connection_failed', stage: 'network' };
       if (wantConnection) {
-        restart = setTimeout(() => { restart = null; void connect().catch(() => { status = { state: 'error' }; }); }, 3000);
+        restart = setTimeout(() => {
+          restart = null;
+          void beginConnect().catch(error => {
+            if (wantConnection) status = { state: 'error', reason: error instanceof WhatsAppPairingError ? error.issue : 'unknown', stage: status.stage };
+          });
+        }, Math.min(3000 * 2 ** retryCount++, 30000));
         restart.unref();
       }
     }
@@ -55,9 +130,17 @@ async function connect(): Promise<void> {
 }
 export async function startWhatsAppWeb(): Promise<WhatsAppWebStatus> {
   wantConnection = true;
-  if (!socket && !restart) {
-    connecting ??= connect().finally(() => { connecting = null; });
-    await connecting;
+  // A deliberate user retry supersedes the scheduled backoff immediately.
+  if (restart) { clearTimeout(restart); restart = null; }
+  if (socket && status.state === 'error') closeSocket();
+  if (!socket) {
+    try { await beginConnect(); }
+    catch (error) {
+      wantConnection = false;
+      const issue = error instanceof WhatsAppPairingError ? error.issue : 'unknown';
+      status = { state: 'error', reason: issue, stage: status.stage };
+      throw new WhatsAppPairingError(issue);
+    }
   }
   return getWhatsAppWebStatus();
 }
@@ -68,8 +151,8 @@ export async function disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus> {
   if (restart) { clearTimeout(restart); restart = null; }
   if (active) await Promise.race([active.logout().catch(() => undefined), new Promise<void>(resolve => setTimeout(resolve, 2500))]);
   closeSocket();
-  if (connecting) await connecting.catch(() => undefined);
-  await saving.catch(() => undefined);
+  if (connecting) await bounded(connecting.catch(() => undefined), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
+  await bounded(saving.catch(() => undefined), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
   await fs.rm(directory(), { recursive: true, force: true });
   status = { state: 'disconnected' };
   return getWhatsAppWebStatus();
@@ -81,8 +164,8 @@ export async function sendWhatsAppWeb(number: string, message: string): Promise<
 }
 export async function stopWhatsAppWeb(): Promise<void> {
   wantConnection = false; ++generation; closeSocket();
-  if (connecting) await connecting.catch(() => undefined);
-  await saving.catch(() => undefined);
+  if (connecting) await bounded(connecting.catch(() => undefined), SETUP_IO_TIMEOUT_MS, 'unknown').catch(() => undefined);
+  await bounded(saving.catch(() => undefined), SETUP_IO_TIMEOUT_MS, 'storage_unavailable').catch(() => undefined);
   status = { state: 'disconnected' };
 }
 export async function resumeWhatsAppWeb(): Promise<void> {

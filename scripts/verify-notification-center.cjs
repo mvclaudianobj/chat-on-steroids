@@ -20,12 +20,13 @@ const fixture = `(() => {
   const base=()=>({enabled:false,events:Object.fromEntries(events.map(e=>[e,false])),destinations:[],titleTemplate:'{title}',bodyTemplate:'{project} — {event}',includeExcerpt:false,config:{}});
   let settings={channels:Object.fromEntries(channels.map(c=>[c,base()])),throttleMinutes:1,batchWindowSeconds:10};
   const credentials=Object.fromEntries(channels.map(c=>[c,false]));
-  window.notifyFixture={testCalls:[],savedKeys:[],exportCalls:0,importCalls:0,vaultCreated:false,latest:()=>structuredClone(settings)};
+  window.notifyFixture={whatsappError:false,testCalls:[],savedKeys:[],exportCalls:0,importCalls:0,previewCalls:0,vaultCreated:false,latest:()=>structuredClone(settings)};
   const methods={
     markWhatsNewSeen:()=>ok(null),
+    marksPromptPreview:()=>{window.notifyFixture.previewCalls++;return ok('Você é Marks. <synthetic-prompt-text>');},
     getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'en',theme:'dark'};return r;},
-    notificationWhatsAppStart:()=>ok({state:'qr',qr:'__SYNTHETIC_QR_IMAGE__'}),
-    notificationWhatsAppStatus:()=>ok({state:'connected'}),
+    notificationWhatsAppStart:()=>window.notifyFixture.whatsappError?Promise.resolve({ok:false,error:'synthetic-private-path',setupCode:'storage_unavailable',setupStage:'storage'}):ok({state:'qr',qr:'__SYNTHETIC_QR_IMAGE__'}),
+    notificationWhatsAppStatus:()=>window.notifyFixture.whatsappError?ok({state:'error',reason:'storage_unavailable'}):ok({state:'connected'}),
     notificationWhatsAppDisconnect:()=>ok({state:'disconnected'}),
     notificationTelegramPairStart:()=>ok({url:'https://t.me/example_bot?start=synthetic',expires:Date.now()+60000,qr:'__SYNTHETIC_QR_IMAGE__'}),
     notificationTelegramPairCheck:()=>ok({state:'paired',chatId:'90001'}),
@@ -63,6 +64,17 @@ app.whenReady().then(async () => {
   await win.loadURL(server.resolvedUrls.local[0]);
   await until(`!!document.querySelector('[data-tab="notifications"]')`);
   win.show(); win.focus(); win.webContents.focus();
+  // Exercise SP and QR in the SAME renderer fixture. Preview must show the exact main-owned
+  // text as inert text, never interpreted as HTML or mixed with synthetic channel credentials.
+  await js(`document.querySelector('[data-tab="general"]').click()`);
+  await until(`document.querySelector('[data-panel="general"]').classList.contains('is-active')`);
+  assert.equal(await js(`document.getElementById('marksSystemPromptEnabled').checked`),true);
+  assert.equal(await js(`document.getElementById('marksPreferredName').value`),'');
+  await js(`document.getElementById('marksPromptPreviewButton').click()`);
+  await until(`window.notifyFixture.previewCalls===1 && !document.getElementById('marksPromptPreview').hidden`);
+  assert.equal(await js(`document.getElementById('marksPromptPreview').textContent`),'Você é Marks. <synthetic-prompt-text>');
+  assert.equal(await js(`document.getElementById('marksPromptPreview').children.length`),0);
+  await capture('marks-system-prompt-preview-synthetic.png');
   await js(`document.querySelector('[data-tab="notifications"]').click()`);
   await until(`!!document.getElementById('notificationTitle-telegram')`);
   await until(`document.querySelector('[data-panel="notifications"]').classList.contains('is-active')`);
@@ -122,6 +134,13 @@ app.whenReady().then(async () => {
   await until(`document.querySelector('#notificationTitle-whatsapp-web').closest('section').querySelector('.notification-channel-pairing img').src.startsWith('data:image/png')`);
   await js(`document.getElementById('notificationPair-whatsapp-web').scrollIntoView({block:'center'})`);
   await capture('notification-whatsapp-qr-synthetic.png');
+  await js(`window.notifyFixture.whatsappError=true;document.getElementById('notificationPair-whatsapp-web').click()`);
+  // The fixture's locale may be restored as English or Portuguese; both must
+  // identify local storage while keeping the private error string invisible.
+  await until(`/session storage|armazenamento local da sessão/.test(document.getElementById('notificationTitle-whatsapp-web').closest('section').textContent)`);
+  assert.equal(await js(`/bot token|token salvo do bot|synthetic-private-path/.test(document.getElementById('notificationTitle-whatsapp-web').closest('section').textContent)`),false);
+  assert.equal(await js(`document.getElementById('notificationTitle-whatsapp-web').closest('section').textContent.includes('WA-storage_unavailable / storage')`),true);
+  await capture('notification-whatsapp-storage-failure-synthetic.png');
   await js(`document.getElementById('notificationTitle-whatsapp-cloud').scrollIntoView({block:'center'})`);
   await capture('notification-center-whatsapp.png');
   assert.deepEqual(errors,[]);

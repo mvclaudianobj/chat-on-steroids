@@ -79,6 +79,32 @@ export async function sendSmtp(message: SmtpMessage, options: SmtpTransportOptio
   catch { throw deliveryFailure('dns_failed'); }
   if (!addresses.length) throw deliveryFailure('dns_failed');
   const cloudflare = addresses.some(isCloudflareAddress);
+  // DNS may return a stale/unreachable first A or AAAA record. Try another address only before
+  // receiving the SMTP greeting: after that point the server may have accepted commands/mail.
+  // A refused/unreachable socket or a pre-greeting close has not received credentials or mail.
+  const deadline = Date.now() + (options.timeoutMs ?? 20000);
+  const targets = [...new Set(addresses)].slice(0, 4);
+  for (const [index, address] of targets.entries()) {
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) throw deliveryFailure('connect_timeout', cloudflare ? { cloudflare } : {});
+    let greeted = false;
+    try {
+      return await sendSmtpAtAddress(message, address, cloudflare, pin, {
+        ...options, timeoutMs: remaining, connectTimeoutMs: Math.min(options.connectTimeoutMs ?? 10000, remaining)
+      }, () => { greeted = true; });
+    } catch (error) {
+      if (!(error instanceof NotificationDeliveryError) || greeted ||
+        !['connect_timeout', 'connection_refused', 'network_unreachable', 'connection_closed'].includes(error.failure.code) ||
+        index === targets.length - 1) throw error;
+    }
+  }
+  throw deliveryFailure('connection_closed');
+}
+
+async function sendSmtpAtAddress(
+  message: SmtpMessage, address: string, cloudflare: boolean, pin: string, options: SmtpTransportOptions,
+  onGreeting: () => void
+): Promise<SmtpReport> {
   const connectFailure = (code: NotificationFailureCode) => deliveryFailure(code, cloudflare ? { cloudflare } : {});
 
   const tlsOptions = (): tls.ConnectionOptions => ({
@@ -89,8 +115,8 @@ export async function sendSmtp(message: SmtpMessage, options: SmtpTransportOptio
     ...(options.ca ? { ca: [...tls.rootCertificates, options.ca] } : {})
   });
   let socket: net.Socket | tls.TLSSocket = message.security === 'tls'
-    ? tls.connect({ host: addresses[0]!, port: message.port, ...tlsOptions() })
-    : net.connect({ host: addresses[0]!, port: message.port });
+    ? tls.connect({ host: address, port: message.port, ...tlsOptions() })
+    : net.connect({ host: address, port: message.port });
   let connected = false;
   let failed: NotificationDeliveryError | null = null;
   const rejecters = new Set<(error: NotificationDeliveryError) => void>();
@@ -168,6 +194,7 @@ export async function sendSmtp(message: SmtpMessage, options: SmtpTransportOptio
     clearTimeout(connectTimer);
     if (message.security === 'tls') { await secured(socket as tls.TLSSocket); verify(socket as tls.TLSSocket); }
     await expect([220], 'server_error');
+    onGreeting();
     const hello = await command('EHLO chat-marks', [250], 'server_error');
     if (message.security === 'starttls') {
       if (!hello.lines.some(line => /^STARTTLS\b/i.test(line))) throw deliveryFailure('starttls_unavailable');

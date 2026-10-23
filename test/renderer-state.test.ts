@@ -570,6 +570,40 @@ const projectSidebarFixture = () => {
   return { project, session };
 };
 
+it('places CLI sessions in their exact project groups without a global CSS object', async () => {
+  const ids = ['project"quote', 'project\\backslash', 'project]#selector', 'project:colon'];
+  const projects = ids.map((id, index) => ({ id, name: `Project ${index}`, path: `C:\\repo${index}`, createdAt: index + 1 }));
+  const cliSessions = ids.map((projectId, index) => ({
+    id: `cli-${index}`, module: 'codex', projectId, title: `CLI ${index}`, createdAt: 1, updatedAt: index + 1
+  }));
+  cliSessions.push({ id: 'cli-orphan', module: 'codex', projectId: 'missing"project', title: 'Orphan', createdAt: 1, updatedAt: 10 });
+  const previousCss = (globalThis as any).CSS;
+  delete (globalThis as any).CSS;
+  try {
+    const mounted = await mountChat({}, [], {
+      listProjects: async () => ({ ok: true, data: projects }),
+      listSessions: async () => listed([]),
+      cliStatus: async () => ({ ok: true, data: [{ id: 'codex', name: 'Codex', enabled: true, detail: 'Ready', installed: true, running: false }] }),
+      cliSessions: async () => ({ ok: true, data: cliSessions })
+    });
+    const doc = mounted.window.document;
+    await waitFor(() => expect(doc.querySelectorAll('.project-group[data-project-id]')).toHaveLength(ids.length));
+    await waitFor(() => expect(doc.querySelectorAll('.cli-module-chat')).toHaveLength(cliSessions.length));
+    const groups = [...doc.querySelectorAll<HTMLElement>('.project-group[data-project-id]')];
+    for (let index = 0; index < ids.length; index++) {
+      const group = groups.find(candidate => candidate.dataset.projectId === ids[index]);
+      expect(group?.querySelector('.cli-module-chat-title')?.textContent).toBe(`CLI ${index}`);
+      expect(group?.querySelectorAll('.cli-module-chat')).toHaveLength(1);
+    }
+    expect(doc.querySelector('#cliModuleChats .cli-module-chat-title')?.textContent).toBe('Orphan');
+    mounted.push(structuredClone(mounted.state));
+    await waitFor(() => expect(doc.querySelectorAll('.cli-module-chat')).toHaveLength(cliSessions.length));
+  } finally {
+    if (previousCss === undefined) delete (globalThis as any).CSS;
+    else (globalThis as any).CSS = previousCss;
+  }
+});
+
 it('starts project groups collapsed and deliberately expands the project selected for a new chat', async () => {
   const { project, session } = projectSidebarFixture();
   const mounted = await mountChat({}, [], {

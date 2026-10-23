@@ -201,6 +201,10 @@
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Follow new output</b><em>Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</em></span><input id="followOutput" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Notify when a chat finishes</b><em>A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.</em></span><input id="turnNotifications" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Prompt do Chat Marks</b><em>Identidade e instruções curtas ao iniciar ou retomar um chat.</em></span><input id="marksSystemPromptEnabled" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Como quer ser chamado</b><em>Deixe vazio para tratamento neutro.</em></span><input id="marksPreferredName" type="text" maxlength="80" autocomplete="off" placeholder="Senhor Marcos" translate="no" /></label>
+                <div class="setting"><span class="setting-text"><b>Prévia do prompt</b><em>Mostra o texto exato da variante ChatGPT conforme as configurações salvas.</em></span><button id="marksPromptPreviewButton" class="btn" type="button">Ver prompt</button></div>
+                <pre id="marksPromptPreview" class="settings-surface" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></pre>
                 <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em id="followUpHint" translate="no"></em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Send messages with</b><em id="enterSendsHint" translate="no"></em></span><select id="enterSends"><option value="enter">Enter</option><option value="modifier" id="enterSendsModifier" translate="no"></option></select></label>
                 <label class="setting"><span class="setting-text"><b>Keep awake while a chat works</b><em>Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose “The computer and screen”.</em></span><select id="keepAwake"><option value="off">Off</option><option value="computer">The computer</option><option value="screen">The computer and screen</option></select></label>
@@ -257,22 +261,41 @@
         <section class="panel appearance-panel jarvis-panel scroll" data-panel="jarvis" aria-labelledby="jarvisTitle">
           <div class="appearance-content settings-page-content">
             <header class="settings-page-head appearance-page-head">
-              <div><h1 id="jarvisTitle">Jarvis</h1><p>Push-to-talk voice assistant for CLIProxy chats.</p></div>
+              <div><h1 id="jarvisTitle">Jarvis</h1><p>Push-to-talk voice assistant for CLIProxy chats on Linux, macOS and Windows.</p></div>
             </header>
             <section class="appearance-section" id="jarvisSettings">
               <header class="settings-section-head"><div><h2>Jarvis</h2><p>Hold to speak in a CLIProxy chat. The microphone starts only while you hold the button or your chosen key.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Enable Jarvis</b><em>Requires a CLIProxy chat and an available transcription engine.</em></span><input id="jarvisEnabled" type="checkbox" /></label>
-                <label class="setting"><span class="setting-text"><b>Transcription order</b><em>Try CLIProxy audio first, then an installed local engine or Windows recognition. Change priority here.</em></span><select id="jarvisEngine"><option value="cliproxy">CLIProxy → local → Windows</option><option value="local">Local → CLIProxy → Windows</option><option value="windows">Windows → CLIProxy → local</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Transcription order</b><em>Jarvis uses the first available engine and tries the next one when it fails. Change priority here.</em></span><select id="jarvisEngine"><option value="auto">Voice provider → CLIProxy → local → Windows</option><option value="cliproxy">CLIProxy → local → Windows</option><option value="local">Local → CLIProxy → Windows</option><option value="windows">Windows → CLIProxy → local</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Transcription model</b><em>Models are read from the configured CLIProxy catalog with the saved API key.</em></span><select id="jarvisAudioModel"><option value="">Detect automatically</option></select></label>
                 <button type="button" class="btn" id="jarvisRefreshAudio">Refresh transcription engines</button>
                 <label class="setting"><span class="setting-text"><b>Push-to-talk key</b><em>Press the chosen key while in the chat composer.</em></span><select id="jarvisKey"><option value="F8">F8</option><option value="F9">F9</option><option value="F10">F10</option><option value="F11">F11</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Speech language</b><em>Optional language code (for example pt-BR). Windows must have its speech language installed; also sets the spoken reply language.</em></span><input id="jarvisLanguage" type="text" maxlength="35" placeholder="System default" /></label>
                 <label class="setting"><span class="setting-text"><b>Chat model</b><em>Choose a model in the CLIProxy chat; Jarvis sends text to that same model.</em></span><span id="jarvisModelInfo">Current CLIProxy chat model</span></label>
-                <label class="setting"><span class="setting-text"><b>Speak replies</b><em>Optional system speech synthesis, off by default.</em></span><input id="jarvisTts" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Speak replies</b><em>Off by default. Jarvis starts speaking while the answer is still being written, one sentence at a time.</em></span><input id="jarvisTts" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Speech engine</b><em>The voice provider when it is configured, otherwise the system voice.</em></span><select id="jarvisTtsEngine"><option value="auto">Voice provider, then system voice</option><option value="provider">Voice provider</option><option value="system">System voice</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Voice</b><em>Choose a voice installed in your operating system.</em></span><select id="jarvisVoice"><option value="">System default</option></select></label>
-                <label class="setting"><span class="setting-text"><b>Microphone and audio transmission consent (this session only)</b><em>CLIProxy transcribes recorded audio after release; local engines keep it here. Windows may use Microsoft's speech service.</em></span><input id="jarvisConsent" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Continuous conversation</b><em>After a spoken answer, Jarvis listens again and sends when you stop talking. Push-to-talk stays the default; pressing the key always interrupts Jarvis.</em></span><input id="jarvisContinuous" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Sound cues</b><em>Short tones when listening starts and stops.</em></span><input id="jarvisEarcons" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Microphone and audio transmission consent (this session only)</b><em>The voice provider or CLIProxy transcribes recorded audio after release; local engines keep it here. Windows may use Microsoft's speech service.</em></span><input id="jarvisConsent" type="checkbox" /></label>
                 <p id="jarvisSettingsStatus" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+            <section class="appearance-section" id="jarvisProviderSettings">
+              <header class="settings-section-head"><div><h2>Voice provider</h2><p>An OpenAI-compatible speech service for transcription and spoken replies. Keys are kept in the vault, bound to this address.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Preset</b><em>Fills in the public settings only; you still enter your own keys.</em></span><select id="jarvisProviderPreset"><option value="">Custom</option><option value="g4f.space" translate="no">g4f.space</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Base URL</b><em>For example https://example.com/v1. HTTPS only, except on this computer.</em></span><input id="jarvisProviderUrl" translate="no" type="url" maxlength="300" placeholder="https://…/v1" spellcheck="false" /></label>
+                <label class="setting"><span class="setting-text"><b>Transcription method</b><em>Audio transcription endpoint, or a multimodal chat model that writes out the recording (needs ffmpeg).</em></span><select id="jarvisSttMode"><option value="transcriptions">Audio transcription endpoint</option><option value="chat-audio">Multimodal chat model</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Speech-to-text model</b><em>Suggestions come from the provider's model list.</em></span><input id="jarvisSttModel" type="text" maxlength="200" list="jarvisSttModels" spellcheck="false" /><datalist id="jarvisSttModels"></datalist></label>
+                <label class="setting"><span class="setting-text"><b>Text-to-speech model</b><em>For example gpt-4o-mini-tts.</em></span><input id="jarvisTtsModel" type="text" maxlength="200" list="jarvisTtsModels" spellcheck="false" /><datalist id="jarvisTtsModels"></datalist></label>
+                <label class="setting"><span class="setting-text"><b>Provider voice</b><em>For example alloy or nova.</em></span><input id="jarvisProviderVoice" type="text" maxlength="64" list="jarvisProviderVoices" spellcheck="false" /><datalist id="jarvisProviderVoices"></datalist></label>
+                <label class="setting"><span class="setting-text"><b>Primary key</b><em>Sent as a bearer token to this provider only.</em></span><input id="jarvisProviderKey" type="password" maxlength="16384" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Fallback key</b><em>Used when the primary key is rejected, rate limited or the provider fails.</em></span><input id="jarvisProviderFallbackKey" type="password" maxlength="16384" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Vault master password</b><em>Needed only to save keys.</em></span><input id="jarvisVaultPassword" type="password" maxlength="1024" autocomplete="off" /></label>
+                <button type="button" class="btn" id="jarvisSaveKeys">Save keys in the vault</button>
+                <p id="jarvisProviderStatus" role="status" aria-live="polite"></p>
               </div>
             </section>
           </div>
@@ -558,13 +581,15 @@
           <div class="company-shell" id="companyRoot">
             <header class="company-header">
               <div><div class="company-eyebrow">MARKS / ORGANIZATION <span class="company-preview">VISUAL PROTOTYPE</span></div><h1 id="companyTitle">Company</h1><p>Coordinate responsibilities, requests and decisions in one place.</p></div>
-              <div class="company-header-actions"><button class="btn" id="companySettings" type="button"><i class="ico ph ph-gear-six"></i> Settings</button><button class="btn btn-solid" id="companyNewRequest" type="button"><i class="ico ph ph-plus"></i> New request</button></div>
+              <div class="company-header-actions"><button class="btn" id="companySettings" type="button"><i class="ico ph ph-gear-six"></i> Settings</button><button class="btn" id="companyMeetingCreate" type="button"><i class="ico ph ph-chat-circle"></i> Meeting</button><button class="btn btn-solid" id="companyNewRequest" type="button"><i class="ico ph ph-plus"></i> New request</button></div>
             </header>
             <div class="company-metrics" id="companyMetrics"></div>
-            <div class="company-toolbar"><div class="company-views" role="group" aria-label="Company view"><button type="button" class="btn is-sel" id="companyBoardTab" aria-pressed="true">Board</button><button type="button" class="btn" id="companyOfficeTab" aria-pressed="false">Office</button></div><span class="company-mode">LOCAL PREVIEW · No live agents connected</span></div>
+            <div class="company-toolbar"><div class="company-views" role="group" aria-label="Company view"><button type="button" class="btn is-sel" id="companyBoardTab" aria-pressed="true">Board</button><button type="button" class="btn" id="companyOfficeTab" aria-pressed="false">Office</button><button type="button" class="btn" id="companyRpgTab" aria-pressed="false">RPG</button></div><span class="company-mode">LOCAL PREVIEW · No live agents connected</span></div>
             <div id="companyEmpty" class="company-empty" hidden><div class="company-empty-icon"><i class="ico ph ph-house"></i></div><h2>Your company starts here</h2><p>Use sample requests to explore the board and office, or create your first request.</p><button type="button" class="btn btn-solid" id="companyLoadDemo">Explore sample data</button></div>
             <div id="companyBoard" class="company-board" aria-label="Requests by status"></div>
             <div id="companyOffice" class="company-office" hidden></div>
+            <section id="companyRpg" class="company-rpg" aria-label="RPG company view" hidden></section>
+            <section id="companyObservePanel" class="company-surface company-observe-panel" aria-label="Worker observability"></section>
             <div class="company-bottom"><section class="company-surface"><h2>CEO desk <span class="company-panel-ornament">↗</span></h2><div id="companyCeo"></div></section><section class="company-surface"><h2>Activity <span class="company-panel-ornament">↗</span></h2><div id="companyActivity"></div></section></div>
           </div>
           <dialog class="company-dialog" id="companyDialog"><form method="dialog" id="companyForm"><div class="company-dialog-head"><h2 id="companyDialogTitle">Request details</h2><button type="button" id="companyClose" class="btn" aria-label="Close">×</button></div><div id="companyDialogContent"></div><div class="company-dialog-actions" id="companyDialogActions"></div></form></dialog>
@@ -1649,7 +1674,7 @@
                   </details>
                   <button id="createPlan" type="button"><i class="ico ph ph-list-checks" aria-hidden="true"></i><span>Plan</span></button>
                   <button class="composer-dictation-button" id="dictationButton" type="button" aria-label="Start dictation" aria-pressed="false" aria-describedby="dictationStatus" data-state="idle" title="Start dictation" hidden disabled><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
-                  <button class="composer-dictation-button" id="jarvisTalk" type="button" aria-label="Hold to speak to Jarvis" aria-pressed="false" aria-describedby="jarvisStatus" data-state="idle" title="Hold to speak to Jarvis" hidden><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
+                  <button class="composer-dictation-button" id="jarvisTalk" type="button" aria-label="Hold to speak to Jarvis" aria-pressed="false" aria-describedby="jarvisStatus" data-state="idle" title="Hold to speak to Jarvis" hidden><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button><span class="jarvis-state" id="jarvisStatus" role="status" aria-live="polite" data-state="idle" hidden></span>
                 </div>
                 <div class="context-meter" id="contextMeter">
                   <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">

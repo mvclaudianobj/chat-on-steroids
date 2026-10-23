@@ -17,7 +17,8 @@ import fs from 'node:fs/promises';
 import nodePath from 'node:path';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ContinuationSnapshot } from '../src/main/session/continuation.js';
-import { MAX_CHATGPT_MESSAGE_CHARS } from '../src/shared/user-prompt.js';
+import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
+import { currentMarksSystemPrompt } from '../src/main/marks-system-prompt.js';
 import { nativeHandoffPrompt } from '../src/main/session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../src/shared/handoff.js';
 import { resumeBootstrapText } from '../src/main/session/handoff.js';
@@ -537,7 +538,7 @@ describe('a brief longer than the app can type', () => {
     await record();
     const { token: continuation } = await press();
     const head = 'TASK — keep all of this.\n', tail = '\nNEXT — continue exactly here.';
-    const overhead = resumeBootstrapText('', continuation).length;
+    const overhead = prependUserPrompt(resumeBootstrapText('', continuation), currentMarksSystemPrompt('chatgpt')).length;
     const brief = head + 'dense operational detail '.repeat(6500).slice(0,
       MAX_CHATGPT_MESSAGE_CHARS - overhead - head.length - tail.length - 8) + tail;
 
@@ -546,7 +547,8 @@ describe('a brief longer than the app can type', () => {
     const text = (await redeem(commandId, 'page-long')).body.command.text as string;
 
     expect(text).toContain(brief);
-    expect(text).not.toContain('[[COS_CONTEXT:');
+    expect(text).toContain('[[COS_CONTEXT:');
+    expect(userPromptText(text)).toContain(brief);
     expect(text).not.toMatch(/middle of this brief.*left out/);
     expect(text.length).toBeLessThanOrEqual(MAX_CHATGPT_MESSAGE_CHARS);
     expect(text.length).toBeGreaterThan(MAX_CHATGPT_MESSAGE_CHARS - 100);

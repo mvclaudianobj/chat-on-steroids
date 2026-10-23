@@ -5,6 +5,7 @@ import { openRowMenu, type RowMenuItem } from './row-menu.js';
 import { t, ui } from './i18n.js';
 import { chatTypeIcon, chatTypeMark, moduleMark } from './chat-types.js';
 import { createUpstreamManageUi, type UpstreamManageUi } from './upstream-manage-ui.js';
+import { findProjectGroup } from './project-group-locator.js';
 import type { CliModuleStatus } from '../main/cli-modules.js';
 
 /** cli-modules' CLI_IDS order. MarksCode and MarksClaw are retired: shown only while active or running. */
@@ -549,7 +550,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
       wrapper.append(button, menuBtn);
       wrapper.hidden = !current.get(session.module)?.enabled;
       if (session.projectId) {
-        const projectGroup = document.querySelector<HTMLElement>(`.project-group[data-project-id="${CSS.escape(session.projectId)}"]`);
+        const projectGroup = findProjectGroup(document, session.projectId);
         if (projectGroup) {
           projectGroup.append(wrapper);
         } else {

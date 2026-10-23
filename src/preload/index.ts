@@ -112,9 +112,16 @@ export interface SessionDetail {
 }
 
 const api = {
+  companyObserve: () => call<import('../main/company-observability.js').CompanyObservabilityView>('marksCompany:request', {action:'observe'}),
   company: (request: import('../main/company-ipc.js').CompanyIpcRequest) => call<import('../shared/company.js').CompanySnapshot>('marksCompany:request', request),
-  notificationWhatsAppStart: () => call<import('../main/notification-whatsapp-web.js').WhatsAppWebStatus>('marksNotify:request', { action: 'wa-start' }),
-  notificationWhatsAppStatus: () => call<import('../main/notification-whatsapp-web.js').WhatsAppWebStatus>('marksNotify:request', { action: 'wa-status' }),
+  notificationWhatsAppStart: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-start' }) as Promise<
+    { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |
+    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue; setupStage?: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus['stage'] | 'unknown' }
+  >,
+  notificationWhatsAppStatus: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-status' }) as Promise<
+    { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |
+    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue; setupStage?: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus['stage'] | 'unknown' }
+  >,
   notificationWhatsAppDisconnect: () => call<import('../main/notification-whatsapp-web.js').WhatsAppWebStatus>('marksNotify:request', { action: 'wa-disconnect' }),
   notificationTelegramPairStart: () => call<{url:string;expires:number;qr:string}>('marksNotify:request', { action: 'tg-start' }),
   notificationTelegramPairCheck: () => call<{state:'pending'|'paired'|'expired';chatId?:string}>('marksNotify:request', { action: 'tg-check' }),
@@ -129,8 +136,21 @@ const api = {
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
   jarvisAudioStatus: () => call<{ models: string[]; local: boolean; windows: boolean; error: string | null }>('jarvis:audio', { action: 'status' }),
-  jarvisTranscribe: (engine: 'cliproxy' | 'local', model: string, language: string, mime: 'audio/webm' | 'audio/ogg' | 'audio/mp4', bytes: Uint8Array) => call<string>('jarvis:audio', { action: 'transcribe', engine, model, language, mime, bytes }),
+  jarvisTranscribe: (engine: 'cliproxy' | 'local' | 'provider', model: string, language: string, mime: 'audio/webm' | 'audio/ogg' | 'audio/mp4', bytes: Uint8Array, voice?: import('../shared/jarvis-voice.js').JarvisVoiceConfig) =>
+    call<string>('jarvis:audio', { action: 'transcribe', engine, model, language, mime, bytes, ...(voice ? { voice } : {}) }),
   jarvisCancel: () => call<null>('jarvis:audio', { action: 'cancel' }),
+  /** Jarvis J3: the voice provider's catalog and whether its Vault K keys exist (never their values). */
+  jarvisVoiceStatus: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig) => call<import('../main/jarvis-voice.js').JarvisVoiceStatus>('jarvis:audio', { action: 'voice-status', voice }),
+  jarvisVoiceSetKey: (slot: import('../shared/jarvis-voice.js').JarvisVoiceKeySlot, baseUrl: string, value: string, password: string) => call<boolean>('jarvis:audio', { action: 'voice-key', slot, baseUrl, value, password }),
+  jarvisSpeak: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string) => call<{ mime: string; bytes: Uint8Array }>('jarvis:audio', { action: 'speak', voice, text }),
+  jarvisSpeakStream: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string, requestId: string) =>
+    call<{ firstByteMs: number; totalMs: number; bytes: number }>('jarvis:audio', { action: 'speak-stream', voice, text, requestId }),
+  onJarvisSpeechStream: (listener: (event: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }) => void): (() => void) => {
+    const wrapped = (_event: unknown, chunk: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }): void => listener(chunk);
+    ipcRenderer.on('jarvis:speech-stream', wrapped);
+    return () => ipcRenderer.removeListener('jarvis:speech-stream', wrapped);
+  },
+  jarvisSpeakCancel: () => call<null>('jarvis:audio', { action: 'speak-cancel' }),
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */
   startDictation: (language = '') => call<{ status: 'starting' }>('dictation:start', { language }),
   stopDictation: () => call<void>('dictation:stop'),
@@ -342,6 +362,7 @@ const api = {
   /** Saves the Usage page as CSV through a save dialog; `divisor` is the page's token divisor. */
   exportUsage: (divisor: number) => call<{ saved: false } | { saved: true; name: string }>('usage:export', { divisor }),
   getState: () => call<AppState>('state:get'),
+  marksPromptPreview: () => call<string>('marks:promptPreview'),
   resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */
   startFreshCredentials: () => call<{ state: AppState; setAside: boolean }>('credentials:start-fresh'),

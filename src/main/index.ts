@@ -134,6 +134,7 @@ import {
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath, WINDOWS_APP_USER_MODEL_ID } from './window-icon.js';
 import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
+import { allowJarvisMicrophone } from './jarvis-permissions.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 import { showConnectionLossNotice } from './connection-loss-notice.js';
 import { requireMarkspanelLogin, startMarkspanelSessionMonitor } from './markspanel-auth.js';
@@ -731,8 +732,15 @@ void app.whenReady().then(async () => {
     });
   });
 
-  // Deny every permission request; the UI needs none of them.
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  // Deny every permission request except Jarvis's audio-only microphone for the app's own page.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const main = window && !window.isDestroyed() ? window.webContents : null;
+    callback(allowJarvisMicrophone({
+      permission, fromMainWindow: !!main && contents === main, isMainFrame: details.isMainFrame === true,
+      requestingUrl: details.requestingUrl ?? '', appUrl: main?.getURL() ?? '',
+      mediaTypes: (details as { mediaTypes?: string[] }).mediaTypes
+    }));
+  });
 
   // From here on a second launch may safely focus/recreate the window: renderer security policy
   // is installed and the renderer's fixed IPC methods already have handlers before it can load.

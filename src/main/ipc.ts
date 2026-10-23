@@ -20,6 +20,7 @@ import { registerJarvisAudioIpc } from './jarvis-audio.js';
 import { registerVaultIpc } from './marks-vault-ipc.js';
 import { registerBrainIpc } from './brain/ipc.js';
 import { registerCompanyIpc } from './company-ipc.js';
+import { initializeCompanyObservability } from './company-observability.js';
 import { initCompanyStore } from './company-store.js';
 import { revokeVaultChat } from './marks-vault-approval.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
@@ -95,6 +96,7 @@ import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } fro
 import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
+import { currentMarksSystemPrompt } from './marks-system-prompt.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { PROJECT_COLORS } from '../shared/projects.js';
 import { bridgePortSelection } from './bridge-ports.js';
@@ -671,6 +673,7 @@ export async function openSessionChat(id: string): Promise<void> {
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerVmsIpc(getWindow);
   initCompanyStore(app.getPath('userData'));
+  initializeCompanyObservability(app.getPath('userData'));
   registerCompanyIpc(getWindow);
   registerNotificationCenterIpc(getWindow);
   registerWorkspaceTerminalIpc(getWindow);
@@ -763,6 +766,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     logInfo('renderer state ready');
     return state;
   });
+  handle('marks:promptPreview', async () => currentMarksSystemPrompt('chatgpt'));
 
   handle('settings:save', async (payload) => {
     const request = settingsSave.parse(payload);

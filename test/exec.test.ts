@@ -276,8 +276,8 @@ describe('the environment prepared for a child process', () => {
     const inherited = pathEntries(process.env).map((entry) => entry.toLowerCase());
     const child = pathEntries(env).map((entry) => entry.toLowerCase());
     for (const entry of inherited) expect(child).toContain(entry);
-    // The bundled ripgrep is a prefix, so the child is never shorter than what it inherited.
-    expect(child.length).toBeGreaterThanOrEqual(inherited.length);
+    // Preparing a child may remove a duplicate bundled-ripgrep entry when it
+    // moves that directory to the front. Every inherited directory must remain.
   });
 
   it('resolves a command against the same path the child will search', () => {

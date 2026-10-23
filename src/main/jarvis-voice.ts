@@ -1,0 +1,306 @@
+/**
+ * Jarvis J3: the user's OpenAI-compatible voice provider (speech-to-text and text-to-speech).
+ * Main process only. Keys come from Vault K entries bound to the provider's exact origin; the
+ * renderer sends public settings, audio or text and gets back text or audio bytes, never a key.
+ */
+import { spawn } from 'node:child_process';
+import { putVault, useVault, vaultStatus } from './marks-vault.js';
+import { logInfo, logWarn, redact } from './logger.js';
+import {
+  JARVIS_VOICE_VAULT, jarvisVoiceUsesFallback, parseJarvisVoiceBaseUrl, rankJarvisVoiceModels,
+  type JarvisVoiceConfig, type JarvisVoiceKeySlot
+} from '../shared/jarvis-voice.js';
+
+export type JarvisAudioMime = 'audio/webm' | 'audio/ogg' | 'audio/mp4' | 'audio/wav';
+export interface VoiceCredential { header: string; value: string }
+export interface JarvisVoiceStatus { models: string[]; stt: string[]; tts: string[]; primary: boolean; fallback: boolean; ffmpeg: boolean; error: string | null }
+
+const MAX_JSON = 2_000_000;
+const MAX_AUDIO = 16_000_000;
+const MAX_TEXT = 32_000;
+
+interface Dependencies {
+  credential(slot: JarvisVoiceKeySlot, origin: string): Promise<VoiceCredential | null>;
+  ffmpeg(): Promise<boolean>;
+  toWav(bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array>;
+  fetch: typeof fetch;
+}
+
+/** A missing vault or entry means "no key"; an entry bound elsewhere is an explicit error. */
+async function vaultCredential(slot: JarvisVoiceKeySlot, origin: string): Promise<VoiceCredential | null> {
+  try { if (!(await vaultStatus()).ready) return null; } catch { return null; }
+  let found: VoiceCredential | null = null;
+  let mismatch = false;
+  try {
+    await useVault(JARVIS_VOICE_VAULT[slot], async entry => {
+      if (entry.origin !== origin) mismatch = true; else found = { header: entry.header, value: entry.value };
+      return '';
+    });
+  } catch { return null; }
+  if (mismatch) throw new Error(`The saved ${slot} voice key belongs to another address. Save it again for this provider URL.`);
+  return found;
+}
+
+let ffmpegKnown: Promise<boolean> | null = null;
+function ffmpegAvailable(): Promise<boolean> {
+  ffmpegKnown ??= new Promise(resolve => {
+    try {
+      const child = spawn('ffmpeg', ['-hide_banner', '-version'], { stdio: 'ignore' });
+      child.on('error', () => resolve(false));
+      child.on('close', code => resolve(code === 0));
+    } catch { resolve(false); }
+  });
+  return ffmpegKnown;
+}
+
+/** Decode any recorded container to 16 kHz mono WAV through ffmpeg pipes; nothing touches disk. */
+function ffmpegToWav(bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) { reject(new Error('Transcription canceled')); return; }
+    const child = spawn('ffmpeg', ['-nostdin', '-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-ac', '1', '-ar', '16000', '-f', 'wav', 'pipe:1'], { stdio: ['pipe', 'pipe', 'pipe'], signal });
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let error = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > MAX_AUDIO * 2) { child.kill(); reject(new Error('Converted audio is too large.')); return; }
+      chunks.push(chunk);
+    });
+    child.stderr.on('data', (chunk: Buffer) => { error = (error + chunk.toString()).slice(-600); });
+    child.on('error', reject);
+    child.stdin.on('error', () => undefined);
+    child.on('close', code => code === 0 ? resolve(new Uint8Array(Buffer.concat(chunks))) : reject(new Error(`ffmpeg could not convert the recording (${code}): ${error.slice(-200)}`)));
+    child.stdin.end(bytes);
+  });
+}
+
+const defaults: Dependencies = { credential: vaultCredential, ffmpeg: ffmpegAvailable, toWav: ffmpegToWav, fetch: (...args) => fetch(...args) };
+let deps: Dependencies = defaults;
+export function configureJarvisVoiceForTests(override: Partial<Dependencies> | null): void { deps = override ? { ...defaults, ...override } : defaults; }
+
+function authorization(credential: VoiceCredential | null): Record<string, string> {
+  if (!credential) return {};
+  return { [credential.header]: /^authorization$/i.test(credential.header) ? `Bearer ${credential.value}` : credential.value };
+}
+
+/** A short, credential-free explanation from a provider error body. */
+async function failure(response: Response, what: string): Promise<Error> {
+  let detail = '';
+  try {
+    const text = (await readBounded(response, 8_000)).toString();
+    const parsed = JSON.parse(text) as { error?: { message?: unknown } | string; detail?: unknown; message?: unknown };
+    const message = typeof parsed.error === 'string' ? parsed.error : parsed.error?.message ?? parsed.detail ?? parsed.message;
+    if (typeof message === 'string') detail = message;
+  } catch { /* not JSON */ }
+  detail = redact(detail.replace(/\s+/g, ' ').trim()).slice(0, 160);
+  return new Error(`Voice provider ${what} returned HTTP ${response.status}${detail ? `: ${detail}` : '.'}`);
+}
+
+async function readBounded(response: Response, max: number): Promise<Buffer> {
+  const length = Number(response.headers.get('content-length'));
+  if (Number.isFinite(length) && length > max) { await response.body?.cancel().catch(() => undefined); throw new Error('Voice provider response is too large.'); }
+  if (!response.body) return Buffer.alloc(0);
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > max) throw new Error('Voice provider response is too large.');
+      chunks.push(value);
+    }
+  } catch (error) { await reader.cancel().catch(() => undefined); throw error; }
+  return Buffer.concat(chunks);
+}
+
+/**
+ * One request with the primary key; a 401/403/429/5xx is retried once with the fallback key.
+ * A provider without keys is called without authorization (for example a local server).
+ */
+async function voiceRequest(config: JarvisVoiceConfig, path: string, init: () => RequestInit, signal: AbortSignal): Promise<Response> {
+  const base = parseJarvisVoiceBaseUrl(config.baseUrl);
+  const primary = await deps.credential('primary', base.origin);
+  const fallback = await deps.credential('fallback', base.origin);
+  const keys = [primary, fallback].filter((key): key is VoiceCredential => !!key);
+  const attempts: (VoiceCredential | null)[] = keys.length ? keys : [null];
+  for (let index = 0; index < attempts.length; index++) {
+    const request = init();
+    const response = await deps.fetch(`${base.toString().replace(/\/+$/, '')}${path}`, {
+      ...request, headers: { ...(request.headers as Record<string, string>), ...authorization(attempts[index]!) },
+      redirect: 'error', credentials: 'omit', cache: 'no-store', signal
+    });
+    if (response.ok || index === attempts.length - 1 || !jarvisVoiceUsesFallback(response.status)) return response;
+    await response.body?.cancel().catch(() => undefined);
+    logInfo(`jarvis: voice provider ${path} answered HTTP ${response.status} to the primary key; retrying with the fallback key`);
+  }
+  throw new Error('Voice provider request was not sent.');
+}
+
+const timeout = (signal: AbortSignal, ms: number): AbortSignal => AbortSignal.any([signal, AbortSignal.timeout(ms)]);
+
+export async function jarvisVoiceStatus(config: JarvisVoiceConfig, signal = new AbortController().signal): Promise<JarvisVoiceStatus> {
+  const result: JarvisVoiceStatus = { models: [], stt: [], tts: [], primary: false, fallback: false, ffmpeg: await deps.ffmpeg(), error: null };
+  if (!config.baseUrl) return result;
+  try {
+    const origin = parseJarvisVoiceBaseUrl(config.baseUrl).origin;
+    result.primary = !!(await deps.credential('primary', origin));
+    result.fallback = !!(await deps.credential('fallback', origin));
+    const response = await voiceRequest(config, '/models', () => ({ method: 'GET', headers: { accept: 'application/json' } }), timeout(signal, 15_000));
+    if (!response.ok) throw await failure(response, 'model list');
+    const parsed = JSON.parse((await readBounded(response, MAX_JSON)).toString()) as { data?: unknown } | unknown[];
+    const rows = Array.isArray(parsed) ? parsed : Array.isArray((parsed as { data?: unknown }).data) ? (parsed as { data: unknown[] }).data : [];
+    const ids = rows.map(row => typeof row === 'string' ? row : (row as { id?: unknown })?.id).filter((id): id is string => typeof id === 'string').slice(0, 1000);
+    result.models = ids;
+    result.stt = rankJarvisVoiceModels(ids, 'stt');
+    result.tts = rankJarvisVoiceModels(ids, 'tts');
+  } catch (error) { result.error = error instanceof Error ? error.message.slice(0, 240) : 'Voice provider is unavailable.'; }
+  return result;
+}
+
+export async function storeJarvisVoiceKey(slot: JarvisVoiceKeySlot, baseUrl: string, raw: string, password: string): Promise<void> {
+  const url = parseJarvisVoiceBaseUrl(baseUrl);
+  const value = raw.trim().replace(/^Bearer\s+/i, '');
+  if (!value || /\s/.test(value)) throw new Error('The key must be one token without spaces.');
+  await putVault({ name: JARVIS_VOICE_VAULT[slot], value, origin: url.origin, header: 'Authorization', ...(url.protocol === 'http:' ? { insecureHttp: true } : {}) }, password);
+  logInfo(`jarvis: stored the ${slot} voice provider key in the vault for ${url.origin}`);
+}
+
+const fileName = (mime: JarvisAudioMime): string => mime === 'audio/wav' ? 'jarvis.wav' : mime === 'audio/mp4' ? 'jarvis.m4a' : mime === 'audio/ogg' ? 'jarvis.ogg' : 'jarvis.webm';
+const cleanTranscript = (text: string): string => text.trim().replace(/^["“'«]+|["”'»]+$/g, '').trim().slice(0, MAX_TEXT);
+
+async function viaTranscriptions(config: JarvisVoiceConfig, mime: JarvisAudioMime, bytes: Uint8Array, language: string, signal: AbortSignal): Promise<{ status: number; text: string | null; response?: Response }> {
+  const response = await voiceRequest(config, '/audio/transcriptions', () => {
+    const form = new FormData();
+    form.append('model', config.sttModel);
+    form.append('file', new Blob([new Uint8Array(bytes)], { type: mime }), fileName(mime));
+    form.append('response_format', 'json');
+    if (language) form.append('language', language.split('-')[0]!.toLowerCase());
+    return { method: 'POST', headers: { accept: 'application/json' }, body: form };
+  }, signal);
+  if (!response.ok) return { status: response.status, text: null, response };
+  const body = (await readBounded(response, MAX_JSON)).toString();
+  let text: unknown;
+  try { text = (JSON.parse(body) as { text?: unknown }).text; } catch { text = body; }
+  return { status: response.status, text: typeof text === 'string' ? cleanTranscript(text) : '' };
+}
+
+async function viaChatAudio(config: JarvisVoiceConfig, wav: Uint8Array, language: string, signal: AbortSignal): Promise<string> {
+  const hint = language ? ` The expected language is ${language}.` : '';
+  const response = await voiceRequest(config, '/chat/completions', () => ({
+    method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({
+      model: config.sttModel, temperature: 0, stream: false,
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: `Transcribe this audio verbatim in its original language.${hint} Reply with the transcript only, without quotes, translation or comments. If nothing is said, reply with nothing.` },
+        { type: 'input_audio', input_audio: { data: Buffer.from(wav).toString('base64'), format: 'wav' } }
+      ] }]
+    })
+  }), signal);
+  if (!response.ok) throw await failure(response, 'transcription');
+  const parsed = JSON.parse((await readBounded(response, MAX_JSON)).toString()) as { choices?: { message?: { content?: unknown } }[] };
+  const content = parsed.choices?.[0]?.message?.content;
+  const text = typeof content === 'string' ? content : Array.isArray(content)
+    ? content.map(part => typeof (part as { text?: unknown })?.text === 'string' ? (part as { text: string }).text : '').join('') : '';
+  return cleanTranscript(text);
+}
+
+/**
+ * Speech to text. A recording format the provider rejects (or answers with empty text) is
+ * converted to WAV with an installed ffmpeg and sent once more; nothing is written to disk.
+ */
+export async function transcribeJarvisVoice(config: JarvisVoiceConfig, mime: JarvisAudioMime, bytes: Uint8Array, language: string, signal: AbortSignal): Promise<string> {
+  if (!config.baseUrl || !config.sttModel) throw new Error('Configure the voice provider URL and speech-to-text model.');
+  const started = Date.now();
+  let text: string;
+  if (config.sttMode === 'chat-audio') {
+    if (mime !== 'audio/wav' && !(await deps.ffmpeg())) throw new Error('Chat-model transcription needs ffmpeg to convert the recording to WAV.');
+    text = await viaChatAudio(config, mime === 'audio/wav' ? bytes : await deps.toWav(bytes, signal), language, signal);
+  } else {
+    let result = await viaTranscriptions(config, mime, bytes, language, signal);
+    const retry = mime !== 'audio/wav' && (result.text === '' || [400, 415, 422].includes(result.status) || result.status >= 500);
+    if (retry && await deps.ffmpeg()) {
+      await result.response?.body?.cancel().catch(() => undefined);
+      logInfo(`jarvis: voice provider ${result.text === '' ? 'returned no text' : `answered HTTP ${result.status}`} for ${mime}; retrying as WAV`);
+      result = await viaTranscriptions(config, 'audio/wav', await deps.toWav(bytes, signal), language, signal);
+    }
+    if (result.text === null) throw await failure(result.response!, 'transcription');
+    text = result.text;
+  }
+  logInfo(`jarvis: voice provider transcription (${config.sttMode}) finished in ${Date.now() - started} ms`);
+  if (!text) throw new Error('The voice provider returned no text.');
+  return text;
+}
+
+async function speechResponse(config: JarvisVoiceConfig, text: string, signal: AbortSignal): Promise<{ mime: string; response: Response }> {
+  if (!config.baseUrl || !config.ttsModel || !config.voice) throw new Error('Configure the voice provider URL, speech model and voice.');
+  const input = text.trim().slice(0, 4000);
+  if (!input) throw new Error('Nothing to speak.');
+  const response = await voiceRequest(config, '/audio/speech', () => ({
+    method: 'POST', headers: { 'content-type': 'application/json', accept: 'audio/mpeg,audio/*;q=0.9' },
+    body: JSON.stringify({ model: config.ttsModel, input, voice: config.voice, response_format: 'mp3' })
+  }), signal);
+  if (!response.ok) throw await failure(response, 'speech');
+  const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
+  if (!/^audio\/|^application\/(ogg|octet-stream)$/.test(type)) {
+    await response.body?.cancel().catch(() => undefined);
+    logWarn(`jarvis: voice provider speech returned ${type || 'no content type'} instead of audio`);
+    throw new Error('Voice provider speech returned no audio.');
+  }
+  return { response, mime: type === 'application/ogg' ? 'audio/ogg' : type === 'application/octet-stream' ? 'audio/mpeg' : type };
+}
+
+/** Compatibility route: providers and clients without incremental playback get one bounded buffer. */
+export async function speakJarvisVoice(config: JarvisVoiceConfig, text: string, signal: AbortSignal): Promise<{ mime: string; bytes: Uint8Array }> {
+  const { response, mime } = await speechResponse(config, text, signal);
+  const bytes = await readBounded(response, MAX_AUDIO);
+  if (!bytes.length) throw new Error('Voice provider speech returned no audio.');
+  return { mime: mime === 'audio/mpeg' && bytes.subarray(0, 4).toString() === 'OggS' ? 'audio/ogg' : mime, bytes: new Uint8Array(bytes) };
+}
+
+export type JarvisAudioStreamEvent =
+  | { requestId: string; type: 'start'; mime: string }
+  | { requestId: string; type: 'chunk'; bytes: Uint8Array }
+  | { requestId: string; type: 'end' };
+
+/**
+ * Forward each bounded provider chunk as it arrives. The renderer owns playback and may start
+ * after the first decodable frames, while the response is still being generated. IPC is scoped
+ * to the requesting main frame; cancellation aborts the HTTP stream and suppresses late events.
+ */
+export async function streamJarvisVoice(
+  config: JarvisVoiceConfig, text: string, requestId: string, signal: AbortSignal,
+  emit: (event: JarvisAudioStreamEvent) => void
+): Promise<{ firstByteMs: number; totalMs: number; bytes: number }> {
+  const started = performance.now();
+  const { response, mime } = await speechResponse(config, text, signal);
+  signal.throwIfAborted();
+  emit({ requestId, type: 'start', mime });
+  if (!response.body) throw new Error('Voice provider speech returned no audio.');
+  const reader = response.body.getReader();
+  let bytes = 0;
+  let firstByteMs = -1;
+  try {
+    for (;;) {
+      signal.throwIfAborted();
+      const { done, value } = await reader.read();
+      if (done) break;
+      signal.throwIfAborted();
+      bytes += value.byteLength;
+      if (bytes > MAX_AUDIO) throw new Error('Voice provider response is too large.');
+      if (value.byteLength && firstByteMs < 0) firstByteMs = Math.round(performance.now() - started);
+      // Bounded messages prevent a provider's large network read becoming one huge IPC payload.
+      for (let offset = 0; offset < value.byteLength; offset += 64 * 1024) {
+        signal.throwIfAborted();
+        emit({ requestId, type: 'chunk', bytes: value.slice(offset, offset + 64 * 1024) });
+      }
+    }
+  } catch (error) { await reader.cancel().catch(() => undefined); throw error; }
+  signal.throwIfAborted();
+  if (!bytes) throw new Error('Voice provider speech returned no audio.');
+  emit({ requestId, type: 'end' });
+  const totalMs = Math.round(performance.now() - started);
+  logInfo(`jarvis: speech stream first byte ${firstByteMs} ms, completed ${totalMs} ms (${bytes} bytes)`);
+  return { firstByteMs, totalMs, bytes };
+}

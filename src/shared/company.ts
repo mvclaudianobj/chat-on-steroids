@@ -11,12 +11,13 @@ export const companyStateNameSchema = z.enum(COMPANY_STATES);
 export const companySeatSchema = z.string().regex(/^marks(?:[1-9][0-9]?)$/);
 const safeText = (limit: number) => z.string().trim().min(1).max(limit);
 const tick = z.number().int().min(0);
+export const companyPresenceSchema = z.enum(['invited','accepted','declined','present']);
 const actor = z.union([z.literal('ceo'), companyRoleSchema, companySeatSchema]);
 export const companySchema = z.object({
   name: safeText(100),
-  seatCount: z.number().int().min(1).max(50).default(5),
+  seatCount: z.number().int().min(1).max(99).default(5),
   roles: z.tuple([z.literal('marks-coo'), z.literal('marks-cto'), z.literal('marks-cio'), z.literal('marks-cpo'), z.literal('marks-cko'), z.literal('marks-cqo'), z.literal('marks-cco')]),
-  seats: z.array(companySeatSchema).min(1).max(50)
+  seats: z.array(companySeatSchema).min(1).max(99)
 }).strict().superRefine((data, context) => {
   if (data.seats.length !== data.seatCount || data.seats.some((seat, index) => seat !== `marks${index + 1}`))
     context.addIssue({ code: 'custom', path: ['seats'], message: 'Seats must be marks1..N' });
@@ -29,10 +30,14 @@ export const companyRequestSchema = z.object({
   tokensUsed: z.number().int().min(0).max(10_000_000), minutesUsed: z.number().int().min(0).max(525600),
   dueAt: tick.nullable(), status: companyStateNameSchema,
   raci: z.object({ responsible: actor, accountable: actor, consulted: z.array(actor).max(20), informed: z.array(actor).max(20) }).strict(),
+  execution: z.object({ mode: z.enum(['simulated','live']), phase: z.enum(['awaiting-authorization','admitted','running','reported','failed']), ownerId: z.string().uuid().nullable(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/).nullable(), runId: z.string().uuid().nullable(), reportId: z.string().max(100).nullable(), result: z.string().max(1200).nullable(), evidence: z.string().max(1200).nullable(), authorizedAt: tick.nullable() }).strict().optional(),
+  /** COO receipt binds the exact worker report to a review. Absent on legacy tickets. */
+  cooConfirmation: z.object({ actor: z.literal('marks-coo'), at: tick, reportId: safeText(100), workerId: z.string().regex(/^worker-[1-9][0-9]*$/), evidence: safeText(400) }).strict().optional(),
   history: z.array(companyHistorySchema).max(300), createdAt: tick, updatedAt: tick
 }).strict();
 export const companyMeetingSchema = z.object({
-  id: z.string().uuid(), title: safeText(160), participants: z.array(actor).min(2).max(30),
+  id: z.string().uuid(), title: safeText(160), participants: z.array(actor).min(2).max(101),
+  invitations: z.array(z.object({ seat: companySeatSchema, state: companyPresenceSchema, contribution: z.string().max(1600), confirmedAt: tick.nullable(), evidence: z.string().max(400).nullable(), delivery: z.object({ ownerId: z.string().uuid(), runId: z.string().uuid(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/), at: tick, queuedId: z.string().max(100).nullable() }).strict().optional() }).strict()).max(99).optional(), agenda: z.string().max(2400).optional(),
   at: tick, durationMinutes: z.number().int().min(1).max(480), minutes: z.string().max(5000),
   decisions: z.array(safeText(800)).max(30), brainSync: z.literal('pending')
 }).strict();
@@ -53,6 +58,50 @@ export type CompanyMeeting = z.infer<typeof companyMeetingSchema>;
 export type ActivityEvent = z.infer<typeof companyActivitySchema>;
 export type CompanySnapshot = z.infer<typeof companySnapshotSchema>;
 
+export type CompanySeatState = 'rest-free' | 'rest-confirmed' | 'meeting-invited' | 'meeting-accepted' | 'meeting-present' | 'busy' | 'review' | 'needs-ceo' | 'unverified';
+export interface CompanySeatView {
+  seat: string;
+  state: CompanySeatState;
+  /** A confirmed completion is distinct from an idle worker with no tasks. */
+  completedRequestId: string | null;
+}
+
+/** Requires an actual report identity and the COO's separate matching acceptance. */
+export function isCompanyCompletionConfirmed(request: CompanyRequest, allowSynthetic = false): boolean {
+  const execution = request.execution;
+  const receipt = request.cooConfirmation;
+  return request.status === 'done' && !!execution && !!receipt &&
+    (execution.mode === 'live' || allowSynthetic) && execution.phase === 'reported' &&
+    !!execution.ownerId && !!execution.runId && !!execution.workerId &&
+    !!execution.reportId && !!execution.result?.trim() && !!execution.evidence?.trim() &&
+    receipt.actor === 'marks-coo' && receipt.at >= (execution.authorizedAt ?? 0) &&
+    receipt.reportId === execution.reportId && receipt.workerId === execution.workerId && !!receipt.evidence.trim();
+}
+
+/** Deterministic projection from the durable ticket and invitation records; no stale status cache. */
+export function companySeatView(snapshot: CompanySnapshot, seat: string, now = Date.now()): CompanySeatView {
+  const tickets = snapshot.requests.filter(request => request.seat === seat);
+  const invitation = snapshot.meetings.find(meeting => meeting.at <= now && now < meeting.at + meeting.durationMinutes * 60_000 &&
+    meeting.invitations?.some(row => row.seat === seat && row.state !== 'declined'))?.invitations?.find(row => row.seat === seat);
+  if (invitation) {
+    const present = invitation.state === 'present' && invitation.confirmedAt !== null && !!invitation.evidence?.trim();
+    return { seat, state: present ? 'meeting-present' : invitation.state === 'accepted' || invitation.state === 'present' ? 'meeting-accepted' : 'meeting-invited', completedRequestId: null };
+  }
+  if (tickets.some(request => request.status === 'needs-ceo')) return { seat, state: 'needs-ceo', completedRequestId: null };
+  if (tickets.some(request => request.status === 'review')) return { seat, state: 'review', completedRequestId: null };
+  if (tickets.some(request => !['done'].includes(request.status))) return { seat, state: 'busy', completedRequestId: null };
+  if (tickets.some(request => !isCompanyCompletionConfirmed(request, snapshot.demo))) return { seat, state: 'unverified', completedRequestId: null };
+  const last = tickets.reduce<CompanyRequest | null>((winner, current) => !winner || current.updatedAt > winner.updatedAt ? current : winner, null);
+  return { seat, state: last ? 'rest-confirmed' : 'rest-free', completedRequestId: last?.id ?? null };
+}
+
+/** New configurations have 1..10 employees; legacy configurations remain intact but do not expand the lounge. */
+export function companyRestingSeats(snapshot: CompanySnapshot, now = Date.now()): CompanySeatView[] {
+  return snapshot.company.seats.slice(0, 10)
+    .map(seat => companySeatView(snapshot, seat, now))
+    .filter(row => row.state === 'rest-free' || row.state === 'rest-confirmed');
+}
+
 export function emptyCompany(): CompanySnapshot {
   return { version: 1, company: { name: 'Chat Marks', seatCount: 5, roles: [...COMPANY_ROLES], seats: companySeats(5) }, requests: [], meetings: [], activities: [], demo: false };
 }
@@ -62,6 +111,10 @@ export function companySeats(count: number): string[] { return Array.from({ leng
 export function demoCompany(now = Date.now()): CompanySnapshot {
   const snapshot = emptyCompany();
   snapshot.company.name = 'Marks Studio';
+  // One idle employee and one independently reviewed completion make the lounge's
+  // two distinct states visible. These are examples, never broker observations.
+  snapshot.company.seatCount = 6;
+  snapshot.company.seats = companySeats(6);
   snapshot.demo = true;
   const titles = [
     ['Review the product roadmap', 'Studio / Product', 'marks-cpo', 'marks1', 'codex', 'gpt-6', 'inbox', 8200, 0],
@@ -80,6 +133,16 @@ export function demoCompany(now = Date.now()): CompanySnapshot {
     dueAt: now + (index - 2) * 86_400_000, status, raci: { responsible: status === 'inbox' ? owner : seat, accountable: 'ceo', consulted: ['marks-cqo'], informed: ['marks-coo'] },
     history: [{ at: now - (10 - index) * 3_600_000, actor: 'ceo', note: 'Synthetic request created.' }], createdAt: now - (10 - index) * 3_600_000, updatedAt: now - index * 1_800_000
   }));
+  const finished = snapshot.requests.find(request => request.status === 'done')!;
+  finished.execution = {
+    mode: 'simulated', phase: 'reported', ownerId: '00000000-0000-4000-8000-000000000301',
+    runId: '00000000-0000-4000-8000-000000000302', workerId: 'worker-5', reportId: 'sample-report-5',
+    result: 'Synthetic completion recorded.', evidence: 'synthetic-event-5', authorizedAt: now - 7_200_000
+  };
+  finished.cooConfirmation = {
+    actor: 'marks-coo', at: now - 3_600_000, reportId: 'sample-report-5',
+    workerId: 'worker-5', evidence: 'synthetic-coo-review-5'
+  };
   snapshot.meetings = [{ id: '00000000-0000-4000-8000-000000000101', title: 'Weekly leadership sync', participants: ['ceo', 'marks-coo', 'marks-cto', 'marks-cpo'], at: now - 86_400_000, durationMinutes: 25, minutes: 'Demo: priorities reviewed and responsibilities confirmed.', decisions: ['Review launch priorities with the CEO.', 'Keep quality checks in the review stage.'], brainSync: 'pending' }];
   snapshot.activities = snapshot.requests.map((request, index) => ({ id: `00000000-0000-4000-8000-${String(index + 201).padStart(12, '0')}`, at: request.updatedAt, actor: request.owner, kind: 'request' as const, requestId: request.id, message: `${request.title} · ${request.status}` })).sort((a,b) => b.at - a.at);
   return companySnapshotSchema.parse(snapshot);

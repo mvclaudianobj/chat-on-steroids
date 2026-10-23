@@ -795,8 +795,58 @@ describe('who is allowed to talk to it', () => {
     expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.42.1' });
   });
 
+  it('does not report the selected built-in browser connected only because external Chrome is paired', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+    const native = 'c'.repeat(32), external = 'e'.repeat(32);
+    const poll = (host: string, browser: string) => request('POST', '/status', {
+      host, browser, body: { openConversations: [] }
+    });
+    await poll('browser', external);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: false, extensionVersion: null,
+      externalExtension: { present: true }, cosExtension: { present: false } });
+    await poll('cos', native);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    // Chrome continues polling after the native browser closes. The external profile's
+    // valid shared credential must not make the selected native browser look connected.
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      await vi.advanceTimersByTimeAsync(40_000);
+      await poll('browser', external);
+      await vi.advanceTimersByTimeAsync(20_002);
+      expect(await bridgeStatus()).toMatchObject({ paired: true, present: false,
+        externalExtension: { present: true }, cosExtension: { present: false } });
+      await poll('cos', native);
+      expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('projects Firefox and Chromium presence independently while sharing one valid pairing', async () => {
+    const credential = await pair();
+    const chrome = 'c'.repeat(32), firefox = 'f'.repeat(32);
+    const poll = (browser: string, engine?: string) => request('POST', '/status', {
+      host: 'browser', browser, engine, auth: credential, body: { openConversations: [] }
+    });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: false, extensionVersion: null });
+    await poll(firefox, 'gecko');
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true,
+      extensionVersion: APP_VERSION, extensionEngine: 'gecko' });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true,
+      extensionVersion: APP_VERSION, extensionEngine: 'gecko' });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+    // Switching browsers changes the UI projection, not the pairing credential itself.
+    expect((await request('GET', '/status', { host: 'browser', browser: firefox, engine: 'gecko', auth: credential })).status).toBe(200);
+  });
+
   it('publishes external expiry while the CoS companion continues polling', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
     try {
@@ -1124,6 +1174,7 @@ describe('provisioning', () => {
 
   it('does not treat a persisted pairing token as proof the browser is present after restart', async () => {
     await pair();
+    await request('GET', '/status', { host: 'browser' });
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
 
     // Pairing is durable authorization; browser presence belongs to this app process. A
@@ -1135,6 +1186,7 @@ describe('provisioning', () => {
 
   it('requires a fresh browser sighting after the local bridge itself restarts', async () => {
     await pair();
+    await request('GET', '/status', { host: 'browser' });
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
 
     await stopBridge();
@@ -1145,7 +1197,7 @@ describe('provisioning', () => {
     expect(await bridgeStatus()).toMatchObject({ running: true, paired: true, present: false, lastSeenAt: null });
 
     // Authorization survived, so the first normal extension poll proves presence again.
-    expect((await request('GET', '/status')).status).toBe(200);
+    expect((await request('GET', '/status', { host: 'browser' })).status).toBe(200);
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
   });
 });
@@ -5067,7 +5119,10 @@ describe('delivering a bootstrap', () => {
       expect(userPromptText(command.text)).toContain('PROJECT_TASK_PRESERVED');
       expect(userPromptText(command.text)).not.toMatch(/SCOPED_AGENTS|Cut off/);
     } else {
-      expect(command.text).not.toContain('[[COS_CONTEXT:');
+      // Compact & Resume starts a new ChatGPT document, so the short Marks persona
+      // now belongs in that opening; the full AGENTS/setup instructions still do not.
+      expect(command.text).toContain('[[COS_CONTEXT:');
+      expect(command.text).toContain('Você é Marks');
       expect(command.text).not.toContain('SCOPED_AGENTS_HEAD');
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }

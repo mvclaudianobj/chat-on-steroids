@@ -19,6 +19,7 @@ const { resetRecorderForTests } = await import('../src/main/session/recorder.js'
 const executor = await import('../src/main/api-chat/executor.js');
 const ledger = await import('../src/main/agent-engine/ledger.js');
 const protocol = await import('../src/main/agent-engine/codex-protocol.js');
+const { currentMarksSystemPrompt } = await import('../src/main/marks-system-prompt.js');
 const { createCodexEngine, CODEX_NOT_SIGNED_IN } = await import('../src/main/agent-engine/codex.js');
 const { JsonRpcPeer, connectWebSocket } = await import('../src/main/agent-engine/jsonrpc.js');
 const { acceptWebSocket } = createRequire(import.meta.url)('./fixtures/agent-engine/websocket-stdio.cjs') as { acceptWebSocket(stream: unknown, options?: { maxPayload?: number }): Promise<import('ws').WebSocket> };
@@ -333,7 +334,7 @@ describe('Codex engine (fake app-server)', () => {
     const [turnStart] = fake.requests('turn/start');
     conforms('TurnStartParams', turnStart!.params);
     expect(turnStart!.params).toEqual({
-      threadId: 'thread-1', input: [{ type: 'text', text: 'Fix the failing test', text_elements: [] }], model: 'gpt-5.5-codex', effort: 'medium', cwd,
+      threadId: 'thread-1', input: [{ type: 'text', text: `${currentMarksSystemPrompt('codex')}\n\nFix the failing test`, text_elements: [] }], model: 'gpt-5.5-codex', effort: 'medium', cwd,
       approvalPolicy: 'untrusted', approvalsReviewer: 'user',
       sandboxPolicy: { type: 'workspaceWrite', writableRoots: [cwd], networkAccess: false, excludeTmpdirEnvVar: false, excludeSlashTmp: false }
     });
