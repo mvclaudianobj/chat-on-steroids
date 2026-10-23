@@ -74,10 +74,10 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   const consent = element<HTMLInputElement>('jarvisConsent'); consent.checked = true; consent.dispatchEvent(new window.Event('change'));
   const hold = () => element<HTMLTextAreaElement>('chatInput').dispatchEvent(new window.KeyboardEvent('keydown', { code: 'F8', bubbles: true }));
   const release = () => window.dispatchEvent(new window.KeyboardEvent('keyup', { code: 'F8', bubbles: true }));
-  const stream = async (text: string, final = false, ended = false) => {
+  const stream = async (text: string, final = false, ended = false, turnId = 'turn-01') => {
     events = [
-      { kind: 'assistant_message', turnId: 'turn-01', messageId: 'm1', seq: 2, message: { text, truncated: false, chars: text.length }, final },
-      ...(ended ? [{ kind: 'turn_end', turnId: 'turn-01', seq: 3, outcome: 'completed' }] : [])
+      { kind: 'assistant_message', turnId, messageId: 'm1', seq: 2, message: { text, truncated: false, chars: text.length }, final },
+      ...(ended ? [{ kind: 'turn_end', turnId, seq: 3, outcome: 'completed' }] : [])
     ];
     changed({ sessionIds: ['test-jarvis-0001'] });
     await flush();
@@ -86,6 +86,28 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
 }
 
 describe('Jarvis voice provider in the conversation', () => {
+  it('rejects an old CLIProxy send receipt after a new PTT interrupts thinking', async () => {
+    let resolveOld!: (result: { ok: true; data: { turnId: string } }) => void;
+    const oldReceipt = new Promise<{ ok: true; data: { turnId: string } }>(resolve => { resolveOld = resolve; });
+    const f = await fixture();
+    f.send.mockImplementationOnce(() => oldReceipt);
+    f.send.mockResolvedValue({ ok: true, data: { turnId: 'turn-02' } });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    expect(f.send).toHaveBeenCalledTimes(1);
+    expect(f.element('jarvisTalk').dataset.state).toBe('thinking');
+    f.hold(); await f.flush();
+    expect(f.element('jarvisTalk').dataset.state).toBe('listening');
+    resolveOld({ ok: true, data: { turnId: 'turn-01' } });
+    await f.flush();
+    await f.stream('Esta resposta antiga não pode voltar a falar. Ainda gerando');
+    expect(f.speak).not.toHaveBeenCalled();
+    expect(f.element('jarvisTalk').dataset.state).toBe('listening');
+    f.release(); await f.flush();
+    expect(f.send).toHaveBeenCalledTimes(2);
+    await f.stream('Agora somente o novo turno deve falar. Texto parcial', false, false, 'turn-02');
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Agora somente o novo turno deve falar.']);
+  });
+
   it('uses the configured provider first and falls back to CLIProxy when it fails', async () => {
     const f = await fixture({ providerTranscribe: 'fail' });
     f.hold(); await f.flush();

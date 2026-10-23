@@ -449,14 +449,20 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
       paint();
       if (!shouldSend) { status.textContent = t('No speech was sent.'); return; }
       status.textContent = t('Sending Jarvis message…');
+      // Sending a CLIProxy message can outlive the next PTT press or loss of microphone consent.
+      // A late receipt belongs to the capture that submitted it, never to the new voice turn.
+      const submittedAttempt = attempt;
+      const currentSend = (): boolean => submittedAttempt === attempt && eligible() === target &&
+        preferences.enabled && consented && phase === 'thinking';
       void api.apiChatSend(target!, text).then(reply => {
+        if (!currentSend()) return;
         if (reply.ok) {
           answer = { sessionId: target!, turnId: reply.data.turnId, splitter: new JarvisSentenceSplitter(), spoken: 0 };
           answerDone = false;
           status.textContent = t('Jarvis message sent to this CLIProxy chat.');
           void readAnswer();
         } else { status.textContent = t(reply.error); setPhase('idle'); }
-      }).catch(() => { status.textContent = t('Jarvis message could not be sent.'); setPhase('idle'); });
+      }).catch(() => { if (currentSend()) { status.textContent = t('Jarvis message could not be sent.'); setPhase('idle'); } });
     } else if (event.type === 'status' && event.status === 'listening') status.textContent = t('Listening…');
   }
   api.onDictationEvent(eventReceived);
