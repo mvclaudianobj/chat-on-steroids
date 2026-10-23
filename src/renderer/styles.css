@@ -3850,6 +3850,11 @@ nav button:hover, nav button.is-sel { background: var(--hover); color: var(--ink
 .notification-secret-row .btn { min-height: 36px; }
 .notification-vault-notice:not([hidden]) { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; margin-top: 12px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); }
 .notification-vault-notice .btn { min-height: 34px; }
+.notification-trust:not([hidden]) { display: grid; gap: 10px; margin-top: 12px; }
+.notification-certificate { display: grid; gap: 4px; justify-items: start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; }
+.notification-certificate b { color: var(--ink); }
+.notification-fingerprint { max-width: 100%; overflow-wrap: anywhere; user-select: all; font-family: var(--mono); }
+.notification-certificate .btn { min-height: 34px; margin-top: 6px; }
 .notification-channel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding-top: 16px; }
 .notification-center-footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; padding: 16px 0; border-top: 1px solid var(--line); }
 .notification-center-footer .btn { min-height: 38px; }

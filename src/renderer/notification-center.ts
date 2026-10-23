@@ -1,5 +1,5 @@
 import { NOTIFICATION_CHANNELS, NOTIFICATION_EVENTS } from '../shared/notification-center.js';
-import type { NotificationChannel, NotificationCenterSettings, NotificationCenterView, NotificationEvent } from '../shared/notification-center.js';
+import type { NotificationChannel, NotificationCenterSettings, NotificationCenterView, NotificationEvent, NotificationFailure } from '../shared/notification-center.js';
 import type { AppApi } from '../preload/index.js';
 import { el } from './dom.js';
 import { t, ui } from './i18n.js';
@@ -43,7 +43,42 @@ const EVENT_LABELS: Record<NotificationEvent, string> = {
   'approval-pending': 'Approval pending', 'module-update': 'Module update', 'app-release': 'App release'
 };
 
-type Reply<T> = { ok: true; data: T } | { ok: false; error: string };
+type Reply<T> = { ok: true; data: T } | { ok: false; error: string; failure?: NotificationFailure };
+
+/** What went wrong and what to do, from the main process's non-secret failure code. */
+export function notificationFailureMessage(failure: NotificationFailure): string {
+  const parts: string[] = [];
+  switch (failure.code) {
+    case 'config_incomplete': parts.push(t('The channel settings are incomplete or invalid. Check the host, sender, endpoint and destinations.')); break;
+    case 'credential_missing': parts.push(t('No credential is stored for this channel. Save it with the vault master password.')); break;
+    case 'credential_unavailable': parts.push(t('The stored credential could not be opened. Check the vault in General settings and save the credential again.')); break;
+    case 'dns_failed': parts.push(t('The server name could not be resolved. Check the host name.')); break;
+    case 'connect_timeout': parts.push(t('The server did not answer the connection in time. Check the host, port and firewall.')); break;
+    case 'connection_refused': parts.push(t('The server refused the connection on this port. Check the port and connection security.')); break;
+    case 'network_unreachable': parts.push(t('The server cannot be reached from this computer. Check the network connection.')); break;
+    case 'connection_closed': parts.push(t('The server closed the connection unexpectedly. Check the port and connection security (TLS or STARTTLS).')); break;
+    case 'server_timeout': parts.push(t('The server stopped answering. Try again later.')); break;
+    case 'tls_untrusted': parts.push(failure.pinned
+      ? t('The server presented a different certificate than the one you trusted. Trust it again only if the server administrator confirms the change.')
+      : t('The server certificate is not trusted (for example self-signed or from an unknown authority).')); break;
+    case 'tls_hostname_mismatch': parts.push(t('The server certificate does not match the configured host name.')); break;
+    case 'starttls_unavailable': parts.push(t('The server does not offer STARTTLS on this port. Use TLS (usually port 465) or a server that supports STARTTLS.')); break;
+    case 'auth_failed': parts.push(t('The server rejected the username or password.')); break;
+    case 'sender_rejected': parts.push(t('The server rejected the sender address. Use an address this account may send from.')); break;
+    case 'recipient_rejected': parts.push(t('The server rejected a recipient address.')); break;
+    case 'server_error': parts.push(t('The server refused the request.')); break;
+    case 'invalid_token': parts.push(t('The provider rejected the token or API key.')); break;
+    case 'unknown_destination': parts.push(t('The provider does not recognize a destination (chat ID or phone number), or may not send to it.')); break;
+    case 'rate_limited': parts.push(t('The provider is limiting requests. Wait a moment and try again.')); break;
+    case 'http_client_error': parts.push(t('The provider refused the request. Check the endpoint and settings.')); break;
+    case 'http_server_error': parts.push(t('The provider had a server error. Try again later.')); break;
+    default: parts.push(t('Check channel configuration and connection.'));
+  }
+  if (failure.cloudflare) parts.push(t('The host resolves to a Cloudflare proxy address, which does not carry SMTP. Use a DNS-only record or the MX host.'));
+  if (failure.smtpCode) parts.push(t('SMTP reply {0}.', [failure.smtpCode]));
+  if (failure.httpStatus) parts.push(t('HTTP status {0}.', [failure.httpStatus]));
+  return parts.join(' ');
+}
 type Service = Pick<AppApi,
   'notificationCenterGet' | 'notificationCenterSave' | 'notificationCenterSetCredential' |
   'notificationCenterTest' | 'notificationCenterExport' | 'notificationCenterImport' | 'vault'
@@ -130,14 +165,14 @@ export function installNotificationCenter(api: Service): void {
   }
   async function request<T>(
     perform: () => Promise<Reply<T>>, onSuccess: (data: T) => void, errorTarget: HTMLElement = status!,
-    errorText: (error: string) => string = error => t('Could not save notification settings: {0}', [error])
+    errorText: (error: string, failure?: NotificationFailure) => string = error => t('Could not save notification settings: {0}', [error])
   ): Promise<boolean> {
     if (busy) return false;
     setBusy(true);
     try {
       const reply = await perform();
       if (!reply.ok) {
-        errorTarget.textContent = errorText(reply.error);
+        errorTarget.textContent = errorText(reply.error, reply.failure);
         errorTarget.classList.add('is-error');
         return false;
       }
@@ -152,6 +187,59 @@ export function installNotificationCenter(api: Service): void {
   }
   function credentialState(channel: NotificationChannel): void {
     credentialStatus.get(channel)!.textContent = t(credentials?.[channel] ? 'Credential stored securely. Enter a new value to replace it.' : 'No credential stored.');
+  }
+  /** Saves only the pinned-certificate change on top of the saved settings the draft already holds. */
+  async function savePin(entry: NotificationCenterSettings['channels']['smtp'], fingerprint: string | null, note: HTMLElement, trust: HTMLElement, message: string): Promise<void> {
+    if (!draft) return;
+    if (fingerprint) entry.config.tlsFingerprint = fingerprint; else delete entry.config.tlsFingerprint;
+    const payload = clone(draft);
+    await request(() => api.notificationCenterSave(payload), view => {
+      credentials = view.credentials;
+      note.textContent = t(message);
+      showTrust(trust, entry, note, null);
+    }, note);
+  }
+  /**
+   * SMTP fallback for a server whose certificate is not publicly trusted: pin exactly the presented
+   * certificate after the user compared its fingerprint, or remove that pin again.
+   */
+  function showTrust(trust: HTMLElement, entry: NotificationCenterSettings['channels']['smtp'], note: HTMLElement, failure: NotificationFailure | null): void {
+    trust.replaceChildren();
+    const pinned = entry.config.tlsFingerprint;
+    const offered = failure && (failure.code === 'tls_untrusted' || failure.code === 'tls_hostname_mismatch') ? failure.certificate : undefined;
+    if (offered) {
+      const box = el('div', 'notification-certificate');
+      box.setAttribute('role', 'group');
+      box.setAttribute('aria-label', t('Certificate presented by the server'));
+      box.append(el('b', '', () => t('Certificate presented by the server')));
+      box.append(el('span', '', () => t('Names: {0}', [offered.names.join(', ') || '—'])));
+      const print = el('code', 'notification-fingerprint', () => offered.fingerprint256);
+      box.append(el('span', '', () => t('SHA-256 fingerprint:')), print);
+      if (offered.selfSigned) box.append(el('span', '', () => t('Self-signed certificate.')));
+      box.append(el('em', '', () => t('Recommended: install a certificate from a public authority (for example Let’s Encrypt) for this host name. Trusting this certificate is a fallback.')));
+      const accept = button('Trust this certificate');
+      accept.id = 'notificationTrustCertificate';
+      accept.addEventListener('click', async () => {
+        if (busy || !confirm(t('Trust only this exact certificate for SMTP? Compare its SHA-256 fingerprint with the server administrator first:\n{0}\nThe connection stays encrypted, and any other certificate will be refused.', [offered.fingerprint256]))) return;
+        await savePin(entry, offered.fingerprint256, note, trust, 'Certificate trusted. Send a test again.');
+      });
+      box.append(accept);
+      trust.append(box);
+    }
+    if (pinned) {
+      const row = el('div', 'notification-certificate');
+      row.append(el('b', '', () => t('Trusted server certificate')), el('code', 'notification-fingerprint', () => pinned));
+      row.append(el('em', '', () => t('Only this exact certificate is accepted for this server.')));
+      const remove = button('Remove trust');
+      remove.id = 'notificationRemoveTrust';
+      remove.addEventListener('click', async () => {
+        if (busy) return;
+        await savePin(entry, null, note, trust, 'Certificate trust removed.');
+      });
+      row.append(remove);
+      trust.append(row);
+    }
+    trust.hidden = !trust.childElementCount;
   }
   function build(): void {
     if (!draft) return;
@@ -325,12 +413,17 @@ export function installNotificationCenter(api: Service): void {
           return api.notificationCenterTest(channel);
         }, outcome => {
           result.textContent = t('Test delivered to {0} destination(s).', [outcome.delivered]);
-        }, result, error => sending
-          ? t('Could not send test notification: {0}', [error])
-          : t('Could not save notification settings: {0}', [error]));
+          if (trust) showTrust(trust, entry, result, null);
+        }, result, (error, failure) => {
+          if (trust) showTrust(trust, entry, result, failure ?? null);
+          if (!sending) return t('Could not save notification settings: {0}', [error]);
+          return t('Could not send test notification: {0}', [failure ? notificationFailureMessage(failure) : error]);
+        });
       });
       actions.append(test, result);
       section.append(actions);
+      const trust = channel === 'smtp' ? el('div', 'notification-trust') : null;
+      if (trust) { showTrust(trust, entry, result, null); section.append(trust); }
       container!.append(section);
     }
     const footer = el('div', 'notification-center-footer');

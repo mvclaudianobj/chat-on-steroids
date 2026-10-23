@@ -2,8 +2,9 @@
 import { z } from 'zod';
 import { readDurable, writeDurableNow } from './durable.js';
 import { notificationCredentialPresence, storeNotificationCredential, withNotificationCredential, requireNotificationReauthorization } from './notification-credentials.js';
-import { NOTIFICATION_CHANNELS, NOTIFICATION_EVENTS, type NotificationChannel, type NotificationEvent, type NotificationCenterSettings, type NotificationCenterView } from '../shared/notification-center.js';
+import { CERTIFICATE_FINGERPRINT, NOTIFICATION_CHANNELS, NOTIFICATION_EVENTS, type NotificationChannel, type NotificationEvent, type NotificationCenterSettings, type NotificationCenterView, type NotificationFailureCode } from '../shared/notification-center.js';
 import { sendSmtp } from './notification-smtp.js';
+import { deliveryFailure, describeFailure, failureOf, networkFailureCode, NotificationDeliveryError } from './notification-failure.js';
 import { logInfo, logWarn } from './logger.js';
 
 const STATE = 'marks-notification-center';
@@ -48,11 +49,13 @@ function checkSettings(value: unknown): NotificationCenterSettings {
     const { config, destinations } = settings.channels[channel];
     // Never accept arbitrary keys that could be mistaken for credentials in the durable settings.
     const names: Record<NotificationChannel, string[]> = {
-      smtp: ['host', 'port', 'username', 'from', 'security'], telegram: ['apiBase'],
+      smtp: ['host', 'port', 'username', 'from', 'security', 'tlsFingerprint'], telegram: ['apiBase'],
       'whatsapp-cloud': ['apiBase', 'phoneId', 'template', 'language', 'parameters'], 'whatsapp-evolution': ['baseUrl', 'instance']
     };
     for (const k of Object.keys(config)) if (!names[channel].includes(k)) throw new Error('Unsupported channel setting');
     if (channel === 'smtp' && config.security && !['tls', 'starttls'].includes(config.security)) throw new Error('SMTP requires TLS or STARTTLS');
+    // A pinned certificate is public data, but only the exact SHA-256 form is ever accepted.
+    if (channel === 'smtp' && config.tlsFingerprint && !CERTIFICATE_FINGERPRINT.test(config.tlsFingerprint)) throw new Error('Invalid pinned certificate fingerprint');
     if (channel === 'whatsapp-cloud' && config.parameters) {
       const parameters = config.parameters.split(',').map(part => part.trim());
       if (parameters.length > 10 || parameters.some(part => !['title', 'body', 'project', 'event', 'excerpt'].includes(part))) throw new Error('Unsupported Meta template parameter');
@@ -106,7 +109,7 @@ export async function queueOutboundNotice(notice: OutboundNotice): Promise<void>
       event: notice.event,
       title: `${count} Chat Marks events`, project: 'Chat Marks'
     };
-    void dispatchNotice(payload).catch(() => logWarn(`Notification ${notice.event}: delivery failed; private provider details omitted`));
+    void dispatchNotice(payload).catch(error => logWarn(`Notification ${notice.event}: delivery failed (${describeFailure(failureOf(error))})`));
   }, windowSeconds * 1000) };
   entry.timer.unref();
   batches.set(notice.event, entry);
@@ -114,18 +117,47 @@ export async function queueOutboundNotice(notice: OutboundNotice): Promise<void>
 function fill(pattern: string, values: Record<string, string>): string {
   return pattern.replace(/\{(title|project|event|excerpt)\}/g, (_, k: string) => values[k] ?? '').slice(0, 1200);
 }
-async function postJson(url: string, headers: Record<string, string>, body: unknown, fetcher: typeof fetch): Promise<void> {
+async function postJson(channel: NotificationChannel, url: string, headers: Record<string, string>, body: unknown, fetcher: typeof fetch): Promise<void> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), signal: controller.signal });
-    if (!response.ok) throw new Error(`Provider rejected the request (HTTP ${response.status})`);
+    let response: Response;
+    try { response = await fetcher(url, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: JSON.stringify(body), signal: controller.signal }); }
+    catch (error) {
+      const code = networkFailureCode(error);
+      // Fetch errors may carry the endpoint URL (Telegram's holds the token): only the code leaves.
+      throw deliveryFailure(code === 'unknown' ? 'connection_closed' : code);
+    }
+    if (!response.ok) {
+      const text = await response.text().then(value => value.slice(0, 4096), () => '');
+      throw deliveryFailure(httpFailureCode(channel, response.status, text), { httpStatus: response.status });
+    }
   } finally { clearTimeout(timeout); }
 }
+/** Classifies a provider's HTTP refusal; the response text is read here only and never kept. */
+export function httpFailureCode(channel: NotificationChannel, status: number, text: string): NotificationFailureCode {
+  if (status === 429) return 'rate_limited';
+  let metaCode = 0;
+  try { metaCode = Number((JSON.parse(text) as { error?: { code?: unknown } }).error?.code ?? 0); } catch { /* not JSON */ }
+  if (channel === 'telegram') {
+    if (status === 401 || status === 404) return 'invalid_token';
+    if ((status === 400 || status === 403) && /chat not found|user not found|bot was blocked|bot was kicked|PEER_ID_INVALID|chat_id is empty|not a member|have no rights/i.test(text)) return 'unknown_destination';
+  } else if (channel === 'whatsapp-cloud') {
+    if (metaCode === 190 || status === 401) return 'invalid_token';
+    if ([4, 80007, 130429, 131048, 131056].includes(metaCode)) return 'rate_limited';
+    if ([131026, 131030, 131021, 133010].includes(metaCode)) return 'unknown_destination';
+  } else if (channel === 'whatsapp-evolution') {
+    if (status === 401 || status === 403) return 'invalid_token';
+    if ((status === 400 || status === 404) && /"exists"\s*:\s*false|not exists?|does not exist/i.test(text)) return 'unknown_destination';
+  }
+  if (status === 401 || status === 403) return 'invalid_token';
+  return status >= 500 ? 'http_server_error' : 'http_client_error';
+}
 function secureBase(base: string, fallback: string): URL {
-  const url = new URL(base || fallback);
-  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) throw new Error('Use HTTPS for external notification servers');
-  if (url.username || url.password || url.search || url.hash) throw new Error('Invalid notification endpoint');
+  let url: URL;
+  try { url = new URL(base || fallback); } catch { throw deliveryFailure('config_incomplete'); }
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname))) throw deliveryFailure('config_incomplete');
+  if (url.username || url.password || url.search || url.hash) throw deliveryFailure('config_incomplete');
   return url;
 }
 export async function dispatchNotice(notice: OutboundNotice, options: { channel?: NotificationChannel; fetcher?: typeof fetch; now?: number; test?: boolean } = {}): Promise<number> {
@@ -153,21 +185,25 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
     const title = fill(choice.titleTemplate, values);
     const body = fill(choice.bodyTemplate, values);
     const cfg = choice.config;
+    if (!(await notificationCredentialPresence())[channel]) throw deliveryFailure('credential_missing', { channel });
+    let reachedProvider = false;
+    try {
     await withNotificationCredential(channel, async secret => {
+    reachedProvider = true;
     if (channel === 'smtp') {
-      if (!cfg.host || !cfg.from) throw new Error('Configure SMTP host and sender first');
+      if (!cfg.host || !cfg.from) throw deliveryFailure('config_incomplete');
       for (const to of choice.destinations) {
-        await sendSmtp({ host: cfg.host, port: Number(cfg.port || (cfg.security === 'tls' ? 465 : 587)), security: cfg.security === 'tls' ? 'tls' : 'starttls', username: cfg.username ?? '', password: secret, from: cfg.from, to, subject: title, body });
+        await sendSmtp({ host: cfg.host, port: Number(cfg.port || (cfg.security === 'tls' ? 465 : 587)), security: cfg.security === 'tls' ? 'tls' : 'starttls', username: cfg.username ?? '', password: secret, from: cfg.from, to, subject: title, body, ...(cfg.tlsFingerprint ? { pinnedFingerprint: cfg.tlsFingerprint } : {}) });
         delivered++;
       }
     } else if (channel === 'telegram') {
       const base = secureBase(cfg.apiBase ?? '', 'https://api.telegram.org');
       for (const chat_id of choice.destinations) {
         const url = new URL(`/bot${encodeURIComponent(secret)}/sendMessage`, base);
-        await postJson(url.toString(), {}, { chat_id, text: `${title}\n${body}` }, fetcher); delivered++;
+        await postJson(channel, url.toString(), {}, { chat_id, text: `${title}\n${body}` }, fetcher); delivered++;
       }
     } else if (channel === 'whatsapp-cloud') {
-      if (!cfg.phoneId || !/^\d{3,30}$/.test(cfg.phoneId) || !cfg.template) throw new Error('Configure Meta phone ID and approved template');
+      if (!cfg.phoneId || !/^\d{3,30}$/.test(cfg.phoneId) || !cfg.template) throw deliveryFailure('config_incomplete');
       const base = secureBase(cfg.apiBase ?? '', 'https://graph.facebook.com');
       const parameters = (cfg.parameters || '').split(',').map(part => part.trim()).filter(Boolean);
       const template = {
@@ -177,19 +213,24 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
       };
       for (const to of choice.destinations) {
         const version = /^\/v\d+\.\d+\/?$/.test(base.pathname) ? base.pathname.replace(/\/$/, '') : '/v22.0';
-        if (base.pathname !== '/' && !/^\/v\d+\.\d+\/?$/.test(base.pathname)) throw new Error('Invalid Meta Graph API version path');
+        if (base.pathname !== '/' && !/^\/v\d+\.\d+\/?$/.test(base.pathname)) throw deliveryFailure('config_incomplete');
         const url = new URL(`${version}/${cfg.phoneId}/messages`, base.origin);
-        await postJson(url.toString(), { Authorization: `Bearer ${secret}` }, { messaging_product: 'whatsapp', to, type: 'template', template }, fetcher); delivered++;
+        await postJson(channel, url.toString(), { Authorization: `Bearer ${secret}` }, { messaging_product: 'whatsapp', to, type: 'template', template }, fetcher); delivered++;
       }
     } else {
-      if (!cfg.baseUrl || !cfg.instance) throw new Error('Configure Evolution endpoint and instance');
+      if (!cfg.baseUrl || !cfg.instance) throw deliveryFailure('config_incomplete');
       const base = secureBase(cfg.baseUrl, 'https://localhost');
       for (const number of choice.destinations) {
         const url = new URL(`message/sendText/${encodeURIComponent(cfg.instance)}`, base.toString().replace(/\/?$/, '/'));
-        await postJson(url.toString(), { apikey: secret }, { number, text: `${title}\n${body}` }, fetcher); delivered++;
+        await postJson(channel, url.toString(), { apikey: secret }, { number, text: `${title}\n${body}` }, fetcher); delivered++;
       }
     }
     });
+    } catch (error) {
+      if (error instanceof NotificationDeliveryError) throw new NotificationDeliveryError({ ...error.failure, channel });
+      // Before the callback ran, Vault K could not open the stored credential.
+      throw deliveryFailure(reachedProvider ? networkFailureCode(error) : 'credential_unavailable', { channel });
+    }
     if (!options.test && delivered) {
       lastSent.set(fingerprint, now);
       counts.set(channel, { at: bucket && now - bucket.at < 3600000 ? bucket.at : now, count: (bucket && now - bucket.at < 3600000 ? bucket.count : 0) + choice.destinations.length });
