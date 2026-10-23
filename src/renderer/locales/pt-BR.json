@@ -3974,5 +3974,19 @@
   "WhatsApp Web could not start. Check the connection and local session storage.": "O WhatsApp Web não iniciou. Verifique a conexão e o armazenamento local da sessão.",
   "Select or type text to remember.": "Selecione ou digite o texto a memorizar.",
   "Save selected or drafted text as a local Brain memory.": "Salvar texto selecionado ou rascunho como memória local do Brain.",
-  "Meeting": "Reunião"
+  "Meeting": "Reunião",
+  "Rest room": "Sala de Descanso",
+  "Available employees with no pending work or meeting": "Funcionários disponíveis sem pendências ou reunião",
+  "Resting employees": "Funcionários descansando",
+  "Free · no tasks": "Livre · sem tarefa",
+  "Completed · COO confirmed": "Concluído · confirmado pelo COO",
+  "View report": "Ver relatório",
+  "No employees are eligible for rest right now.": "Ninguém pode descansar no momento.",
+  "Synthetic example · not live worker status": "Exemplo sintético · não representa agentes reais",
+  "COO confirmation": "Confirmação do COO",
+  "Meeting invitation pending": "Convite para reunião pendente",
+  "Meeting accepted": "Reunião aceita",
+  "In meeting · confirmed": "Em reunião · presença confirmada",
+  "Awaiting review": "Aguardando revisão",
+  "Completion not verified": "Conclusão não verificada"
 }

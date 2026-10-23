@@ -3926,5 +3926,19 @@
   "WhatsApp Web could not start. Check the connection and local session storage.": "WhatsApp Web could not start. Check the connection and local session storage.",
   "Select or type text to remember.": "Hatırlanacak metni seçin veya yazın.",
   "Save selected or drafted text as a local Brain memory.": "Seçili veya taslak halindeki metni yerel Beyin belleği olarak kaydedin.",
-  "Meeting": "Toplantı"
+  "Meeting": "Toplantı",
+  "Rest room": "Rest room",
+  "Available employees with no pending work or meeting": "Available employees with no pending work or meeting",
+  "Resting employees": "Resting employees",
+  "Free · no tasks": "Free · no tasks",
+  "Completed · COO confirmed": "Completed · COO confirmed",
+  "View report": "View report",
+  "No employees are eligible for rest right now.": "No employees are eligible for rest right now.",
+  "Synthetic example · not live worker status": "Synthetic example · not live worker status",
+  "COO confirmation": "COO confirmation",
+  "Meeting invitation pending": "Meeting invitation pending",
+  "Meeting accepted": "Meeting accepted",
+  "In meeting · confirmed": "In meeting · confirmed",
+  "Awaiting review": "Awaiting review",
+  "Completion not verified": "Completion not verified"
 }

@@ -18,3 +18,14 @@
 
 .company-shell [hidden] { display:none!important; }
 .company-views .is-sel { background:var(--ink);color:var(--card); }
+
+/* Company lounge: only employees eligible under the durable seat projection. */
+.company-rest-room {border-color:var(--accent-edge);background:var(--accent-wash)}
+.company-rest-list {list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;padding:0;margin:0}
+.company-rest-worker {display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:13px;border:1px solid var(--line);border-radius:11px;background:var(--card)}
+.company-rest-worker-body {display:grid;gap:4px;min-width:0;flex:1}
+.company-rest-worker-body strong {font-size:13px}
+.company-rest-worker-state,.company-rest-empty,.company-rest-demo {color:var(--soft);font-size:11px}
+.company-rest-review {background:none;border:0;color:var(--accent);cursor:pointer;font-size:11px;text-decoration:underline;text-underline-offset:2px;padding:5px}
+.company-rest-review:focus-visible {outline:2px solid var(--accent);outline-offset:3px;border-radius:4px}
+.company-rest-demo {margin-top:15px!important}

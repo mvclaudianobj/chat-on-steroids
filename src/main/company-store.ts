@@ -37,7 +37,7 @@ function serialized<T>(fn: () => Promise<T>): Promise<T> {
   const job = queue.then(fn); queue = job.then(() => undefined, () => undefined); return job;
 }
 export function getCompany(): Promise<CompanySnapshot> { return serialized(load); }
-export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' | 'seat' | 'authorize' | 'report' | 'meeting' | 'attendance' | 'minutes', payload: unknown): Promise<CompanySnapshot> {
+export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'meeting' | 'attendance' | 'minutes', payload: unknown): Promise<CompanySnapshot> {
   return serialized(async () => {
     const current = await load();
     if (action === 'demo') {
@@ -79,7 +79,7 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
         invite.confirmedAt = fields.state === 'invited' ? null : now;
       }
       current.activities.unshift({ id: randomUUID(), at: now, actor: 'marks-coo', kind: 'meeting', message: action === 'minutes' ? `Minutes recorded: ${meeting.title}` : `${fields.seat}: ${fields.state} (${meeting.title})` });
-    } else if (action === 'authorize' || action === 'report') {
+    } else if (action === 'authorize' || action === 'report' || action === 'confirm') {
       const fields = payload as { id: string; ownerId?: string; workerId: string; runId: string; reportId?: string; result?: string; evidence?: string; outcome?: 'completed'|'failed' };
       const request = current.requests.find(row => row.id === fields.id);
       if (!request || !request.seat) throw new Error('Ticket has no assigned seat');
@@ -89,16 +89,25 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
         if (current.requests.some(row => row.id !== request.id && row.seat === request.seat && row.execution?.phase === 'running')) throw new Error('Seat already running a ticket');
         request.execution = { mode: 'live', phase: 'admitted', ownerId: fields.ownerId!, workerId: fields.workerId, runId: fields.runId, reportId: null, result: null, evidence: null, authorizedAt: now };
         request.status = 'working';
-      } else {
+      } else if (action === 'report') {
         const exec = request.execution;
         if (!exec || exec.workerId !== fields.workerId || exec.runId !== fields.runId || exec.mode !== 'live') throw new Error('Worker identity mismatch');
         if (exec.reportId) throw new Error('Ticket already reported');
         if (request.tokenBudget > 0 && request.tokensUsed > request.tokenBudget) throw new Error('Token budget exceeded');
         exec.phase = fields.outcome === 'completed' ? 'reported' : 'failed'; exec.reportId = fields.reportId!; exec.result = fields.result!; exec.evidence = fields.evidence!;
         request.status = fields.outcome === 'completed' ? 'review' : 'needs-ceo';
+      } else {
+        const exec = request.execution;
+        if (!exec || exec.mode !== 'live' || exec.phase !== 'reported' || request.status !== 'review' ||
+            !exec.ownerId || !exec.runId || !exec.workerId || !exec.reportId || !exec.result?.trim() || !exec.evidence?.trim() ||
+            exec.reportId !== fields.reportId || exec.workerId !== fields.workerId || exec.runId !== fields.runId ||
+            request.cooConfirmation) throw new Error('COO confirmation requires a matching verified worker report');
+        if (!fields.evidence?.trim()) throw new Error('COO review evidence required');
+        request.cooConfirmation = { actor: 'marks-coo', at: now, reportId: exec.reportId, workerId: exec.workerId, evidence: fields.evidence };
+        request.status = 'done';
       }
       request.updatedAt = now;
-      request.history.push({ at: now, actor: 'marks-coo', note: action === 'authorize' ? `Authorized ${request.seat} as ${fields.workerId}` : `Worker ${fields.workerId} reported ${fields.outcome}` });
+      request.history.push({ at: now, actor: 'marks-coo', note: action === 'authorize' ? `Authorized ${request.seat} as ${fields.workerId}` : action === 'report' ? `Worker ${fields.workerId} reported ${fields.outcome}` : `COO confirmed report ${fields.reportId} for ${request.seat}`, ...(action === 'confirm' ? { from: 'review' as const, to: 'done' as const } : {}) });
       current.activities.unshift({ id: randomUUID(), at: now, actor: 'marks-coo', kind: 'request', requestId: request.id, message: request.history.at(-1)!.note });
     } else {
       const { id, status, seat } = payload as { id: string; status?: CompanyRequest['status']; seat?: string | null };
@@ -107,15 +116,14 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
       const before = request.status;
       if (action === 'move') {
         if (status === 'working') throw new Error('Working requires verified broker admission');
-        if (request.execution && status === 'done' && !request.execution.reportId) throw new Error('Verified report required for completion');
-        if (status === 'done' && !request.execution?.reportId) throw new Error('Verified report required for completion');
+        if (status === 'done') throw new Error('Only a verified COO confirmation can complete a ticket');
         request.status = status!;
-        if (request.status === 'assigned' || request.status === 'working' || request.status === 'review') {
+        if (request.status === 'assigned' || request.status === 'review') {
           if (!request.seat) throw new Error('COO must choose the exact seat first');
           if (!request.seat) throw new Error('No free seat; request remains queued');
         }
       } else { if (request.execution) throw new Error('Cannot silently replace an executing worker'); request.seat = seat!; }
-      if ((request.status === 'assigned' || request.status === 'working' || request.status === 'review') && !request.seat) throw new Error('Active work needs a seat');
+      if ((request.status === 'assigned' || request.status === 'review') && !request.seat) throw new Error('Active work needs a seat');
       request.updatedAt = now;
       const note = action === 'move' ? `Moved to ${request.status}` : `Assigned to ${request.seat ?? 'queue'}`;
       request.history.push({ at: now, actor: 'ceo', note, ...(action === 'move' ? { from: before, to: request.status } : {}) });

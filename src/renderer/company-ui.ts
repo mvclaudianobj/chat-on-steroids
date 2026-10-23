@@ -1,5 +1,5 @@
 import type { AppApi } from '../preload/index.js';
-import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, type CompanyRequest, type CompanySnapshot } from '../shared/company.js';
+import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, companyRestingSeats, companySeatView, type CompanyRequest, type CompanySeatState, type CompanySnapshot } from '../shared/company.js';
 import { t, onLanguageChange } from './i18n.js';
 
 const names: Record<string, string> = { inbox: 'Inbox', assigned: 'Assigned', working: 'Working', review: 'Review', 'needs-ceo': 'Needs CEO', done: 'Done' };
@@ -15,6 +15,12 @@ const fmt = (n: number) => new Intl.NumberFormat().format(n);
 function date(value: number | null): string { return value ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(value) : '—'; }
 function priority(status: string): number { return ({ working: 5, 'needs-ceo': 4, review: 3, assigned: 2, inbox: 1, done: 0 } as Record<string,number>)[status] ?? 0; }
 function roleLabel(role: string): string { return t(roleNames[COMPANY_ROLES.indexOf(role as typeof COMPANY_ROLES[number])] ?? role); }
+const seatStateLabels: Record<CompanySeatState, string> = {
+  'rest-free': 'Free · no tasks', 'rest-confirmed': 'Completed · COO confirmed',
+  'meeting-invited': 'Meeting invitation pending', 'meeting-accepted': 'Meeting accepted',
+  'meeting-present': 'In meeting · confirmed', busy: 'Working', review: 'Awaiting review',
+  'needs-ceo': 'Waiting for CEO', unverified: 'Completion not verified'
+};
 
 export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   let snapshot: CompanySnapshot | null = null;
@@ -82,6 +88,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     content.append(el('p', 'company-dialog-hint', `${t('Token budget')}: ${fmt(request.tokensUsed)} / ${fmt(request.tokenBudget)} · ${t('Time budget (minutes)')}: ${request.minutesUsed} / ${request.timeBudgetMinutes}`));
     content.append(el('h4', '', 'RACI'), el('p', 'company-dialog-hint', `R: ${request.raci.responsible} · A: ${request.raci.accountable} · C: ${request.raci.consulted.join(', ')} · I: ${request.raci.informed.join(', ')}`));
     if (request.execution) content.append(el('p','company-dialog-hint',`Execution: ${request.execution.phase} · ${request.execution.workerId ?? 'unbound'} · ${request.execution.evidence ?? 'No verified report'}`));
+    if (request.cooConfirmation) content.append(el('p', 'company-dialog-hint', `${t('COO confirmation')}: ${request.cooConfirmation.reportId} · ${date(request.cooConfirmation.at)}`));
     content.append(el('h4', '', t('History')));
     const history = el('div', 'company-history'); for (const item of request.history.slice(-10).reverse()) history.append(el('p', '', `${date(item.at)} · ${item.actor}: ${item.note}`)); content.append(history);
     actions.append(button('Save assignment', () => void change({ action: 'seat', payload: { id, seat: seat.value || null } })));
@@ -133,6 +140,9 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   }
   function paintOffice(): void {
     const office = $('companyOffice'); office.replaceChildren(); if (!snapshot) return;
+    const current = Date.now();
+    const resting = companyRestingSeats(snapshot, current);
+    const restIds = new Set(resting.map(entry => entry.seat));
     COMPANY_ROLES.forEach((role, index) => {
       const room = el('section', 'company-room');
       const heading = el('div', 'company-room-head'); heading.append(el('span', 'company-room-icon', String.fromCharCode(65 + index)), el('div'));
@@ -142,18 +152,50 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
       const manager = button(role, () => { if (managed[0]) detail(managed[0].id); }, 'company-desk manager');
       manager.prepend(el('span', 'company-desk-avatar', role.slice(-3).toUpperCase())); manager.append(chip(managed.some(r => r.status === 'needs-ceo') ? t('Waiting for CEO') : managed.length ? t('Working') : t('Available'))); desks.append(manager);
       for (const seat of snapshot!.company.seats.filter((seat, i) => {
+        if (restIds.has(seat)) return false;
         const assigned = snapshot!.requests.filter(r => r.seat === seat && r.status !== 'done').sort((a, b) => priority(b.status) - priority(a.status))[0];
         return (assigned?.owner ?? COMPANY_ROLES[i % COMPANY_ROLES.length]) === role;
       })) {
         const work = snapshot!.requests.filter(r => r.seat === seat && r.status !== 'done').sort((a, b) => priority(b.status) - priority(a.status))[0];
         const desk = button(seat, () => { if (work) detail(work.id); }, 'company-desk');
-        desk.dataset.seat = seat; desk.prepend(el('span', 'company-desk-avatar', seat.slice(5))); desk.append(chip(work ? work.status === 'needs-ceo' ? t('Waiting for CEO') : t('Working') : t('Available')));
+        const state = companySeatView(snapshot!, seat, current).state;
+        const label = t(seatStateLabels[state]);
+        desk.dataset.seat = seat; desk.dataset.state = state;
+        desk.setAttribute('aria-label', `${seat}: ${label}`);
+        desk.prepend(el('span', 'company-desk-avatar', seat.slice(5))); desk.append(chip(label));
         desk.addEventListener('dragover', event => event.preventDefault());
         desk.addEventListener('drop', event => { event.preventDefault(); const id = event.dataTransfer?.getData('text/plain'); if (id) void change({ action: 'seat', payload: { id, seat } }); });
         desks.append(desk);
       }
       room.append(desks); office.append(room);
     });
+    const lounge = el('section', 'company-room company-rest-room');
+    lounge.id = 'companyRestRoom';
+    lounge.setAttribute('role', 'region');
+    lounge.setAttribute('aria-labelledby', 'companyRestTitle');
+    const restHeader = el('div', 'company-room-head');
+    const restSymbol = el('span', 'company-room-icon', '☕'); restSymbol.setAttribute('aria-hidden', 'true');
+    const restHeadText = el('div');
+    const restTitle = el('h2', '', t('Rest room')); restTitle.id = 'companyRestTitle';
+    restHeadText.append(restTitle, el('p', '', t('Available employees with no pending work or meeting')));
+    restHeader.append(restSymbol, restHeadText); lounge.append(restHeader);
+    const restList = el('ul', 'company-rest-list'); restList.setAttribute('aria-label', t('Resting employees'));
+    for (const entry of resting) {
+      const label = t(seatStateLabels[entry.state]);
+      const li = el('li', 'company-rest-worker'); li.dataset.seat = entry.seat; li.dataset.restKind = entry.state;
+      li.setAttribute('aria-label', `${entry.seat}: ${label}`);
+      const avatar = el('span', 'company-desk-avatar', entry.seat.slice(5)); avatar.setAttribute('aria-hidden','true');
+      const details = el('div', 'company-rest-worker-body'); details.append(el('strong', '', entry.seat), el('span', 'company-rest-worker-state', label));
+      li.append(avatar, details);
+      if (entry.completedRequestId) {
+        li.append(button('View report', () => detail(entry.completedRequestId!), 'company-rest-review'));
+      }
+      restList.append(li);
+    }
+    lounge.append(restList);
+    if (!resting.length) lounge.append(el('p', 'company-rest-empty', t('No employees are eligible for rest right now.')));
+    if (snapshot.demo) lounge.append(el('p', 'company-rest-demo', t('Synthetic example · not live worker status')));
+    office.append(lounge);
     if (snapshot.meetings.length) { const meeting = el('section', 'company-room company-meeting'); meeting.append(el('h2', '', t('Meeting room'))); for (const row of snapshot.meetings) { meeting.append(button(row.title,()=>meetingDetail(row.id),'company-ceo-action'), el('p', '', `${row.participants.join(' · ')} · ${row.durationMinutes} min`), el('p', '', row.minutes)); for (const decision of row.decisions) meeting.append(el('p', 'company-dialog-hint', `• ${decision}`)); } office.append(meeting); }
   }
   function paint(): void {
@@ -162,7 +204,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     $('companyBoard').hidden = view !== 'board'; $('companyOffice').hidden = view !== 'office';
     $('companyBoardTab').classList.toggle('is-sel', view === 'board'); $('companyOfficeTab').classList.toggle('is-sel', view === 'office');
     $('companyBoardTab').setAttribute('aria-pressed', String(view === 'board')); $('companyOfficeTab').setAttribute('aria-pressed', String(view === 'office'));
-    const empty = snapshot.requests.length === 0; $('companyEmpty').hidden = !empty; $('companyBoard').hidden ||= empty; $('companyOffice').hidden ||= empty;
+    const empty = snapshot.requests.length === 0; $('companyEmpty').hidden = !empty || view === 'office'; $('companyBoard').hidden ||= empty;
     const working = snapshot.requests.filter(r => r.status === 'working').length;
     const attention = snapshot.requests.filter(r => r.status === 'needs-ceo').length;
     const metrics = $('companyMetrics'); metrics.replaceChildren();
