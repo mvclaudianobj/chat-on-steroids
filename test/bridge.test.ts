@@ -795,6 +795,55 @@ describe('who is allowed to talk to it', () => {
     expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.42.1' });
   });
 
+  it('does not report the selected built-in browser connected only because external Chrome is paired', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+    const native = 'c'.repeat(32), external = 'e'.repeat(32);
+    const poll = (host: string, browser: string) => request('POST', '/status', {
+      host, browser, body: { openConversations: [] }
+    });
+    await poll('browser', external);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: false, extensionVersion: null,
+      externalExtension: { present: true }, cosExtension: { present: false } });
+    await poll('cos', native);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    // Chrome continues polling after the native browser closes. The external profile's
+    // valid shared credential must not make the selected native browser look connected.
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      await vi.advanceTimersByTimeAsync(40_000);
+      await poll('browser', external);
+      await vi.advanceTimersByTimeAsync(20_002);
+      expect(await bridgeStatus()).toMatchObject({ paired: true, present: false,
+        externalExtension: { present: true }, cosExtension: { present: false } });
+      await poll('cos', native);
+      expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('projects Firefox and Chromium presence independently while sharing one valid pairing', async () => {
+    const credential = await pair();
+    const chrome = 'c'.repeat(32), firefox = 'f'.repeat(32);
+    const poll = (browser: string, engine?: string) => request('POST', '/status', {
+      host: 'browser', browser, engine, auth: credential, body: { openConversations: [] }
+    });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: false, extensionVersion: null });
+    await poll(firefox, 'gecko');
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true,
+      extensionVersion: APP_VERSION, extensionEngine: 'gecko' });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true,
+      extensionVersion: APP_VERSION, extensionEngine: 'gecko' });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+    // Switching browsers changes the UI projection, not the pairing credential itself.
+    expect((await request('GET', '/status', { host: 'browser', browser: firefox, engine: 'gecko', auth: credential })).status).toBe(200);
+  });
+
   it('publishes external expiry while the CoS companion continues polling', async () => {
     await pair();
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });

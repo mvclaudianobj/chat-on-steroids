@@ -1050,7 +1050,9 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     // Seen for the user: a recent request, or the authenticated wake channel held open. The
     // extension makes requests only while it has a chat to serve, so a browser with no ChatGPT
     // tab open went "missing" a minute after start although it was connected all along.
-    present: browserPresent() || browserWakeConnected(),
+    // UI presence belongs to the selected ChatGPT browser, as the reported version does.
+    // A paired Chrome profile must not make a stopped CoS browser look connected.
+    present: selectedBrowserPresent(),
     lastSeenAt,
     ...versionStatus(),
     externalExtension: externalExtensionStatus(),
@@ -1122,6 +1124,14 @@ function cosExtensionPresent(): boolean {
 
 function externalExtensionPresent(): boolean {
   return server !== null && externalExtension?.seenAt != null && Date.now() - externalExtension.seenAt < BROWSER_PRESENT_MS;
+}
+
+function selectedBrowserPresent(): boolean {
+  const chosen = getConfig().ui.chatBrowser;
+  if (chosen === 'cos') return cosExtensionPresent();
+  // Firefox and Chromium share the pairing credential; a live instance of the other engine
+  // is not evidence that the chosen browser is currently serving ChatGPT.
+  return externalExtensionPresent() && (chosen === 'firefox') === (externalExtension?.engine === 'gecko');
 }
 
 /**
