@@ -60,6 +60,12 @@ app.whenReady().then(async()=>{
   assert.equal(await js("document.querySelectorAll('.company-room').length"),9);
   assert.deepEqual(await js("[...document.querySelectorAll('.company-rest-worker')].map(node=>[node.dataset.seat,node.dataset.restKind])"),[['marks1','rest-confirmed'],['marks6','rest-free']]);
   assert.equal(await js("document.getElementById('companyRestRoom').getAttribute('role')"),'region');
+  assert.equal(await js("document.querySelectorAll('.company-meeting').length"),1);
+  await js("document.querySelector('.company-meeting button').click()");
+  assert.equal(await js("document.getElementById('companyDialog').open"),true);
+  assert.ok((await js("document.getElementById('companyDialogContent').textContent")).includes('Leadership standup'));
+  assert.equal(await js("document.getElementById('companyDialogContent').textContent.includes('present ·')"),false);
+  await js("document.getElementById('companyClose').click()");
   await screenshot('company-rest-dark.png');
   await screenshot('company-office-dark.png');
   await js("document.documentElement.dataset.theme='light'; const sheet=document.createElement('style');sheet.id='company-fixture-light';sheet.textContent=':root, :root[data-theme=dark] {--page:#f4f4f5!important;--card:#ffffff!important;--ink:#0c0c0e!important;--soft:#56565e!important;--line:#e7e7ea!important;--sunk:#f7f7f8!important;--accent:#486f9d!important;--red:#b4262c!important;}';document.head.append(sheet)");
@@ -71,6 +77,6 @@ app.whenReady().then(async()=>{
   assert.equal(await js("document.getElementById('companyDialog').open"),true);
   assert.ok((await js("document.getElementById('companyDialogContent').textContent")).includes('Acceptance criteria'));
   assert.deepEqual(errors,[]);
-  console.log('PASS: Company synthetic board, office, both themes, request dialog. Screenshots: '+output);
+  console.log('PASS: Company synthetic board, office, rest room, meeting details, both themes, request dialog. Screenshots: '+output);
   win.destroy();await server.close();app.exit(0);
 }).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'company-error.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await server?.close();app.exit(1);});
