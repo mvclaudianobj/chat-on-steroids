@@ -114,6 +114,17 @@ describe('SMTP failure codes', () => {
     await new Promise<void>(resolve => server.close(() => resolve()));
     expect(await failure(sendSmtp(message(port), local))).toMatchObject({ code: 'connection_refused' });
   });
+  it('uses the next resolved address when the first refuses TCP before SMTP begins', async () => {
+    fake = await fakeSmtp({ starttls: selfSigned });
+    const report = await sendSmtp(message(fake.port, { pinnedFingerprint: selfSigned.fingerprint256 }), {
+      ...local, lookup: async () => ['127.0.0.2', '127.0.0.1']
+    });
+    expect(report.pinned).toBe(true);
+    expect(fake.plain).toEqual(['EHLO chat-marks', 'STARTTLS']);
+    expect(fake.secure).toContain('DATA');
+    expect(fake.plain).not.toContain('AUTH LOGIN');
+    expect(fake.plain.join(' ')).not.toContain(Buffer.from(PASSWORD).toString('base64'));
+  });
   it('reports a connect timeout and names Cloudflare proxy addresses', async () => {
     // An unconnected socket never emits `connect`: no real network is touched.
     vi.spyOn(net, 'connect').mockImplementation(() => new net.Socket());
