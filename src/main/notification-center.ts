@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { readDurable, writeDurableNow } from './durable.js';
 import { notificationCredentialPresence, storeNotificationCredential, withNotificationCredential, requireNotificationReauthorization } from './notification-credentials.js';
 import { CERTIFICATE_FINGERPRINT, NOTIFICATION_CHANNELS, NOTIFICATION_EVENTS, type NotificationChannel, type NotificationEvent, type NotificationCenterSettings, type NotificationCenterView, type NotificationFailureCode } from '../shared/notification-center.js';
+import { sendWhatsAppWeb } from './notification-whatsapp-web.js';
 import { sendSmtp } from './notification-smtp.js';
 import { deliveryFailure, describeFailure, failureOf, networkFailureCode, NotificationDeliveryError } from './notification-failure.js';
 import { logInfo, logWarn } from './logger.js';
@@ -22,7 +23,7 @@ const schema = z.object({
 }).strict();
 const defaultChannel = () => ({ enabled: false, events: { ...DEFAULT_EVENTS }, destinations: [], titleTemplate: '{title}', bodyTemplate: '{project} — {event}', includeExcerpt: false, config: {} });
 const defaults = (): NotificationCenterSettings => ({ channels: {
-  smtp: defaultChannel(), telegram: defaultChannel(), 'whatsapp-cloud': defaultChannel(), 'whatsapp-evolution': defaultChannel()
+  smtp: defaultChannel(), telegram: defaultChannel(), 'whatsapp-web': defaultChannel(), 'whatsapp-cloud': defaultChannel(), 'whatsapp-evolution': defaultChannel()
 }, throttleMinutes: 1, batchWindowSeconds: 10 });
 let saved: NotificationCenterSettings | null = null;
 let loadInFlight: Promise<NotificationCenterSettings> | null = null;
@@ -44,12 +45,16 @@ export async function notificationView(): Promise<NotificationCenterView> {
   return { settings: await notificationSettings(), credentials: await notificationCredentialPresence() };
 }
 function checkSettings(value: unknown): NotificationCenterSettings {
-  const settings = schema.parse(value);
+  // Existing 2.1.45 files predate local WhatsApp. Add the disabled channel without losing saved preferences.
+  const input = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+  const channels = input.channels && typeof input.channels === 'object' && !Array.isArray(input.channels) ? input.channels as Record<string, unknown> : {};
+  const migrated = Object.hasOwn(channels, 'whatsapp-web') ? value : { ...input, channels: { ...channels, 'whatsapp-web': defaultChannel() } };
+  const settings = schema.parse(migrated);
   for (const channel of NOTIFICATION_CHANNELS) {
     const { config, destinations } = settings.channels[channel];
     // Never accept arbitrary keys that could be mistaken for credentials in the durable settings.
     const names: Record<NotificationChannel, string[]> = {
-      smtp: ['host', 'port', 'username', 'from', 'security', 'tlsFingerprint'], telegram: ['apiBase'],
+      smtp: ['host', 'port', 'username', 'from', 'security', 'tlsFingerprint'], telegram: ['apiBase'], 'whatsapp-web': [],
       'whatsapp-cloud': ['apiBase', 'phoneId', 'template', 'language', 'parameters'], 'whatsapp-evolution': ['baseUrl', 'instance']
     };
     for (const k of Object.keys(config)) if (!names[channel].includes(k)) throw new Error('Unsupported channel setting');
@@ -185,10 +190,10 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
     const title = fill(choice.titleTemplate, values);
     const body = fill(choice.bodyTemplate, values);
     const cfg = choice.config;
-    if (!(await notificationCredentialPresence())[channel]) throw deliveryFailure('credential_missing', { channel });
+    if (channel !== 'whatsapp-web' && !(await notificationCredentialPresence())[channel]) throw deliveryFailure('credential_missing', { channel });
     let reachedProvider = false;
     try {
-    await withNotificationCredential(channel, async secret => {
+    const deliver = async (secret: string) => {
     reachedProvider = true;
     if (channel === 'smtp') {
       if (!cfg.host || !cfg.from) throw deliveryFailure('config_incomplete');
@@ -201,6 +206,12 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
       for (const chat_id of choice.destinations) {
         const url = new URL(`/bot${encodeURIComponent(secret)}/sendMessage`, base);
         await postJson(channel, url.toString(), {}, { chat_id, text: `${title}\n${body}` }, fetcher); delivered++;
+      }
+    } else if (channel === 'whatsapp-web') {
+      for (const number of choice.destinations) {
+        try { await sendWhatsAppWeb(number, `${title}\n${body}`); }
+        catch { throw deliveryFailure('connection_closed'); }
+        delivered++;
       }
     } else if (channel === 'whatsapp-cloud') {
       if (!cfg.phoneId || !/^\d{3,30}$/.test(cfg.phoneId) || !cfg.template) throw deliveryFailure('config_incomplete');
@@ -225,7 +236,9 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
         await postJson(channel, url.toString(), { apikey: secret }, { number, text: `${title}\n${body}` }, fetcher); delivered++;
       }
     }
-    });
+    };
+    if (channel === 'whatsapp-web') await deliver('');
+    else await withNotificationCredential(channel, deliver);
     } catch (error) {
       if (error instanceof NotificationDeliveryError) throw new NotificationDeliveryError({ ...error.failure, channel });
       // Before the callback ran, Vault K could not open the stored credential.

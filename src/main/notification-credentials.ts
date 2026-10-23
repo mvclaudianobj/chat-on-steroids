@@ -7,10 +7,10 @@ import { NOTIFICATION_CHANNELS, type NotificationChannel } from '../shared/notif
 const ACTIVE_RECORD = 'marks-notification-credential-activation';
 const activationSchema = z.object({
   smtp: z.boolean(), telegram: z.boolean(),
-  'whatsapp-cloud': z.boolean(), 'whatsapp-evolution': z.boolean()
+  'whatsapp-web': z.boolean(), 'whatsapp-cloud': z.boolean(), 'whatsapp-evolution': z.boolean()
 }).strict();
 type Activation = Record<NotificationChannel, boolean>;
-const disabled = (): Activation => ({ smtp: false, telegram: false, 'whatsapp-cloud': false, 'whatsapp-evolution': false });
+const disabled = (): Activation => ({ smtp: false, telegram: false, 'whatsapp-web': false, 'whatsapp-cloud': false, 'whatsapp-evolution': false });
 let cached: Activation | null = null;
 let serial: Promise<void> = Promise.resolve();
 
@@ -18,7 +18,9 @@ export const notificationVaultName = (channel: NotificationChannel): string => `
 
 async function state(): Promise<Activation> {
   if (cached) return cached;
-  const parsed = activationSchema.safeParse(await readDurable<unknown>(ACTIVE_RECORD));
+  const raw = await readDurable<unknown>(ACTIVE_RECORD);
+  const migrated = raw && typeof raw === 'object' && !Array.isArray(raw) && !('whatsapp-web' in raw) ? { ...raw, 'whatsapp-web': false } : raw;
+  const parsed = activationSchema.safeParse(migrated);
   return cached ?? (cached = parsed.success ? parsed.data : disabled());
 }
 async function mutate(change: (current: Activation) => Activation): Promise<void> {

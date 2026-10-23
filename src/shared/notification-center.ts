@@ -1,4 +1,4 @@
-export const NOTIFICATION_CHANNELS = ['smtp', 'telegram', 'whatsapp-cloud', 'whatsapp-evolution'] as const;
+export const NOTIFICATION_CHANNELS = ['smtp', 'telegram', 'whatsapp-web', 'whatsapp-cloud', 'whatsapp-evolution'] as const;
 export type NotificationChannel = typeof NOTIFICATION_CHANNELS[number];
 export const NOTIFICATION_EVENTS = ['turn-completed', 'turn-failed', 'approval-pending', 'module-update', 'app-release'] as const;
 export type NotificationEvent = typeof NOTIFICATION_EVENTS[number];

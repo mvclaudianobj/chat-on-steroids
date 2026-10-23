@@ -48,6 +48,7 @@ import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
 import { createTurnNotifier } from './turn-notifications.js';
 import { createOutboundTurnWatcher } from './notification-events.js';
+import { resumeWhatsAppWeb, stopWhatsAppWeb } from './notification-whatsapp-web.js';
 import { queueOutboundNotice } from './notification-center.js';
 import { listProjects } from './projects.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
@@ -738,6 +739,7 @@ void app.whenReady().then(async () => {
   // The same quit the tray's Quit performs. It has to go through `quitting` for the window's
   // close-to-tray handler to let go: without it, quitting to install would hide the window and
   // leave the app running, which is exactly the trap the Install button exists to end.
+  void resumeWhatsAppWeb().catch(() => undefined);
   registerIpc(
     () => window,
     () => {
@@ -863,7 +865,7 @@ app.on('will-quit', (event) => {
       {
         name: 'process cleanup',
         budgetMs: 15_000,
-        run: () => [unifiedExecManager.terminateAllProcesses(), workspaceTerminalsExited(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close(),
+        run: () => [unifiedExecManager.terminateAllProcesses(), workspaceTerminalsExited(), stopComputerHelper(), shutdownPetOverlay(), stopWhatsAppWeb(), pluginManager.close(),
           // SFTP sessions of projects on a server (#1469): their ssh would outlive the app on Windows.
           Promise.resolve().then(() => closeRemoteSessions()),
           Promise.resolve().then(() => loadedCosBrowser()?.stop())]

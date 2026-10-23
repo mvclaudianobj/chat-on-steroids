@@ -113,6 +113,12 @@ export interface SessionDetail {
 
 const api = {
   company: (request: import('../main/company-ipc.js').CompanyIpcRequest) => call<import('../shared/company.js').CompanySnapshot>('marksCompany:request', request),
+  notificationWhatsAppStart: () => call<import('../main/notification-whatsapp-web.js').WhatsAppWebStatus>('marksNotify:request', { action: 'wa-start' }),
+  notificationWhatsAppStatus: () => call<import('../main/notification-whatsapp-web.js').WhatsAppWebStatus>('marksNotify:request', { action: 'wa-status' }),
+  notificationWhatsAppDisconnect: () => call<import('../main/notification-whatsapp-web.js').WhatsAppWebStatus>('marksNotify:request', { action: 'wa-disconnect' }),
+  notificationTelegramPairStart: () => call<{url:string;expires:number;qr:string}>('marksNotify:request', { action: 'tg-start' }),
+  notificationTelegramPairCheck: () => call<{state:'pending'|'paired'|'expired';chatId?:string}>('marksNotify:request', { action: 'tg-check' }),
+  notificationTelegramPairCancel: () => call<boolean>('marksNotify:request', { action: 'tg-cancel' }),
   notificationCenterGet: () => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'get' }),
   notificationCenterSave: (settings: import('../shared/notification-center.js').NotificationCenterSettings) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'save', settings }),
   notificationCenterSetCredential: (channel: import('../shared/notification-center.js').NotificationChannel, credential: string, masterPassword: string) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'credential', channel, credential, masterPassword }),
