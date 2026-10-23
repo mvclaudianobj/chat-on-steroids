@@ -136,8 +136,21 @@ const api = {
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
   jarvisAudioStatus: () => call<{ models: string[]; local: boolean; windows: boolean; error: string | null }>('jarvis:audio', { action: 'status' }),
-  jarvisTranscribe: (engine: 'cliproxy' | 'local', model: string, language: string, mime: 'audio/webm' | 'audio/ogg' | 'audio/mp4', bytes: Uint8Array) => call<string>('jarvis:audio', { action: 'transcribe', engine, model, language, mime, bytes }),
+  jarvisTranscribe: (engine: 'cliproxy' | 'local' | 'provider', model: string, language: string, mime: 'audio/webm' | 'audio/ogg' | 'audio/mp4', bytes: Uint8Array, voice?: import('../shared/jarvis-voice.js').JarvisVoiceConfig) =>
+    call<string>('jarvis:audio', { action: 'transcribe', engine, model, language, mime, bytes, ...(voice ? { voice } : {}) }),
   jarvisCancel: () => call<null>('jarvis:audio', { action: 'cancel' }),
+  /** Jarvis J3: the voice provider's catalog and whether its Vault K keys exist (never their values). */
+  jarvisVoiceStatus: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig) => call<import('../main/jarvis-voice.js').JarvisVoiceStatus>('jarvis:audio', { action: 'voice-status', voice }),
+  jarvisVoiceSetKey: (slot: import('../shared/jarvis-voice.js').JarvisVoiceKeySlot, baseUrl: string, value: string, password: string) => call<boolean>('jarvis:audio', { action: 'voice-key', slot, baseUrl, value, password }),
+  jarvisSpeak: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string) => call<{ mime: string; bytes: Uint8Array }>('jarvis:audio', { action: 'speak', voice, text }),
+  jarvisSpeakStream: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string, requestId: string) =>
+    call<{ firstByteMs: number; totalMs: number; bytes: number }>('jarvis:audio', { action: 'speak-stream', voice, text, requestId }),
+  onJarvisSpeechStream: (listener: (event: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }) => void): (() => void) => {
+    const wrapped = (_event: unknown, chunk: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }): void => listener(chunk);
+    ipcRenderer.on('jarvis:speech-stream', wrapped);
+    return () => ipcRenderer.removeListener('jarvis:speech-stream', wrapped);
+  },
+  jarvisSpeakCancel: () => call<null>('jarvis:audio', { action: 'speak-cancel' }),
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */
   startDictation: (language = '') => call<{ status: 'starting' }>('dictation:start', { language }),
   stopDictation: () => call<void>('dictation:stop'),

@@ -11,10 +11,18 @@ import { apiChatKey, apiChatSettings } from './api-chat/settings.js';
 import { resolveApiChatBaseUrl } from './api-chat/client.js';
 import { isJarvisAudioModelId } from '../shared/jarvis-ptt.js';
 import { markspanelAccessBlocked } from './markspanel-auth.js';
+import { jarvisVoiceConfigSchema } from '../shared/jarvis-voice.js';
+import { jarvisVoiceStatus, speakJarvisVoice, storeJarvisVoiceKey, streamJarvisVoice, transcribeJarvisVoice } from './jarvis-voice.js';
 
-const audio = z.object({ action: z.literal('transcribe'), engine: z.enum(['cliproxy', 'local']), model: z.string().max(128),
-  language: z.string().max(35), mime: z.enum(['audio/webm', 'audio/ogg', 'audio/mp4']), bytes: z.instanceof(Uint8Array).refine(b => b.length > 0 && b.length <= 12_000_000) }).strict();
+const audio = z.object({ action: z.literal('transcribe'), engine: z.enum(['cliproxy', 'local', 'provider']), model: z.string().max(128),
+  language: z.string().max(35), mime: z.enum(['audio/webm', 'audio/ogg', 'audio/mp4']), bytes: z.instanceof(Uint8Array).refine(b => b.length > 0 && b.length <= 12_000_000),
+  voice: jarvisVoiceConfigSchema.optional() }).strict();
 const status = z.object({ action: z.literal('status') }).strict();
+const voiceStatus = z.object({ action: z.literal('voice-status'), voice: jarvisVoiceConfigSchema }).strict();
+const voiceKey = z.object({ action: z.literal('voice-key'), slot: z.enum(['primary', 'fallback']), baseUrl: z.string().min(1).max(300),
+  value: z.string().trim().min(1).max(16384), password: z.string().min(1).max(1024) }).strict();
+const speak = z.object({ action: z.literal('speak'), voice: jarvisVoiceConfigSchema, text: z.string().min(1).max(4000) }).strict();
+const speakStream = z.object({ action: z.literal('speak-stream'), voice: jarvisVoiceConfigSchema, text: z.string().min(1).max(4000), requestId: z.string().uuid() }).strict();
 const MAX_RESPONSE = 64_000;
 
 /** Only recognize an already provisioned whisper.cpp executable and model. */
@@ -35,6 +43,10 @@ export async function jarvisAudioStatus(): Promise<{ models: string[]; local: bo
 }
 
 export async function transcribeJarvis(input: z.infer<typeof audio>, signal: AbortSignal): Promise<string> {
+  if (input.engine === 'provider') {
+    if (!input.voice) throw new Error('Configure the Jarvis voice provider first.');
+    return transcribeJarvisVoice(input.voice, input.mime, input.bytes, input.language, signal);
+  }
   if (input.engine === 'local') {
     const local = await localEngine();
     if (!local) throw new Error('Configure MARKS_JARVIS_WHISPER_CLI and MARKS_JARVIS_WHISPER_MODEL with installed absolute paths.');
@@ -97,14 +109,53 @@ export async function transcribeJarvis(input: z.infer<typeof audio>, signal: Abo
 
 export function registerJarvisAudioIpc(getWindow: () => BrowserWindow | null): void {
   let active: AbortController | null = null;
-  app.on('before-quit', () => active?.abort());
+  const speaking = new Set<AbortController>();
+  app.on('before-quit', () => { active?.abort(); for (const controller of speaking) controller.abort(); });
   ipcMain.handle('jarvis:audio', async (event, payload: unknown) => {
     try {
       const target = getWindow();
       if (!target || target.isDestroyed() || target.webContents !== event.sender || event.senderFrame !== target.webContents.mainFrame) throw new Error('Window not authorized');
       if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
       if (status.safeParse(payload).success) return { ok: true, data: await jarvisAudioStatus() };
-      if (payload && typeof payload === 'object' && (payload as { action?: unknown }).action === 'cancel') { active?.abort(); active = null; return { ok: true, data: null }; }
+      const action = payload && typeof payload === 'object' ? (payload as { action?: unknown }).action : undefined;
+      if (action === 'cancel') { active?.abort(); active = null; return { ok: true, data: null }; }
+      if (action === 'speak-cancel') { for (const controller of speaking) controller.abort(); speaking.clear(); return { ok: true, data: null }; }
+      if (action === 'voice-status') return { ok: true, data: await jarvisVoiceStatus(voiceStatus.parse(payload).voice) };
+      if (action === 'voice-key') {
+        const input = voiceKey.parse(payload);
+        await storeJarvisVoiceKey(input.slot, input.baseUrl, input.value, input.password);
+        return { ok: true, data: true };
+      }
+      if (action === 'speak' || action === 'speak-stream') {
+        const input = action === 'speak' ? speak.parse(payload) : speakStream.parse(payload);
+        // The renderer prefetches the next sentence while one plays; more than that is a bug.
+        if (speaking.size >= 3) throw new Error('Jarvis speech is already busy.');
+        const controller = new AbortController();
+        speaking.add(controller);
+        const timer = setTimeout(() => controller.abort(), 60_000);
+        try {
+          if (action === 'speak-stream' && 'requestId' in input) {
+            try {
+              const data = await streamJarvisVoice(input.voice, input.text, input.requestId, controller.signal, chunk => {
+                if (target.isDestroyed() || target.webContents.isDestroyed() || event.senderFrame !== target.webContents.mainFrame) {
+                  controller.abort();
+                  return;
+                }
+                event.sender.send('jarvis:speech-stream', chunk);
+              });
+              return { ok: true, data };
+            } catch (reason) {
+              const error = controller.signal.aborted ? 'Speech interrupted.' : reason instanceof Error ? reason.message.slice(0, 240) : 'Speech failed.';
+              if (!target.isDestroyed() && !target.webContents.isDestroyed() && !controller.signal.aborted) {
+                event.sender.send('jarvis:speech-stream', { requestId: input.requestId, type: 'error', error });
+              }
+              return { ok: false, error };
+            }
+          }
+          return { ok: true, data: await speakJarvisVoice(input.voice, input.text, controller.signal) };
+        }
+        finally { clearTimeout(timer); speaking.delete(controller); }
+      }
       const input = audio.parse(payload);
       if (active) throw new Error('Jarvis transcription is already running.');
       const controller = new AbortController(); active = controller;
