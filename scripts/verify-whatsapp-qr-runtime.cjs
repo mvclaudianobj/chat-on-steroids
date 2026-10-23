@@ -77,9 +77,12 @@ app.whenReady().then(async () => {
       assert.equal(reply.data.state, 'error', 'missing QR must time out');
       assert.equal(reply.data.reason, 'qr_timeout');
       assert.equal(reply.data.qr, undefined);
-      const second = await invoke('wa-start');
-      assert.equal(second.ok, true, 'manual retry must reinitialize after timeout');
-      const retryLimit = Date.now() + 1000;
+      const autoRetry = process.env.MARKS_QR_FIXTURE_AUTORETRY === '1';
+      if (!autoRetry) {
+        const second = await invoke('wa-start');
+        assert.equal(second.ok, true, 'manual retry must reinitialize after timeout');
+      }
+      const retryLimit = Date.now() + (autoRetry ? 4400 : 1000);
       while (Date.now() < retryLimit) {
         reply = await invoke('wa-status');
         if (reply.ok && reply.data.state === 'qr') break;
@@ -89,7 +92,7 @@ app.whenReady().then(async () => {
       assert.equal(sockets.length, 2);
       assert.equal(attempts[0].closes, 1);
       assert(reply.data.qr.startsWith('data:image/png;base64,'));
-      console.log('PASS WhatsApp Electron IPC negative:noQR timeout, recovery:manual retry, sockets=2, closed=1');
+      console.log(`PASS WhatsApp Electron IPC negative:noQR timeout, recovery:${autoRetry ? 'automatic backoff' : 'manual retry'}, sockets=2, closed=1`);
       clearTimeout(guard);
       app.exit(0);
       return;
