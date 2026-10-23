@@ -115,11 +115,11 @@ const api = {
   company: (request: import('../main/company-ipc.js').CompanyIpcRequest) => call<import('../shared/company.js').CompanySnapshot>('marksCompany:request', request),
   notificationWhatsAppStart: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-start' }) as Promise<
     { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |
-    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue }
+    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue; setupStage?: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus['stage'] | 'unknown' }
   >,
   notificationWhatsAppStatus: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-status' }) as Promise<
     { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |
-    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue }
+    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue; setupStage?: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus['stage'] | 'unknown' }
   >,
   notificationWhatsAppDisconnect: () => call<import('../main/notification-whatsapp-web.js').WhatsAppWebStatus>('marksNotify:request', { action: 'wa-disconnect' }),
   notificationTelegramPairStart: () => call<{url:string;expires:number;qr:string}>('marksNotify:request', { action: 'tg-start' }),

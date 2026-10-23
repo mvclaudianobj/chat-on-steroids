@@ -25,7 +25,7 @@ const fixture = `(() => {
     markWhatsNewSeen:()=>ok(null),
     marksPromptPreview:()=>{window.notifyFixture.previewCalls++;return ok('Você é Marks. <synthetic-prompt-text>');},
     getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'en',theme:'dark'};return r;},
-    notificationWhatsAppStart:()=>window.notifyFixture.whatsappError?Promise.resolve({ok:false,error:'synthetic-private-path',setupCode:'storage_unavailable'}):ok({state:'qr',qr:'__SYNTHETIC_QR_IMAGE__'}),
+    notificationWhatsAppStart:()=>window.notifyFixture.whatsappError?Promise.resolve({ok:false,error:'synthetic-private-path',setupCode:'storage_unavailable',setupStage:'storage'}):ok({state:'qr',qr:'__SYNTHETIC_QR_IMAGE__'}),
     notificationWhatsAppStatus:()=>window.notifyFixture.whatsappError?ok({state:'error',reason:'storage_unavailable'}):ok({state:'connected'}),
     notificationWhatsAppDisconnect:()=>ok({state:'disconnected'}),
     notificationTelegramPairStart:()=>ok({url:'https://t.me/example_bot?start=synthetic',expires:Date.now()+60000,qr:'__SYNTHETIC_QR_IMAGE__'}),
@@ -139,6 +139,7 @@ app.whenReady().then(async () => {
   // identify local storage while keeping the private error string invisible.
   await until(`/session storage|armazenamento local da sessão/.test(document.getElementById('notificationTitle-whatsapp-web').closest('section').textContent)`);
   assert.equal(await js(`/bot token|token salvo do bot|synthetic-private-path/.test(document.getElementById('notificationTitle-whatsapp-web').closest('section').textContent)`),false);
+  assert.equal(await js(`document.getElementById('notificationTitle-whatsapp-web').closest('section').textContent.includes('WA-storage_unavailable / storage')`),true);
   await capture('notification-whatsapp-storage-failure-synthetic.png');
   await js(`document.getElementById('notificationTitle-whatsapp-cloud').scrollIntoView({block:'center'})`);
   await capture('notification-center-whatsapp.png');

@@ -48,6 +48,13 @@ const EVENT_LABELS: Record<NotificationEvent, string> = {
 
 type Reply<T> = { ok: true; data: T } | { ok: false; error: string; failure?: NotificationFailure };
 
+/** Shareable setup diagnostics, only fixed enums supplied by main; never include QR or error text. */
+function whatsappDiagnosis(issue?: WhatsAppSetupIssue, stage?: string): string {
+  const safeStage = ['storage', 'auth', 'socket', 'network', 'qr', 'ready'].includes(stage ?? '') ? stage! : 'unknown';
+  const safeIssue = issue ?? 'unknown';
+  return ` [WA-${safeIssue} / ${safeStage}]`;
+}
+
 /** UI-owned wording only: setup details from the main process are restricted to these codes. */
 export function whatsappSetupMessage(issue?: WhatsAppSetupIssue): string {
   switch (issue) {
@@ -170,6 +177,7 @@ export function installNotificationCenter(api: Service): void {
   const credentialStatus = new Map<NotificationChannel, HTMLElement>();
   const tests = new Map<NotificationChannel, HTMLButtonElement>();
   const vaultHelp = new Map<NotificationChannel, HTMLElement>();
+  const pairingCleanups: Array<() => void> = [];
 
   function state(message: string, error = false): void {
     ui(status!, 'textContent', () => t(message));
@@ -260,6 +268,7 @@ export function installNotificationCenter(api: Service): void {
   }
   function build(): void {
     if (!draft) return;
+    for (const cleanup of pairingCleanups.splice(0)) cleanup();
     controls.length = 0;
     channelStatus.clear();
     credentialStatus.clear();
@@ -417,15 +426,19 @@ export function installNotificationCenter(api: Service): void {
         const disconnect = button(channel === 'telegram' ? 'Cancel pairing' : 'Disconnect WhatsApp');
         disconnect.id = 'notificationDisconnect-' + channel;
         let poll: ReturnType<typeof setInterval> | null = null;
+        let pairingEpoch = 0;
         const stopPoll = () => { if (poll) clearInterval(poll); poll = null; };
+        pairingCleanups.push(() => { pairingEpoch++; stopPoll(); });
         const setQr = (qr?: string) => {
           qrImage.hidden = !qr;
           if (qr) qrImage.src = qr;
           else qrImage.removeAttribute('src');
         };
         const refresh = async () => {
+          const epoch = pairingEpoch;
           if (channel === 'telegram') {
             const response = await api.notificationTelegramPairCheck();
+            if (epoch !== pairingEpoch) return;
             if (!response.ok) { stopPoll(); info.textContent = t('Could not check pairing. Try again.'); return; }
             if (response.data.state === 'paired') {
               stopPoll(); setQr();
@@ -438,12 +451,13 @@ export function installNotificationCenter(api: Service): void {
           } else {
             let response: Awaited<ReturnType<typeof api.notificationWhatsAppStatus>>;
             try { response = await api.notificationWhatsAppStatus(); }
-            catch { info.textContent = whatsappSetupMessage(); return; }
-            if (!response.ok) { info.textContent = whatsappSetupMessage(response.setupCode); return; }
+            catch { if (epoch === pairingEpoch) info.textContent = whatsappSetupMessage(); return; }
+            if (epoch !== pairingEpoch) return;
+            if (!response.ok) { info.textContent = whatsappSetupMessage(response.setupCode) + whatsappDiagnosis(response.setupCode, response.setupStage); return; }
             const result = response.data;
             setQr(result.state === 'qr' ? result.qr : undefined);
             info.textContent = result.state === 'error'
-              ? whatsappSetupMessage(result.reason)
+              ? whatsappSetupMessage(result.reason) + whatsappDiagnosis(result.reason, result.stage)
               : t(result.state === 'connected' ? 'WhatsApp connected.' : result.state === 'disconnected' ? 'WhatsApp disconnected.' : result.state === 'qr' ? 'Open WhatsApp > Linked devices > Link a device, then scan the QR code.' : 'Waiting for WhatsApp pairing…');
             if (result.state === 'connected' || result.state === 'disconnected') stopPoll();
           }
@@ -452,15 +466,17 @@ export function installNotificationCenter(api: Service): void {
           if (busy) return;
           // A retry supersedes the previous QR status watcher. Otherwise a late
           // "connected" poll can overwrite the diagnosis of a failed retry.
+          const epoch = ++pairingEpoch;
           stopPoll();
           info.textContent = t('Preparing QR code…');
           let response: Awaited<ReturnType<typeof api.notificationTelegramPairStart | typeof api.notificationWhatsAppStart>>;
           try { response = channel === 'telegram' ? await api.notificationTelegramPairStart() : await api.notificationWhatsAppStart(); }
-          catch { info.textContent = channel === 'telegram' ? t('Could not prepare QR code. Check the connection and saved bot token.') : whatsappSetupMessage(); return; }
+          catch { if (epoch === pairingEpoch) info.textContent = channel === 'telegram' ? t('Could not prepare QR code. Check the connection and saved bot token.') : whatsappSetupMessage(); return; }
+          if (epoch !== pairingEpoch) return;
           if (!response.ok) {
             info.textContent = channel === 'telegram'
               ? t('Could not prepare QR code. Check the connection and saved bot token.')
-              : whatsappSetupMessage('setupCode' in response ? response.setupCode : undefined);
+              : whatsappSetupMessage('setupCode' in response ? response.setupCode : undefined) + whatsappDiagnosis('setupCode' in response ? response.setupCode : undefined, 'setupStage' in response ? response.setupStage : undefined);
             return;
           }
           if (channel === 'telegram') {
@@ -470,15 +486,16 @@ export function installNotificationCenter(api: Service): void {
             const result = response.data;
             setQr(result.state === 'qr' ? result.qr : undefined);
             info.textContent = result.state === 'error'
-              ? whatsappSetupMessage(result.reason)
+              ? whatsappSetupMessage(result.reason) + whatsappDiagnosis(result.reason, result.stage)
               : t(result.state === 'qr' ? 'Open WhatsApp > Linked devices > Link a device, then scan the QR code.' : result.state === 'connected' ? 'WhatsApp connected.' : 'Waiting for WhatsApp pairing…');
           }
           stopPoll(); poll = setInterval(() => { void refresh(); }, 2500);
         });
         disconnect.addEventListener('click', async () => {
+          const epoch = ++pairingEpoch;
           stopPoll(); setQr();
           const result = channel === 'telegram' ? await api.notificationTelegramPairCancel() : await api.notificationWhatsAppDisconnect();
-          info.textContent = t(result.ok ? 'Pairing stopped.' : 'Could not disconnect the channel.');
+          if (epoch === pairingEpoch) info.textContent = t(result.ok ? 'Pairing stopped.' : 'Could not disconnect the channel.');
         });
         if (channel === 'telegram') pairingBox.append(el('p', 'notification-channel-note', () => t('Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.')));
         pairingBox.append(startPair, disconnect, qrImage, info);

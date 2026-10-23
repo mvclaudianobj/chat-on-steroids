@@ -119,7 +119,8 @@ export function registerNotificationCenterIpc(getWindow: () => BrowserWindow | n
       }
       if (error instanceof WhatsAppPairingError) {
         logWarn(`Notification WhatsApp setup: ${error.issue}`);
-        return { ok: false, error: 'WhatsApp setup failed', setupCode: error.issue };
+        const current = await getWhatsAppWebStatus();
+        return { ok: false, error: 'WhatsApp setup failed', setupCode: error.issue, setupStage: current.stage ?? 'unknown' };
       }
       const failure = error instanceof NotificationDeliveryError ? error.failure : null;
       logWarn(`Notification IPC: request refused (${failure ? describeFailure(failure) : 'permission, credential or setting failure'}); secrets and provider text omitted`);
