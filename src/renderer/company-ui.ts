@@ -78,6 +78,15 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     const count = input(String(snapshot.company.seatCount), 'number'); count.min = '1'; count.max = String(Math.max(10, snapshot.company.seatCount));
     content.append(field('Company name', name), field('Employee seats', count), el('p', 'company-dialog-hint', t('Management roles stay fixed. Employee seats are named marks1 through marksN.')));
     actions.append(button('Save settings', () => void change({ action: 'configure', payload: { name: name.value.trim(), seatCount: Number(count.value) } }), 'btn btn-solid'));
+    content.append(el('h3','',t('Operational approvals')),el('p','company-dialog-hint',
+      snapshot.delegation?.mode !== 'delegated' ? t('Manual approval is active by default.') : t('COO ticket-review delegation enabled; authenticated identity is still required.')));
+    content.append(el('p','company-dialog-hint',t('Only ticket reviews can be delegated. System and service permissions always apply.')));
+    actions.append(snapshot.delegation?.mode !== 'delegated' ?
+      button('Enable COO delegation',()=>void change({action:'delegationGrant',payload:{delegate:'marks-coo',scope:'ticket-review'}})) :
+      button('Revoke COO delegation',()=>void change({action:'delegationRevoke'})));
+    content.append(el('h4','',t('Delegation audit')));
+    for (const event of (snapshot.delegationAudit ?? []).slice(0,10)) content.append(el('p','company-dialog-hint',
+      `${date(event.at)} · ${event.actor} · ${event.action} · ${event.scope ?? '—'} · ${event.requestId ?? ''}`));
   }
   function detail(id: string): void {
     const request = snapshot?.requests.find(row => row.id === id); if (!request || !snapshot) return;
@@ -136,10 +145,12 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     if (!snapshot) return;
     open('Convene all workers');
     const meetingTitle = input('Coordination meeting');
+    const kind = select(['ad-hoc','emergency','daily','weekly'],'ad-hoc', value => t(({ 'ad-hoc':'Coordination meeting', emergency:'Emergency meeting',daily:'Daily alignment',weekly:'Weekly alignment' } as Record<string,string>)[value]!));
+    kind.addEventListener('change',()=>{meetingTitle.value=({ 'ad-hoc':'Coordination meeting',emergency:'Emergency meeting',daily:'Daily alignment',weekly:'Weekly alignment' } as Record<string,string>)[kind.value]!;});
     const agenda = el('textarea'); agenda.value = 'Review priorities, dependencies and next actions.';
     const minutes = input('30','number'); minutes.min='1'; minutes.max='480';
-    content.append(field('Meeting title',meetingTitle),field('Agenda',agenda),field('Duration (minutes)',minutes),el('p','company-dialog-hint',`${snapshot.company.seats.length} seats will be invited. Invitation does not imply attendance.`));
-    actions.append(button('Send invitations',()=>void change({action:'meeting',payload:{title:meetingTitle.value.trim(),agenda:agenda.value.trim(),durationMinutes:Number(minutes.value)}}),'btn btn-solid'));
+    content.append(field('Meeting type',kind),field('Meeting title',meetingTitle),field('Agenda',agenda),field('Duration (minutes)',minutes),el('p','company-dialog-hint',`${snapshot.company.seats.length} seats will be invited. Invitation does not imply attendance.`));
+    actions.append(button('Send invitations',()=>void change({action:'meeting',payload:{title:meetingTitle.value.trim(),agenda:agenda.value.trim(),durationMinutes:Number(minutes.value),kind:kind.value as 'ad-hoc'|'emergency'|'daily'|'weekly'}}),'btn btn-solid'));
   }
   function meetingDetail(id:string):void {
     const meeting = snapshot?.meetings.find(item=>item.id===id); if(!meeting) return;
@@ -282,6 +293,9 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     }
     paintBoard(); paintOffice(); paintRpg(); paintObservation();
     const ceo = $('companyCeo'); ceo.replaceChildren();
+    ceo.append(el('p','company-muted',snapshot.delegation?.mode !== 'delegated' ? t('Manual approval is active by default.') : t('COO ticket-review delegation enabled; authenticated identity is still required.')));
+    ceo.append(button('Operational approvals',settings,'company-ceo-action'));
+    ceo.append(button('Convene all workers',newMeeting,'company-ceo-action'));
     const requests = snapshot.requests.filter(r => r.status === 'needs-ceo');
     if (!requests.length) ceo.append(el('p', 'company-muted', t('All clear. Nothing needs your decision.')));
     for (const item of requests) ceo.append(button(`◉ ${item.title}  →`, () => detail(item.id), 'company-ceo-action'));

@@ -37,15 +37,36 @@ function serialized<T>(fn: () => Promise<T>): Promise<T> {
   const job = queue.then(fn); queue = job.then(() => undefined, () => undefined); return job;
 }
 export function getCompany(): Promise<CompanySnapshot> { return serialized(load); }
-export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered', payload: unknown): Promise<CompanySnapshot> {
+export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'confirmDelegated' | 'delegationGrant' | 'delegationRevoke' | 'delegationDeny' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered', payload: unknown): Promise<CompanySnapshot> {
   return serialized(async () => {
     const current = await load();
     if (action === 'demo') {
-      if (current.requests.length || current.meetings.length) throw new Error('Example data requires an empty company');
+      if (current.requests.length || current.meetings.length || current.delegationAudit.length) throw new Error('Example data requires an empty company');
       const demo = demoCompany(); await save(demo); return demo;
     }
     const now = Date.now();
-    if (action === 'configure') {
+    if (action === 'delegationGrant' || action === 'delegationRevoke') {
+      if (current.demo) throw new Error('Delegation is unavailable for synthetic company data');
+      if (action === 'delegationGrant') {
+        if (current.delegation.mode === 'delegated') throw new Error('Delegation already enabled');
+        if (!current.company.roles.includes('marks-coo')) throw new Error('Operations chief not configured');
+        current.delegation = { mode: 'delegated', delegate: 'marks-coo', scopes: ['ticket-review'],
+          epoch: current.delegation.epoch + 1, grantedAt: now, revokedAt: null };
+      } else {
+        if (current.delegation.mode !== 'delegated') throw new Error('Delegation is not active');
+        current.delegation = { mode: 'manual', delegate: null, scopes: [],
+          epoch: current.delegation.epoch + 1, grantedAt: null, revokedAt: now };
+      }
+      current.delegationAudit.unshift({ id: randomUUID(), at: now, epoch: current.delegation.epoch,
+        action: action === 'delegationGrant' ? 'grant' : 'revoke', actor: 'ceo', delegate: 'marks-coo',
+        scope: 'ticket-review', requestId: null, reason: 'explicit-ceo' });
+    } else if (action === 'delegationDeny') {
+      const fields = payload as { id: string; reason: 'revoked' | 'invalid-identity' | 'policy-mismatch' };
+      // Only callable by trusted main code; never an IPC action.
+      current.delegationAudit.unshift({ id: randomUUID(), at: now, epoch: current.delegation.epoch,
+        action: 'decision-denied', actor: 'system', delegate: current.delegation.delegate,
+        scope: 'ticket-review', requestId: fields.id, reason: fields.reason });
+    } else if (action === 'configure') {
       const { name, seatCount } = payload as { name: string; seatCount: number };
       if (seatCount > 10 && current.company.seatCount <= 10) throw new Error('New configurations support at most ten seats');
       if (seatCount < current.company.seatCount && current.requests.some(r => r.seat && Number(r.seat.slice(5)) > seatCount))
@@ -62,9 +83,9 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
       current.requests.unshift(request);
       current.activities.unshift({ id: randomUUID(), at: now, actor: fields.origin, kind: 'request', requestId: request.id, message: `Created ${request.title}` });
     } else if (action === 'meeting') {
-      const fields = payload as { title: string; agenda: string; durationMinutes: number };
+      const fields = payload as { title: string; agenda: string; durationMinutes: number; kind?: 'ad-hoc'|'emergency'|'daily'|'weekly' };
       const invites = current.company.seats.map(seat => ({ seat, state: 'invited' as const, contribution: '', confirmedAt: null, evidence: null }));
-      current.meetings.unshift({ id: randomUUID(), title: fields.title, agenda: fields.agenda, participants: ['ceo','marks-coo', ...current.company.seats], invitations: invites, at: now, durationMinutes: fields.durationMinutes, minutes: '', decisions: [], brainSync: 'pending' });
+      current.meetings.unshift({ id: randomUUID(), title: fields.title, kind: fields.kind ?? 'ad-hoc', agenda: fields.agenda, participants: ['ceo','marks-coo', ...current.company.seats], invitations: invites, at: now, durationMinutes: fields.durationMinutes, minutes: '', decisions: [], brainSync: 'pending' });
       current.activities.unshift({ id: randomUUID(), at: now, actor: 'marks-coo', kind: 'meeting', message: `Invited ${invites.length} seats to ${fields.title}; awaiting confirmation.` });
     } else if (action === 'inviteReserve' || action === 'inviteDelivered') {
       const fields = payload as { id: string; seat: string; ownerId: string; runId: string; workerId: string; queuedId?: string };
@@ -120,10 +141,13 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
       request.history.push({ at: now, actor: 'marks-coo', note: action === 'reserve' ? `Reserved ${request.seat} for authorized broker submission` :
         action === 'bind' ? `Broker bound ${fields.workerId} to ${request.seat}` : `Broker state ${fields.state}` });
       current.activities.unshift({ id: randomUUID(), at: now, actor: 'marks-coo', kind: 'request', requestId: request.id, message: request.history.at(-1)!.note });
-    } else if (action === 'authorize' || action === 'report' || action === 'confirm') {
-      const fields = payload as { id: string; ownerId?: string; workerId: string; runId: string; reportId?: string; result?: string; evidence?: string; outcome?: 'completed'|'failed' };
+    } else if (action === 'authorize' || action === 'report' || action === 'confirm' || action === 'confirmDelegated') {
+      const fields = payload as { id: string; ownerId?: string; workerId: string; runId: string; reportId?: string; result?: string; evidence?: string; outcome?: 'completed'|'failed'; epoch?: number };
       const request = current.requests.find(row => row.id === fields.id);
       if (!request || !request.seat) throw new Error('Ticket has no assigned seat');
+      if (action === 'confirmDelegated' && (current.delegation.mode !== 'delegated' ||
+        current.delegation.delegate !== 'marks-coo' || !current.delegation.scopes.includes('ticket-review') ||
+        current.delegation.epoch !== fields.epoch)) throw new Error('Delegation revoked or changed; decision refused');
       if (action === 'authorize') {
         if (request.execution) throw new Error('Execution already admitted');
         if (request.status !== 'assigned') throw new Error('Ticket must be assigned before authorization');
@@ -144,12 +168,20 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
             exec.reportId !== fields.reportId || exec.workerId !== fields.workerId || exec.runId !== fields.runId ||
             request.cooConfirmation) throw new Error('COO confirmation requires a matching verified worker report');
         if (!fields.evidence?.trim()) throw new Error('COO review evidence required');
-        request.cooConfirmation = { actor: 'marks-coo', at: now, reportId: exec.reportId, workerId: exec.workerId, evidence: fields.evidence };
+        request.cooConfirmation = { actor: action === 'confirmDelegated' ? 'marks-coo' : 'ceo', at: now, reportId: exec.reportId, workerId: exec.workerId, evidence: fields.evidence };
         request.status = 'done';
+        if (action === 'confirm') current.delegationAudit.unshift({ id: randomUUID(), at: now,
+          epoch: current.delegation.epoch, action: 'decision-approved', actor: 'ceo', delegate: null,
+          scope: 'ticket-review', requestId: request.id, reason: 'explicit-ceo' });
+        if (action === 'confirmDelegated') current.delegationAudit.unshift({ id: randomUUID(), at: now,
+          epoch: current.delegation.epoch, action: 'decision-approved', actor: 'marks-coo', delegate: 'marks-coo',
+          scope: 'ticket-review', requestId: request.id, reason: 'authenticated-coo' });
       }
       request.updatedAt = now;
-      request.history.push({ at: now, actor: 'marks-coo', note: action === 'authorize' ? `Authorized ${request.seat} as ${fields.workerId}` : action === 'report' ? `Worker ${fields.workerId} reported ${fields.outcome}` : `COO confirmed report ${fields.reportId} for ${request.seat}`, ...(action === 'confirm' ? { from: 'review' as const, to: 'done' as const } : {}) });
-      current.activities.unshift({ id: randomUUID(), at: now, actor: 'marks-coo', kind: 'request', requestId: request.id, message: request.history.at(-1)!.note });
+      const confirmation = action === 'confirm' || action === 'confirmDelegated';
+      const decisionActor = action === 'confirm' ? 'ceo' : 'marks-coo';
+      request.history.push({ at: now, actor: decisionActor, note: action === 'authorize' ? `Authorized ${request.seat} as ${fields.workerId}` : action === 'report' ? `Worker ${fields.workerId} reported ${fields.outcome}` : `${decisionActor} confirmed report ${fields.reportId} for ${request.seat}`, ...(confirmation ? { from: 'review' as const, to: 'done' as const } : {}) });
+      current.activities.unshift({ id: randomUUID(), at: now, actor: decisionActor, kind: 'request', requestId: request.id, message: request.history.at(-1)!.note });
     } else {
       const { id, status, seat } = payload as { id: string; status?: CompanyRequest['status']; seat?: string | null };
       const request = current.requests.find(r => r.id === id);
@@ -171,6 +203,7 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
       current.activities.unshift({ id: randomUUID(), at: now, actor: 'ceo', kind: action, requestId: id, message: `${request.title}: ${note}` });
     }
     current.activities = current.activities.slice(0, 1000);
+    current.delegationAudit = current.delegationAudit.slice(0, 300);
     await save(current);
     return current;
   });

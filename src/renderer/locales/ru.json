@@ -4062,5 +4062,16 @@
   "disconnected": "disconnected",
   "unverified": "unverified",
   "RPG": "RPG",
-  "RPG company view": "RPG company view"
+  "RPG company view": "RPG company view",
+  "Operational approvals": "Operational approvals",
+  "Manual approval is active by default.": "Manual approval is active by default.",
+  "COO ticket-review delegation enabled; authenticated identity is still required.": "COO ticket-review delegation enabled; authenticated identity is still required.",
+  "Only ticket reviews can be delegated. System and service permissions always apply.": "Only ticket reviews can be delegated. System and service permissions always apply.",
+  "Enable COO delegation": "Enable COO delegation",
+  "Revoke COO delegation": "Revoke COO delegation",
+  "Delegation audit": "Delegation audit",
+  "Meeting type": "Meeting type",
+  "Emergency meeting": "Emergency meeting",
+  "Daily alignment": "Daily alignment",
+  "Weekly alignment": "Weekly alignment"
 }

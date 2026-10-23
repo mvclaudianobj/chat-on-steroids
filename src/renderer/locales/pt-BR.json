@@ -4014,5 +4014,16 @@
   "disconnected": "Desconectado",
   "unverified": "Não verificado",
   "RPG": "RPG",
-  "RPG company view": "RPG company view"
+  "RPG company view": "RPG company view",
+  "Operational approvals": "Aprovações operacionais",
+  "Manual approval is active by default.": "A aprovação manual está ativa por padrão.",
+  "COO ticket-review delegation enabled; authenticated identity is still required.": "Delegação de revisão de tarefas ao COO ativada; ainda é necessária identidade autenticada.",
+  "Only ticket reviews can be delegated. System and service permissions always apply.": "Somente revisões de tarefas podem ser delegadas. As permissões do sistema e serviços continuam obrigatórias.",
+  "Enable COO delegation": "Ativar delegação ao COO",
+  "Revoke COO delegation": "Revogar delegação ao COO",
+  "Delegation audit": "Auditoria de delegação",
+  "Meeting type": "Tipo de reunião",
+  "Emergency meeting": "Reunião de emergência",
+  "Daily alignment": "Alinhamento diário",
+  "Weekly alignment": "Alinhamento semanal"
 }

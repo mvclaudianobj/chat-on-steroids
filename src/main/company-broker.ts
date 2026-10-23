@@ -70,6 +70,28 @@ function ensureLive(snapshot: CompanySnapshot): void {
 /** Explicit human action reserves a durable one-shot command BEFORE spawning. If an
  * ambiguous spawn fails, no second spawn is issued: reconcile the broker by exact label. */
 export function createCompanyBroker(backend: CompanyWorkerBackend = localCompanyWorkerBackend) {
+  /** No verified COO actor is currently surfaced by the worker broker. A future authenticated
+   * adapter must inject a proven principal, never a renderer-provided role or boolean. */
+  async function reviewDelegated(id: string, evidence: string, identity: { role: 'marks-coo'; authenticated: boolean } | null = null): Promise<CompanySnapshot> {
+    const initial = await getCompany();
+    const epoch = initial.delegation.epoch;
+    if (initial.delegation.mode !== 'delegated' || !initial.delegation.scopes.includes('ticket-review')) {
+      await mutateCompany('delegationDeny',{id,reason:'policy-mismatch'});
+      throw new Error('Ticket review delegation is not active');
+    }
+    if (!identity?.authenticated || identity.role !== 'marks-coo') {
+      await mutateCompany('delegationDeny',{id,reason:'invalid-identity'});
+      throw new Error('Authenticated COO identity is unavailable; delegated decision refused');
+    }
+    const request=ticket(initial,id), binding=request.execution;
+    if (!binding?.ownerId || !binding.runId || !binding.workerId || !binding.reportId || !binding.result ||
+      request.status !== 'review' || binding.phase !== 'reported') throw new Error('Verified report required');
+    const status = await backend.status(binding.ownerId,binding.runId);
+    if (status.workers.filter(w=>w.id===binding.workerId && w.runId===binding.runId &&
+      w.label===labelFor(request) && ['sleeping','finished'].includes(w.state) && w.result===binding.result).length!==1)
+      throw new Error('Worker identity or report mismatch');
+    return mutateCompany('confirmDelegated',{id,workerId:binding.workerId,runId:binding.runId,reportId:binding.reportId,evidence,epoch});
+  }
   async function dispatch(id: string): Promise<CompanySnapshot> {
     let current = await getCompany(); ensureLive(current);
     const request = ticket(current, id);
@@ -201,5 +223,5 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
     return current;
   }
 
-  return { dispatch, refresh, review, sendInvitations, reconcileMeeting };
+  return { dispatch, refresh, review, reviewDelegated, sendInvitations, reconcileMeeting };
 }
