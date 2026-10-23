@@ -57,7 +57,8 @@ export function parseJarvisPreferences(value: unknown): Preferences {
 type ProviderCapability = { checked: boolean; primary: boolean; fallback: boolean; ffmpeg: boolean; stt: string[]; tts: string[]; error: string | null };
 type Playable = { kind: 'audio'; url: string } | { kind: 'system'; text: string } | { kind: 'stream'; player: JarvisProgressiveAudio };
 
-export function initJarvis(api: AppApi, selected: () => { id: string; conversationId: string | null; engine?: string } | null): void {
+export interface JarvisChatActions { createCliProxyChat(): Promise<string | null>; selectChat(id: string): Promise<void> | void }
+export function initJarvis(api: AppApi, selected: () => { id: string; conversationId: string | null; engine?: string } | null, actions?: JarvisChatActions): void {
   const find = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
   const maybe = <T extends HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
   const button = find<HTMLButtonElement>('jarvisTalk');
@@ -81,6 +82,10 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   const providerVoice = maybe<HTMLInputElement>('jarvisProviderVoice');
   const providerStatus = maybe<HTMLElement>('jarvisProviderStatus');
   const stateLabel = maybe<HTMLElement>('jarvisStatus');
+  const createChat = maybe<HTMLButtonElement>('jarvisCreateCliProxyChat');
+  const returnChat = maybe<HTMLButtonElement>('jarvisReturnChat');
+  let creating = false;
+  let previousChat: string | null = null;
   let preferences = defaults;
   try { preferences = parseJarvisPreferences(JSON.parse(localStorage.getItem(KEY) ?? '{}')); } catch { /* default */ }
   enable.checked = preferences.enabled;
@@ -276,6 +281,15 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   function paint(): void {
     button.hidden = !preferences.enabled;
     button.disabled = !mode() || !consented || !eligible() || stopping;
+    if (createChat) {
+      createChat.hidden = !preferences.enabled || !!eligible() || !actions;
+      createChat.disabled = creating;
+      createChat.textContent = t(creating ? 'Creating CLIProxy chat…' : 'Open Jarvis in a CLIProxy chat');
+    }
+    if (returnChat) {
+      returnChat.hidden = !preferences.enabled || !previousChat || !eligible() || !actions;
+      returnChat.textContent = t('Return to previous chat');
+    }
     const reason = !preferences.enabled ? '' : !eligible()
       ? t('Jarvis works in a CLIProxy API chat. The g4f.space preset configures speech services, not a chat. Open or create a CLIProxy chat.')
       : !consented ? t('Enable microphone and audio transmission consent in Jarvis settings for this session.')
@@ -297,6 +311,23 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     else if (!eligible()) status.textContent = t('Select a CLIProxy chat to use Jarvis.');
     else if (!running && !status.textContent) status.textContent = t('Jarvis is ready.');
   }
+  createChat?.addEventListener('click', () => {
+    if (!actions || creating || !preferences.enabled || eligible()) return;
+    const origin = selected()?.id ?? null;
+    creating = true; paint();
+    void actions.createCliProxyChat().then(id => {
+      if (!id) { status.textContent = t('Could not create a CLIProxy chat. Check CLIProxy settings.'); return; }
+      if (origin && origin !== id) previousChat = origin;
+      status.textContent = t('CLIProxy chat selected. Give microphone consent, then hold the Jarvis key to speak.');
+    }).catch(() => { status.textContent = t('Could not create a CLIProxy chat. Check CLIProxy settings.'); })
+      .finally(() => { creating = false; paint(); });
+  });
+  returnChat?.addEventListener('click', () => {
+    if (!actions || !previousChat || !eligible() || running) return;
+    const target = previousChat;
+    void Promise.resolve(actions.selectChat(target)).then(() => { previousChat = null; paint(); })
+      .catch(() => { status.textContent = t('Could not return to the previous chat.'); });
+  });
   function stop(): void {
     if (!running || stopping) return;
     stopping = true;

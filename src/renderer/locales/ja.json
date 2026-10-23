@@ -4002,5 +4002,11 @@
   "Jarvis works in a CLIProxy API chat. The g4f.space preset configures speech services, not a chat. Open or create a CLIProxy chat.": "Jarvis は CLIProxy API チャットで動作します。g4f.space プリセットは音声サービスの設定で、チャットは作成しません。CLIProxy チャットを開くか作成してください。",
   "Enable microphone and audio transmission consent in Jarvis settings for this session.": "このセッションでは Jarvis の設定でマイクと音声送信への同意が必要です。",
   "This app cannot access microphone recording. Check system permissions and restart the app.": "このアプリではマイク録音を利用できません。システムの権限を確認して再起動してください。",
-  "No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.": "文字起こしエンジンを利用できません。プロバイダー URL、保存済みキーと STT モデル、または CLIProxy のモデルを確認してください。"
+  "No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.": "文字起こしエンジンを利用できません。プロバイダー URL、保存済みキーと STT モデル、または CLIProxy のモデルを確認してください。",
+  "Open Jarvis in a CLIProxy chat": "Open Jarvis in a CLIProxy chat",
+  "Creating CLIProxy chat…": "Creating CLIProxy chat…",
+  "Return to previous chat": "Return to previous chat",
+  "Could not create a CLIProxy chat. Check CLIProxy settings.": "Could not create a CLIProxy chat. Check CLIProxy settings.",
+  "CLIProxy chat selected. Give microphone consent, then hold the Jarvis key to speak.": "CLIProxy chat selected. Give microphone consent, then hold the Jarvis key to speak.",
+  "Could not return to the previous chat.": "Could not return to the previous chat."
 }

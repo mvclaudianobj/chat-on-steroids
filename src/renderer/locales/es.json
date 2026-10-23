@@ -4098,5 +4098,11 @@
   "Jarvis works in a CLIProxy API chat. The g4f.space preset configures speech services, not a chat. Open or create a CLIProxy chat.": "Jarvis funciona en un chat API de CLIProxy. El ajuste g4f.space configura la voz, no crea un chat. Abre o crea un chat CLIProxy.",
   "Enable microphone and audio transmission consent in Jarvis settings for this session.": "Autoriza el micrófono y la transmisión de audio en los ajustes de Jarvis para esta sesión.",
   "This app cannot access microphone recording. Check system permissions and restart the app.": "La aplicación no puede grabar desde el micrófono. Comprueba los permisos del sistema y reinicia la aplicación.",
-  "No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.": "No hay motor de transcripción listo. Revisa la URL, la clave y el modelo STT del proveedor o elige un modelo CLIProxy."
+  "No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.": "No hay motor de transcripción listo. Revisa la URL, la clave y el modelo STT del proveedor o elige un modelo CLIProxy.",
+  "Open Jarvis in a CLIProxy chat": "Open Jarvis in a CLIProxy chat",
+  "Creating CLIProxy chat…": "Creating CLIProxy chat…",
+  "Return to previous chat": "Return to previous chat",
+  "Could not create a CLIProxy chat. Check CLIProxy settings.": "Could not create a CLIProxy chat. Check CLIProxy settings.",
+  "CLIProxy chat selected. Give microphone consent, then hold the Jarvis key to speak.": "CLIProxy chat selected. Give microphone consent, then hold the Jarvis key to speak.",
+  "Could not return to the previous chat.": "Could not return to the previous chat."
 }
