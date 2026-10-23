@@ -3916,5 +3916,12 @@
   "Prévia do prompt": "İstem önizlemesi",
   "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "Kaydedilen ayarlara göre ChatGPT için kullanılan tam metni gösterir.",
   "Ver prompt": "İstemi göster",
-  "Prompt do Chat Marks desativado.": "Chat Marks istemi devre dışı."
+  "Prompt do Chat Marks desativado.": "Chat Marks istemi devre dışı.",
+  "WhatsApp cannot access local session storage. Check folder permissions and free disk space.": "WhatsApp cannot access local session storage. Check folder permissions and free disk space.",
+  "WhatsApp session data cannot be read. Check local permissions; do not delete your session files.": "WhatsApp session data cannot be read. Check local permissions; do not delete your session files.",
+  "WhatsApp Web could not initialize. Check the installed application package.": "WhatsApp Web could not initialize. Check the installed application package.",
+  "WhatsApp could not connect. Check the network and try again.": "WhatsApp could not connect. Check the network and try again.",
+  "WhatsApp did not provide a QR code in time. Try connecting again.": "WhatsApp did not provide a QR code in time. Try connecting again.",
+  "WhatsApp QR image could not be generated. Try again.": "WhatsApp QR image could not be generated. Try again.",
+  "WhatsApp Web could not start. Check the connection and local session storage.": "WhatsApp Web could not start. Check the connection and local session storage."
 }

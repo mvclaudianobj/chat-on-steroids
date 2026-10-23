@@ -21,6 +21,13 @@ export interface NotificationCenterView {
   credentials: Record<NotificationChannel, boolean>;
 }
 
+/** The only details about WhatsApp setup that may cross IPC. Never include OS/provider messages. */
+export const WHATSAPP_SETUP_ISSUES = [
+  'storage_unavailable', 'session_invalid', 'runtime_unavailable',
+  'connection_failed', 'qr_timeout', 'qr_render_failed', 'unknown'
+] as const;
+export type WhatsAppSetupIssue = typeof WHATSAPP_SETUP_ISSUES[number];
+
 /**
  * Non-secret, machine-readable reasons a channel test or send failed. The main process classifies
  * transport errors into these codes; the renderer translates each one. Never add provider text,

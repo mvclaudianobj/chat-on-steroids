@@ -3868,5 +3868,12 @@
   "Prévia do prompt": "提示词预览",
   "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "显示按照已保存设置提供给 ChatGPT 的准确文本。",
   "Ver prompt": "查看提示词",
-  "Prompt do Chat Marks desativado.": "Chat Marks 提示词已关闭。"
+  "Prompt do Chat Marks desativado.": "Chat Marks 提示词已关闭。",
+  "WhatsApp cannot access local session storage. Check folder permissions and free disk space.": "WhatsApp cannot access local session storage. Check folder permissions and free disk space.",
+  "WhatsApp session data cannot be read. Check local permissions; do not delete your session files.": "WhatsApp session data cannot be read. Check local permissions; do not delete your session files.",
+  "WhatsApp Web could not initialize. Check the installed application package.": "WhatsApp Web could not initialize. Check the installed application package.",
+  "WhatsApp could not connect. Check the network and try again.": "WhatsApp could not connect. Check the network and try again.",
+  "WhatsApp did not provide a QR code in time. Try connecting again.": "WhatsApp did not provide a QR code in time. Try connecting again.",
+  "WhatsApp QR image could not be generated. Try again.": "WhatsApp QR image could not be generated. Try again.",
+  "WhatsApp Web could not start. Check the connection and local session storage.": "WhatsApp Web could not start. Check the connection and local session storage."
 }

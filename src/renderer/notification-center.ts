@@ -1,5 +1,5 @@
 import { NOTIFICATION_CHANNELS, NOTIFICATION_EVENTS } from '../shared/notification-center.js';
-import type { NotificationChannel, NotificationCenterSettings, NotificationCenterView, NotificationEvent, NotificationFailure } from '../shared/notification-center.js';
+import type { NotificationChannel, NotificationCenterSettings, NotificationCenterView, NotificationEvent, NotificationFailure, WhatsAppSetupIssue } from '../shared/notification-center.js';
 import type { AppApi } from '../preload/index.js';
 import { el } from './dom.js';
 import { t, ui } from './i18n.js';
@@ -47,6 +47,19 @@ const EVENT_LABELS: Record<NotificationEvent, string> = {
 };
 
 type Reply<T> = { ok: true; data: T } | { ok: false; error: string; failure?: NotificationFailure };
+
+/** UI-owned wording only: setup details from the main process are restricted to these codes. */
+export function whatsappSetupMessage(issue?: WhatsAppSetupIssue): string {
+  switch (issue) {
+    case 'storage_unavailable': return t('WhatsApp cannot access local session storage. Check folder permissions and free disk space.');
+    case 'session_invalid': return t('WhatsApp session data cannot be read. Check local permissions; do not delete your session files.');
+    case 'runtime_unavailable': return t('WhatsApp Web could not initialize. Check the installed application package.');
+    case 'connection_failed': return t('WhatsApp could not connect. Check the network and try again.');
+    case 'qr_timeout': return t('WhatsApp did not provide a QR code in time. Try connecting again.');
+    case 'qr_render_failed': return t('WhatsApp QR image could not be generated. Try again.');
+    default: return t('WhatsApp Web could not start. Check the connection and local session storage.');
+  }
+}
 
 /** What went wrong and what to do, from the main process's non-secret failure code. */
 export function notificationFailureMessage(failure: NotificationFailure): string {
@@ -423,25 +436,39 @@ export function installNotificationCenter(api: Service): void {
               stopPoll(); setQr(); info.textContent = t('QR code expired. Generate another.');
             }
           } else {
-            const response = await api.notificationWhatsAppStatus();
-            if (!response.ok) { info.textContent = t('Could not check pairing. Try again.'); return; }
+            let response: Awaited<ReturnType<typeof api.notificationWhatsAppStatus>>;
+            try { response = await api.notificationWhatsAppStatus(); }
+            catch { info.textContent = whatsappSetupMessage(); return; }
+            if (!response.ok) { info.textContent = whatsappSetupMessage(response.setupCode); return; }
             const result = response.data;
             setQr(result.state === 'qr' ? result.qr : undefined);
-            info.textContent = t(result.state === 'connected' ? 'WhatsApp connected.' : result.state === 'disconnected' ? 'WhatsApp disconnected.' : result.state === 'error' ? 'WhatsApp connection failed.' : 'Waiting for WhatsApp pairing…');
+            info.textContent = result.state === 'error'
+              ? whatsappSetupMessage(result.reason)
+              : t(result.state === 'connected' ? 'WhatsApp connected.' : result.state === 'disconnected' ? 'WhatsApp disconnected.' : result.state === 'qr' ? 'Open WhatsApp > Linked devices > Link a device, then scan the QR code.' : 'Waiting for WhatsApp pairing…');
             if (result.state === 'connected' || result.state === 'disconnected') stopPoll();
           }
         };
         startPair.addEventListener('click', async () => {
           if (busy) return;
           info.textContent = t('Preparing QR code…');
-          const response = channel === 'telegram' ? await api.notificationTelegramPairStart() : await api.notificationWhatsAppStart();
-          if (!response.ok) { info.textContent = t('Could not prepare QR code. Check the connection and saved bot token.'); return; }
+          let response: Awaited<ReturnType<typeof api.notificationTelegramPairStart | typeof api.notificationWhatsAppStart>>;
+          try { response = channel === 'telegram' ? await api.notificationTelegramPairStart() : await api.notificationWhatsAppStart(); }
+          catch { info.textContent = channel === 'telegram' ? t('Could not prepare QR code. Check the connection and saved bot token.') : whatsappSetupMessage(); return; }
+          if (!response.ok) {
+            info.textContent = channel === 'telegram'
+              ? t('Could not prepare QR code. Check the connection and saved bot token.')
+              : whatsappSetupMessage('setupCode' in response ? response.setupCode : undefined);
+            return;
+          }
           if (channel === 'telegram') {
             setQr(response.data.qr);
             info.textContent = t('On your phone, scan the QR code and tap Start in Telegram.');
-          } else {
-            setQr(response.data.qr);
-            info.textContent = t('Open WhatsApp > Linked devices > Link a device, then scan the QR code.');
+          } else if ('state' in response.data) {
+            const result = response.data;
+            setQr(result.state === 'qr' ? result.qr : undefined);
+            info.textContent = result.state === 'error'
+              ? whatsappSetupMessage(result.reason)
+              : t(result.state === 'qr' ? 'Open WhatsApp > Linked devices > Link a device, then scan the QR code.' : result.state === 'connected' ? 'WhatsApp connected.' : 'Waiting for WhatsApp pairing…');
           }
           stopPoll(); poll = setInterval(() => { void refresh(); }, 2500);
         });

@@ -3,33 +3,78 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
-  directory: '', sockets: [] as Array<{ ev: import('node:events').EventEmitter; ws: { close: ReturnType<typeof vi.fn> }; sendMessage: ReturnType<typeof vi.fn>; logout: ReturnType<typeof vi.fn> }>
+  directory: '', startError: null as Error | null, authError: null as Error | null,
+  sockets: [] as Array<{ ev: import('node:events').EventEmitter; ws: { close: ReturnType<typeof vi.fn> }; sendMessage: ReturnType<typeof vi.fn>; logout: ReturnType<typeof vi.fn> }>
 }));
 vi.mock('electron', () => ({ app: { getPath: () => mocks.directory } }));
 vi.mock('@whiskeysockets/baileys', async () => {
   const { EventEmitter } = await import('node:events');
   return {
     default: vi.fn(() => {
+      if (mocks.startError) throw mocks.startError;
       const sock = { ev: new EventEmitter(), ws: { close: vi.fn() }, sendMessage: vi.fn(async () => undefined), logout: vi.fn(async () => undefined) };
       mocks.sockets.push(sock);
       return sock;
     }),
     DisconnectReason: { loggedOut: 401 },
-    useMultiFileAuthState: vi.fn(async (dir: string) => ({
+    useMultiFileAuthState: vi.fn(async (dir: string) => {
+      if (mocks.authError) throw mocks.authError;
+      return {
       state: { creds: {} }, saveCreds: vi.fn(async () => fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify({ synthetic: true })))
-    }))
+      };
+    })
   };
 });
 let web: typeof import('../src/main/notification-whatsapp-web.js');
 beforeEach(async () => {
   mocks.directory = await fs.mkdtemp(path.join(tmpdir(), 'marks-whatsapp-fake-'));
   mocks.sockets = [];
+  mocks.startError = null;
+  mocks.authError = null;
   vi.resetModules();
   web = await import('../src/main/notification-whatsapp-web.js');
 });
 afterEach(async () => {
   await web.stopWhatsAppWeb();
   await fs.rm(mocks.directory, { recursive: true, force: true });
+  vi.restoreAllMocks();
+});
+it('returns a fixed storage code when the synthetic directory cannot be created', async () => {
+  vi.spyOn(fs, 'mkdir').mockRejectedValueOnce(Object.assign(new Error('PRIVATE PATH'), { code: 'EACCES' }));
+  await expect(web.startWhatsAppWeb()).rejects.toMatchObject({ issue: 'storage_unavailable' });
+  expect(await web.getWhatsAppWebStatus()).toEqual({ state: 'error', reason: 'storage_unavailable' });
+  expect(mocks.sockets).toHaveLength(0);
+});
+it('does not delete or reveal a malformed local session', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'creds.json'), '{private-synthetic-invalid');
+  mocks.authError = new SyntaxError('Private session contents must not leave the main process');
+  await expect(web.startWhatsAppWeb()).rejects.toMatchObject({ issue: 'session_invalid' });
+  expect((await fs.readFile(path.join(dir, 'creds.json'), 'utf8'))).toBe('{private-synthetic-invalid');
+  expect(JSON.stringify(await web.getWhatsAppWebStatus())).not.toContain('private-synthetic-invalid');
+});
+it('classifies Baileys initialization errors without echoing private exception messages', async () => {
+  mocks.startError = new Error('PRIVATE SYNTHETIC INTERNAL TOKEN');
+  await expect(web.startWhatsAppWeb()).rejects.toMatchObject({ issue: 'runtime_unavailable' });
+  expect(await web.getWhatsAppWebStatus()).toEqual({ state: 'error', reason: 'runtime_unavailable' });
+  expect(JSON.stringify(await web.getWhatsAppWebStatus())).not.toContain('TOKEN');
+  mocks.startError = null;
+  expect(await web.startWhatsAppWeb()).toEqual({ state: 'connecting' });
+});
+it('reports a pre-QR disconnection without exposing the transport exception', async () => {
+  await web.startWhatsAppWeb();
+  const socket = mocks.sockets.at(-1)!;
+  socket.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: new Error('PRIVATE SOCKET DETAIL') } });
+  expect(await web.getWhatsAppWebStatus()).toEqual({ state: 'error', reason: 'connection_failed' });
+});
+it('retains the local session on remote logged-out events', async () => {
+  await web.startWhatsAppWeb();
+  const file = path.join(mocks.directory, 'notifications', 'whatsapp-web', 'creds.json');
+  await fs.writeFile(file, '{"registered":true,"synthetic":true}');
+  mocks.sockets.at(-1)!.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: { output: { statusCode: 401 } } } });
+  expect(await web.getWhatsAppWebStatus()).toEqual({ state: 'error', reason: 'session_invalid' });
+  expect(await fs.readFile(file, 'utf8')).toContain('synthetic');
 });
 it('connects, emits pairing QR without real network and sends to a validated JID', async () => {
   expect(await web.startWhatsAppWeb()).toEqual({ state: 'connecting' });

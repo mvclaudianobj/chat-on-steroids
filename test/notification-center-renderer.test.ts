@@ -89,3 +89,29 @@ it('offers to pin the presented certificate after an explicit confirmation and c
   await vi.waitFor(() => expect(saves.at(-1)?.channels.smtp.config).not.toHaveProperty('tlsFingerprint'));
   await vi.waitFor(() => expect($('notificationRemoveTrust')).toBeNull());
 });
+
+it('shows WhatsApp setup failures without suggesting a Telegram bot token', async () => {
+  const { setLanguage } = await import('../src/renderer/i18n.js');
+  setLanguage('pt-BR');
+  const { installNotificationCenter } = await import('../src/renderer/notification-center.js');
+  const credentials = Object.fromEntries(NOTIFICATION_CHANNELS.map(c => [c, false])) as never;
+  const api = {
+    notificationCenterGet: async () => ({ ok: true as const, data: { settings: settings(), credentials } }),
+    notificationWhatsAppStart: vi.fn(async () => ({ ok: false as const, error: 'Internal synthetic sensitive path', setupCode: 'storage_unavailable' })),
+    notificationWhatsAppStatus: vi.fn(), notificationWhatsAppDisconnect: vi.fn(),
+    notificationTelegramPairStart: vi.fn(async () => ({ ok: false as const, error: 'synthetic failure' })),
+    notificationTelegramPairCheck: vi.fn(), notificationTelegramPairCancel: vi.fn(),
+    notificationCenterSave: vi.fn(), notificationCenterTest: vi.fn(), notificationCenterSetCredential: vi.fn(),
+    notificationCenterExport: vi.fn(), notificationCenterImport: vi.fn(), vault: vi.fn()
+  };
+  installNotificationCenter(api as never);
+  await vi.waitFor(() => expect(document.getElementById('notificationPair-whatsapp-web')).not.toBeNull());
+  document.getElementById('notificationPair-whatsapp-web')!.click();
+  const whatsapp = document.getElementById('notificationTitle-whatsapp-web')!.closest('section')!;
+  await vi.waitFor(() => expect(whatsapp.textContent).toContain('permissões da pasta'));
+  expect(whatsapp.textContent).not.toContain('token salvo do bot');
+  expect(whatsapp.textContent).not.toContain('sensitive');
+  document.getElementById('notificationPair-telegram')!.click();
+  const telegram = document.getElementById('notificationTitle-telegram')!.closest('section')!;
+  await vi.waitFor(() => expect(telegram.textContent).toContain('token salvo do bot'));
+});

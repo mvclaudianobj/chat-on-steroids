@@ -3964,5 +3964,12 @@
   "Prévia do prompt": "Pré-visualização do prompt",
   "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "Mostra o texto exato para o ChatGPT com as definições guardadas.",
   "Ver prompt": "Ver prompt",
-  "Prompt do Chat Marks desativado.": "Prompt do Chat Marks desativado."
+  "Prompt do Chat Marks desativado.": "Prompt do Chat Marks desativado.",
+  "WhatsApp cannot access local session storage. Check folder permissions and free disk space.": "O WhatsApp não consegue aceder ao armazenamento local da sessão. Verifique as permissões da pasta e o espaço no disco.",
+  "WhatsApp session data cannot be read. Check local permissions; do not delete your session files.": "Os dados da sessão do WhatsApp não podem ser lidos. Verifique as permissões locais; não elimine os ficheiros da sessão.",
+  "WhatsApp Web could not initialize. Check the installed application package.": "O WhatsApp Web não conseguiu iniciar. Verifique o pacote da aplicação instalada.",
+  "WhatsApp could not connect. Check the network and try again.": "O WhatsApp não conseguiu ligar-se. Verifique a rede e tente novamente.",
+  "WhatsApp did not provide a QR code in time. Try connecting again.": "O WhatsApp não apresentou um código QR a tempo. Tente ligar novamente.",
+  "WhatsApp QR image could not be generated. Try again.": "Não foi possível gerar a imagem do código QR do WhatsApp. Tente novamente.",
+  "WhatsApp Web could not start. Check the connection and local session storage.": "O WhatsApp Web não iniciou. Verifique a ligação e o armazenamento local da sessão."
 }

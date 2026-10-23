@@ -3868,5 +3868,12 @@
   "Prévia do prompt": "프롬프트 미리 보기",
   "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "저장한 설정에 따른 ChatGPT용 실제 문구를 표시합니다.",
   "Ver prompt": "프롬프트 보기",
-  "Prompt do Chat Marks desativado.": "Chat Marks 프롬프트가 비활성화되었습니다."
+  "Prompt do Chat Marks desativado.": "Chat Marks 프롬프트가 비활성화되었습니다.",
+  "WhatsApp cannot access local session storage. Check folder permissions and free disk space.": "WhatsApp cannot access local session storage. Check folder permissions and free disk space.",
+  "WhatsApp session data cannot be read. Check local permissions; do not delete your session files.": "WhatsApp session data cannot be read. Check local permissions; do not delete your session files.",
+  "WhatsApp Web could not initialize. Check the installed application package.": "WhatsApp Web could not initialize. Check the installed application package.",
+  "WhatsApp could not connect. Check the network and try again.": "WhatsApp could not connect. Check the network and try again.",
+  "WhatsApp did not provide a QR code in time. Try connecting again.": "WhatsApp did not provide a QR code in time. Try connecting again.",
+  "WhatsApp QR image could not be generated. Try again.": "WhatsApp QR image could not be generated. Try again.",
+  "WhatsApp Web could not start. Check the connection and local session storage.": "WhatsApp Web could not start. Check the connection and local session storage."
 }

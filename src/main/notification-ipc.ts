@@ -1,4 +1,4 @@
-import { startWhatsAppWeb, disconnectWhatsAppWeb, getWhatsAppWebStatus } from './notification-whatsapp-web.js';
+import { startWhatsAppWeb, disconnectWhatsAppWeb, getWhatsAppWebStatus, WhatsAppPairingError } from './notification-whatsapp-web.js';
 import { startTelegramPairing, checkTelegramPairing, cancelTelegramPairing } from './notification-telegram-pair.js';
 import QRCode from 'qrcode';
 import { dialog, ipcMain, type BrowserWindow } from 'electron';
@@ -86,8 +86,18 @@ export function registerNotificationCenterIpc(getWindow: () => BrowserWindow | n
       let data: unknown;
       switch (parsed.action) {
         case 'get': data = await notificationView(); break;
-        case 'wa-start': { const status = await startWhatsAppWeb(); data = { ...status, qr: status.qr ? await QRCode.toDataURL(status.qr) : undefined }; break; }
-        case 'wa-status': { const status = await getWhatsAppWebStatus(); data = { ...status, qr: status.qr ? await QRCode.toDataURL(status.qr) : undefined }; break; }
+        case 'wa-start': {
+          const status = await startWhatsAppWeb();
+          try { data = { ...status, qr: status.qr ? await QRCode.toDataURL(status.qr) : undefined }; }
+          catch { throw new WhatsAppPairingError('qr_render_failed'); }
+          break;
+        }
+        case 'wa-status': {
+          const status = await getWhatsAppWebStatus();
+          try { data = { ...status, qr: status.qr ? await QRCode.toDataURL(status.qr) : undefined }; }
+          catch { throw new WhatsAppPairingError('qr_render_failed'); }
+          break;
+        }
         case 'wa-disconnect': data = await disconnectWhatsAppWeb(); break;
         case 'tg-start': { const result = await startTelegramPairing(); data = { ...result, qr: await QRCode.toDataURL(result.url) }; break; }
         case 'tg-check': data = await checkTelegramPairing(); break;
@@ -106,6 +116,10 @@ export function registerNotificationCenterIpc(getWindow: () => BrowserWindow | n
       if (error instanceof z.ZodError) {
         logWarn('Notification IPC: request refused (invalid schema)');
         return { ok: false, error: 'Invalid notification settings' };
+      }
+      if (error instanceof WhatsAppPairingError) {
+        logWarn(`Notification WhatsApp setup: ${error.issue}`);
+        return { ok: false, error: 'WhatsApp setup failed', setupCode: error.issue };
       }
       const failure = error instanceof NotificationDeliveryError ? error.failure : null;
       logWarn(`Notification IPC: request refused (${failure ? describeFailure(failure) : 'permission, credential or setting failure'}); secrets and provider text omitted`);
