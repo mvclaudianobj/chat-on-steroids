@@ -3878,5 +3878,13 @@
   "No secret with that name.": "Bu adla bir gizli bilgi yok.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "Sistem anahtarlığı kullanılamıyor, bu nedenle kasa bu bilgisayarda kullanılamaz.",
   "Check this field: {0}.": "Bu alanı kontrol edin: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Kasa oluşturuldu. Ana parola yalnızca yönetim için tekrar istenir: gizli bilgi eklemek, göstermek, dışa veya içe aktarmak."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Kasa oluşturuldu. Ana parola yalnızca yönetim için tekrar istenir: gizli bilgi eklemek, göstermek, dışa veya içe aktarmak.",
+  "Prompt do Chat Marks": "Chat Marks sistem istemi",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "Sohbet başlarken veya sürdürülürken kısa yönergeler ekler.",
+  "Como quer ser chamado": "Size nasıl hitap edilsin?",
+  "Deixe vazio para tratamento neutro.": "Tarafsız hitap için boş bırakın.",
+  "Prévia do prompt": "İstem önizlemesi",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "Kaydedilen ayarlara göre ChatGPT için kullanılan tam metni gösterir.",
+  "Ver prompt": "İstemi göster",
+  "Prompt do Chat Marks desativado.": "Chat Marks istemi devre dışı."
 }

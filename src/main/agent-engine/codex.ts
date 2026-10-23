@@ -36,6 +36,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
 import { logInfo, logWarn } from '../logger.js';
+import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
 import { redactCredentialText } from '../redaction.js';
 import { codexBrainMcpLaunch, noteBrainEngineToolCall } from '../brain/engine-mcp.js';
 import { notifyChanged } from '../session/recorder.js';
@@ -737,7 +738,10 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
       await projector.start(text);
       started = true;
       if (placeholder.stopping) { await finish(placeholder, 'stopped'); return { turnId: appTurnId }; }
-      const params = codexTurnStartParams({ threadId, text, model, effort: codexEffort(record.effort, row), cwd, approval: record.approval ?? 'ask' });
+      // Codex app-server has no tested per-thread Chat Marks instruction field in this adapter.
+      // Include the identity once in the first turn; the displayed question stays user-authored.
+      const marks = (await readEvents(session.id, { kinds: ['turn_start'] })).length <= 1 ? currentMarksSystemPrompt('codex') : '';
+      const params = codexTurnStartParams({ threadId, text: marks ? `${marks}\n\n${text}` : text, model, effort: codexEffort(record.effort, row), cwd, approval: record.approval ?? 'ask' });
       void connection.peer.request<{ turn?: { id?: unknown } }>('turn/start', params, { timeoutMs: 60_000 }).then(response => {
         const id = response?.turn?.id;
         if (!placeholder.codexTurnId && typeof id === 'string') {

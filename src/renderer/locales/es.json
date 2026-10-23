@@ -3926,5 +3926,13 @@
   "No secret with that name.": "No hay ningún secreto con ese nombre.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "El llavero del sistema no está disponible, así que el almacén no se puede usar en este equipo.",
   "Check this field: {0}.": "Revisa este campo: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Almacén creado. La contraseña maestra solo se vuelve a pedir para administrar: añadir, mostrar, exportar o importar secretos."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Almacén creado. La contraseña maestra solo se vuelve a pedir para administrar: añadir, mostrar, exportar o importar secretos.",
+  "Prompt do Chat Marks": "Prompt de Chat Marks",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "Identidad e instrucciones breves al iniciar o reanudar un chat.",
+  "Como quer ser chamado": "Cómo quiere que le llamemos",
+  "Deixe vazio para tratamento neutro.": "Déjelo vacío para un trato neutral.",
+  "Prévia do prompt": "Vista previa del prompt",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "Muestra el texto exacto para ChatGPT según la configuración guardada.",
+  "Ver prompt": "Ver prompt",
+  "Prompt do Chat Marks desativado.": "Prompt de Chat Marks desactivado."
 }

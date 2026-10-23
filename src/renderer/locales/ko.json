@@ -3830,5 +3830,13 @@
   "No secret with that name.": "그 이름의 비밀이 없습니다.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "시스템 키링을 사용할 수 없어 이 컴퓨터에서는 보관함을 쓸 수 없습니다.",
   "Check this field: {0}.": "이 항목을 확인하세요: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "보관함을 만들었습니다. 마스터 비밀번호는 관리 작업(비밀 추가, 보기, 내보내기, 가져오기)에서만 다시 묻습니다."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "보관함을 만들었습니다. 마스터 비밀번호는 관리 작업(비밀 추가, 보기, 내보내기, 가져오기)에서만 다시 묻습니다.",
+  "Prompt do Chat Marks": "Chat Marks 시스템 프롬프트",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "채팅을 시작하거나 다시 시작할 때 짧은 지침을 추가합니다.",
+  "Como quer ser chamado": "어떻게 불러 드릴까요?",
+  "Deixe vazio para tratamento neutro.": "비워 두면 중립적인 호칭을 사용합니다.",
+  "Prévia do prompt": "프롬프트 미리 보기",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "저장한 설정에 따른 ChatGPT용 실제 문구를 표시합니다.",
+  "Ver prompt": "프롬프트 보기",
+  "Prompt do Chat Marks desativado.": "Chat Marks 프롬프트가 비활성화되었습니다."
 }

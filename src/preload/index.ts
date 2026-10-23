@@ -336,6 +336,7 @@ const api = {
   /** Saves the Usage page as CSV through a save dialog; `divisor` is the page's token divisor. */
   exportUsage: (divisor: number) => call<{ saved: false } | { saved: true; name: string }>('usage:export', { divisor }),
   getState: () => call<AppState>('state:get'),
+  marksPromptPreview: () => call<string>('marks:promptPreview'),
   resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */
   startFreshCredentials: () => call<{ state: AppState; setAside: boolean }>('credentials:start-fresh'),

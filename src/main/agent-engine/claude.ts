@@ -24,6 +24,7 @@
  * restarts with `--resume`. The two never run at once.
  */
 import { spawn as spawnProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import {
@@ -199,6 +200,7 @@ export function claudeArgs(options: {
   sessionId: string; mode: 'start' | 'resume'; permissionMode: 'default' | 'manual'; model?: string | null; effort?: ApiChatEffort | null;
   /** The route's flag settings (router.ts `claudeRouteSettings`); default the hardening alone. */
   settings?: string;
+  systemPrompt?: string;
 }): string[] {
   if (!UUID.test(options.sessionId)) throw new Error('Invalid Claude session id');
   const settings = options.settings ?? CLAUDE_FLAG_SETTINGS;
@@ -207,6 +209,7 @@ export function claudeArgs(options: {
     '-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose', '--include-partial-messages',
     '--permission-prompt-tool', 'stdio', '--permission-mode', options.permissionMode, '--settings', settings,
     '--disallowedTools', CLAUDE_DEFERRED_TOOLS.join(','),
+    ...(options.mode === 'start' && options.systemPrompt ? ['--append-system-prompt', options.systemPrompt] : []),
     ...(options.model ? [`--model=${modelId.parse(options.model)}`] : []),
     ...(options.effort ? ['--effort', z.enum(API_CHAT_EFFORTS).parse(options.effort)] : []),
     options.mode === 'resume' ? `--resume=${options.sessionId}` : `--session-id=${options.sessionId}`
@@ -847,7 +850,7 @@ export class ClaudeEngine implements AgentEngine {
     // never reached the CLI, or a session the terminal started) is corrected once from stderr.
     let mode: 'start' | 'resume' = resume ? 'resume' : 'start';
     for (let attempt = 0; ; attempt++) {
-      const started = await this.startHost(sessionId, runtime, launch, [...claudeArgs({ sessionId: launch.backendId, mode, permissionMode, model: launch.model, effort: launch.effort, settings: launch.settings }), ...brainArgs]);
+      const started = await this.startHost(sessionId, runtime, launch, [...claudeArgs({ sessionId: launch.backendId, mode, permissionMode, model: launch.model, effort: launch.effort, settings: launch.settings, systemPrompt: currentMarksSystemPrompt('claude') }), ...brainArgs]);
       if (started.alive) return started;
       const reason = started.stderr;
       if (attempt === 0 && !started.sawStdout) {

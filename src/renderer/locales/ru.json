@@ -3974,5 +3974,13 @@
   "No secret with that name.": "Секрета с таким именем нет.",
   "The system keyring is not available, so the vault cannot be used on this computer.": "Системная связка ключей недоступна, поэтому хранилище нельзя использовать на этом компьютере.",
   "Check this field: {0}.": "Проверьте это поле: {0}.",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Хранилище создано. Мастер-пароль запрашивается снова только для администрирования: добавления, показа, экспорта или импорта секретов."
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "Хранилище создано. Мастер-пароль запрашивается снова только для администрирования: добавления, показа, экспорта или импорта секретов.",
+  "Prompt do Chat Marks": "Системный промпт Chat Marks",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "Краткие инструкции при запуске или возобновлении чата.",
+  "Como quer ser chamado": "Как к вам обращаться",
+  "Deixe vazio para tratamento neutro.": "Оставьте пустым для нейтрального обращения.",
+  "Prévia do prompt": "Предпросмотр промпта",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "Показывает точный текст для ChatGPT с сохранёнными настройками.",
+  "Ver prompt": "Показать промпт",
+  "Prompt do Chat Marks desativado.": "Промпт Chat Marks отключён."
 }

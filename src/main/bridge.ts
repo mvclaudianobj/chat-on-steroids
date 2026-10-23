@@ -15,6 +15,8 @@ import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt.js';
 import { CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { prepareSessionPrompt } from './session/prompt.js';
+import { currentMarksSystemPrompt } from './marks-system-prompt.js';
+import { prependUserPrompt } from '../shared/user-prompt.js';
 import { NEW_CHAT, noteAutomaticReply } from './session/automatic-replies.js';
 import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
 import { resumeModelSelection } from './resume-model.js';
@@ -10894,7 +10896,11 @@ function bootstrapText(spec: CommandSpec, summary: string): string {
       'ultrathink)'
     );
   }
-  return resumeBootstrapText(summary, spec.token);
+  // The destination is a new native conversation: inject the short Marks identity once.
+  // The handoff formatter remains unchanged for provenance/Goal transcript matching.
+  const bootstrap = resumeBootstrapText(summary, spec.token);
+  const marks = currentMarksSystemPrompt('chatgpt');
+  return marks ? prependUserPrompt(bootstrap, marks) : bootstrap;
 }
 
 /** The broker's current plan for waking one worker, or null once it is no longer waking. */

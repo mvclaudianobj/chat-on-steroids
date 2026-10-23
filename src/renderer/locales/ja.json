@@ -3830,5 +3830,13 @@
   "No secret with that name.": "その名前のシークレットはありません。",
   "The system keyring is not available, so the vault cannot be used on this computer.": "システムのキーリングが使えないため、このコンピューターでは保管庫を使えません。",
   "Check this field: {0}.": "この項目を確認してください: {0}。",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "保管庫を作成しました。マスターパスワードは管理操作（シークレットの追加・表示・書き出し・読み込み）のときだけ再度求められます。"
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "保管庫を作成しました。マスターパスワードは管理操作（シークレットの追加・表示・書き出し・読み込み）のときだけ再度求められます。",
+  "Prompt do Chat Marks": "Chat Marks システムプロンプト",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "チャットの開始または再開時に短い指示を追加します。",
+  "Como quer ser chamado": "呼び方",
+  "Deixe vazio para tratamento neutro.": "空欄の場合は中立的な呼び方になります。",
+  "Prévia do prompt": "プロンプトのプレビュー",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "保存された設定に基づくChatGPT用の正確なテキストを表示します。",
+  "Ver prompt": "プロンプトを見る",
+  "Prompt do Chat Marks desativado.": "Chat Marksプロンプトは無効です。"
 }

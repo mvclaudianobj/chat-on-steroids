@@ -3830,5 +3830,13 @@
   "No secret with that name.": "没有该名称的密钥。",
   "The system keyring is not available, so the vault cannot be used on this computer.": "系统密钥环不可用，因此无法在这台电脑上使用保险库。",
   "Check this field: {0}.": "请检查此字段：{0}。",
-  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "保险库已创建。只有在管理时（添加、显示、导出或导入密钥）才会再次要求主密码。"
+  "Vault created. The master password is only asked again for administration: adding, revealing, exporting or importing secrets.": "保险库已创建。只有在管理时（添加、显示、导出或导入密钥）才会再次要求主密码。",
+  "Prompt do Chat Marks": "Chat Marks 系统提示词",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "开始或恢复聊天时添加简短指令。",
+  "Como quer ser chamado": "希望如何称呼您",
+  "Deixe vazio para tratamento neutro.": "留空则使用中性称呼。",
+  "Prévia do prompt": "提示词预览",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "显示按照已保存设置提供给 ChatGPT 的准确文本。",
+  "Ver prompt": "查看提示词",
+  "Prompt do Chat Marks desativado.": "Chat Marks 提示词已关闭。"
 }
