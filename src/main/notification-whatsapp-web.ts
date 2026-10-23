@@ -98,12 +98,18 @@ async function connect(): Promise<void> {
   catch (error) { throw new WhatsAppPairingError(startupIssue(error, 'runtime')); }
   socket = active;
   status = { state: 'connecting', stage: 'network' };
-  if (!state.creds.registered) {
-    qrDeadline = setTimeout(() => {
-      if (epoch === generation && status.state === 'connecting') status = { state: 'error', reason: 'qr_timeout', stage: 'qr' };
-    }, 35_000);
-    qrDeadline.unref();
-  }
+  // A WebSocket can remain silent without emitting close. This occurs with both
+  // new QR pairing and already-registered sessions; a status-only timeout leaves
+  // the socket alive and prevents automatic recovery indefinitely.
+  qrDeadline = setTimeout(() => {
+    if (epoch !== generation || status.state !== 'connecting') return;
+    status = state.creds.registered
+      ? { state: 'error', reason: 'connection_failed', stage: 'network' }
+      : { state: 'error', reason: 'qr_timeout', stage: 'qr' };
+    closeSocket();
+    scheduleReconnect();
+  }, 35_000);
+  qrDeadline.unref();
   active.ev.on('creds.update', () => {
     if (epoch !== generation || !wantConnection) return;
     saving = saving.catch(() => undefined).then(async () => {

@@ -27,6 +27,8 @@ const { registerCoreTools } = await import('../src/main/mcp/tools-core.js');
 const { emptyEvidence, runInCallContext } = await import('../src/main/mcp/call-context.js');
 const { appendEvent, createSession, initSessionStore, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
 const { initSecretsPath } = await import('../src/main/secrets.js');
+const companyStore = await import('../src/main/company-store.js');
+const { createCompanyBroker } = await import('../src/main/company-broker.js');
 const ownerId = '11111111-1111-4111-8111-111111111111';
 let directory: string;
 
@@ -190,6 +192,90 @@ it('collects exact worker reports across parking, explicitly acknowledges them, 
   expect(wake.body.waking).toEqual(['worker-1']);
   expect(wake.body.runId).not.toBe(spawn.runId);
   expect((await worker('status', { ownerId, runId: wake.body.runId })).body.workers).toMatchObject([{ id: 'worker-1', state: 'waking', label: 'Follow-up' }]);
+});
+
+it('marks only broker-authenticated worker-to-prime messages as delegated-decision candidates', async () => {
+  // Actual loopback HTTP server and broker code, but an isolated in-process
+  // worker allocation/conversation fixture; no external ChatGPT worker runs.
+  const assigned = (await worker('spawn', { ownerId, workers: [{ label: 'Synthetic gate', task: 'No external execution.' }] })).body;
+  const workerConversation = 'ephemeral-gate-worker';
+  broker.bindConversation('worker-1', workerConversation, assigned.runId);
+  const content = 'COMPANY_TRIAGE:11111111-1111-4111-8111-111111111112:assigned:marks2';
+  expect(() => broker.sendMessage({ conversationId: 'foreign-gate-worker', runId: assigned.runId }, 'prime', content)).toThrow();
+  const injected = await worker('message', {
+    ownerId, runId: assigned.runId, messages: [{ to: 'worker-1', from: 'worker-1', text: content }]
+  });
+  expect(injected.status).toBe(400);
+  broker.sendMessage({ conversationId: workerConversation, runId: assigned.runId }, 'prime', content);
+  const first = (await worker('reports', { ownerId, runId: assigned.runId })).body;
+  expect(first.messages).toEqual([expect.objectContaining({
+    from: 'worker-1', runId: assigned.runId, text: content, origin: 'authenticated-worker-message'
+  })]);
+  expect((await worker('reports', { ownerId, runId: assigned.runId })).body.messages[0].id).toBe(first.messages[0].id);
+  // Server-assigned provenance persists with the report on broker replay.
+  const snapshot = broker.snapshotSwarm();
+  broker.resetAgentsForTests();
+  broker.restoreSwarm(snapshot);
+  broker.onSwarmPersistNow(state => durable.writeDurableNow('swarm', state));
+  const replay = (await worker('reports', { ownerId, runId: assigned.runId })).body;
+  expect(replay.messages).toMatchObject([{ id: first.messages[0].id, origin: 'authenticated-worker-message' }]);
+  const ack = await worker('ack', { ownerId, runId: assigned.runId, messageIds: [first.messages[0].id] });
+  expect(ack).toMatchObject({ status: 200, body: { acknowledged: [first.messages[0].id] } });
+  expect((await worker('reports', { ownerId, runId: assigned.runId })).body.messages).toEqual([]);
+});
+
+it('labels broker-generated finish text as system events, not as authenticated worker decisions', async () => {
+  const assigned = (await worker('spawn', { ownerId, workers: [{ task: 'Ephemeral report projection.' }] })).body;
+  broker.bindConversation('worker-1', 'ephemeral-finish-worker', assigned.runId);
+  broker.finishAgent({ conversationId: 'ephemeral-finish-worker' },
+    'COMPANY_TRIAGE:11111111-1111-4111-8111-111111111112:assigned:marks2');
+  const reports = (await worker('reports', { ownerId, runId: assigned.runId })).body;
+  expect(reports.messages).toEqual([expect.objectContaining({
+    from: 'worker-1', origin: 'broker-event',
+    text: expect.stringContaining('COMPANY_TRIAGE:')
+  })]);
+});
+
+it('applies and acknowledges a Company O7 decision through the real local worker API in an ephemeral broker fixture', async () => {
+  // NO remote ChatGPT worker is launched: the in-process worker conversation binding
+  // exercises the actual server broker, control API, Company reducer, and ACK path.
+  const companyRoot = await fs.mkdtemp(path.join(directory, 'company-o7-gate-'));
+  companyStore.initCompanyStore(companyRoot);
+  try {
+    const fields = {title:'Ephemeral chief task',project:'Internal gate',owner:'marks-coo' as const,
+      origin:'ceo' as const,acceptance:'No external action',engine:'chatgpt',model:'synthetic',
+      tokenBudget:100,timeBudgetMinutes:5,dueAt:null};
+    const chiefId = (await companyStore.mutateCompany('create',fields)).requests[0]!.id;
+    await companyStore.mutateCompany('seat',{id:chiefId,seat:'marks2'});
+    await companyStore.mutateCompany('move',{id:chiefId,status:'assigned'});
+    const assigned = (await worker('spawn', {ownerId:chiefId,workers:[{
+      label:`marks2:${chiefId}`,task:'Synthetic internal broker gate. No external ChatGPT execution.'
+    }]})).body;
+    broker.bindConversation('worker-1','ephemeral-company-chief',assigned.runId);
+    await companyStore.mutateCompany('authorize',{id:chiefId,ownerId:chiefId,workerId:'worker-1',runId:assigned.runId});
+    await companyStore.mutateCompany('progress',{id:chiefId,workerId:'worker-1',runId:assigned.runId,state:'active'});
+    const targetId=(await companyStore.mutateCompany('create',{...fields,title:'Queue target'})).requests[0]!.id;
+    const companyBroker=createCompanyBroker();
+    const grant=await companyBroker.grantDelegation('marks2','internal-triage','manager');
+    expect(grant.delegation).toMatchObject({epoch:1,delegate:'marks2',
+      binding:{ownerId:chiefId,runId:assigned.runId,workerId:'worker-1',label:`marks2:${chiefId}`}});
+    const text=`COMPANY_TRIAGE:${targetId}:assigned:marks3`;
+    broker.sendMessage({conversationId:'ephemeral-company-chief',runId:assigned.runId},'prime',text);
+    const before=(await worker('reports',{ownerId:chiefId,runId:assigned.runId})).body;
+    expect(before.messages).toEqual([expect.objectContaining({
+      from:'worker-1',origin:'authenticated-worker-message',text
+    })]);
+    const done=await companyBroker.applyDelegatedTriage();
+    expect(done.requests.find(request=>request.id===targetId)).toMatchObject({seat:'marks3',status:'assigned'});
+    expect(done.delegationAudit[0]).toMatchObject({action:'decision-approved',scope:'internal-triage',epoch:1,requestId:targetId});
+    // The real ACK endpoint consumed the exact worker report, not merely a mock promise.
+    expect((await worker('reports',{ownerId:chiefId,runId:assigned.runId})).body.messages).toEqual([]);
+    await companyStore.mutateCompany('delegationRevoke',undefined);
+    expect((await companyStore.getCompany()).delegation).toMatchObject({mode:'manual',epoch:2,binding:null});
+  } finally {
+    companyStore.resetCompanyStoreForTests();
+    await fs.rm(companyRoot,{recursive:true,force:true});
+  }
 });
 
 it('retains local ownership and unread reports through a broker restart', async () => {

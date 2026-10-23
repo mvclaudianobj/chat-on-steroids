@@ -3998,5 +3998,15 @@
   "Expires at": "Expires at",
   "Chief designation": "Chief designation",
   "Director": "Director",
-  "Coordinator": "Coordinator"
+  "Coordinator": "Coordinator",
+  "Jarvis works in a CLIProxy API chat. The g4f.space preset configures speech services, not a chat. Open or create a CLIProxy chat.": "Jarvis 只能在 CLIProxy API 聊天中使用。g4f.space 预设仅配置语音服务，不会创建聊天。请打开或新建 CLIProxy 聊天。",
+  "Enable microphone and audio transmission consent in Jarvis settings for this session.": "请在 Jarvis 设置中为本次会话同意使用麦克风及传输音频。",
+  "This app cannot access microphone recording. Check system permissions and restart the app.": "应用无法录制麦克风音频。请检查系统权限并重新启动应用。",
+  "No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.": "没有可用的语音转文字引擎。请检查服务地址、已保存的密钥和 STT 模型，或选择 CLIProxy 模型。",
+  "Open Jarvis in a CLIProxy chat": "Open Jarvis in a CLIProxy chat",
+  "Creating CLIProxy chat…": "Creating CLIProxy chat…",
+  "Return to previous chat": "Return to previous chat",
+  "Could not create a CLIProxy chat. Check CLIProxy settings.": "Could not create a CLIProxy chat. Check CLIProxy settings.",
+  "CLIProxy chat selected. Give microphone consent, then hold the Jarvis key to speak.": "CLIProxy chat selected. Give microphone consent, then hold the Jarvis key to speak.",
+  "Could not return to the previous chat.": "Could not return to the previous chat."
 }

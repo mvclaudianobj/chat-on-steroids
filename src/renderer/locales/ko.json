@@ -3998,5 +3998,15 @@
   "Expires at": "Expires at",
   "Chief designation": "Chief designation",
   "Director": "Director",
-  "Coordinator": "Coordinator"
+  "Coordinator": "Coordinator",
+  "Jarvis works in a CLIProxy API chat. The g4f.space preset configures speech services, not a chat. Open or create a CLIProxy chat.": "Jarvis는 CLIProxy API 채팅에서 작동합니다. g4f.space 프리셋은 음성 서비스만 설정하며 채팅을 만들지 않습니다. CLIProxy 채팅을 열거나 만드세요.",
+  "Enable microphone and audio transmission consent in Jarvis settings for this session.": "이번 세션에서 Jarvis 설정의 마이크 및 오디오 전송 동의를 활성화하세요.",
+  "This app cannot access microphone recording. Check system permissions and restart the app.": "앱에서 마이크를 녹음할 수 없습니다. 시스템 권한을 확인하고 앱을 다시 시작하세요.",
+  "No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.": "사용 가능한 음성 인식 엔진이 없습니다. 제공자 URL, 저장된 키, STT 모델 또는 CLIProxy 모델을 확인하세요.",
+  "Open Jarvis in a CLIProxy chat": "Open Jarvis in a CLIProxy chat",
+  "Creating CLIProxy chat…": "Creating CLIProxy chat…",
+  "Return to previous chat": "Return to previous chat",
+  "Could not create a CLIProxy chat. Check CLIProxy settings.": "Could not create a CLIProxy chat. Check CLIProxy settings.",
+  "CLIProxy chat selected. Give microphone consent, then hold the Jarvis key to speak.": "CLIProxy chat selected. Give microphone consent, then hold the Jarvis key to speak.",
+  "Could not return to the previous chat.": "Could not return to the previous chat."
 }

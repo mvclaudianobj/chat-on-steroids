@@ -67,7 +67,7 @@
 .jarvis-state[hidden] { display: none; }
 .jarvis-state {
   align-self: center;
-  max-width: 14em;
+  max-width: min(38vw, 38em);
   padding: 0 4px;
   overflow: hidden;
   color: var(--soft);
@@ -75,4 +75,5 @@
   white-space: nowrap;
   text-overflow: ellipsis;
 }
+.jarvis-state[data-state='idle']:not([hidden]) { white-space: normal; }
 .jarvis-state:is([data-state='listening'],[data-state='speaking']) { color: var(--accent); }

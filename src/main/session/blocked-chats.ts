@@ -33,6 +33,8 @@
  */
 
 import { readDurable, writeDurableSoon } from '../durable.js';
+import { revokeRemoteChat } from '../remote/approval.js';
+import { revokeVaultChat } from '../marks-vault-approval.js';
 
 /**
  * A hand-curated list, so the ceiling only exists to keep a corrupt or hostile state file from
@@ -138,7 +140,13 @@ export function setChatsBlocked(conversationIds: readonly string[], next: boolea
   if (!changed) return;
   if (next) {
     const blockedAt = Date.now();
-    for (const conversationId of additions) blocked.set(conversationId, blockedAt);
+    for (const conversationId of additions) {
+      blocked.set(conversationId, blockedAt);
+      // Block ends ephemeral permissions as well as future tool access. Releasing this chat
+      // must never resurrect an earlier SSH command or Vault secret approval.
+      revokeRemoteChat(conversationId);
+      revokeVaultChat(conversationId);
+    }
   } else {
     for (const conversationId of ids) blocked.delete(conversationId);
   }

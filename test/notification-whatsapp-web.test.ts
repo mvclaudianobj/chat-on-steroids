@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
-  directory: '', startError: null as Error | null, authError: null as Error | null, authStuck: false, authCalls: 0, saveStarted: false, saveBarrier: null as Promise<void> | null,
+  directory: '', startError: null as Error | null, authError: null as Error | null, authStuck: false, authCalls: 0, saveStarted: false, saveBarrier: null as Promise<void> | null, registered: false,
   sockets: [] as Array<{ ev: import('node:events').EventEmitter; ws: { close: ReturnType<typeof vi.fn> }; sendMessage: ReturnType<typeof vi.fn>; logout: ReturnType<typeof vi.fn> }>
 }));
 vi.mock('electron', () => ({ app: { getPath: () => mocks.directory } }));
@@ -22,7 +22,7 @@ vi.mock('@whiskeysockets/baileys', async () => {
       if (mocks.authError) throw mocks.authError;
       if (mocks.authStuck) return new Promise(() => undefined);
       return {
-      state: { creds: {} }, saveCreds: vi.fn(async () => {
+      state: { creds: { registered: mocks.registered } }, saveCreds: vi.fn(async () => {
         mocks.saveStarted = true;
         if (mocks.saveBarrier) await mocks.saveBarrier;
         await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify({ synthetic: true }));
@@ -41,6 +41,7 @@ beforeEach(async () => {
   mocks.authCalls = 0;
   mocks.saveStarted = false;
   mocks.saveBarrier = null;
+  mocks.registered = false;
   vi.resetModules();
   web = await import('../src/main/notification-whatsapp-web.js');
 });
@@ -227,4 +228,37 @@ it('does not reload authentication before a pending save finishes during a manua
   }
   await retry;
   expect(mocks.authCalls).toBe(2);
+});
+
+it('recovers automatically when a new unpaired socket never produces a QR', async () => {
+  vi.useFakeTimers();
+  try {
+    await web.startWhatsAppWeb();
+    const stalled = mocks.sockets[0]!;
+    await vi.advanceTimersByTimeAsync(35_100);
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'error', reason: 'qr_timeout', stage: 'qr' });
+    expect(stalled.ws.close).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(3_100);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(mocks.sockets).toHaveLength(2));
+    mocks.sockets[1]!.ev.emit('connection.update', { qr: 'SYNTHETIC-RECONNECTED-QR' });
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'qr', qr: 'SYNTHETIC-RECONNECTED-QR' });
+  } finally { vi.useRealTimers(); }
+});
+
+it('recovers a registered session when its socket never reaches open or close', async () => {
+  mocks.registered = true;
+  vi.useFakeTimers();
+  try {
+    await web.startWhatsAppWeb();
+    const stalled = mocks.sockets[0]!;
+    await vi.advanceTimersByTimeAsync(35_100);
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'error', reason: 'connection_failed', stage: 'network' });
+    expect(stalled.ws.close).toHaveBeenCalledOnce();
+    await vi.advanceTimersByTimeAsync(3_100);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(mocks.sockets).toHaveLength(2));
+    mocks.sockets[1]!.ev.emit('connection.update', { connection: 'open' });
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected', stage: 'ready' });
+  } finally { vi.useRealTimers(); }
 });

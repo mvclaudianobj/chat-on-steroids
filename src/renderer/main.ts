@@ -81,7 +81,6 @@ declare global {
 
 const api = window.api;
 installNotificationCenter(api);
-initJarvis(api, selectedChatSession);
 
 document.getElementById('marksPanelLogout')?.addEventListener('click', async () => {
   const button = document.getElementById('marksPanelLogout') as HTMLButtonElement;
@@ -139,6 +138,7 @@ onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
 // Chat Marks: API chats select their session and follow the selected one.
 const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId, selectedChat: selectedChatSession, selectChat: selectChatSession });
+initJarvis(api, selectedChatSession, { createCliProxyChat: () => marksModulesUi.createJarvisChat(), selectChat: selectChatSession });
 const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'

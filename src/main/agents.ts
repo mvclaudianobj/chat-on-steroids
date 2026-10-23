@@ -2691,7 +2691,12 @@ function stageMessagesActive(
     const already = perRecipient.get(to.info.id) ?? 0;
     assertRoom(to, already + 1);
     perRecipient.set(to.info.id, already + 1);
-    planned.push({ to, message: newMessage(from.info.id, to.info.id, trimmed) });
+    const message = newMessage(from.info.id, to.info.id, trimmed);
+    // This is not derived from model-authored text or a supplied sender field:
+    // requireMember() above resolved the bound caller to this worker.
+    if (from.info.role === 'worker' && to.info.role === 'prime' && caller.conversationId)
+      message.origin = 'authenticated-worker-message';
+    planned.push({ to, message });
   }
 
   for (const { to, message } of planned) {

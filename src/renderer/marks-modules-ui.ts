@@ -24,6 +24,7 @@ export interface MarksModulesUiHooks {
 
 /** Only the sidebar hooks are visible to upstream-owned main.ts. */
 export interface MarksModulesUiController {
+  createJarvisChat(): Promise<string | null>;
   createSession(moduleId: string, projectId: string | null): Promise<void>;
   cliModules(): ReadonlyArray<CliModuleSummary>;
   /** A project's menu items for a CLIProxy chat in that project. */
@@ -248,6 +249,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
   });
   onLanguageChange(paintModules);
   return {
+    createJarvisChat: () => apiChatChats.create(undefined, 'cliproxy'),
     createSession: cli.createSession,
     cliModules: cli.cliModules,
     projectChatItems: apiChatChats.projectChatItems,

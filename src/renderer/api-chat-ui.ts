@@ -39,7 +39,7 @@ export interface ApiChatUi {
   projectChatItems(projectId: string): RowMenuItem[];
   /** Follows the selected chat: called whenever the chat list or selection repaints. */
   sync(): void;
-  create(projectId?: string | null, engine?: AgentEngineId): Promise<void>;
+  create(projectId?: string | null, engine?: AgentEngineId): Promise<string | null>;
   refresh(): Promise<void>;
 }
 
@@ -472,17 +472,17 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   }
 
   /** `projectId` is the project whose menu was used; New chat uses the selected workspace. */
-  async function create(projectId?: string | null, engine: AgentEngineId = DEFAULT_AGENT_ENGINE): Promise<void> {
+  async function create(projectId?: string | null, engine: AgentEngineId = DEFAULT_AGENT_ENGINE): Promise<string | null> {
     if (engine === 'cliproxy') {
       // CLIProxy's own setup: a missing key or default model is fixed in Settings > Modules.
       const status = await api.apiChatStatus().catch(() => null);
-      if (!status?.ok) { openSettings(status?.error ?? t('CLIProxy is not set up yet.')); return; }
-      if (status.data.keyRequired && !status.data.hasKey) { openSettings(t('CLIProxy needs an API key. Add it in Settings > Modules.')); return; }
-      if (!status.data.model) { openSettings(t('Choose a default CLIProxy model in Settings > Modules first.')); return; }
+      if (!status?.ok) { openSettings(status?.error ?? t('CLIProxy is not set up yet.')); return null; }
+      if (status.data.keyRequired && !status.data.hasKey) { openSettings(t('CLIProxy needs an API key. Add it in Settings > Modules.')); return null; }
+      if (!status.data.model) { openSettings(t('Choose a default CLIProxy model in Settings > Modules first.')); return null; }
     }
     const target = projectId === undefined ? hooks.workspace() : projectId;
     const reply = await api.apiChatCreate(engine === 'cliproxy' ? { projectId: target } : { projectId: target, engine });
-    if (!reply.ok) { toast(t(reply.error)); return; }
+    if (!reply.ok) { toast(t(reply.error)); return null; }
     created.add(reply.data.sessionId);
     hooks.showTab('chat');
     await hooks.selectChat?.(reply.data.sessionId);
@@ -491,6 +491,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     void loadModels(engineOf(), routeOfChat());
     paint();
     input?.focus();
+    return reply.data.sessionId;
   }
 
   // The composer belongs to the selected chat: an API chat sends and stops through its executor,
