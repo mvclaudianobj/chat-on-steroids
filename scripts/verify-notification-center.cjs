@@ -20,9 +20,10 @@ const fixture = `(() => {
   const base=()=>({enabled:false,events:Object.fromEntries(events.map(e=>[e,false])),destinations:[],titleTemplate:'{title}',bodyTemplate:'{project} — {event}',includeExcerpt:false,config:{}});
   let settings={channels:Object.fromEntries(channels.map(c=>[c,base()])),throttleMinutes:1,batchWindowSeconds:10};
   const credentials=Object.fromEntries(channels.map(c=>[c,false]));
-  window.notifyFixture={testCalls:[],savedKeys:[],exportCalls:0,importCalls:0,vaultCreated:false,latest:()=>structuredClone(settings)};
+  window.notifyFixture={testCalls:[],savedKeys:[],exportCalls:0,importCalls:0,previewCalls:0,vaultCreated:false,latest:()=>structuredClone(settings)};
   const methods={
     markWhatsNewSeen:()=>ok(null),
+    marksPromptPreview:()=>{window.notifyFixture.previewCalls++;return ok('Você é Marks. <synthetic-prompt-text>');},
     getState:async()=>{const r=await old.getState();r.data.config=fixtureMerge(fixtureDefaults,r.data.config);r.data.config.ui={...r.data.config.ui,language:'en',theme:'dark'};return r;},
     notificationWhatsAppStart:()=>ok({state:'qr',qr:'__SYNTHETIC_QR_IMAGE__'}),
     notificationWhatsAppStatus:()=>ok({state:'connected'}),
@@ -63,6 +64,17 @@ app.whenReady().then(async () => {
   await win.loadURL(server.resolvedUrls.local[0]);
   await until(`!!document.querySelector('[data-tab="notifications"]')`);
   win.show(); win.focus(); win.webContents.focus();
+  // Exercise SP and QR in the SAME renderer fixture. Preview must show the exact main-owned
+  // text as inert text, never interpreted as HTML or mixed with synthetic channel credentials.
+  await js(`document.querySelector('[data-tab="general"]').click()`);
+  await until(`document.querySelector('[data-panel="general"]').classList.contains('is-active')`);
+  assert.equal(await js(`document.getElementById('marksSystemPromptEnabled').checked`),true);
+  assert.equal(await js(`document.getElementById('marksPreferredName').value`),'');
+  await js(`document.getElementById('marksPromptPreviewButton').click()`);
+  await until(`window.notifyFixture.previewCalls===1 && !document.getElementById('marksPromptPreview').hidden`);
+  assert.equal(await js(`document.getElementById('marksPromptPreview').textContent`),'Você é Marks. <synthetic-prompt-text>');
+  assert.equal(await js(`document.getElementById('marksPromptPreview').children.length`),0);
+  await capture('marks-system-prompt-preview-synthetic.png');
   await js(`document.querySelector('[data-tab="notifications"]').click()`);
   await until(`!!document.getElementById('notificationTitle-telegram')`);
   await until(`document.querySelector('[data-panel="notifications"]').classList.contains('is-active')`);
