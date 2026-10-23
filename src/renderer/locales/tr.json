@@ -3908,5 +3908,13 @@
   "Open WhatsApp > Linked devices > Link a device, then scan the QR code.": "WhatsApp > Bağlı cihazlar > Cihaz bağla menüsünü açıp QR kodunu tarayın.",
   "Pairing stopped.": "Eşleştirme durduruldu.",
   "Could not disconnect the channel.": "Kanal bağlantısı kesilemedi.",
-  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Telegram’da @BotFather ile kendi botunuzu oluşturun, jetonunu kopyalayıp yukarıdaki kasaya kaydedin. Ardından QR kodunu oluşturun."
+  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Telegram’da @BotFather ile kendi botunuzu oluşturun, jetonunu kopyalayıp yukarıdaki kasaya kaydedin. Ardından QR kodunu oluşturun.",
+  "Prompt do Chat Marks": "Chat Marks sistem istemi",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "Sohbet başlarken veya sürdürülürken kısa yönergeler ekler.",
+  "Como quer ser chamado": "Size nasıl hitap edilsin?",
+  "Deixe vazio para tratamento neutro.": "Tarafsız hitap için boş bırakın.",
+  "Prévia do prompt": "İstem önizlemesi",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "Kaydedilen ayarlara göre ChatGPT için kullanılan tam metni gösterir.",
+  "Ver prompt": "İstemi göster",
+  "Prompt do Chat Marks desativado.": "Chat Marks istemi devre dışı."
 }

@@ -15,6 +15,7 @@ const { resetRecorderForTests } = await import('../src/main/session/recorder.js'
 const executor = await import('../src/main/api-chat/executor.js');
 const ledger = await import('../src/main/agent-engine/ledger.js');
 const claude = await import('../src/main/agent-engine/claude.js');
+const { currentMarksSystemPrompt } = await import('../src/main/marks-system-prompt.js');
 const { argsHash } = await import('../src/main/agent-engine/approval.js');
 import type { ClaudeEngine, ClaudeRuntime } from '../src/main/agent-engine/claude.js';
 import { ENGINE_TERMINAL_OPEN_ELSEWHERE, ENGINE_TERMINAL_OPEN_IN_APP } from '../src/shared/agent-engine.js';
@@ -206,7 +207,7 @@ describe('Claude Code engine against a fake CLI', () => {
 
     const [launch] = launches();
     expect(launch!.cwd).toBe(project);
-    expect(launch!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default' }));
+    expect(launch!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', systemPrompt: currentMarksSystemPrompt('claude') }));
     expect(launch!.argv!.join(' ')).not.toMatch(/dangerously|bypass/);
     // Nothing wakes this session after its result: background work and wake-up tools are off.
     expect(launch).toMatchObject({ background: '1', cron: '1' });
@@ -525,7 +526,7 @@ describe('Claude Code engine: routes (direct CLI account or a detected Claude Co
     const id = record!.backendSessionId!;
     await engine.send(chat.sessionId, 'plain');
     await finished(chat.sessionId);
-    expect(launches().at(-1)!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', settings: claude.CLAUDE_DIRECT_SETTINGS }));
+    expect(launches().at(-1)!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', settings: claude.CLAUDE_DIRECT_SETTINGS, systemPrompt: currentMarksSystemPrompt('claude') }));
 
     // Between turns: the same Claude session resumes with the router route's settings.
     expect(await engine.setChatSettings(chat.sessionId, { route: 'router' })).toMatchObject({ route: 'router' });
@@ -574,7 +575,7 @@ describe('Claude Code engine: routes (direct CLI account or a detected Claude Co
     // The same session runs with the direct settings: the CLI never tries the dead router address.
     await engine.send(chat.sessionId, 'plain');
     await finished(chat.sessionId);
-    expect(launches().at(-1)!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', settings: claude.CLAUDE_DIRECT_SETTINGS }));
+    expect(launches().at(-1)!.argv).toEqual(claude.claudeArgs({ sessionId: id, mode: 'start', permissionMode: 'default', settings: claude.CLAUDE_DIRECT_SETTINGS, systemPrompt: currentMarksSystemPrompt('claude') }));
     expect((await ledger.storedChatRecord(chat.sessionId))?.route).toBe('router');
     // Choosing the router route needs one that answers.
     routing = { detected: true, model: 'Local/router-model', unavailable: 'stopped' };

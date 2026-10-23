@@ -3860,5 +3860,13 @@
   "Open WhatsApp > Linked devices > Link a device, then scan the QR code.": "Mở WhatsApp > Thiết bị liên kết > Liên kết thiết bị rồi quét mã QR.",
   "Pairing stopped.": "Đã dừng ghép nối.",
   "Could not disconnect the channel.": "Không thể ngắt kết nối kênh.",
-  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Tạo bot riêng với @BotFather trong Telegram, sao chép mã thông báo và lưu vào kho bí mật bên trên. Sau đó tạo mã QR."
+  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Tạo bot riêng với @BotFather trong Telegram, sao chép mã thông báo và lưu vào kho bí mật bên trên. Sau đó tạo mã QR.",
+  "Prompt do Chat Marks": "Lời nhắc hệ thống Chat Marks",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "Hướng dẫn ngắn khi bắt đầu hoặc tiếp tục cuộc trò chuyện.",
+  "Como quer ser chamado": "Bạn muốn được gọi là gì?",
+  "Deixe vazio para tratamento neutro.": "Để trống để dùng cách xưng hô trung lập.",
+  "Prévia do prompt": "Xem trước lời nhắc",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "Hiển thị văn bản chính xác cho ChatGPT theo cài đặt đã lưu.",
+  "Ver prompt": "Xem lời nhắc",
+  "Prompt do Chat Marks desativado.": "Đã tắt lời nhắc Chat Marks."
 }

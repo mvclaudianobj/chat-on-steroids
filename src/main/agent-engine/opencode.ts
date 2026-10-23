@@ -32,6 +32,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import { logInfo, logWarn } from '../logger.js';
+import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
 import { notifyChanged } from '../session/recorder.js';
 import { bindSessionProject, createSession, getSession, readEvents, upsertMessageEvent } from '../session/store.js';
 import { AGENT_ENGINE_LABELS } from '../../shared/agent-engine.js';
@@ -913,7 +914,8 @@ export const openCodeEngine: AgentEngine = {
       if (turn.ended) throw new Error('The OpenCode event stream could not be opened');
       turn.promptAt = Date.now();
       turn.promptSent = true;
-      turn.promptMessageId = (await client.prompt(turn.backendId, question)).id;
+      const marks = (await readEvents(session.id, { kinds: ['turn_start'] })).length <= 1 ? currentMarksSystemPrompt('opencode') : '';
+      turn.promptMessageId = (await client.prompt(turn.backendId, marks ? `${marks}\n\n${question}` : question)).id;
       return { turnId: turn.turnId };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);

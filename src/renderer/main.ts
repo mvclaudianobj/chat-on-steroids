@@ -795,6 +795,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
+      marksSystemPromptEnabled: $<HTMLInputElement>('marksSystemPromptEnabled').checked,
+      marksPreferredName: $<HTMLInputElement>('marksPreferredName').value.trim() || undefined,
       localAppUsage: $<HTMLInputElement>('localAppUsage').checked,
       keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
       keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
@@ -1737,6 +1739,9 @@ function apply(next: AppState): void {
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
+  applyChecked($<HTMLInputElement>('marksSystemPromptEnabled'), config.ui.marksSystemPromptEnabled !== false, previousState ? previousState.config.ui.marksSystemPromptEnabled !== false : undefined);
+  applyValue($<HTMLInputElement>('marksPreferredName'), config.ui.marksPreferredName ?? '', previousState?.config.ui.marksPreferredName ?? '');
+  $('marksPromptPreview').hidden = true;
   applyChecked($<HTMLInputElement>('localAppUsage'), config.ui.localAppUsage !== false, previousState ? previousState.config.ui.localAppUsage !== false : undefined);
   // The saved switch, not the click, decides what the main process reads.
   if (previousState && (previousState.config.ui.localAppUsage !== false) !== (config.ui.localAppUsage !== false)) void refreshOtherApps(true);
@@ -2846,6 +2851,8 @@ for (const id of [
   'followUp',
   'enterSends',
   'turnNotifications',
+  'marksSystemPromptEnabled',
+  'marksPreferredName',
   'mentionCore',
   'mentionPlugins',
   'controlApiEnabled',
@@ -2859,6 +2866,14 @@ for (const id of [
 ]) {
   $(id).addEventListener('change', () => void save());
 }
+$('marksPromptPreviewButton').addEventListener('click', async () => {
+  await settingsSaveQueue;
+  const prompt = await run(api.marksPromptPreview());
+  if (prompt === null) return;
+  const preview = $('marksPromptPreview');
+  preview.textContent = prompt || t('Prompt do Chat Marks desativado.');
+  preview.hidden = false;
+});
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
 
 document.addEventListener('click', (event) => {

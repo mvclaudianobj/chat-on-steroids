@@ -14,7 +14,8 @@ import { continuationMarkerOf, unescapeMarkdown } from '../../shared/session.js'
 import { logInfo } from '../logger.js';
 import { getSession, readSessionPlan, saveHandoff } from './store.js';
 import { destinationContinuationMarker } from './handoff-prompt.js';
-import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../../shared/user-prompt.js';
+import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
+import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt, userPromptText } from '../../shared/user-prompt.js';
 import type { AgentPlan } from '../../shared/agent-plan.js';
 
 export interface PrepareHandoffInput {
@@ -188,7 +189,10 @@ export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handof
   // Freeze the actual saved plan with the brief. A pointer to the removed session
   // tool cannot supply it to the replacement model. Budget this same snapshot once.
   const planNotice = handoffPlanNotice(await readSessionPlan(input.sessionId));
-  const overhead = resumeBootstrapText('', input.continuationToken).length + planNotice.length;
+  // Reserve exactly the frame that the bridge adds to the destination's first message.
+  const marks = currentMarksSystemPrompt('chatgpt');
+  const overhead = (marks ? prependUserPrompt(resumeBootstrapText('', input.continuationToken), marks)
+    : resumeBootstrapText('', input.continuationToken)).length + planNotice.length;
   text = boundBrief(text, MAX_CHATGPT_MESSAGE_CHARS - overhead);
   // Checked again here, and not only at the bridge route that can word the refusal well,
   // because this is the one function that writes a handoff to disk. A stub that reaches the

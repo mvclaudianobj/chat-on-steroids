@@ -4004,5 +4004,13 @@
   "Open WhatsApp > Linked devices > Link a device, then scan the QR code.": "Откройте WhatsApp > Связанные устройства > Привязать устройство и отсканируйте QR-код.",
   "Pairing stopped.": "Привязка остановлена.",
   "Could not disconnect the channel.": "Не удалось отключить канал.",
-  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Создайте своего бота через @BotFather в Telegram, скопируйте токен и сохраните его в хранилище выше. Затем создайте QR-код."
+  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Создайте своего бота через @BotFather в Telegram, скопируйте токен и сохраните его в хранилище выше. Затем создайте QR-код.",
+  "Prompt do Chat Marks": "Системный промпт Chat Marks",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "Краткие инструкции при запуске или возобновлении чата.",
+  "Como quer ser chamado": "Как к вам обращаться",
+  "Deixe vazio para tratamento neutro.": "Оставьте пустым для нейтрального обращения.",
+  "Prévia do prompt": "Предпросмотр промпта",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "Показывает точный текст для ChatGPT с сохранёнными настройками.",
+  "Ver prompt": "Показать промпт",
+  "Prompt do Chat Marks desativado.": "Промпт Chat Marks отключён."
 }

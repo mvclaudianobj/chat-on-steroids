@@ -3860,5 +3860,13 @@
   "Open WhatsApp > Linked devices > Link a device, then scan the QR code.": "開啟 WhatsApp > 已連結裝置 > 連結裝置，再掃描 QR 碼。",
   "Pairing stopped.": "配對已停止。",
   "Could not disconnect the channel.": "無法中斷此頻道的連線。",
-  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "在 Telegram 使用 @BotFather 建立自己的機器人，複製權杖並儲存至上方保險庫，再產生 QR 碼。"
+  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "在 Telegram 使用 @BotFather 建立自己的機器人，複製權杖並儲存至上方保險庫，再產生 QR 碼。",
+  "Prompt do Chat Marks": "Chat Marks 系統提示詞",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "開始或恢復聊天時加入簡短指令。",
+  "Como quer ser chamado": "希望如何稱呼您",
+  "Deixe vazio para tratamento neutro.": "留空則使用中性稱呼。",
+  "Prévia do prompt": "提示詞預覽",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "顯示依照已儲存設定提供給 ChatGPT 的確切文字。",
+  "Ver prompt": "查看提示詞",
+  "Prompt do Chat Marks desativado.": "Chat Marks 提示詞已停用。"
 }

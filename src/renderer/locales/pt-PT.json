@@ -3956,5 +3956,13 @@
   "Open WhatsApp > Linked devices > Link a device, then scan the QR code.": "Abra WhatsApp > Dispositivos associados > Associar um dispositivo e digitalize o código QR.",
   "Pairing stopped.": "Emparelhamento interrompido.",
   "Could not disconnect the channel.": "Não foi possível desligar o canal.",
-  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Crie o seu bot com @BotFather no Telegram, copie o token e guarde-o no cofre acima. Depois gere o código QR."
+  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Crie o seu bot com @BotFather no Telegram, copie o token e guarde-o no cofre acima. Depois gere o código QR.",
+  "Prompt do Chat Marks": "Prompt do Chat Marks",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "Identidade e instruções breves ao iniciar ou retomar uma conversa.",
+  "Como quer ser chamado": "Como quer ser tratado",
+  "Deixe vazio para tratamento neutro.": "Deixe vazio para tratamento neutro.",
+  "Prévia do prompt": "Pré-visualização do prompt",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "Mostra o texto exato para o ChatGPT com as definições guardadas.",
+  "Ver prompt": "Ver prompt",
+  "Prompt do Chat Marks desativado.": "Prompt do Chat Marks desativado."
 }

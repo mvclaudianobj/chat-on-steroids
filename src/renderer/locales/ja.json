@@ -3860,5 +3860,13 @@
   "Open WhatsApp > Linked devices > Link a device, then scan the QR code.": "WhatsAppの「リンク済みデバイス」>「デバイスをリンク」を開き、QRコードを読み取ってください。",
   "Pairing stopped.": "ペアリングを停止しました。",
   "Could not disconnect the channel.": "チャネルを切断できませんでした。",
-  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Telegramの@BotFatherで自分のボットを作成し、トークンをコピーして上の保管庫に保存してください。その後QRコードを生成します。"
+  "Create your own bot with @BotFather in Telegram, copy its token, and save it in the vault above. Then generate the QR.": "Telegramの@BotFatherで自分のボットを作成し、トークンをコピーして上の保管庫に保存してください。その後QRコードを生成します。",
+  "Prompt do Chat Marks": "Chat Marks システムプロンプト",
+  "Identidade e instruções curtas ao iniciar ou retomar um chat.": "チャットの開始または再開時に短い指示を追加します。",
+  "Como quer ser chamado": "呼び方",
+  "Deixe vazio para tratamento neutro.": "空欄の場合は中立的な呼び方になります。",
+  "Prévia do prompt": "プロンプトのプレビュー",
+  "Mostra o texto exato da variante ChatGPT conforme as configurações salvas.": "保存された設定に基づくChatGPT用の正確なテキストを表示します。",
+  "Ver prompt": "プロンプトを見る",
+  "Prompt do Chat Marks desativado.": "Chat Marksプロンプトは無効です。"
 }
