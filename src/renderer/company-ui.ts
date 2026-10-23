@@ -92,6 +92,17 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     content.append(el('h4', '', t('History')));
     const history = el('div', 'company-history'); for (const item of request.history.slice(-10).reverse()) history.append(el('p', '', `${date(item.at)} · ${item.actor}: ${item.note}`)); content.append(history);
     actions.append(button('Save assignment', () => void change({ action: 'seat', payload: { id, seat: seat.value || null } })));
+    if (!snapshot.demo && request.status === 'assigned' && request.seat && !request.execution) {
+      actions.append(button('Authorize real worker', () => void change({action:'dispatch',payload:{id,consent:true}}),'btn btn-solid'));
+    }
+    if (!snapshot.demo && request.execution && ['admitted','running','awaiting-authorization'].includes(request.execution.phase)) {
+      actions.append(button('Check broker progress', () => void change({action:'refreshBroker',payload:{id}})));
+    }
+    if (!snapshot.demo && request.status === 'review' && request.execution?.reportId) {
+      const evidence = input('Review accepted by COO');
+      content.append(field('COO review evidence',evidence));
+      actions.append(button('Approve verified completion', () => void change({action:'reviewBroker',payload:{id,evidence:evidence.value.trim(),consent:true}}),'btn btn-solid'));
+    }
     actions.append(button('Move request', () => void change({ action: 'move', payload: { id, status: state.value as CompanyRequest['status'] } }), 'btn btn-solid'));
   }
   function chip(text: string, className = ''): HTMLElement { return el('span', `company-chip ${className}`, text); }
@@ -136,6 +147,10 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     content.append(el('p','company-dialog-hint','Presence requires independent worker acknowledgement; no invitation is attendance.'));
     const notes=el('textarea');notes.value=meeting.minutes;notes.rows=4; content.append(field('Minutes',notes));
     const decisions=el('textarea'); decisions.value=meeting.decisions.join('\n');content.append(field('Decisions (one per line)',decisions));
+    if (!snapshot?.demo) {
+      actions.append(button('Send authorized invitations',()=>void change({action:'sendInvitations',payload:{id,consent:true}})));
+      actions.append(button('Check verified attendance',()=>void change({action:'reconcileMeeting',payload:{id}})));
+    }
     actions.append(button('Save minutes',()=>void change({action:'minutes',payload:{id,minutes:notes.value,decisions:decisions.value.split('\n').map(x=>x.trim()).filter(Boolean)}}),'btn btn-solid'));
   }
   function paintOffice(): void {

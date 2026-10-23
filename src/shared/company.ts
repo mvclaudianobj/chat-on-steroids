@@ -37,7 +37,7 @@ export const companyRequestSchema = z.object({
 }).strict();
 export const companyMeetingSchema = z.object({
   id: z.string().uuid(), title: safeText(160), participants: z.array(actor).min(2).max(101),
-  invitations: z.array(z.object({ seat: companySeatSchema, state: companyPresenceSchema, contribution: z.string().max(1600), confirmedAt: tick.nullable(), evidence: z.string().max(400).nullable() }).strict()).max(99).optional(), agenda: z.string().max(2400).optional(),
+  invitations: z.array(z.object({ seat: companySeatSchema, state: companyPresenceSchema, contribution: z.string().max(1600), confirmedAt: tick.nullable(), evidence: z.string().max(400).nullable(), delivery: z.object({ ownerId: z.string().uuid(), runId: z.string().uuid(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/), at: tick, queuedId: z.string().max(100).nullable() }).strict().optional() }).strict()).max(99).optional(), agenda: z.string().max(2400).optional(),
   at: tick, durationMinutes: z.number().int().min(1).max(480), minutes: z.string().max(5000),
   decisions: z.array(safeText(800)).max(30), brainSync: z.literal('pending')
 }).strict();
