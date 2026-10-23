@@ -82,9 +82,13 @@ app.whenReady().then(async()=>{
   assert.equal(await js("document.getElementById('companyOffice').hidden"),false);
   await js("document.getElementById('companyRpgTab').click()");
   assert.equal(await js("localStorage.getItem('company:view')"),'rpg');
-  await js("document.getElementById('companyBoardTab').click()");
+  // Capture the RPG itself in the dark theme; the previous sequence saved the
+  // light Board under the RPG-dark filename, hiding a visual regression.
+  await js("window.companyFixtureLight=document.getElementById('company-fixture-light');window.companyFixtureLight.remove();document.documentElement.dataset.theme='dark'");
+  await until("!document.getElementById('companyRpg').hidden && document.documentElement.dataset.theme==='dark'");
   await screenshot('company-rpg-dark.png');
-
+  await js("document.documentElement.dataset.theme='light';document.head.append(window.companyFixtureLight);document.getElementById('companyBoardTab').click()");
+  await until("!document.getElementById('companyBoard').hidden");
   await screenshot('company-board-light.png');
   await js("document.querySelector('.company-ticket').click()");
   assert.equal(await js("document.getElementById('companyDialog').open"),true);
