@@ -119,7 +119,7 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
       current.delegationAudit.unshift({ id: randomUUID(), at: now, epoch: authority.epoch,
         action: 'decision-approved', actor: authority.delegate, delegate: authority.delegate, scope: 'internal-triage',
         chiefTitle: authority.chiefTitle, binding: {ownerId:fields.ownerId,runId:fields.runId,workerId:fields.workerId},
-        requestId: fields.id, reason: 'authenticated-coo' });
+        receiptId: fields.receiptId, requestId: fields.id, reason: 'authenticated-coo' });
     } else if (action === 'configure') {
       const { name, seatCount } = payload as { name: string; seatCount: number };
       if (seatCount > 10 && current.company.seatCount <= 10) throw new Error('New configurations support at most ten seats');

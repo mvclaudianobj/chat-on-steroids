@@ -44,6 +44,7 @@ export const companyDelegationAuditSchema = z.object({
   delegate: companyChiefSchema.nullable(), scope: companyDelegationScopeSchema.nullable(),
   chiefTitle: companyChiefTitleSchema.nullable().optional(),
   binding: z.object({ ownerId: z.string().uuid(), runId: z.string().uuid(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/) }).strict().nullable().optional(),
+  receiptId: safeText(100).optional(),
   requestId: z.string().uuid().nullable(), reason: z.enum(['explicit-ceo', 'authenticated-coo', 'revoked', 'invalid-identity', 'policy-mismatch', 'expired', 'stale-session']).nullable()
 }).strict();
 const actor = z.union([z.literal('ceo'), companyRoleSchema, companySeatSchema]);

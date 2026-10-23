@@ -68,7 +68,8 @@ export async function serveWorkerRead(route: string, params: URLSearchParams): P
   statusForCaller(caller); // Reject foreign/unknown run selection before any inbox offer.
   const offered = offerMessagesForCaller(caller)?.messages ?? [];
   return { messages: offered.map(message => ({ id: message.id, runId: message.runId ?? caller.runId ?? null,
-    from: message.from, time: message.time, text: redactSecretText(message.text) })) };
+    from: message.from, time: message.time, text: redactSecretText(message.text),
+    origin: message.origin === 'authenticated-worker-message' ? 'authenticated-worker-message' : 'broker-event' })) };
 }
 
 export async function serveWorkerAction(method: string, route: string, raw: unknown, authorize: () => void) {

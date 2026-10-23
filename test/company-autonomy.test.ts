@@ -84,7 +84,11 @@ describe('O7 verified internal autonomy',()=>{
     expect((await broker.applyDelegatedTriage()).requests.find(x=>x.id===target)!.status).toBe('inbox');
     incoming=[{id:'wrong-run',from:workerId,runId:'00000000-0000-4000-8000-000000000144',time:Date.now(),text:`COMPANY_TRIAGE:${target}:assigned:marks1`}];
     expect((await broker.applyDelegatedTriage()).requests.find(x=>x.id===target)!.status).toBe('inbox');
-    incoming=[{id:'real-receipt',from:workerId,runId,time:Date.now(),text:`COMPANY_TRIAGE:${target}:assigned:marks1`}];
+    incoming=[{id:'spoofed-finish',from:workerId,runId,time:Date.now(),origin:'broker-event',text:`COMPANY_TRIAGE:${target}:assigned:marks1`}];
+    expect((await broker.applyDelegatedTriage()).requests.find(x=>x.id===target)!.status).toBe('inbox');
+    incoming=[{id:'legacy-unverified',from:workerId,runId,time:Date.now(),text:`COMPANY_TRIAGE:${target}:assigned:marks1`}];
+    expect((await broker.applyDelegatedTriage()).requests.find(x=>x.id===target)!.status).toBe('inbox');
+    incoming=[{id:'real-receipt',from:workerId,runId,time:Date.now(),origin:'authenticated-worker-message',text:`COMPANY_TRIAGE:${target}:assigned:marks1`}];
     const committed=await broker.applyDelegatedTriage();
     expect(committed.requests.find(x=>x.id===target)).toMatchObject({status:'assigned',seat:'marks1'});
     expect(committed.requests.find(x=>x.id===target)?.execution).toBeUndefined();
@@ -104,7 +108,7 @@ describe('O7 verified internal autonomy',()=>{
     const target=await fixture();let release!:()=>void;let entered!:()=>void;
     const parked=new Promise<void>(r=>{release=r;});const reached=new Promise<void>(r=>{entered=r;});
     const delayed:CompanyWorkerBackend={...service,async reports() {entered();await parked;
-      return [{id:'raced-receipt',from:workerId,runId,time:Date.now(),text:`COMPANY_TRIAGE:${target}:assigned:marks1`}]; }};
+      return [{id:'raced-receipt',from:workerId,runId,time:Date.now(),origin:'authenticated-worker-message',text:`COMPANY_TRIAGE:${target}:assigned:marks1`}]; }};
     const broker=createCompanyBroker(delayed);
     await broker.grantDelegation('marks2','internal-triage');
     const attempt=broker.applyDelegatedTriage();await reached;

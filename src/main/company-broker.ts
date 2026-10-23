@@ -11,7 +11,8 @@ const uuid = z.string().uuid();
 const workerStatus = z.object({ id: workerId, runId: uuid.nullable(), label: z.string(), state: z.string(),
   result: z.string().nullable().optional() });
 const fleetStatus = z.object({ runId: uuid.nullable(), workers: z.array(workerStatus) });
-const reportSchema = z.object({ id: z.string().min(1).max(100), from: z.string(), runId: uuid.nullable(), time: z.number().int().nonnegative(), text: z.string() });
+const reportSchema = z.object({ id: z.string().min(1).max(100), from: z.string(), runId: uuid.nullable(), time: z.number().int().nonnegative(), text: z.string(),
+  origin: z.enum(['authenticated-worker-message','broker-event']).optional() });
 
 export interface CompanyWorkerBackend {
   spawn(ownerId: string, label: string, task: string): Promise<{ runId: string; workerId: string }>;
@@ -113,12 +114,25 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
       throw new Error('Chief worker no longer active');
     const reports=await backend.reports(binding.ownerId,binding.runId);
     for (const report of reports) {
-      if (report.from!==binding.workerId || report.runId!==binding.runId || report.time<(policy.grantedAt??Infinity) ||
+      // Legacy reports and server-generated finish/health text cannot authorize a
+      // decision merely by containing a COMPANY_TRIAGE-shaped string.
+      if (report.origin !== 'authenticated-worker-message' ||
+        report.from!==binding.workerId || report.runId!==binding.runId || report.time<(policy.grantedAt??Infinity) ||
         report.time>binding.expiresAt) continue;
       const match=/^COMPANY_TRIAGE:([0-9a-f-]{36}):assigned:(marks[1-9][0-9]?)$/.exec(report.text);
       if (!match) continue;
       const id=uuid.parse(match[1]); const seat=match[2]!;
-      if (!snapshot.requests.some(row=>row.id===id && row.status==='inbox')) continue;
+      if (!snapshot.requests.some(row=>row.id===id && row.status==='inbox')) {
+        // A persisted decision may precede a failed /ack reply. Only retire the
+        // exact server-sourced receipt recorded with this epoch and binding.
+        const completed = snapshot.requests.some(row=>row.id===id && row.status==='assigned' && row.seat===seat) &&
+          snapshot.delegationAudit.some(event=>event.action==='decision-approved' && event.scope==='internal-triage' &&
+            event.requestId===id && event.receiptId===report.id && event.epoch===policy.epoch &&
+            event.binding?.ownerId===binding.ownerId && event.binding.runId===binding.runId &&
+            event.binding.workerId===binding.workerId);
+        if (completed) { await backend.ack(binding.ownerId,binding.runId,report.id); return getCompany(); }
+        continue;
+      }
       // Store serializes epoch, TTL and one-shot decision with the ticket transition.
       await mutateCompany('delegationTriage',{id,seat,epoch:policy.epoch,ownerId:binding.ownerId,
         runId:binding.runId,workerId:binding.workerId,receiptId:report.id,receiptTime:report.time});
