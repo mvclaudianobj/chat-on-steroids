@@ -37,7 +37,7 @@ function serialized<T>(fn: () => Promise<T>): Promise<T> {
   const job = queue.then(fn); queue = job.then(() => undefined, () => undefined); return job;
 }
 export function getCompany(): Promise<CompanySnapshot> { return serialized(load); }
-export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'confirmDelegated' | 'delegationGrant' | 'delegationRevoke' | 'delegationDeny' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered', payload: unknown): Promise<CompanySnapshot> {
+export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'confirmDelegated' | 'delegationGrant' | 'delegationRevoke' | 'delegationDeny' | 'delegationTriage' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered', payload: unknown): Promise<CompanySnapshot> {
   return serialized(async () => {
     const current = await load();
     if (action === 'demo') {
@@ -47,25 +47,79 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
     const now = Date.now();
     if (action === 'delegationGrant' || action === 'delegationRevoke') {
       if (current.demo) throw new Error('Delegation is unavailable for synthetic company data');
+      const previousDelegate = current.delegation.delegate;
+      const previousScope = current.delegation.scopes[0] ?? null;
+      const previousTitle = current.delegation.chiefTitle;
+      const previousBinding = current.delegation.binding;
       if (action === 'delegationGrant') {
+        const fields = payload as { delegate?: string; chiefTitle?: string; binding?: CompanySnapshot['delegation']['binding']; scope?: string } | undefined;
         if (current.delegation.mode === 'delegated') throw new Error('Delegation already enabled');
-        if (!current.company.roles.includes('marks-coo')) throw new Error('Operations chief not configured');
-        current.delegation = { mode: 'delegated', delegate: 'marks-coo', scopes: ['ticket-review'],
-          epoch: current.delegation.epoch + 1, grantedAt: now, revokedAt: null };
+        const delegate = fields?.delegate ?? 'marks-coo';
+        const seat = current.company.seats.includes(delegate as `marks${number}`);
+        if (!seat && delegate !== 'marks-coo') throw new Error('Selected chief not eligible');
+        if (seat && (!fields?.binding || fields.binding.seat !== delegate ||
+          fields.binding.expiresAt <= now || fields.binding.verifiedAt > now ||
+          !current.requests.some(row => row.id === fields.binding!.ownerId && row.seat === delegate &&
+            row.execution?.mode === 'live' && row.execution.ownerId === fields.binding!.ownerId &&
+            row.execution.runId === fields.binding!.runId && row.execution.workerId === fields.binding!.workerId &&
+            `${row.seat}:${row.id}` === fields.binding!.label)))
+          throw new Error('Chief worker binding cannot be verified');
+        if (seat && fields?.scope !== 'internal-triage') throw new Error('Worker delegation only supports internal triage');
+        if (!seat && fields?.scope && fields.scope !== 'ticket-review') throw new Error('Unsupported chief role scope');
+        const chiefTitle = seat ? fields?.chiefTitle : 'operations';
+        if (!chiefTitle || !['operations','director','manager','coordinator'].includes(chiefTitle)) throw new Error('Invalid chief title');
+        current.delegation = { mode: 'delegated', delegate: delegate as CompanySnapshot['delegation']['delegate'],
+          chiefTitle: chiefTitle as CompanySnapshot['delegation']['chiefTitle'], binding: seat ? fields!.binding! : null,
+          scopes: [seat ? 'internal-triage' : 'ticket-review'], epoch: current.delegation.epoch + 1, grantedAt: now, revokedAt: null };
       } else {
         if (current.delegation.mode !== 'delegated') throw new Error('Delegation is not active');
-        current.delegation = { mode: 'manual', delegate: null, scopes: [],
+        current.delegation = { mode: 'manual', delegate: null, chiefTitle: null, binding: null, scopes: [],
           epoch: current.delegation.epoch + 1, grantedAt: null, revokedAt: now };
       }
       current.delegationAudit.unshift({ id: randomUUID(), at: now, epoch: current.delegation.epoch,
-        action: action === 'delegationGrant' ? 'grant' : 'revoke', actor: 'ceo', delegate: 'marks-coo',
-        scope: 'ticket-review', requestId: null, reason: 'explicit-ceo' });
+        action: action === 'delegationGrant' ? 'grant' : 'revoke', actor: 'ceo', delegate: action === 'delegationGrant' ? current.delegation.delegate : previousDelegate,
+        scope: action === 'delegationGrant' ? current.delegation.scopes[0]! : previousScope,
+        chiefTitle: action === 'delegationGrant' ? current.delegation.chiefTitle : previousTitle,
+        binding: (() => { const b=action === 'delegationGrant' ? current.delegation.binding : previousBinding;
+          return b ? {ownerId:b.ownerId,runId:b.runId,workerId:b.workerId} : null; })(),
+        requestId: null, reason: 'explicit-ceo' });
     } else if (action === 'delegationDeny') {
-      const fields = payload as { id: string; reason: 'revoked' | 'invalid-identity' | 'policy-mismatch' };
+      const fields = payload as { id: string; reason: 'revoked' | 'invalid-identity' | 'policy-mismatch' | 'expired' | 'stale-session' };
       // Only callable by trusted main code; never an IPC action.
       current.delegationAudit.unshift({ id: randomUUID(), at: now, epoch: current.delegation.epoch,
         action: 'decision-denied', actor: 'system', delegate: current.delegation.delegate,
-        scope: 'ticket-review', requestId: fields.id, reason: fields.reason });
+        scope: current.delegation.scopes[0] ?? null, requestId: fields.id, reason: fields.reason });
+    } else if (action === 'delegationTriage') {
+      const fields = payload as { id: string; seat: string; epoch: number; ownerId: string; runId: string; workerId: string; receiptId: string; receiptTime: number };
+      const authority = current.delegation;
+      if (authority.mode !== 'delegated' || authority.epoch !== fields.epoch || !authority.scopes.includes('internal-triage') ||
+          !authority.binding || authority.delegate !== authority.binding.seat ||
+          authority.binding.ownerId !== fields.ownerId || authority.binding.runId !== fields.runId ||
+          authority.binding.workerId !== fields.workerId || authority.binding.expiresAt <= now ||
+          fields.receiptTime < (authority.grantedAt ?? Number.MAX_SAFE_INTEGER) || fields.receiptTime > now)
+        throw new Error('Delegation expired, revoked or wrong session');
+      const chiefRequest = current.requests.find(row => row.id === authority.binding!.ownerId);
+      if (!chiefRequest || chiefRequest.seat !== authority.binding.seat ||
+          `${chiefRequest.seat}:${chiefRequest.id}` !== authority.binding.label ||
+          chiefRequest.execution?.mode !== 'live' || chiefRequest.execution?.phase !== 'running' ||
+          chiefRequest.execution.runId !== fields.runId || chiefRequest.execution.workerId !== fields.workerId)
+        throw new Error('Selected chief session no longer matches the active broker ticket');
+      const request = current.requests.find(row => row.id === fields.id);
+      if (!request || request.status !== 'inbox' || request.execution || request.seat) throw new Error('Ticket is not in the triage inbox');
+      if (!current.company.seats.includes(fields.seat as `marks${number}`) ||
+          current.requests.some(row => row.id !== request.id && row.seat === fields.seat &&
+            row.execution && ['admitted','running','awaiting-authorization'].includes(row.execution.phase)))
+        throw new Error('Invalid or occupied assignment seat');
+      if (current.delegationAudit.some(row => row.action === 'decision-approved' && row.requestId === fields.id))
+        throw new Error('Delegated triage already recorded');
+      request.seat = fields.seat as `marks${number}`;
+      request.status = 'assigned'; request.updatedAt = now;
+      request.history.push({ at: now, actor: authority.delegate, note: `Internal triage broker receipt ${fields.receiptId}`, from:'inbox', to:'assigned' });
+      current.activities.unshift({ id: randomUUID(), at: now, actor: authority.delegate, kind: 'move', requestId: request.id, message: `Internal triage assigned to ${fields.seat}` });
+      current.delegationAudit.unshift({ id: randomUUID(), at: now, epoch: authority.epoch,
+        action: 'decision-approved', actor: authority.delegate, delegate: authority.delegate, scope: 'internal-triage',
+        chiefTitle: authority.chiefTitle, binding: {ownerId:fields.ownerId,runId:fields.runId,workerId:fields.workerId},
+        requestId: fields.id, reason: 'authenticated-coo' });
     } else if (action === 'configure') {
       const { name, seatCount } = payload as { name: string; seatCount: number };
       if (seatCount > 10 && current.company.seatCount <= 10) throw new Error('New configurations support at most ten seats');

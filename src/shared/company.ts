@@ -13,20 +13,38 @@ const safeText = (limit: number) => z.string().trim().min(1).max(limit);
 const tick = z.number().int().min(0);
 export const companyPresenceSchema = z.enum(['invited','accepted','declined','present']);
 export const companyMeetingKindSchema = z.enum(['ad-hoc', 'emergency', 'daily', 'weekly']);
-export const companyDelegationScopeSchema = z.enum(['ticket-review']);
+export const companyDelegationScopeSchema = z.enum(['ticket-review','internal-triage']);
+export const companyChiefSchema = z.union([companyRoleSchema, companySeatSchema]);
+export const companyChiefTitleSchema = z.enum(['operations', 'director', 'manager', 'coordinator']);
+export const companyChiefBindingSchema = z.object({
+  seat: companySeatSchema, ownerId: z.string().uuid(), runId: z.string().uuid(),
+  workerId: z.string().regex(/^worker-[1-9][0-9]*$/), label: safeText(80),
+  verifiedAt: tick, expiresAt: tick
+}).strict();
 export const companyDelegationSchema = z.object({
   mode: z.enum(['manual', 'delegated']),
-  delegate: z.literal('marks-coo').nullable(),
-  scopes: z.array(companyDelegationScopeSchema).max(1),
+  delegate: companyChiefSchema.nullable(),
+  chiefTitle: companyChiefTitleSchema.nullable().default(null),
+  binding: companyChiefBindingSchema.nullable().default(null),
+  scopes: z.array(companyDelegationScopeSchema).max(2),
   epoch: z.number().int().nonnegative(),
   grantedAt: tick.nullable(), revokedAt: tick.nullable()
-}).strict();
+}).strict().superRefine((data, context) => {
+  if (data.mode === 'manual' && (data.delegate !== null || data.binding !== null || data.scopes.length !== 0))
+    context.addIssue({code:'custom',path:['mode'],message:'Manual policy cannot retain delegation authority'});
+  if (data.mode === 'delegated' && (!data.delegate || !data.scopes.length))
+    context.addIssue({code:'custom',path:['delegate'],message:'Delegation requires an explicit chief and scope'});
+  if (data.binding && (data.delegate !== data.binding.seat || !data.scopes.includes('internal-triage')))
+    context.addIssue({code:'custom',path:['binding'],message:'Chief binding must match the selected seat and internal scope'});
+});
 export const companyDelegationAuditSchema = z.object({
   id: z.string().uuid(), at: tick, epoch: z.number().int().nonnegative(),
   action: z.enum(['grant', 'revoke', 'decision-approved', 'decision-denied']),
-  actor: z.enum(['ceo', 'marks-coo', 'system']),
-  delegate: z.literal('marks-coo').nullable(), scope: companyDelegationScopeSchema.nullable(),
-  requestId: z.string().uuid().nullable(), reason: z.enum(['explicit-ceo', 'authenticated-coo', 'revoked', 'invalid-identity', 'policy-mismatch']).nullable()
+  actor: z.union([z.literal('ceo'), z.literal('system'), companyChiefSchema]),
+  delegate: companyChiefSchema.nullable(), scope: companyDelegationScopeSchema.nullable(),
+  chiefTitle: companyChiefTitleSchema.nullable().optional(),
+  binding: z.object({ ownerId: z.string().uuid(), runId: z.string().uuid(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/) }).strict().nullable().optional(),
+  requestId: z.string().uuid().nullable(), reason: z.enum(['explicit-ceo', 'authenticated-coo', 'revoked', 'invalid-identity', 'policy-mismatch', 'expired', 'stale-session']).nullable()
 }).strict();
 const actor = z.union([z.literal('ceo'), companyRoleSchema, companySeatSchema]);
 export const companySchema = z.object({
@@ -59,7 +77,7 @@ export const companyMeetingSchema = z.object({
 }).strict();
 export const companyActivitySchema = z.object({ id: z.string().uuid(), at: tick, actor, kind: z.enum(['request', 'move', 'seat', 'meeting', 'company']), requestId: z.string().uuid().optional(), message: safeText(400) }).strict();
 export const companySnapshotSchema = z.object({ version: z.literal(1), company: companySchema, requests: z.array(companyRequestSchema).max(500), meetings: z.array(companyMeetingSchema).max(150), activities: z.array(companyActivitySchema).max(1000), demo: z.boolean(),
-  delegation: companyDelegationSchema.default({mode:'manual',delegate:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null}),
+  delegation: companyDelegationSchema.default({mode:'manual',delegate:null,chiefTitle:null,binding:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null}),
   delegationAudit: z.array(companyDelegationAuditSchema).max(300).default([])
 }).strict().superRefine((data, context) => {
   const ids = new Set<string>();
@@ -124,7 +142,7 @@ export function companyRestingSeats(snapshot: CompanySnapshot, now = Date.now())
 
 export function emptyCompany(): CompanySnapshot {
   return { version: 1, company: { name: 'Chat Marks', seatCount: 5, roles: [...COMPANY_ROLES], seats: companySeats(5) }, requests: [], meetings: [], activities: [], demo: false,
-    delegation: {mode:'manual',delegate:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null},delegationAudit:[] };
+    delegation: {mode:'manual',delegate:null,chiefTitle:null,binding:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null},delegationAudit:[] };
 }
 export function companySeats(count: number): string[] { return Array.from({ length: count }, (_, i) => `marks${i + 1}`); }
 

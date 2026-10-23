@@ -4086,5 +4086,13 @@
   "Keys saved in the vault.": "Clés enregistrées dans le coffre.",
   "The keys could not be saved.": "Les clés n’ont pas pu être enregistrées.",
   "The speech-to-text model is not in the provider's model list.": "Le modèle parole-texte ne figure pas dans la liste de modèles du fournisseur.",
-  "First audio": "Premier son :"
+  "First audio": "Premier son :",
+  "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.": "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.",
+  "Selected operations chief": "Selected operations chief",
+  "Select an active broker-bound seat for internal triage. A named management role without its own authenticated worker remains restricted.": "Select an active broker-bound seat for internal triage. A named management role without its own authenticated worker remains restricted.",
+  "Sync verified internal decisions": "Sync verified internal decisions",
+  "Expires at": "Expires at",
+  "Chief designation": "Chief designation",
+  "Director": "Director",
+  "Coordinator": "Coordinator"
 }

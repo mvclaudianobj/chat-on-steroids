@@ -62,24 +62,19 @@ describe('Company O6 delegation',()=>{
     expect((await getCompany()).requests[0]!.status).toBe('review');
     expect((await getCompany()).delegationAudit[0]!.reason).toBe('invalid-identity');
   });
-  it('fences epoch changed while broker status request is in flight',async()=>{
+  it('fences role-only delegations on revocation without entering broker review',async()=>{
     const id=await preparedTicket();await mutateCompany('delegationGrant',undefined);
-    let release!:()=>void;
-    const pending=new Promise<void>(resolve=>{release=resolve;});
-    let started!:()=>void;
-    const entered=new Promise<void>(resolve=>{started=resolve;});
-    const delayed={...backend,status:async (...args:Parameters<CompanyWorkerBackend['status']>)=>{started();await pending;return backend.status(...args);}};
-    const attempt=createCompanyBroker(delayed).reviewDelegated(id,'Synthetic verified',{role:'marks-coo',authenticated:true});
-    await entered; await mutateCompany('delegationRevoke',undefined);release();
-    await expect(attempt).rejects.toThrow('revoked or changed');
+    await mutateCompany('delegationRevoke',undefined);
+    await expect(createCompanyBroker(backend).reviewDelegated(id,'Synthetic verified',{role:'marks-coo',authenticated:true}))
+      .rejects.toThrow('not active');
     expect((await getCompany()).requests[0]!.status).toBe('review');
   });
-  it('allows a verified synthetic COO decision only through main broker and audits it',async()=>{
+  it('fails closed when caller asserts COO authentication with an unbound boolean',async()=>{
     const id=await preparedTicket();await mutateCompany('delegationGrant',undefined);
-    await createCompanyBroker(backend).reviewDelegated(id,'Synthetic review evidence',{role:'marks-coo',authenticated:true});
+    await expect(createCompanyBroker(backend).reviewDelegated(id,'Synthetic review evidence',{role:'marks-coo',authenticated:true})).rejects.toThrow('identity is unavailable');
     const state=await getCompany();
-    expect(state.requests[0]).toMatchObject({status:'done',cooConfirmation:{actor:'marks-coo'}});
-    expect(state.delegationAudit[0]).toMatchObject({action:'decision-approved',actor:'marks-coo',requestId:id,epoch:1});
+    expect(state.requests[0]).toMatchObject({status:'review'});
+    expect(state.delegationAudit[0]).toMatchObject({action:'decision-denied',requestId:id,epoch:1});
   });
   it('keeps all meeting kinds available regardless of approval mode, without fabricated presence',async()=>{
     for (const kind of ['emergency','daily','weekly'] as const) {

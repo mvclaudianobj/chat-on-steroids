@@ -79,11 +79,19 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     content.append(field('Company name', name), field('Employee seats', count), el('p', 'company-dialog-hint', t('Management roles stay fixed. Employee seats are named marks1 through marksN.')));
     actions.append(button('Save settings', () => void change({ action: 'configure', payload: { name: name.value.trim(), seatCount: Number(count.value) } }), 'btn btn-solid'));
     content.append(el('h3','',t('Operational approvals')),el('p','company-dialog-hint',
-      snapshot.delegation?.mode !== 'delegated' ? t('Manual approval is active by default.') : t('COO ticket-review delegation enabled; authenticated identity is still required.')));
-    content.append(el('p','company-dialog-hint',t('Only ticket reviews can be delegated. System and service permissions always apply.')));
+      snapshot.delegation?.mode !== 'delegated' ? t('Manual approval is active by default.') :
+      `${t('Selected operations chief')}: ${snapshot.delegation.delegate} · ${snapshot.delegation.chiefTitle ?? 'operations'} · ${snapshot.delegation.scopes.join(', ')}${snapshot.delegation.binding ? ` · ${t('Expires at')}: ${new Date(snapshot.delegation.binding.expiresAt).toLocaleTimeString()}` : ''}`));
+    content.append(el('p','company-dialog-hint',t('Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.')));
+    const chiefs = ['marks-coo',...snapshot.company.seats.slice(0,10)];
+    const chief=select(chiefs,'marks-coo');
+    const chiefTitle=select(['director','manager','coordinator'],'director',value=>t(({director:'Director',manager:'Manager',coordinator:'Coordinator'} as Record<string,string>)[value]!));
+    content.append(field('Selected operations chief',chief),field('Chief designation',chiefTitle));
+    content.append(el('p','company-dialog-hint',t('Select an active broker-bound seat for internal triage. A named management role without its own authenticated worker remains restricted.')));
     actions.append(snapshot.delegation?.mode !== 'delegated' ?
-      button('Enable COO delegation',()=>void change({action:'delegationGrant',payload:{delegate:'marks-coo',scope:'ticket-review'}})) :
+      button('Enable COO delegation',()=>void change({action:'delegationGrant',payload:{delegate:chief.value as typeof COMPANY_ROLES[number],scope:chief.value==='marks-coo'?'ticket-review':'internal-triage',chiefTitle:chief.value==='marks-coo'?'operations':chiefTitle.value as 'director'|'manager'|'coordinator'}})) :
       button('Revoke COO delegation',()=>void change({action:'delegationRevoke'})));
+    if (snapshot.delegation?.mode === 'delegated' && snapshot.delegation.binding)
+      actions.append(button('Sync verified internal decisions',()=>void change({action:'syncDelegatedTriage'})));
     content.append(el('h4','',t('Delegation audit')));
     for (const event of (snapshot.delegationAudit ?? []).slice(0,10)) content.append(el('p','company-dialog-hint',
       `${date(event.at)} · ${event.actor} · ${event.action} · ${event.scope ?? '—'} · ${event.requestId ?? ''}`));
@@ -293,7 +301,8 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     }
     paintBoard(); paintOffice(); paintRpg(); paintObservation();
     const ceo = $('companyCeo'); ceo.replaceChildren();
-    ceo.append(el('p','company-muted',snapshot.delegation?.mode !== 'delegated' ? t('Manual approval is active by default.') : t('COO ticket-review delegation enabled; authenticated identity is still required.')));
+    ceo.append(el('p','company-muted',snapshot.delegation?.mode !== 'delegated' ? t('Manual approval is active by default.') :
+      `${t('Selected operations chief')}: ${snapshot.delegation.delegate} · ${snapshot.delegation.scopes.join(', ')}`));
     ceo.append(button('Operational approvals',settings,'company-ceo-action'));
     ceo.append(button('Convene all workers',newMeeting,'company-ceo-action'));
     const requests = snapshot.requests.filter(r => r.status === 'needs-ceo');
@@ -305,7 +314,18 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     if (!snapshot.activities.length) activity.append(el('p', 'company-muted', t('No activity yet.')));
   }
   async function refresh(): Promise<void> {
-    try { const reply = await api.company({ action: 'get' }); if (!reply.ok) throw new Error(reply.error); snapshot = reply.data; paint(); await loadObservation(); }
+    try {
+      const reply = await api.company({ action: 'get' }); if (!reply.ok) throw new Error(reply.error);
+      snapshot = reply.data;
+      // After an explicit CEO grant, consume trusted internal triage receipts at a normal
+      // UI refresh boundary. No independent polling timer or service permission bypass.
+      if (snapshot.delegation?.mode === 'delegated' && snapshot.delegation.binding &&
+          snapshot.delegation.binding.expiresAt > Date.now()) {
+        const synced = await api.company({ action: 'syncDelegatedTriage' });
+        if (synced.ok) snapshot = synced.data;
+      }
+      paint(); await loadObservation();
+    }
     catch (error) { $('companyEmpty').hidden = false; $('companyEmpty').append(el('p', 'company-error', (error as Error).message)); }
   }
   $('companyNewRequest').addEventListener('click', newRequest);

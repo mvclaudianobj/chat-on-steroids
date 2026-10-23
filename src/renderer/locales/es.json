@@ -4086,5 +4086,13 @@
   "Keys saved in the vault.": "Claves guardadas en el almacén.",
   "The keys could not be saved.": "No se pudieron guardar las claves.",
   "The speech-to-text model is not in the provider's model list.": "El modelo de voz a texto no está en la lista de modelos del proveedor.",
-  "First audio": "Primer audio:"
+  "First audio": "Primer audio:",
+  "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.": "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.",
+  "Selected operations chief": "Selected operations chief",
+  "Select an active broker-bound seat for internal triage. A named management role without its own authenticated worker remains restricted.": "Select an active broker-bound seat for internal triage. A named management role without its own authenticated worker remains restricted.",
+  "Sync verified internal decisions": "Sync verified internal decisions",
+  "Expires at": "Expires at",
+  "Chief designation": "Chief designation",
+  "Director": "Director",
+  "Coordinator": "Coordinator"
 }

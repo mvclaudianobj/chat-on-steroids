@@ -1,6 +1,6 @@
 import { dialog, ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
-import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema, companyMeetingKindSchema } from '../shared/company.js';
+import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema, companyMeetingKindSchema, companyChiefSchema, companyDelegationScopeSchema, companyChiefTitleSchema } from '../shared/company.js';
 import { getCompany, mutateCompany } from './company-store.js';
 import { createCompanyBroker } from './company-broker.js';
 import { createCompanyObserver } from './company-observability.js';
@@ -11,8 +11,9 @@ export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('dispatch'), payload: z.object({ id: z.string().uuid(), consent: z.literal(true) }).strict() }).strict(),
   z.object({ action: z.literal('refreshBroker'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
   z.object({ action: z.literal('reviewBroker'), payload: z.object({ id: z.string().uuid(), evidence: z.string().trim().min(3).max(400), consent: z.literal(true) }).strict() }).strict(),
-  z.object({ action: z.literal('delegationGrant'), payload: z.object({ delegate: z.literal('marks-coo'), scope: z.literal('ticket-review') }).strict() }).strict(),
+  z.object({ action: z.literal('delegationGrant'), payload: z.object({ delegate: companyChiefSchema, scope: companyDelegationScopeSchema, chiefTitle: companyChiefTitleSchema.optional() }).strict() }).strict(),
   z.object({ action: z.literal('delegationRevoke') }).strict(),
+  z.object({ action: z.literal('syncDelegatedTriage') }).strict(),
   z.object({ action: z.literal('sendInvitations'), payload: z.object({ id: z.string().uuid(), consent: z.literal(true) }).strict() }).strict(),
   z.object({ action: z.literal('reconcileMeeting'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
   z.object({ action: z.literal('demo') }).strict(),
@@ -46,7 +47,7 @@ export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void 
           message: request.action === 'dispatch' ? 'Start an actual ChatGPT worker for this assigned seat?' :
             request.action === 'sendInvitations' ? 'Send real meeting invitations to connected workers? Some sleeping workers may wake.' :
             request.action === 'reviewBroker' ? 'Personally approve this verified completion as CEO?' :
-            request.action === 'delegationGrant' ? 'Enable COO delegation for ticket reviews? Delegated decisions remain blocked until COO identity can be authenticated.' :
+            request.action === 'delegationGrant' ? 'Delegate only the selected internal operations to this verified chief? Other permissions remain mandatory.' :
             'Revoke COO delegation immediately?',
           detail: 'This uses the local worker broker with its existing permissions and budget guidance. It cannot guarantee hard token/time caps.',
           buttons: ['Cancel', 'Authorize'], defaultId: 0, cancelId: 0, noLink: true
@@ -56,6 +57,8 @@ export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void 
       }
       const data = request.action === 'get' ? await getCompany() :
         request.action === 'observe' ? await observer.snapshot() :
+        request.action === 'delegationGrant' ? await broker.grantDelegation(request.payload.delegate,request.payload.scope,request.payload.chiefTitle) :
+        request.action === 'syncDelegatedTriage' ? await broker.applyDelegatedTriage() :
         request.action === 'dispatch' ? await broker.dispatch(request.payload.id) :
         request.action === 'refreshBroker' ? await broker.refresh(request.payload.id) :
         request.action === 'reviewBroker' ? await broker.review(request.payload.id,request.payload.evidence) :

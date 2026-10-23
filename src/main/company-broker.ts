@@ -70,6 +70,63 @@ function ensureLive(snapshot: CompanySnapshot): void {
 /** Explicit human action reserves a durable one-shot command BEFORE spawning. If an
  * ambiguous spawn fails, no second spawn is issued: reconcile the broker by exact label. */
 export function createCompanyBroker(backend: CompanyWorkerBackend = localCompanyWorkerBackend) {
+  /** CEO selects a configured live worker. The binding comes exclusively from current
+   * main-owned ticket and broker status, never from renderer-supplied worker IDs. */
+  async function grantDelegation(delegate: string, scope: 'internal-triage' | 'ticket-review', chiefTitle: 'operations' | 'director' | 'manager' | 'coordinator' = 'operations'): Promise<CompanySnapshot> {
+    const snapshot = await getCompany(); ensureLive(snapshot);
+    if (snapshot.delegation.mode !== 'manual') throw new Error('Revoke the current delegation first');
+    if (delegate === 'marks-coo') {
+      if (scope !== 'ticket-review') throw new Error('Role identity lacks a worker binding');
+      return mutateCompany('delegationGrant',{delegate,scope,chiefTitle:'operations'});
+    }
+    if (!snapshot.company.seats.slice(0,10).includes(delegate) || scope !== 'internal-triage')
+      throw new Error('Select one of the ten configured employee seats for internal triage');
+    const candidates = snapshot.requests.filter(row => row.seat === delegate && row.execution?.mode === 'live' &&
+      row.execution.ownerId === row.id && row.execution.runId && row.execution.workerId &&
+      ['admitted','running'].includes(row.execution.phase));
+    if (candidates.length !== 1) throw new Error('A unique active broker-bound chief worker is required');
+    const chief=candidates[0]!, bound=chief.execution!;
+    const status=await backend.status(chief.id,bound.runId!);
+    if (status.workers.filter(worker=>worker.id===bound.workerId && worker.runId===bound.runId &&
+      worker.label===labelFor(chief) && worker.state==='active').length!==1)
+      throw new Error('Selected chief has no active authenticated worker session');
+    const now=Date.now();
+    return mutateCompany('delegationGrant',{delegate,scope,chiefTitle,binding:{seat:delegate,ownerId:chief.id,
+      runId:bound.runId,workerId:bound.workerId,label:labelFor(chief),verifiedAt:now,expiresAt:now+5*60_000}});
+  }
+
+  /** Poll-based, idempotent internal triage. Worker report provenance is validated by
+   * server-managed owner/run/worker identity and an exact live binding. No tool dispatch. */
+  async function applyDelegatedTriage(): Promise<CompanySnapshot> {
+    const snapshot=await getCompany(); ensureLive(snapshot);
+    const policy=snapshot.delegation, binding=policy.binding;
+    if (policy.mode!=='delegated' || !policy.scopes.includes('internal-triage') || !binding)
+      throw new Error('Internal triage delegation not active');
+    if (Date.now()>=binding.expiresAt) throw new Error('Chief delegation expired');
+    const source=ticket(snapshot,binding.ownerId);
+    if (source.seat!==binding.seat || source.execution?.runId!==binding.runId || source.execution.workerId!==binding.workerId ||
+      source.execution.phase!=='running' || labelFor(source)!==binding.label)
+      throw new Error('Chief binding changed');
+    const status=await backend.status(binding.ownerId,binding.runId);
+    if (status.workers.filter(worker=>worker.id===binding.workerId && worker.runId===binding.runId &&
+      worker.label===binding.label && worker.state==='active').length!==1)
+      throw new Error('Chief worker no longer active');
+    const reports=await backend.reports(binding.ownerId,binding.runId);
+    for (const report of reports) {
+      if (report.from!==binding.workerId || report.runId!==binding.runId || report.time<(policy.grantedAt??Infinity) ||
+        report.time>binding.expiresAt) continue;
+      const match=/^COMPANY_TRIAGE:([0-9a-f-]{36}):assigned:(marks[1-9][0-9]?)$/.exec(report.text);
+      if (!match) continue;
+      const id=uuid.parse(match[1]); const seat=match[2]!;
+      if (!snapshot.requests.some(row=>row.id===id && row.status==='inbox')) continue;
+      // Store serializes epoch, TTL and one-shot decision with the ticket transition.
+      await mutateCompany('delegationTriage',{id,seat,epoch:policy.epoch,ownerId:binding.ownerId,
+        runId:binding.runId,workerId:binding.workerId,receiptId:report.id,receiptTime:report.time});
+      await backend.ack(binding.ownerId,binding.runId,report.id);
+      return getCompany();
+    }
+    return snapshot;
+  }
   /** No verified COO actor is currently surfaced by the worker broker. A future authenticated
    * adapter must inject a proven principal, never a renderer-provided role or boolean. */
   async function reviewDelegated(id: string, evidence: string, identity: { role: 'marks-coo'; authenticated: boolean } | null = null): Promise<CompanySnapshot> {
@@ -79,7 +136,9 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
       await mutateCompany('delegationDeny',{id,reason:'policy-mismatch'});
       throw new Error('Ticket review delegation is not active');
     }
-    if (!identity?.authenticated || identity.role !== 'marks-coo') {
+    // A role name and an injected boolean are never authentication. No live COO
+    // role-session attestation exists yet; never treat a main-local flag as one.
+    if (!identity?.authenticated || identity.role !== 'marks-coo' || !initial.delegation.binding) {
       await mutateCompany('delegationDeny',{id,reason:'invalid-identity'});
       throw new Error('Authenticated COO identity is unavailable; delegated decision refused');
     }
@@ -223,5 +282,5 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
     return current;
   }
 
-  return { dispatch, refresh, review, reviewDelegated, sendInvitations, reconcileMeeting };
+  return { dispatch, refresh, review, reviewDelegated, grantDelegation, applyDelegatedTriage, sendInvitations, reconcileMeeting };
 }
