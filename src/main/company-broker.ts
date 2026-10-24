@@ -64,6 +64,22 @@ function ticket(snapshot: CompanySnapshot, id: string): CompanyRequest {
   return request;
 }
 function labelFor(request: CompanyRequest): string { return `${request.seat}:${request.id}`; }
+function verifiedWorker(status: z.infer<typeof fleetStatus>, request: CompanyRequest,
+  binding: NonNullable<CompanyRequest['execution']>) {
+  if (status.runId !== binding.runId) throw new Error('Broker worker run identity mismatch');
+  const matches = status.workers.filter(worker => worker.id === binding.workerId &&
+    worker.runId === binding.runId && worker.label === labelFor(request));
+  if (matches.length !== 1) throw new Error('Worker run or identity missing; refusing stale session');
+  const worker = matches[0]!;
+  // The browser may not have opened an invited worker's chat yet. Its server
+  // admission is real, but it must remain pending rather than be called active.
+  if (['invited','waking'].includes(worker.state) && !binding.conversationId &&
+      !worker.conversationId) return worker;
+  if (typeof worker.conversationId !== 'string' || !worker.conversationId.trim() ||
+    worker.conversationId.length > 160 || (binding.conversationId && worker.conversationId !== binding.conversationId))
+    throw new Error('Broker worker conversation identity unavailable or changed');
+  return worker;
+}
 function ensureLive(snapshot: CompanySnapshot): void {
   if (snapshot.demo) throw new Error('Synthetic company records cannot run real workers');
 }
@@ -217,23 +233,39 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
     }
     const binding = request.execution!;
     if (!binding.workerId || !binding.runId) throw new Error('Worker binding unresolved');
-    const bound = currentStatus.workers.filter(w => w.id === binding.workerId && w.runId === binding.runId && w.label === labelFor(request));
-    if (bound.length !== 1) throw new Error('Worker run or identity missing; refusing stale session');
-    const worker = bound[0]!;
+    // A named seat is only configuration. A real worker needs a server-bound
+    // conversation identity for every state change; never adopt a model label.
+    const worker = verifiedWorker(currentStatus, request, binding);
     if (worker.state === 'active' && binding.phase === 'admitted') {
-      current = await mutateCompany('progress', { id, workerId: worker.id, runId: binding.runId, state: 'active' });
+      current = await mutateCompany('progress', { id, workerId: worker.id, runId: binding.runId, conversationId: worker.conversationId, state: 'active' });
     }
-    if ((worker.state === 'sleeping' || worker.state === 'finished') && worker.result?.trim() && !ticket(current,id).execution?.reportId) {
+    if ((worker.state === 'sleeping' || worker.state === 'finished') && worker.result?.trim()) {
+      const durableReport = ticket(current,id).execution!;
+      if (durableReport.reportId && durableReport.phase !== 'reported') return current;
       const messages = await backend.reports(id, binding.runId);
       const found = messages.filter(message => message.from === binding.workerId && message.runId === binding.runId &&
+        message.origin === 'broker-event' &&
+        (!durableReport.reportId || message.id === durableReport.reportId) &&
         message.time >= (binding.authorizedAt ?? Number.MAX_SAFE_INTEGER) &&
         (message.text.startsWith(`[${binding.workerId} reported] `) || message.text.startsWith(`[${binding.workerId} finished] `)) &&
         message.text.includes(worker.result!.slice(0, 1200)));
       if (found.length !== 1) return current;
       const report = found[0]!;
-      current = await mutateCompany('report', { id, workerId: binding.workerId, runId: binding.runId,
-        reportId: report.id, result: worker.result.slice(0,1200), evidence: `broker:${report.id}:${binding.runId}`,
-        outcome: 'completed' });
+      // Reports are a separate broker read. The worker must still be the same
+      // server-owned conversation with the same settled result immediately
+      // before the durable transition and ACK.
+      const again = verifiedWorker(fleetStatus.parse(await backend.status(id, binding.runId)), request,
+        ticket(await getCompany(),id).execution!);
+      if (again.conversationId !== worker.conversationId ||
+        !['sleeping','finished'].includes(again.state) || again.result !== worker.result)
+        throw new Error('Broker worker session changed during report verification');
+      if (!durableReport.reportId) {
+        current = await mutateCompany('report', { id, workerId: binding.workerId, runId: binding.runId,
+          conversationId: worker.conversationId, reportId: report.id, result: worker.result.slice(0,1200), evidence: `broker:${report.id}:${binding.runId}`,
+          outcome: 'completed' });
+      }
+      // Persisted report and broker ACK are separate durable owners: after an
+      // ambiguous ACK failure, use the exact receipt again without re-reporting.
       await backend.ack(id, binding.runId, report.id);
     }
     return current;

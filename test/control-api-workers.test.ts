@@ -278,6 +278,48 @@ it('applies and acknowledges a Company O7 decision through the real local worker
   }
 });
 
+it('runs a Company ticket through the real owner-scoped HTTP broker, exact worker report and acknowledged receipt',async()=>{
+  const temp=await fs.mkdtemp(path.join(directory,'company-ticket-broker-'));
+  companyStore.initCompanyStore(temp);
+  try {
+    const prepared=await companyStore.mutateCompany('create',{
+      title:'Fixture work',project:'Ephemeral',owner:'marks-coo',origin:'ceo',
+      acceptance:'Report a fixture result',engine:'chatgpt',model:'synthetic',
+      tokenBudget:100,timeBudgetMinutes:5,dueAt:null
+    });
+    const id=prepared.requests[0]!.id;
+    await companyStore.mutateCompany('prepare',{id,seat:'marks2'});
+    const companyBroker=createCompanyBroker();
+    const dispatched=await companyBroker.dispatch(id);
+    expect(dispatched.requests[0]).toMatchObject({status:'assigned',execution:{phase:'admitted',ownerId:id,workerId:'worker-1'}});
+    const runId=dispatched.requests[0]!.execution!.runId!;
+    const initial=(await worker('status',{ownerId:id,runId})).body;
+    expect(initial.workers).toMatchObject([{id:'worker-1',label:`marks2:${id}`,conversationId:null}]);
+    expect(initial.workers[0]).not.toHaveProperty('attestation');
+    expect(initial.workers[0]).not.toHaveProperty('signature');
+    expect(initial).not.toHaveProperty('seat');
+    expect((await request(`/v1/workers/${id}/attestation?runId=${runId}`)).status).toBe(404);
+    await companyBroker.refresh(id);
+    expect((await companyStore.getCompany()).requests[0]).toMatchObject({status:'assigned'});
+    broker.bindConversation('worker-1','company-fixture-worker',runId);
+    const running=await companyBroker.refresh(id);
+    expect(running.requests[0]).toMatchObject({status:'working',execution:{conversationId:'company-fixture-worker',phase:'running'}});
+    broker.finishAgent({conversationId:'company-fixture-worker'},'Fixture task completed');
+    const report=(await worker('reports',{ownerId:id,runId})).body;
+    expect(report.messages).toMatchObject([{from:'worker-1',origin:'broker-event',
+      text:expect.stringContaining('Fixture task completed')}]);
+    const reviewed=await companyBroker.refresh(id);
+    expect(reviewed.requests[0]).toMatchObject({status:'review',execution:{phase:'reported',reportId:report.messages[0].id}});
+    expect((await worker('reports',{ownerId:id,runId})).body.messages).toEqual([]);
+    const completed=await companyBroker.review(id,'CEO reviewed the synthetic report');
+    expect(completed.requests[0]).toMatchObject({status:'done'});
+    expect((await worker('status',{ownerId,runId})).status).not.toBe(200);
+  } finally {
+    companyStore.resetCompanyStoreForTests();
+    await fs.rm(temp,{recursive:true,force:true});
+  }
+});
+
 it('retains local ownership and unread reports through a broker restart', async () => {
   const spawn = (await worker('spawn', { ownerId, workers: [{ task: 'Complete a task.' }] })).body;
   broker.bindConversation('worker-1', 'restart-worker', spawn.runId);

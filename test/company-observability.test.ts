@@ -12,7 +12,7 @@ const create={title:'Synthetic job',project:'Test',origin:'ceo' as const,owner:'
 beforeEach(async()=>{root=await fs.mkdtemp(path.join(tmpdir(),'company-observe-'));initCompanyStore(root);initializeCompanyObservability(root);});
 afterEach(async()=>{resetCompanyStoreForTests();resetCompanyObservabilityForTests();await fs.rm(root,{recursive:true,force:true});});
 async function bind(){const id=(await mutateCompany('create',create)).requests[0]!.id;await mutateCompany('seat',{id,seat:'marks2'});await mutateCompany('move',{id,status:'assigned'});await mutateCompany('reserve',{id});await mutateCompany('bind',{id,workerId:'worker-7',runId});return id;}
-const fake=(ownerId:string,wrong=false):CompanyWorkerBackend=>({spawn:async()=>{throw Error('must not spawn');},send:async()=>{throw Error('must not send');},ack:async()=>{throw Error('must not ack');},reports:async()=>{throw Error('must not load transcripts');},status:async()=>({runId,workers:[{id:wrong?'worker-8':'worker-7',runId,label:`marks2:${ownerId}`,state:'active',result:null}]})});
+const fake=(ownerId:string,wrong=false):CompanyWorkerBackend=>({spawn:async()=>{throw Error('must not spawn');},send:async()=>{throw Error('must not send');},ack:async()=>{throw Error('must not ack');},reports:async()=>{throw Error('must not load transcripts');},status:async()=>({runId,workers:[{id:wrong?'worker-8':'worker-7',runId,label:`marks2:${ownerId}`,state:'active',conversationId:'observation-fixture-worker',result:null}]})});
 describe('Company O5 read-only observations',()=>{
  it('observes exact bound owner/run/worker without spawning and expires heartbeat',async()=>{const id=await bind();const observer=createCompanyObserver(fake(id));const now=Date.now();const first=await observer.snapshot(now);expect(first.seats.find(s=>s.seat==='marks2')).toMatchObject({state:'working',source:'broker',ticketId:id});expect(first.events.every(e=>!JSON.stringify(e).includes('Synthetic job'))).toBe(true);
  const repeated=await observer.snapshot(now+1000,false);expect(repeated.events.filter(e=>e.seat==='marks2')).toHaveLength(1);
@@ -22,4 +22,14 @@ describe('Company O5 read-only observations',()=>{
  it('replays persisted sanitized event history after observer reload and enforces retention',async()=>{const id=await bind();const now=Date.now();await createCompanyObserver(fake(id)).snapshot(now);expect((await readObservationEvents(now)).some(e=>e.seat==='marks2')).toBe(true);resetCompanyObservabilityForTests();initializeCompanyObservability(root);expect((await readObservationEvents(now)).some(e=>e.seat==='marks2')).toBe(true);await setObservationRetention(1);expect(await readObservationEvents(now+2*86_400_000)).toEqual([]);});
  it('never turns demo into broker presence or writes events',async()=>{const backend=fake('00000000-0000-4000-8000-000000000111');const snapshot=demoCompany();const result=await createCompanyObserver(backend).snapshot(Date.now(),true,snapshot);expect(result.demo).toBe(true);expect(result.events).toHaveLength(0);expect(result.seats.some(s=>s.state==='working')).toBe(false);expect(await readObservationEvents()).toHaveLength(0);});
  it('does not assume shell, token costs or account metrics absent from broker',async()=>{const id=await bind();const result=await createCompanyObserver(fake(id)).snapshot();const item=result.seats.find(s=>s.seat==='marks2')!;expect(item.tokensUsed).toBeNull();expect(item.minutesUsed).toBeNull();expect(item.state).not.toBe('shell-wait');});
+ it('does not present an unbound or switched conversation as a working employee',async()=>{
+  const id=await bind();
+  await mutateCompany('progress',{id,workerId:'worker-7',runId,state:'active',conversationId:'original-worker'});
+  const noConversation:CompanyWorkerBackend={...fake(id),async status(){return {runId,workers:[{id:'worker-7',runId,label:`marks2:${id}`,state:'active',conversationId:null}]};}};
+  const switched:CompanyWorkerBackend={...fake(id),async status(){return {runId,workers:[{id:'worker-7',runId,label:`marks2:${id}`,state:'active',conversationId:'another-worker'}]};}};
+  for(const backend of [noConversation,switched]){
+    const view=await createCompanyObserver(backend).snapshot();
+    expect(view.seats.find(s=>s.seat==='marks2')).toMatchObject({state:'disconnected',source:'error',error:true});
+  }
+ });
 });

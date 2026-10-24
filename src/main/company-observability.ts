@@ -58,7 +58,11 @@ export function createCompanyObserver(backend:CompanyWorkerBackend=localCompanyW
    else if(exec?.mode==='live'&&exec.ownerId===current?.id&&exec.runId&&exec.workerId&&!company.demo){
     const key=`${current.id}:${exec.runId}:${exec.workerId}`;const last=memory.get(key);
     if(refreshBroker){try{
-      const found=await backend.status(exec.ownerId,exec.runId);const workers=found.workers.filter(w=>w.id===exec.workerId&&w.runId===exec.runId&&w.label===`${seat}:${current.id}`);
+      const found=await backend.status(exec.ownerId,exec.runId);
+      if(found.runId!==exec.runId)throw Error('run identity');
+      const workers=found.workers.filter(w=>w.id===exec.workerId&&w.runId===exec.runId&&w.label===`${seat}:${current.id}`&&
+        typeof w.conversationId==='string'&&w.conversationId.length>0&&w.conversationId.length<=160&&
+        (!exec.conversationId||w.conversationId===exec.conversationId));
       if(workers.length!==1)throw Error('identity');const worker=workers[0]!;
       // Broker does not expose shell state reliably in every version. Unknown never means shell.
       state=worker.state==='active'?'working':'disconnected';source='broker';observedAt=now;

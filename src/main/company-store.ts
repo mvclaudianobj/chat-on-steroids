@@ -249,7 +249,7 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
       }
       current.activities.unshift({ id: randomUUID(), at: now, actor: 'marks-coo', kind: 'meeting', message: action === 'minutes' ? `Minutes recorded: ${meeting.title}` : `${fields.seat}: ${fields.state} (${meeting.title})` });
     } else if (action === 'reserve' || action === 'bind' || action === 'progress') {
-      const fields = payload as { id: string; ownerId?: string; workerId?: string; runId?: string; state?: string };
+      const fields = payload as { id: string; ownerId?: string; workerId?: string; runId?: string; state?: string; conversationId?: string };
       const request = current.requests.find(r => r.id === fields.id);
       if (!request || !request.seat || !current.company.seats.slice(0, 10).includes(request.seat)) throw new Error('Explicit configured seat required');
       if (action === 'reserve') {
@@ -268,6 +268,12 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
           execution.workerId = fields.workerId!; execution.runId = fields.runId!; execution.phase = 'admitted';
         } else {
           if (execution.workerId !== fields.workerId || execution.runId !== fields.runId) throw new Error('Worker identity mismatch');
+          if (fields.conversationId !== undefined) {
+            if (!fields.conversationId.trim() || fields.conversationId.length > 160 ||
+              (execution.conversationId && execution.conversationId !== fields.conversationId))
+              throw new Error('Broker worker conversation identity changed');
+            execution.conversationId = fields.conversationId;
+          }
           if (execution.phase === 'admitted' && fields.state === 'active') { execution.phase = 'running'; request.status = 'working'; }
         }
       }
@@ -276,7 +282,7 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
         action === 'bind' ? `Broker bound ${fields.workerId} to ${request.seat}` : `Broker state ${fields.state}` });
       current.activities.unshift({ id: randomUUID(), at: now, actor: 'marks-coo', kind: 'request', requestId: request.id, message: request.history.at(-1)!.note });
     } else if (action === 'authorize' || action === 'report' || action === 'confirm' || action === 'confirmDelegated') {
-      const fields = payload as { id: string; ownerId?: string; workerId: string; runId: string; reportId?: string; result?: string; evidence?: string; outcome?: 'completed'|'failed'; epoch?: number };
+      const fields = payload as { id: string; ownerId?: string; workerId: string; runId: string; conversationId?: string; reportId?: string; result?: string; evidence?: string; outcome?: 'completed'|'failed'; epoch?: number };
       const request = current.requests.find(row => row.id === fields.id);
       if (!request || !request.seat) throw new Error('Ticket has no assigned seat');
       if (action === 'confirmDelegated' && (current.delegation.mode !== 'delegated' ||
@@ -291,6 +297,12 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
       } else if (action === 'report') {
         const exec = request.execution;
         if (!exec || exec.workerId !== fields.workerId || exec.runId !== fields.runId || exec.mode !== 'live' || !['running','admitted'].includes(exec.phase)) throw new Error('Worker identity mismatch');
+        if (fields.conversationId !== undefined) {
+          if (!fields.conversationId.trim() || fields.conversationId.length > 160 ||
+            (exec.conversationId && exec.conversationId !== fields.conversationId))
+            throw new Error('Broker worker conversation identity changed');
+          exec.conversationId = fields.conversationId;
+        }
         if (exec.reportId) throw new Error('Ticket already reported');
         if (request.tokenBudget > 0 && request.tokensUsed > request.tokenBudget) throw new Error('Token budget exceeded');
         exec.phase = fields.outcome === 'completed' ? 'reported' : 'failed'; exec.reportId = fields.reportId!; exec.result = fields.result!; exec.evidence = fields.evidence!;

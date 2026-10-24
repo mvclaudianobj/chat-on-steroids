@@ -66,7 +66,7 @@ export const companyRequestSchema = z.object({
   tokensUsed: z.number().int().min(0).max(10_000_000), minutesUsed: z.number().int().min(0).max(525600),
   dueAt: tick.nullable(), status: companyStateNameSchema,
   raci: z.object({ responsible: actor, accountable: actor, consulted: z.array(actor).max(20), informed: z.array(actor).max(20) }).strict(),
-  execution: z.object({ mode: z.enum(['simulated','live']), phase: z.enum(['awaiting-authorization','admitted','running','reported','failed']), ownerId: z.string().uuid().nullable(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/).nullable(), runId: z.string().uuid().nullable(), reportId: z.string().max(100).nullable(), result: z.string().max(1200).nullable(), evidence: z.string().max(1200).nullable(), authorizedAt: tick.nullable() }).strict().optional(),
+  execution: z.object({ mode: z.enum(['simulated','live']), phase: z.enum(['awaiting-authorization','admitted','running','reported','failed']), ownerId: z.string().uuid().nullable(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/).nullable(), runId: z.string().uuid().nullable(), conversationId: safeText(160).optional(), reportId: z.string().max(100).nullable(), result: z.string().max(1200).nullable(), evidence: z.string().max(1200).nullable(), authorizedAt: tick.nullable() }).strict().optional(),
   /** COO receipt binds the exact worker report to a review. Absent on legacy tickets. */
   cooConfirmation: z.object({ actor: z.enum(['marks-coo','ceo']), at: tick, reportId: safeText(100), workerId: z.string().regex(/^worker-[1-9][0-9]*$/), evidence: safeText(400) }).strict().optional(),
   history: z.array(companyHistorySchema).max(300), createdAt: tick, updatedAt: tick
