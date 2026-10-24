@@ -4082,5 +4082,7 @@
   "No archived chats": "暂无归档聊天",
   "Search archived chats": "搜索归档聊天",
   "Restore chat to the main list": "将聊天恢复到主列表",
-  "Move chat to Archived without deleting its history": "将聊天移至归档而不删除历史记录"
+  "Move chat to Archived without deleting its history": "将聊天移至归档而不删除历史记录",
+  "Archived chats count": "已归档聊天数量",
+  "Authorize Company workers": "授权 Company 工作代理"
 }

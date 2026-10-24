@@ -4082,5 +4082,7 @@
   "No archived chats": "보관된 채팅이 없습니다",
   "Search archived chats": "보관된 채팅 검색",
   "Restore chat to the main list": "채팅을 기본 목록으로 복원",
-  "Move chat to Archived without deleting its history": "기록을 삭제하지 않고 보관함으로 이동"
+  "Move chat to Archived without deleting its history": "기록을 삭제하지 않고 보관함으로 이동",
+  "Archived chats count": "보관된 채팅 수",
+  "Authorize Company workers": "Company 작업자 승인"
 }

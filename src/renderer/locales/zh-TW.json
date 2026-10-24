@@ -4082,5 +4082,7 @@
   "No archived chats": "沒有封存的聊天",
   "Search archived chats": "搜尋封存的聊天",
   "Restore chat to the main list": "將聊天還原至主要清單",
-  "Move chat to Archived without deleting its history": "將聊天移至封存而不刪除歷史紀錄"
+  "Move chat to Archived without deleting its history": "將聊天移至封存而不刪除歷史紀錄",
+  "Archived chats count": "已封存聊天數量",
+  "Authorize Company workers": "授權 Company 工作代理"
 }

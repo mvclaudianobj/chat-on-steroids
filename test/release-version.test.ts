@@ -55,4 +55,13 @@ describe('GitHub release metadata', () => {
     expect(() => verifyReleaseVersion({ root })).toThrow(/changelog version/);
     expect(verifyReleaseVersion({ root, packageOnly: true })).toBe('2.1.37.2');
   });
+
+  it('allows an explicitly labeled higher Debian TEST revision without changing the app version or a release tag', () => {
+    const { root, put } = releaseFixture('2.1.45+3');
+    put('electron-builder.yml', '# localQaRebuild: 4\nbuildVersion: 2.1.45.3\nbuildNumber: 4\nextraMetadata:\n  version: 2.1.45.3\n');
+    expect(verifyReleaseVersion({ root })).toBe('2.1.45.3');
+    expect(() => verifyReleaseVersion({ root, tag: 'v2.1.45.3' })).toThrow(/builder revision/);
+    put('electron-builder.yml', 'buildVersion: 2.1.45.3\nbuildNumber: 4\nextraMetadata:\n  version: 2.1.45.3\n');
+    expect(() => verifyReleaseVersion({ root })).toThrow(/builder revision/);
+  });
 });

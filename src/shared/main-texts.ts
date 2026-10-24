@@ -65,6 +65,7 @@ export const MAIN_TEXTS = [
   'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.',
   'Keep checkout',
   'Remove checkout; preserve Git branch',
+  'Authorize Company workers',
   // The turn-completion notice when an answer has no text to show.
   'ChatGPT finished.',
   'Export encrypted Chat Marks vault',

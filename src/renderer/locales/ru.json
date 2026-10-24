@@ -4226,5 +4226,7 @@
   "No archived chats": "Нет архивных чатов",
   "Search archived chats": "Поиск архивных чатов",
   "Restore chat to the main list": "Вернуть чат в основной список",
-  "Move chat to Archived without deleting its history": "Переместить чат в архив без удаления истории"
+  "Move chat to Archived without deleting its history": "Переместить чат в архив без удаления истории",
+  "Archived chats count": "Количество архивированных чатов",
+  "Authorize Company workers": "Авторизовать работников Company"
 }

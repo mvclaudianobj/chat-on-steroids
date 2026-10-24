@@ -4,6 +4,7 @@ import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companySta
 import { activateRealCompany, restoreDemoCompany, getCompany, mutateCompany } from './company-store.js';
 import { createCompanyBroker } from './company-broker.js';
 import { createCompanyObserver } from './company-observability.js';
+import { mainText } from './main-texts.js';
 
 export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
@@ -46,7 +47,7 @@ export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void 
       const request = parsed.data;
       if (request.action === 'dispatch' || request.action === 'sendInvitations' || request.action === 'reviewBroker' || request.action === 'delegationGrant' || request.action === 'delegationRevoke' || request.action === 'activateReal' || request.action === 'restoreDemo') {
         const decision = await dialog.showMessageBox(window, {
-          type: 'warning', title: 'Authorize Company workers',
+          type: 'warning', title: mainText('Authorize Company workers'),
           message: request.action === 'activateReal' ? 'Preserve the complete demonstration in a local versioned backup and start an EMPTY real company?' :
             request.action === 'restoreDemo' ? 'Restore the demonstration backup? This is allowed only before any real company changes.' :
             request.action === 'dispatch' ? 'Start an actual ChatGPT worker for this assigned seat?' :

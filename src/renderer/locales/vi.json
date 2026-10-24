@@ -4082,5 +4082,7 @@
   "No archived chats": "Không có cuộc trò chuyện đã lưu trữ",
   "Search archived chats": "Tìm cuộc trò chuyện đã lưu trữ",
   "Restore chat to the main list": "Khôi phục cuộc trò chuyện về danh sách chính",
-  "Move chat to Archived without deleting its history": "Chuyển cuộc trò chuyện vào lưu trữ mà không xóa lịch sử"
+  "Move chat to Archived without deleting its history": "Chuyển cuộc trò chuyện vào lưu trữ mà không xóa lịch sử",
+  "Archived chats count": "Số cuộc trò chuyện đã lưu trữ",
+  "Authorize Company workers": "Cấp quyền cho nhân viên Company"
 }

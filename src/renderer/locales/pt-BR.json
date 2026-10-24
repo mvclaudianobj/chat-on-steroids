@@ -4178,5 +4178,7 @@
   "No archived chats": "Nenhum chat arquivado",
   "Search archived chats": "Pesquisar chats arquivados",
   "Restore chat to the main list": "Restaurar chat à lista principal",
-  "Move chat to Archived without deleting its history": "Mover chat para Arquivados sem excluir o histórico"
+  "Move chat to Archived without deleting its history": "Mover chat para Arquivados sem excluir o histórico",
+  "Archived chats count": "Quantidade de conversas arquivadas",
+  "Authorize Company workers": "Autorizar trabalhadores da Empresa"
 }

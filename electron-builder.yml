@@ -1,9 +1,10 @@
 appId: com.chatonsteroids.app
 productName: Chat Marks
 copyright: MIT licensed
-# Product revision 2.1.45.3; npm uses SemVer build metadata +3.
+# Product revision 2.1.45.3; this local QA rebuild bumps only Debian's package revision.
+# localQaRebuild: 4
 buildVersion: 2.1.45.3
-buildNumber: '3'
+buildNumber: '4'
 extraMetadata:
   version: 2.1.45.3
 

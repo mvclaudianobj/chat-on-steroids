@@ -4082,5 +4082,7 @@
   "No archived chats": "アーカイブ済みチャットはありません",
   "Search archived chats": "アーカイブ済みチャットを検索",
   "Restore chat to the main list": "チャットをメイン一覧に復元",
-  "Move chat to Archived without deleting its history": "履歴を削除せずアーカイブに移動"
+  "Move chat to Archived without deleting its history": "履歴を削除せずアーカイブに移動",
+  "Archived chats count": "アーカイブ済みチャットの件数",
+  "Authorize Company workers": "Company ワーカーを承認"
 }

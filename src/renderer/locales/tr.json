@@ -4130,5 +4130,7 @@
   "No archived chats": "Arşivlenen sohbet yok",
   "Search archived chats": "Arşivlenen sohbetleri ara",
   "Restore chat to the main list": "Sohbeti ana listeye geri yükle",
-  "Move chat to Archived without deleting its history": "Geçmişi silmeden sohbeti arşive taşı"
+  "Move chat to Archived without deleting its history": "Geçmişi silmeden sohbeti arşive taşı",
+  "Archived chats count": "Arşivlenmiş sohbet sayısı",
+  "Authorize Company workers": "Company çalışanlarını yetkilendir"
 }
