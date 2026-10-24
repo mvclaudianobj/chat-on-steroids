@@ -181,6 +181,19 @@ app.whenReady().then(async()=>{
   assert.ok(reqs.tries.some(e=>e.route.endsWith('/audio/transcriptions')&&e.key==='fallback'));
   assert.ok((await js('window.jarvisHardwareFake.stops'))>=1);
   const first=JSON.stringify({ipc:'real preload+jarvis main',audio:reqs.audio.length,spoken:reqs.speech,sends:reqs.sends.length,fallback:reqs.tries.filter(e=>e.key==='fallback').length});
+  // Opt-in P0 regression: a normal typed send must also trigger Jarvis TTS,
+  // with no extra microphone capture. Keep independent from the legacy mic gate
+  // while this behavior is being implemented by the Jarvis owner.
+  if(process.env.JARVIS_TYPED_TTS_REGRESSION==='1'){
+    const beforeAudio=reqs.audio.length;
+    const input=await js('document.getElementById("chatInput")');
+    assert.ok(input,'normal chat composer must exist');
+    await js(`(()=>{const el=document.getElementById('chatInput');el.value='Mensagem digitada para Jarvis';el.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('chatSend').click();})()`);
+    await until('window.api && document.getElementById("chatInput")',5000);
+    assert.equal(reqs.audio.length,beforeAudio,'typed message must not start STT');
+    await until('window.jarvisHardwareFake.plays>=2',5000);
+    assert.equal(reqs.speech.length,2,'typed response should be voiced once');
+  }
   // Even a configured provider that fails both keys must not queue a second native input.
   failedFallback=true;
   await js('document.getElementById("chatInput").dispatchEvent(new KeyboardEvent("keydown",{code:"F8",bubbles:true}))');
