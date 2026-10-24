@@ -96,6 +96,7 @@ export async function importNotificationSettings(value: unknown): Promise<Notifi
 export interface OutboundNotice { event: NotificationEvent; title: string; project: string; excerpt?: string; }
 const lastSent = new Map<string, number>();
 const counts = new Map<string, { at: number; count: number }>();
+const inFlight = new Set<string>();
 const LIMIT_PER_HOUR = 30;
 /** Single bounded aggregation owner for bursts of many simultaneous turn completions. */
 const batches = new Map<NotificationEvent, { notices: OutboundNotice[]; timer: ReturnType<typeof setTimeout> }>();
@@ -177,6 +178,7 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
     if (!options.test && !choice.events[notice.event]) { logInfo(`Notification ${channel}: skipped ${notice.event} (event unsubscribed)`); continue; }
     if (!choice.destinations.length) { logInfo(`Notification ${channel}: skipped ${notice.event} (no destinations)`); continue; }
     const fingerprint = `${channel}:${notice.event}`;
+    if (!options.test && inFlight.has(fingerprint)) continue;
     const bucket = counts.get(channel);
     if (!options.test && bucket && now - bucket.at < 3600000 && bucket.count + choice.destinations.length > LIMIT_PER_HOUR) {
       logInfo(`Notification ${channel}: skipped ${notice.event} (hourly limit)`);
@@ -186,6 +188,8 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
       logInfo(`Notification ${channel}: skipped ${notice.event} (throttled)`);
       continue;
     }
+    if (!options.test) inFlight.add(fingerprint);
+    try {
     const values = { title: notice.title.slice(0, 180), project: notice.project.slice(0, 160), event: notice.event, excerpt: choice.includeExcerpt ? (notice.excerpt ?? '').slice(0, 160) : '' };
     const title = fill(choice.titleTemplate, values);
     const body = fill(choice.bodyTemplate, values);
@@ -249,6 +253,9 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
       counts.set(channel, { at: bucket && now - bucket.at < 3600000 ? bucket.at : now, count: (bucket && now - bucket.at < 3600000 ? bucket.count : 0) + choice.destinations.length });
     }
     logInfo(`Notification ${channel}: ${options.test ? 'test' : notice.event} sent to ${choice.destinations.length} destination(s)`);
+    } finally {
+      if (!options.test) inFlight.delete(fingerprint);
+    }
   }
   return delivered;
 }

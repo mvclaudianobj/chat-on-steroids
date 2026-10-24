@@ -40,6 +40,44 @@ describe('notification center outbound channels', () => {
     settings.channels['whatsapp-web'].enabled = false;
     await saveNotificationSettings(settings);
   });
+  it('does not duplicate a WhatsApp notice while an identical delivery is still in flight', async () => {
+    const settings = structuredClone(await notificationSettings());
+    for (const channel of Object.values(settings.channels)) channel.enabled = false;
+    settings.channels['whatsapp-web'] = {
+      ...settings.channels['whatsapp-web'], enabled: true,
+      events: { ...settings.channels['whatsapp-web'].events, 'turn-completed': true },
+      destinations: ['5511999999999']
+    };
+    await saveNotificationSettings(settings);
+    let finishSend: () => void = () => undefined;
+    const pending = new Promise<void>(resolve => { finishSend = resolve; });
+    vi.mocked(sendWhatsAppWeb).mockImplementation(async () => pending);
+    const first = dispatchNotice(event, { now: 9_000_000 });
+    await vi.waitFor(() => expect(sendWhatsAppWeb).toHaveBeenCalledTimes(1));
+    const second = dispatchNotice(event, { now: 9_000_001 });
+    try {
+      await new Promise(resolve => setTimeout(resolve, 20));
+      expect(sendWhatsAppWeb).toHaveBeenCalledTimes(1);
+    } finally {
+      finishSend();
+      await Promise.allSettled([first, second]);
+    }
+    expect(await Promise.all([first, second])).toEqual([1, 0]);
+  });
+  it('releases a failed WhatsApp delivery for another attempt', async () => {
+    const settings = structuredClone(await notificationSettings());
+    for (const channel of Object.values(settings.channels)) channel.enabled = false;
+    settings.channels['whatsapp-web'] = {
+      ...settings.channels['whatsapp-web'], enabled: true,
+      events: { ...settings.channels['whatsapp-web'].events, 'turn-completed': true },
+      destinations: ['5511888888888']
+    };
+    await saveNotificationSettings(settings);
+    vi.mocked(sendWhatsAppWeb).mockRejectedValueOnce(new Error('synthetic socket failure')).mockResolvedValueOnce(undefined);
+    await expect(dispatchNotice(event, { now: 10_000_000 })).rejects.toMatchObject({ failure: { code: 'whatsapp_disconnected' } });
+    expect(await dispatchNotice(event, { now: 10_000_001 })).toBe(1);
+    expect(sendWhatsAppWeb).toHaveBeenCalledTimes(2);
+  });
   it('uses per-channel events and excludes chat excerpts by default', async () => {
     const settings = structuredClone(await notificationSettings());
     settings.channels.telegram = { ...settings.channels.telegram, enabled: true, events: { ...settings.channels.telegram.events, 'turn-completed': true }, destinations: ['1234', '2345'], titleTemplate: '{title}', bodyTemplate: '{project} {excerpt}' };
