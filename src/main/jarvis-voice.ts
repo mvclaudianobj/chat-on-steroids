@@ -463,10 +463,21 @@ export async function streamJarvisVoice(
   const reader = response.body.getReader();
   let bytes = 0;
   let firstByteMs = -1;
+  const aborted = () => new DOMException('Speech interrupted.', 'AbortError');
   try {
     for (;;) {
       signal.throwIfAborted();
-      const { done, value } = await reader.read();
+      // A broken provider can leave reader.read() unresolved indefinitely.
+      // Cancelling the turn must not wait for that provider to cooperate.
+      const { done, value } = await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+        if (signal.aborted) { reject(aborted()); return; }
+        const onAbort = () => reject(aborted());
+        signal.addEventListener('abort', onAbort, { once: true });
+        void reader.read().then(
+          value => { signal.removeEventListener('abort', onAbort); resolve(value); },
+          error => { signal.removeEventListener('abort', onAbort); reject(error); }
+        );
+      });
       if (done) break;
       signal.throwIfAborted();
       bytes += value.byteLength;
@@ -478,7 +489,11 @@ export async function streamJarvisVoice(
         emit({ requestId, type: 'chunk', bytes: value.slice(offset, offset + 64 * 1024) });
       }
     }
-  } catch (error) { await reader.cancel().catch(() => undefined); throw error; }
+  } catch (error) {
+    // reader.cancel() itself may never settle for a wedged custom stream.
+    void reader.cancel().catch(() => undefined);
+    throw error;
+  }
   signal.throwIfAborted();
   if (!bytes) throw new Error('Voice provider speech returned no audio.');
   emit({ requestId, type: 'end' });

@@ -289,6 +289,24 @@ describe('Jarvis voice provider (fake OpenAI-compatible server)', () => {
     await expect(run).rejects.toThrow();
     expect(events).toEqual(['start', 'chunk']);
   });
+  it('exits promptly when a streaming provider stalls mid-body and the turn is cancelled', async () => {
+    keys();
+    const turn = new AbortController();
+    configureJarvisVoiceForTests({ fetch: async () => new Response(new ReadableStream<Uint8Array>({
+      start(stream) { stream.enqueue(new Uint8Array([73, 68, 51])); }
+      // Deliberately never close or release the following reader.read().
+    }), { headers: { 'content-type': 'audio/mpeg' } }) });
+    const events: string[] = [];
+    const run = streamJarvisVoice(config(), 'Turno cancelado.', 'stall-turn', turn.signal, event => {
+      events.push(event.type);
+      if (event.type === 'chunk') queueMicrotask(() => turn.abort());
+    });
+    await expect(Promise.race([
+      run.then(() => 'completed', () => 'cancelled'),
+      new Promise<string>(resolve => setTimeout(() => resolve('stalled'), 100))
+    ])).resolves.toBe('cancelled');
+    expect(events).toEqual(['start', 'chunk']);
+  });
 
   it('never sends a key bound to another origin', async () => {
     keys('https://other.example');
