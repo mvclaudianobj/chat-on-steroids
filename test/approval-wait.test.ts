@@ -89,6 +89,29 @@ describe('approval card episodes', () => {
     expect(approvalCardWaiting('chat', 60_000)).toBe(false);
   });
 
+  it('FAIL-FIRST: a fresh same-word host card after observed dismissal starts a new consent episode', async () => {
+    // Reproduction of "Permitir uma vez volta toda hora": the host may ask again
+    // for another tool invocation with identical words. A 4 s redraw tolerance
+    // is valid while an approval is unresolved, but a confirmed dismissal must
+    // fence the earlier answer and start a distinct consent episode.
+    const first = { id:'card-first', lines:['Allow ChatGPT to use Chat Marks Core?', 'Run a local command.'], allow:true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, first);
+    const answer = requestApprovalAnswer('chat', first.id, 'allow', 1_100);
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) throw new Error('Unexpected missing synthetic answer');
+    expect(settleApprovalAnswer('chat', answer.token, 'dismissed')).toBe(true);
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    await noteApprovalCard('chat', true, 'session', deps, 2_500, { ...first, id:'card-second' });
+    expect(approvalCardView('chat', 2_500)).toMatchObject({ id:'card-second', answer:null });
+    const waitingRows = deps.rows.filter(row=>row[2]===APPROVAL_WAITING_TEXT);
+    expect(waitingRows).toHaveLength(2);
+    // Unlike a flicker of the same unanswered card, two separate successful
+    // dismissals belong to two independently reviewable consent episodes.
+    expect(waitingRows[1]![1]).not.toBe(waitingRows[0]![1]);
+    expect(requestApprovalAnswer('chat', 'card-first', 'allow', 2_600)).toEqual({ ok:false, error:'card_changed' });
+    expect(requestApprovalAnswer('chat', 'card-second', 'allow', 2_600).ok).toBe(true);
+  });
+
   it('keeps an answer when a different card follows it, or the same one only after a while', async () => {
     const first = { id: 'a', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Run one command.'], allow: true };
     const second = { id: 'b', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Write one file.'], allow: true };
