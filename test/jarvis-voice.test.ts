@@ -331,6 +331,27 @@ describe('Jarvis provider routing across Gemini and two G4F accounts', () => {
       { origin: 'https://g4f-test.example', key: 'Bearer fixture-g4f1' }
     ]);
   });
+  it('prevents prefetch concurrency from selecting different providers for one answer', async () => {
+    const id = crypto.randomUUID();
+    const seen: string[] = [];
+    let completeFirst: (() => void) | undefined;
+    const blocked = new Promise<void>(resolve => { completeFirst = resolve; });
+    configureJarvisVoiceForTests({ credential: async slot => slot.startsWith('g4f') ? { header: 'Authorization', value: `fixture-${slot}` } : null,
+      fetch: async (_url, init) => {
+        const key = (init?.headers as Record<string, string>).Authorization ?? '';
+        seen.push(key);
+        if (seen.length === 1) await blocked;
+        return new Response(Buffer.from('ID3audio'), { headers: { 'content-type': 'audio/mpeg' } });
+      } });
+    const first = speakJarvisVoice(google(), 'Parte um', signal(), routing('g4f-first'), id);
+    await vi.waitFor(() => expect(seen).toHaveLength(1));
+    const second = speakJarvisVoice(google(), 'Parte dois', signal(), routing('g4f-first'), id);
+    await new Promise(resolve => setTimeout(resolve, 5));
+    expect(seen).toHaveLength(1);
+    completeFirst!();
+    await Promise.all([first, second]);
+    expect(seen).toEqual(['Bearer fixture-g4f1', 'Bearer fixture-g4f1']);
+  });
   it('does not change speaker/provider within a pinned answer after a later failure', async () => {
     const id = crypto.randomUUID();
     const seen: string[] = [];

@@ -326,6 +326,7 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
 type RoutedVoice = { config: JarvisVoiceConfig; slot: JarvisVoiceKeySlot; id: string };
 const routePinned = new Map<string, { route: RoutedVoice; until: number }>();
 const routeCooldown = new Map<string, number>();
+const routeSelectionInFlight = new Map<string, Promise<void>>();
 const FAILURE_COOLDOWN_MS = 30_000;
 const GROUP_TTL_MS = 120_000;
 function voiceCandidates(config: JarvisVoiceConfig, routing: JarvisVoiceRouting): RoutedVoice[] {
@@ -357,6 +358,21 @@ export async function jarvisVoiceRouteStatus(routing: JarvisVoiceRouting): Promi
 async function routedSpeechResponse(config: JarvisVoiceConfig, text: string, signal: AbortSignal,
   routing?: JarvisVoiceRouting, groupId?: string): Promise<{ mime: string; response: Response }> {
   if (!routing || routing.mode === 'off') return speechResponse(config, text, signal);
+  const previous = groupId ? routeSelectionInFlight.get(groupId) : undefined;
+  if (previous) { await previous; signal.throwIfAborted(); }
+  // Only the first simultaneous segment chooses the provider. Later segments
+  // wait until that decision is pinned, so prefetch cannot mix voices.
+  let release: (() => void) | undefined;
+  const lock = !previous && groupId && !routePinned.has(groupId) ? new Promise<void>(resolve => { release = resolve; }) : null;
+  if (lock && groupId) routeSelectionInFlight.set(groupId, lock);
+  try { return await selectSpeechResponse(config, text, signal, routing, groupId); }
+  finally {
+    if (groupId && lock && routeSelectionInFlight.get(groupId) === lock) routeSelectionInFlight.delete(groupId);
+    release?.();
+  }
+}
+async function selectSpeechResponse(config: JarvisVoiceConfig, text: string, signal: AbortSignal,
+  routing: JarvisVoiceRouting, groupId?: string): Promise<{ mime: string; response: Response }> {
   const candidates = voiceCandidates(config, routing);
   if (!candidates.length) return speechResponse(config, text, signal);
   const now = Date.now();
