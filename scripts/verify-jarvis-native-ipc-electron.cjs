@@ -109,7 +109,8 @@ const synthetic = {
         {seq:100,kind:'assistant_message',turnId:'not-jarvis-turn',messageId:'wrong',message:{text:'Do not speak a different turn.',truncated:false,chars:30},final:false},
         {seq:101,kind:'user_message',inputId:payload.id,inputDelivery:'offered',turnId:'unconfirmed',message:{text:payload.text,truncated:false,chars:payload.text.length}},
         {seq:102,kind:'user_message',messageId:'confirmed-question',inputId:payload.id,inputDelivery:'confirmed',turnId:'native-user-turn',message:{text:payload.text,truncated:false,chars:payload.text.length}},
-        {seq:103,kind:'assistant_message',turnId:'confirmed-turn',messageId:'confirmed-answer',message:{text:'A resposta certa veio do ChatGPT. Continua aqui',truncated:false,chars:49},final:false}
+        {seq:103,kind:'assistant_message',turnId:'confirmed-turn',messageId:'confirmed-answer',message:{text:'A resposta certa veio do ChatGPT.',truncated:false,chars:33},final:true},
+        {seq:104,kind:'turn_end',turnId:'confirmed-turn',outcome:'completed'}
       );
       fakeWindow.composerFixture.summary.timelineTurns={
         'confirmed-turn':{origin:102,time:Date.now(),questionId:'confirmed-question'}
@@ -206,8 +207,7 @@ app.whenReady().then(async()=>{
     await js(`(()=>{const el=document.getElementById('chatInput');el.value='Mensagem digitada para Jarvis';el.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('chatSend').click();})()`);
     await until('window.api && document.getElementById("chatInput")',5000);
     assert.equal(reqs.audio.length,beforeAudio,'typed message must not start STT');
-    try { await until('window.jarvisHardwareFake.plays>=2',5000); }
-    catch(error){console.error('typed synthetic evidence',JSON.stringify({sends:reqs.sends.length,speech:reqs.speech,events:fakeWindow.composerFixture.events.filter(e=>e.seq>199),status:await js('document.getElementById("jarvisSettingsStatus").textContent')}));throw error;}
+    await until('window.jarvisHardwareFake.plays>=2',5000);
     assert.equal(reqs.speech.length,2,'typed response should be voiced once');
   }
   // Even a configured provider that fails both keys must not queue a second native input.
