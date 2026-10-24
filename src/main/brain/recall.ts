@@ -11,7 +11,8 @@ import { redactSecretText } from '../redaction.js';
 import { redactVaultText } from '../marks-vault-redaction.js';
 import { brainSearch, brainSetRemote, brainStatus } from './store.js';
 import { getBrainSettings } from './settings.js';
-import { errorText, ProviderError, vaultCredential, checkTransport, type RemoteHit } from './providers/http.js';
+import { errorText, ProviderError, type RemoteHit } from './providers/http.js';
+import { listVault, vaultStatus } from '../marks-vault.js';
 import { aiMemoryRecall, aiMemorySave, aiMemoryStatus } from './providers/ai-memory.js';
 import { OPENVIKING_START_HINT, openVikingRecall, openVikingStatus } from './providers/openviking.js';
 import { marksApiDelete, marksApiHealth, marksApiRecall, marksApiSave } from './providers/marks-remote.js';
@@ -132,13 +133,16 @@ export async function providerStatuses(probe = true): Promise<BrainProviderStatu
   const settings = getBrainSettings();
   const local = await brainStatus();
   const rows: BrainProviderStatus[] = [{ id: 'local', label: PROVIDER_LABELS.local, enabled: true, state: local.available ? 'ok' : 'error', count: local.count, ...(local.available ? {} : { detail: 'Local database unavailable' }) }];
+  // Show persistence by entry name, independent of whether its origin can be used
+  // by today's provider URL. A locked/damaged vault is unknown, never "no key".
+  let names: Set<string> | null = null;
+  try {
+    if ((await vaultStatus()).ready) names = new Set((await listVault()).map(entry => entry.name));
+  } catch { /* Vault presence is unavailable. */ }
   for (const id of BRAIN_PROVIDER_IDS) {
     const config = settings.providers[id];
     const base: BrainProviderStatus = { id, label: PROVIDER_LABELS[id], enabled: config.enabled, state: 'disabled', url: config.url };
-    try {
-      const url = checkTransport(config.url, id === 'marksApi' ? settings.providers.marksApi.insecureHttp : false);
-      base.hasKey = !!(await vaultCredential(config.secret, url.origin).catch(() => null));
-    } catch { base.hasKey = false; }
+    if (names !== null) base.hasKey = names.has(config.secret);
     if (!config.enabled || !probe) { rows.push(base); continue; }
     try {
       if (id === 'aiMemory') {

@@ -187,6 +187,26 @@ describe('Brain H1b providers', () => {
     expect((await providerStatuses(false)).filter(row => row.id !== 'local').map(row => row.state)).toEqual(['disabled', 'disabled', 'disabled']);
   });
 
+  it('shows a persisted key even when the provider URL changes, without claiming it can authenticate', async () => {
+    configure({ ai: { secret: 'brain.marks-memories' }, ov: { enabled: false }, marks: { enabled: false } });
+    const row = (await providerStatuses(false)).find(item => item.id === 'aiMemory');
+    expect(row?.hasKey).toBe(true);
+    expect(row?.state).toBe('disabled');
+  });
+
+  it('does not mistake an unreadable persisted vault for absent Brain credentials', async () => {
+    configure();
+    const existingKey = localKey;
+    localKey = null; // Simulate a missing OS key, leaving the synthetic vault file intact.
+    try {
+      const rows = await providerStatuses(false);
+      for (const id of ['aiMemory', 'openviking', 'marksApi']) {
+        expect(rows.find(item => item.id === id)?.hasKey).toBeUndefined();
+      }
+    } finally { localKey = existingKey; }
+    expect((await providerStatuses(false)).find(row => row.id === 'aiMemory')?.hasKey).toBe(true);
+  });
+
   it('budgets merged recall by count and characters, round-robin across sources', () => {
     const item = (source: 'local' | 'aiMemory', n: number) => ({ source, id: `${source}:${n}`, content: 'x'.repeat(400), contentHash: `${source}${n}`.padEnd(64, '0') });
     const merged = mergeRecall([[item('local', 1), item('local', 2), item('local', 3)], [item('aiMemory', 1)]], 3, 1000);

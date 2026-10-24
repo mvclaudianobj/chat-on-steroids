@@ -376,11 +376,11 @@ function providerPanel(api: AppApi, changed: () => void): { paint: (settings: Br
   function paintState(row: BrainProviderStatus): void {
     const state = stateNodes.get(row.id); const key = keyNodes.get(row.id);
     if (state) { state.dataset.state = row.state; state.textContent = `${providerStateText(row)}${row.detail ? ` · ${row.detail}` : ''}`; }
-    if (key) key.textContent = row.hasKey ? t('Key in vault') : t('No key');
+    if (key) key.textContent = t(row.hasKey === undefined ? 'Credential status unavailable' : row.hasKey ? 'Key in vault' : 'No key');
     const input = keyInputs.get(row.id);
     if (input) {
       input.placeholder = row.hasKey ? '••••••••' : '';
-      input.setAttribute('aria-description', t(row.hasKey ? 'Key in vault' : 'No key'));
+      input.setAttribute('aria-description', t(row.hasKey === undefined ? 'Credential status unavailable' : row.hasKey ? 'Key in vault' : 'No key'));
     }
   }
   return {
