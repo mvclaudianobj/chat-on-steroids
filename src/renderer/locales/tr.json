@@ -4132,5 +4132,20 @@
   "Restore chat to the main list": "Sohbeti ana listeye geri yükle",
   "Move chat to Archived without deleting its history": "Geçmişi silmeden sohbeti arşive taşı",
   "Archived chats count": "Arşivlenmiş sohbet sayısı",
-  "Authorize Company workers": "Company çalışanlarını yetkilendir"
+  "Authorize Company workers": "Company çalışanlarını yetkilendir",
+  "Local Company permissions": "Şirket yerel izinleri",
+  "Local grants never bypass ChatGPT host approvals or operating-system permissions.": "Yerel izinler ChatGPT veya işletim sistemi onaylarını atlamaz.",
+  "Configure recurring approvals in ChatGPT settings; local grants cannot change host approval policy.": "Tekrarlanan onayları ChatGPT ayarlarından yapılandırın.",
+  "Locally attested identity": "Yerel olarak doğrulanmış kimlik",
+  "Local authorization unavailable": "Yerel yetkilendirme kullanılamıyor",
+  "Active local grants": "Etkin yerel izinler",
+  "Revoke local grant": "Yerel izni iptal et",
+  "No active local grants": "Etkin yerel izin yok",
+  "Local grant authorization options": "Yerel yetkilendirme seçenekleri",
+  "Authorize this task": "Bu göreve izin ver",
+  "Always authorize THIS agent for selected local scope": "BU ajana seçilen yerel kapsamda her zaman izin ver",
+  "Always authorize COO for all LOCAL scopes": "COO için tüm YEREL kapsamları her zaman onayla",
+  "A locally attested broker identity is required.": "Yerel doğrulanmış aracı kimliği gereklidir.",
+  "Local grant audit": "Yerel izin denetimi",
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Üç eşdeğer istek. Genişletme otomatik onaylanmaz."
 }

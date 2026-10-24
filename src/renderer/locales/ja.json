@@ -4084,5 +4084,20 @@
   "Restore chat to the main list": "チャットをメイン一覧に復元",
   "Move chat to Archived without deleting its history": "履歴を削除せずアーカイブに移動",
   "Archived chats count": "アーカイブ済みチャットの件数",
-  "Authorize Company workers": "Company ワーカーを承認"
+  "Authorize Company workers": "Company ワーカーを承認",
+  "Local Company permissions": "企業のローカル権限",
+  "Local grants never bypass ChatGPT host approvals or operating-system permissions.": "ローカル権限はChatGPTやOSの承認を省略しません。",
+  "Configure recurring approvals in ChatGPT settings; local grants cannot change host approval policy.": "継続的な承認はChatGPTの設定で管理してください。",
+  "Locally attested identity": "ローカルで認証されたID",
+  "Local authorization unavailable": "ローカル承認は利用できません",
+  "Active local grants": "有効なローカル権限",
+  "Revoke local grant": "ローカル権限を取り消す",
+  "No active local grants": "有効な権限はありません",
+  "Local grant authorization options": "ローカル承認の選択肢",
+  "Authorize this task": "このタスクを承認",
+  "Always authorize THIS agent for selected local scope": "このエージェントの選択範囲を常に承認",
+  "Always authorize COO for all LOCAL scopes": "COOのすべてのローカル範囲を常に承認",
+  "A locally attested broker identity is required.": "ローカルで認証されたブローカーIDが必要です。",
+  "Local grant audit": "ローカル権限の監査",
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "同じ依頼が3件あります。拡大は別途承認が必要です。"
 }

@@ -5,7 +5,8 @@ import { activateRealCompany, restoreDemoCompany, getCompany, mutateCompany } fr
 import { createCompanyBroker } from './company-broker.js';
 import { createCompanyObserver } from './company-observability.js';
 import { mainText } from './main-texts.js';
-import { companyLocalConsentCopy, localGrantDecision, readLocalCompanyGrants, recordLocalCompanyRequest, revokeLocalCompanyGrant } from './company-local-grants.js';
+import { companyLocalConsentCopy, localGrantDecision, readLocalCompanyGrants, recordLocalCompanyRequest, revokeLocalCompanyGrant,
+  type CompanyLocalAttestation } from './company-local-grants.js';
 
 export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
@@ -44,8 +45,11 @@ export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('seat'), payload: z.object({ id: z.string().uuid(), seat: companySeatSchema.nullable() }).strict() }).strict()
 ]);
 export type CompanyIpcRequest = z.infer<typeof companyIpcSchema>;
-export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void {
-  // Caller must initialize the persistent userData before registering this handler.
+export function registerCompanyIpc(
+  getWindow: () => BrowserWindow | null,
+  /** Only main-process, locally verified attestation can supply this. Never pass renderer/broker text. */
+  resolveLocalAttestation: () => Promise<CompanyLocalAttestation | null> = async () => null
+): void {
   const broker = createCompanyBroker();
   const observer = createCompanyObserver();
   ipcMain.handle('marksCompany:request', async (event, payload: unknown) => {
@@ -57,9 +61,25 @@ export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void 
     try {
       if (parsed.data.action === 'authorize' || parsed.data.action === 'report' || parsed.data.action === 'confirm' || parsed.data.action === 'attendance') return { ok: false, error: 'Broker/COO identity and evidence verification are not yet connected; operation refused' };
       const request = parsed.data;
-      if (request.action === 'localGrants') return { ok: true, data: await readLocalCompanyGrants() };
+      if (request.action === 'localGrants') {
+        const ledger = await readLocalCompanyGrants();
+        const proof = await resolveLocalAttestation();
+        return { ok: true, data: { ...ledger, authority: {
+          verified: proof?.local === true && proof.verified === true,
+          subject: proof?.local === true && proof.verified === true ? proof.subject : null,
+          reason: proof?.local === true && proof.verified === true ? '' :
+            'External broker does not provide locally attested Company identity. Local grants are disabled.'
+        } } };
+      }
       if (request.action === 'localGrantRevoke') return { ok: true, data: await revokeLocalCompanyGrant(request.payload.id) };
       if (request.action === 'localGrantRequest') {
+        const proof = await resolveLocalAttestation();
+        if (!proof || proof.local !== true || proof.verified !== true ||
+            JSON.stringify(proof.subject) !== JSON.stringify(request.payload.subject) ||
+            (request.payload.mode === 'coo' && proof.subject.kind !== 'coo') ||
+            (request.payload.mode === 'agent' && proof.subject.kind !== 'worker')) {
+          return { ok: false, error: 'No locally attested Company identity; persistent grant refused' };
+        }
         const copy = companyLocalConsentCopy(request.payload.mode, request.payload.scope);
         const frequency = await recordLocalCompanyRequest(request.payload);
         const decision = await dialog.showMessageBox(window, { type: 'warning', title: copy.title,
@@ -68,9 +88,12 @@ export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void 
           buttons: ['Cancelar', 'Autorizar'], defaultId: 0, cancelId: 0, noLink: true });
         if (decision.response !== 1 || window.isDestroyed() || event.sender !== window.webContents ||
           event.senderFrame !== window.webContents.mainFrame) return { ok: false, error: 'Explicit consent required' };
-        // The existing external broker has no attested local role principal. A renderer's
-        // subject is a request, not proof; keep this boundary closed until wired to local attestation.
-        const result = await localGrantDecision({ ...request.payload, attestation: null, consent: true });
+        // One trusted local proof is rechecked after the native dialog because a revocation
+        // or switch of worker/run while the dialog is open must invalidate the grant.
+        const stillVerified = await resolveLocalAttestation();
+        const result = await localGrantDecision({ ...request.payload,
+          attestation: stillVerified && JSON.stringify(stillVerified.subject) === JSON.stringify(proof.subject) ? stillVerified : null,
+          consent: true });
         return result.authorized ? { ok: true, data: result } :
           { ok: false, error: 'No locally attested Company identity; persistent grant refused' };
       }

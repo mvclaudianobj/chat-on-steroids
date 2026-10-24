@@ -17,10 +17,17 @@ const request = z.object({ requestId: z.string().uuid(), at: z.number().int().no
 const ledgerSchema = z.object({ version: z.literal(1), epoch: z.number().int().nonnegative(),
   grants: z.array(grant).max(500), audit: z.array(audit).max(2000),
   requests: z.array(request).max(1000).default([]) }).strict();
-type Subject = z.infer<typeof subject>;
-type Scope = z.infer<typeof scope>;
-type Ledger = z.infer<typeof ledgerSchema>;
-type Attestation = { local: true; verified: true; subject: Subject };
+export type CompanyLocalSubject = z.infer<typeof subject>;
+export type CompanyLocalScope = z.infer<typeof scope>;
+export type CompanyLocalLedger = z.infer<typeof ledgerSchema>;
+export type CompanyLocalAttestation = { local: true; verified: true; subject: CompanyLocalSubject };
+type Subject = CompanyLocalSubject;
+type Scope = CompanyLocalScope;
+type Ledger = CompanyLocalLedger;
+type Attestation = CompanyLocalAttestation;
+export type CompanyLocalGrantsView = Ledger & {
+  authority: { verified: boolean; subject: CompanyLocalSubject | null; reason: string };
+};
 let directory = '';
 let queue: Promise<unknown> = Promise.resolve();
 export function initCompanyLocalGrants(userData: string): void { directory = path.join(userData, 'company-local-grants'); queue = Promise.resolve(); }

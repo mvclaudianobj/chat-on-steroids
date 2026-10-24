@@ -4084,5 +4084,20 @@
   "Restore chat to the main list": "Khôi phục cuộc trò chuyện về danh sách chính",
   "Move chat to Archived without deleting its history": "Chuyển cuộc trò chuyện vào lưu trữ mà không xóa lịch sử",
   "Archived chats count": "Số cuộc trò chuyện đã lưu trữ",
-  "Authorize Company workers": "Cấp quyền cho nhân viên Company"
+  "Authorize Company workers": "Cấp quyền cho nhân viên Company",
+  "Local Company permissions": "Quyền cục bộ của Công ty",
+  "Local grants never bypass ChatGPT host approvals or operating-system permissions.": "Quyền cục bộ không bỏ qua phê duyệt ChatGPT hoặc hệ điều hành.",
+  "Configure recurring approvals in ChatGPT settings; local grants cannot change host approval policy.": "Thiết lập phê duyệt lặp lại trong ChatGPT.",
+  "Locally attested identity": "Danh tính được xác thực cục bộ",
+  "Local authorization unavailable": "Không thể cấp quyền cục bộ",
+  "Active local grants": "Quyền cục bộ đang có",
+  "Revoke local grant": "Thu hồi quyền cục bộ",
+  "No active local grants": "Không có quyền cục bộ nào",
+  "Local grant authorization options": "Tùy chọn cấp quyền cục bộ",
+  "Authorize this task": "Cho phép tác vụ này",
+  "Always authorize THIS agent for selected local scope": "Luôn cho phép tác nhân NÀY trong phạm vi cục bộ đã chọn",
+  "Always authorize COO for all LOCAL scopes": "Luôn cho phép COO mọi phạm vi CỤC BỘ",
+  "A locally attested broker identity is required.": "Cần danh tính môi giới được xác thực cục bộ.",
+  "Local grant audit": "Nhật ký quyền cục bộ",
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Ba yêu cầu tương đương. Mở rộng không được tự động phê duyệt."
 }

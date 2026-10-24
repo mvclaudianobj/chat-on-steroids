@@ -4084,5 +4084,20 @@
   "Restore chat to the main list": "将聊天恢复到主列表",
   "Move chat to Archived without deleting its history": "将聊天移至归档而不删除历史记录",
   "Archived chats count": "已归档聊天数量",
-  "Authorize Company workers": "授权 Company 工作代理"
+  "Authorize Company workers": "授权 Company 工作代理",
+  "Local Company permissions": "公司本地权限",
+  "Local grants never bypass ChatGPT host approvals or operating-system permissions.": "本地权限不会绕过 ChatGPT 或操作系统审批。",
+  "Configure recurring approvals in ChatGPT settings; local grants cannot change host approval policy.": "请在 ChatGPT 设置中配置重复审批。",
+  "Locally attested identity": "本地已验证身份",
+  "Local authorization unavailable": "本地授权不可用",
+  "Active local grants": "有效的本地授权",
+  "Revoke local grant": "撤销本地授权",
+  "No active local grants": "没有有效授权",
+  "Local grant authorization options": "本地授权选项",
+  "Authorize this task": "授权此任务",
+  "Always authorize THIS agent for selected local scope": "始终授权此代理的指定本地范围",
+  "Always authorize COO for all LOCAL scopes": "始终授权 COO 的所有本地范围",
+  "A locally attested broker identity is required.": "需要本地验证的代理身份。",
+  "Local grant audit": "本地授权审计",
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "发现三次相同请求。扩大范围不会自动批准。"
 }

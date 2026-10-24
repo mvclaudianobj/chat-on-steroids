@@ -114,6 +114,10 @@ export interface SessionDetail {
 const api = {
   companyObserve: () => call<import('../main/company-observability.js').CompanyObservabilityView>('marksCompany:request', {action:'observe'}),
   company: (request: import('../main/company-ipc.js').CompanyIpcRequest) => call<import('../shared/company.js').CompanySnapshot>('marksCompany:request', request),
+  companyLocalGrants: () => call<import('../main/company-local-grants.js').CompanyLocalGrantsView>('marksCompany:request', { action: 'localGrants' }),
+  revokeCompanyLocalGrant: (id: string) => call<boolean>('marksCompany:request', { action: 'localGrantRevoke', payload: { id } }),
+  requestCompanyLocalGrant: (payload: Extract<import('../main/company-ipc.js').CompanyIpcRequest, { action: 'localGrantRequest' }>['payload']) =>
+    call<{ authorized: boolean; epoch: number; id: string | null }>('marksCompany:request', { action: 'localGrantRequest', payload }),
   notificationWhatsAppStart: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-start' }) as Promise<
     { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |
     { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue; setupStage?: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus['stage'] | 'unknown' }

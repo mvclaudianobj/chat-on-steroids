@@ -58,7 +58,7 @@ it('asks explicit native consent for durable grants but denies unproven broker c
   const refused = await invoke(request);
   expect(refused.ok).toBe(false);
   expect(refused.error).toMatch(/attested/);
-  expect(native.prompts).toContain('Autorizar sempre ESTE agente para escopo específico');
+  expect(native.prompts).toEqual([]); // No native prompt for an unattested broker identity.
   expect((await readLocalCompanyGrants()).grants).toEqual([]);
   expect((await invoke({ action: 'localGrants' })).ok).toBe(true);
   expect((await invoke({ action: 'localGrantRevoke', payload: { id: request.payload.requestId } })).data).toBe(false);

@@ -2,6 +2,7 @@ import type { AppApi } from '../preload/index.js';
 import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, companyRestingSeats, companySeatView, type CompanyRequest, type CompanySeatState, type CompanySnapshot } from '../shared/company.js';
 import type { CompanyObservabilityView } from '../main/company-observability.js';
 import { t, onLanguageChange } from './i18n.js';
+import { mountCompanyLocalGrants } from './company-local-grants-ui.js';
 
 const names: Record<string, string> = { inbox: 'Inbox', assigned: 'Assigned', working: 'Working', review: 'Review', 'needs-ceo': 'Needs CEO', done: 'Done' };
 const roleNames = ['Operations', 'Engineering', 'Infrastructure', 'Product', 'Knowledge', 'Quality', 'Communications'];
@@ -112,6 +113,10 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     content.append(el('h4','',t('Delegation audit')));
     for (const event of (snapshot.delegationAudit ?? []).slice(0,10)) content.append(el('p','company-dialog-hint',
       `${date(event.at)} · ${event.actor} · ${event.action} · ${event.scope ?? '—'} · ${event.requestId ?? ''}`));
+    const local = el('section', 'company-local-grants');
+    local.id = 'companyLocalGrants';
+    content.append(local);
+    mountCompanyLocalGrants(local, api);
   }
   function detail(id: string): void {
     const request = snapshot?.requests.find(row => row.id === id); if (!request || !snapshot) return;

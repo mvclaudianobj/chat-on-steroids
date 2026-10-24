@@ -4084,5 +4084,20 @@
   "Restore chat to the main list": "채팅을 기본 목록으로 복원",
   "Move chat to Archived without deleting its history": "기록을 삭제하지 않고 보관함으로 이동",
   "Archived chats count": "보관된 채팅 수",
-  "Authorize Company workers": "Company 작업자 승인"
+  "Authorize Company workers": "Company 작업자 승인",
+  "Local Company permissions": "회사 로컬 권한",
+  "Local grants never bypass ChatGPT host approvals or operating-system permissions.": "로컬 권한은 ChatGPT 또는 운영 체제 승인을 우회하지 않습니다.",
+  "Configure recurring approvals in ChatGPT settings; local grants cannot change host approval policy.": "반복 승인은 ChatGPT 설정에서 구성하세요.",
+  "Locally attested identity": "로컬 인증 신원",
+  "Local authorization unavailable": "로컬 승인 사용 불가",
+  "Active local grants": "활성 로컬 권한",
+  "Revoke local grant": "로컬 권한 취소",
+  "No active local grants": "활성 로컬 권한 없음",
+  "Local grant authorization options": "로컬 승인 옵션",
+  "Authorize this task": "이 작업 승인",
+  "Always authorize THIS agent for selected local scope": "이 에이전트의 선택한 로컬 범위 항상 승인",
+  "Always authorize COO for all LOCAL scopes": "COO의 모든 로컬 범위 항상 승인",
+  "A locally attested broker identity is required.": "로컬 인증 브로커 신원이 필요합니다.",
+  "Local grant audit": "로컬 권한 감사",
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "동일한 요청 3건. 확대 승인은 자동으로 수행되지 않습니다."
 }

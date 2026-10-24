@@ -4180,5 +4180,20 @@
   "Restore chat to the main list": "Restaurar chat à lista principal",
   "Move chat to Archived without deleting its history": "Mover chat para Arquivados sem apagar o histórico",
   "Archived chats count": "Número de conversas arquivadas",
-  "Authorize Company workers": "Autorizar trabalhadores da Empresa"
+  "Authorize Company workers": "Autorizar trabalhadores da Empresa",
+  "Local Company permissions": "Permissões locais da Empresa",
+  "Local grants never bypass ChatGPT host approvals or operating-system permissions.": "Permissões locais não dispensam aprovações do ChatGPT nem do sistema operativo.",
+  "Configure recurring approvals in ChatGPT settings; local grants cannot change host approval policy.": "Configure aprovações recorrentes nas definições do ChatGPT; permissões locais não alteram as regras do anfitrião.",
+  "Locally attested identity": "Identidade atestada localmente",
+  "Local authorization unavailable": "Autorização local indisponível",
+  "Active local grants": "Permissões locais ativas",
+  "Revoke local grant": "Revogar permissão local",
+  "No active local grants": "Nenhuma permissão local ativa",
+  "Local grant authorization options": "Opções de autorização local",
+  "Authorize this task": "Autorizar esta tarefa",
+  "Always authorize THIS agent for selected local scope": "Autorizar sempre ESTE agente para âmbito local selecionado",
+  "Always authorize COO for all LOCAL scopes": "Autorizar sempre o COO para todos os âmbitos LOCAIS",
+  "A locally attested broker identity is required.": "É necessária uma identidade do broker atestada localmente.",
+  "Local grant audit": "Auditoria de permissões locais",
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Três pedidos equivalentes. Pode pedir ampliação, sem aprovação automática."
 }

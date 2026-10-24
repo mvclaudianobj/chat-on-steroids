@@ -4228,5 +4228,20 @@
   "Restore chat to the main list": "Вернуть чат в основной список",
   "Move chat to Archived without deleting its history": "Переместить чат в архив без удаления истории",
   "Archived chats count": "Количество архивированных чатов",
-  "Authorize Company workers": "Авторизовать работников Company"
+  "Authorize Company workers": "Авторизовать работников Company",
+  "Local Company permissions": "Локальные разрешения компании",
+  "Local grants never bypass ChatGPT host approvals or operating-system permissions.": "Локальные разрешения не обходят подтверждения ChatGPT или ОС.",
+  "Configure recurring approvals in ChatGPT settings; local grants cannot change host approval policy.": "Повторные подтверждения настраиваются в ChatGPT.",
+  "Locally attested identity": "Локально подтверждённая личность",
+  "Local authorization unavailable": "Локальное разрешение недоступно",
+  "Active local grants": "Активные локальные разрешения",
+  "Revoke local grant": "Отозвать локальное разрешение",
+  "No active local grants": "Нет активных разрешений",
+  "Local grant authorization options": "Варианты локального разрешения",
+  "Authorize this task": "Разрешить эту задачу",
+  "Always authorize THIS agent for selected local scope": "Всегда разрешать ЭТОМУ агенту выбранную локальную область",
+  "Always authorize COO for all LOCAL scopes": "Всегда разрешать COO все ЛОКАЛЬНЫЕ области",
+  "A locally attested broker identity is required.": "Требуется локально подтверждённая личность брокера.",
+  "Local grant audit": "Аудит локальных разрешений",
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Три одинаковых запроса. Расширение требует отдельного согласия."
 }
