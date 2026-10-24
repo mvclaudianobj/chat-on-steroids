@@ -102,10 +102,16 @@ export class JarvisSpeechQueue<T> {
   }
 
   private synth(text: string, generation: number, signal: AbortSignal): Promise<T | null> {
-    return this.backend.synthesize(text, signal).catch(error => {
+    const fail = (error: unknown): null => {
       if (generation === this.generation && !signal.aborted) this.events.error?.(error, text);
       return null;
-    });
+    };
+    try {
+      if (signal.aborted || generation !== this.generation) return Promise.resolve(null);
+      return Promise.resolve(this.backend.synthesize(text, signal)).catch(fail);
+    } catch (error) {
+      return Promise.resolve(fail(error));
+    }
   }
 
   private topUp(): void {

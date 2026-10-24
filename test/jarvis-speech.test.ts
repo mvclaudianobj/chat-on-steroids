@@ -64,6 +64,22 @@ describe('Jarvis sentence splitting for streamed answers', () => {
 });
 
 describe('Jarvis speech queue', () => {
+  it('recovers from synchronous synthesis failure and continues later sentences without stalling', async () => {
+    const played: string[] = [];
+    const errors: string[] = [];
+    const drained = vi.fn();
+    const queue = new JarvisSpeechQueue<string>({
+      synthesize: (text) => {
+        if (text === 'Falha.') throw new Error('synchronous backend failure');
+        return Promise.resolve(text);
+      },
+      play: async text => { played.push(text); }
+    }, { error: (error) => errors.push(String(error)), drained });
+    queue.enqueue(['Falha.', 'Recuperada.']);
+    await vi.waitFor(() => expect(drained).toHaveBeenCalledOnce());
+    expect(played).toEqual(['Recuperada.']);
+    expect(errors).toHaveLength(1);
+  });
   it('primes two future TTS segments during the first playback to avoid a synthesis gap before the third', async () => {
     const timeline: string[] = [];
     const playing = new Map<string, ReturnType<typeof deferred>>();
