@@ -23,6 +23,7 @@ it('forwards exact session-change ownership to the renderer and keeps catalog-on
 });
 
 it('exposes only validated archive and paged listing actions through the Electron preload', async () => {
+  vi.resetModules();
   await import('../src/preload/index.js');
   const { ipcRenderer } = await import('electron');
   const invoke = vi.mocked(ipcRenderer.invoke);
