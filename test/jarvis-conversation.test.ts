@@ -60,13 +60,14 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   const speak = vi.fn(async (_voice: unknown, text: string) => ({ ok: true as const, data: { mime: 'audio/mpeg', bytes: new TextEncoder().encode(text) } }));
   const speakCancel = vi.fn(async () => ({ ok: true as const, data: null }));
   const send = vi.fn(async () => ({ ok: true as const, data: { turnId: 'turn-01' } }));
+  const sendInput = vi.fn(async (input: { id: string; sessionId: string | null; text: string }) => ({ ok: true as const, data: { ...input, state: 'queued' } }));
   const api = {
     dictationSupported: false,
     jarvisAudioStatus: async () => ({ ok: true as const, data: { models: options.noAudioEngines ? [] : ['whisper-1'], local: false, windows: false, error: null } }),
     jarvisVoiceStatus: async () => ({ ok: true as const, data: { models: [], stt: ['whisper-1'], tts: ['gpt-4o-mini-tts'], primary: true, fallback: true, ffmpeg: true, error: null } }),
     jarvisTranscribe: transcribe, jarvisSpeak: speak, jarvisSpeakCancel: speakCancel,
     jarvisCancel: async () => ({ ok: true as const, data: null }),
-    startDictation: vi.fn(), stopDictation: vi.fn(async () => ({ ok: true, data: undefined })), apiChatSend: send,
+    startDictation: vi.fn(), stopDictation: vi.fn(async () => ({ ok: true, data: undefined })), apiChatSend: send, sendInput,
     onDictationEvent: () => () => undefined,
     onSessionChanged: (callback: typeof changed) => { changed = callback; return () => undefined; },
     getSession: vi.fn(async () => ({ ok: true as const, data: { events, summary: null, total: events.length, nextFrom: 0 } }))
@@ -99,20 +100,113 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     changed({ sessionIds: ['test-jarvis-0001'] });
     await flush();
   };
-  return { element, hold, release, flush, stream, transcribe, speak, speakCancel, send, players, getUserMedia, createCliProxyChat, selectChat };
+  const nativeEvents = async (rows: unknown[]) => {
+    events = rows;
+    changed({ sessionIds: [selected?.id ?? ''] });
+    await flush();
+  };
+  return { element, hold, release, flush, stream, nativeEvents, transcribe, speak, speakCancel, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat };
 }
 
+describe('Jarvis native ChatGPT bridge ownership', () => {
+  const normal = { id: 'native-chat-01', conversationId: 'chatgpt-realistic', engine: 'chatgpt' };
+  const message = (turnId: string, text: string) => ({ kind: 'assistant_message', turnId, messageId: 'm-'+turnId,
+    seq: 3, message: { text, truncated: false, chars: text.length }, final: false });
+
+  it('sends STT through the native outbox and speaks only its confirmed input turn', async () => {
+    const f = await fixture({ selected: normal, g4f: true });
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(false);
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.sendInput).toHaveBeenCalledOnce();
+    const [input] = f.sendInput.mock.calls[0]!;
+    expect(input).toMatchObject({ sessionId: normal.id, text: 'text from provider', mode: 'auto', model: null, reasoningEffort: null });
+    expect(f.tracks[0]?.stop).toHaveBeenCalled();
+    await f.nativeEvents([message('wrong-turn', 'Resposta de outra pessoa. Não falar.')]);
+    expect(f.speak).not.toHaveBeenCalled();
+    await f.nativeEvents([
+      { kind: 'user_message', inputId: input.id, inputDelivery: 'offered', turnId: 'native-turn', seq: 2 },
+      message('native-turn', 'Ainda sem confirmação de envio. Não falar.')
+    ]);
+    expect(f.speak).not.toHaveBeenCalled();
+    await f.nativeEvents([
+      { kind: 'user_message', inputId: input.id, inputDelivery: 'confirmed', turnId: 'native-turn', seq: 2 },
+      message('wrong-turn', 'Outra resposta não pode falar.'),
+      message('native-turn', 'Resposta correta, do mesmo turno. Em andamento')
+    ]);
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Resposta correta, do mesmo turno.']);
+  });
+
+  it('drops stale native responses after a new PTT and does not resend queued input', async () => {
+    const f = await fixture({ selected: normal });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [first] = f.sendInput.mock.calls[0]!;
+    f.hold(); await f.flush();
+    await f.nativeEvents([{ kind: 'user_message', inputId: first.id, inputDelivery: 'confirmed', turnId: 'old', seq: 1 }, message('old', 'Fala antiga bloqueada.')]);
+    expect(f.speak).not.toHaveBeenCalled();
+    expect(f.element('jarvisTalk').dataset.state).toBe('listening');
+    expect(f.sendInput).toHaveBeenCalledTimes(1);
+    f.release(); await f.flush();
+    const [second] = f.sendInput.mock.calls[1]!;
+    await f.nativeEvents([{ kind: 'user_message', inputId: second.id, inputDelivery: 'confirmed', turnId: 'new', seq: 1 }, message('new', 'Só a fala nova será ouvida. Continua')]);
+    await f.flush();
+    expect(f.element('jarvisSettingsStatus').textContent).toContain('delivered to ChatGPT');
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Só a fala nova será ouvida.']);
+  });
+
+  it('refuses microphone and native sends without session consent', async () => {
+    const f = await fixture({ selected: normal, consent: false });
+    f.hold(); await f.flush();
+    expect(f.getUserMedia).not.toHaveBeenCalled();
+    expect(f.sendInput).not.toHaveBeenCalled();
+  });
+
+  it('does not speak after a rejected native outbox write', async () => {
+    const f = await fixture({ selected: normal });
+    f.sendInput.mockResolvedValueOnce({ ok: false as const, error: 'native bridge unavailable' } as never);
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    expect(f.sendInput).toHaveBeenCalledOnce();
+    await f.nativeEvents([message('arbitrary', 'An unrelated answer must remain silent.')]);
+    expect(f.speak).not.toHaveBeenCalled();
+    expect(f.element('jarvisTalk').dataset.state).toBe('idle');
+  });
+
+  it('revokes voice output after microphone consent is withdrawn while delivery is pending', async () => {
+    const f = await fixture({ selected: normal });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [input] = f.sendInput.mock.calls[0]!;
+    const consent = f.element<HTMLInputElement>('jarvisConsent');
+    consent.checked = false; consent.dispatchEvent(new page!.window.Event('change')); await f.flush();
+    await f.nativeEvents([{ kind: 'user_message', inputId: input.id, inputDelivery: 'confirmed', turnId: 'late', seq: 1 },
+      message('late', 'Nunca falar depois de revogar.')]);
+    expect(f.speak).not.toHaveBeenCalled();
+    expect(f.getUserMedia).toHaveBeenCalledOnce();
+    expect(f.tracks[0]?.stop).toHaveBeenCalled();
+    expect(f.element('jarvisTalk').dataset.state).toBe('idle');
+  });
+
+  it('times out an unconfirmed native input without retrying or inventing a reply', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = await fixture({ selected: normal });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    expect(f.element('jarvisTalk').dataset.state).toBe('thinking');
+    vi.advanceTimersByTime(120_100); await f.flush();
+    expect(f.element('jarvisSettingsStatus').textContent).toMatch(/did not confirm/);
+    expect(f.element('jarvisTalk').dataset.state).toBe('idle');
+    expect(f.sendInput).toHaveBeenCalledOnce();
+    expect(f.speak).not.toHaveBeenCalled();
+  });
+});
+
 describe('Jarvis voice provider in the conversation', () => {
-  it('onboards g4f from a ChatGPT chat into CLIProxy, then records only after session consent', async () => {
+  it('uses g4f voice in the current ChatGPT chat, with no forced CLIProxy migration', async () => {
     const f = await fixture({ g4f: true, consent: false, noAudioEngines: true,
       selected: { id: 'browser-chat', conversationId: 'chatgpt-realistic', engine: 'chatgpt' } });
     const create = f.element<HTMLButtonElement>('jarvisCreateCliProxyChat');
-    expect(create.hidden).toBe(false);
+    expect(create.hidden).toBe(true);
     f.hold(); await f.flush();
     expect(f.getUserMedia).not.toHaveBeenCalled();
-    create.click(); await f.flush();
-    expect(f.createCliProxyChat).toHaveBeenCalledOnce();
-    expect(create.hidden).toBe(true);
+    expect(f.createCliProxyChat).not.toHaveBeenCalled();
     expect(f.getUserMedia).not.toHaveBeenCalled();
     expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(true);
     const consent = f.element<HTMLInputElement>('jarvisConsent');
@@ -120,15 +214,14 @@ describe('Jarvis voice provider in the conversation', () => {
     expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(false);
     f.hold(); await f.flush(); f.release(); await f.flush();
     expect(f.transcribe).toHaveBeenCalledWith('provider', '', '', 'audio/webm', expect.any(Uint8Array), expect.objectContaining({ baseUrl: 'https://g4f.space/v1' }));
-    expect(f.send).toHaveBeenCalledWith('created-api-session', 'text from provider');
-    f.element<HTMLButtonElement>('jarvisReturnChat').click(); await f.flush();
-    expect(f.selectChat).toHaveBeenCalledWith('browser-chat');
-    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(true);
+    expect(f.sendInput).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'browser-chat', text: 'text from provider' }));
+    expect(f.send).not.toHaveBeenCalled();
+    expect(f.selectChat).not.toHaveBeenCalled();
   });
 
   it('does not move the selected chat or touch the microphone when CLIProxy creation fails', async () => {
     const f = await fixture({ g4f: true, createFailure: true,
-      selected: { id: 'original', conversationId: 'chatgpt-realistic' } });
+      selected: { id: 'original', conversationId: null } });
     const create = f.element<HTMLButtonElement>('jarvisCreateCliProxyChat');
     create.click(); await f.flush();
     expect(f.createCliProxyChat).toHaveBeenCalledOnce();
@@ -139,16 +232,14 @@ describe('Jarvis voice provider in the conversation', () => {
     expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(true);
   });
 
-  it('explains in the composer that g4f.space is a voice provider but a CLIProxy chat is required', async () => {
+  it('allows ChatGPT chat while keeping g4f.space as an audio-only provider', async () => {
     const f = await fixture({ g4f: true, selected: { id: 'browser-chat', conversationId: 'chatgpt-realistic', engine: 'chatgpt' } });
     const button = f.element<HTMLButtonElement>('jarvisTalk');
     expect(button.hidden).toBe(false);
-    expect(button.disabled).toBe(true);
-    expect(f.element('jarvisStatus').hidden).toBe(false);
-    expect(f.element('jarvisStatus').textContent).toMatch(/CLIProxy/);
-    expect(button.title).toMatch(/CLIProxy/);
+    expect(button.disabled).toBe(false);
+    expect(f.element('jarvisStatus').textContent).not.toMatch(/CLIProxy.*required/);
     f.hold(); await f.flush();
-    expect(f.getUserMedia).not.toHaveBeenCalled();
+    expect(f.getUserMedia).toHaveBeenCalledOnce();
   });
 
   it('guides session-only consent and does not request a microphone until expressly checked', async () => {

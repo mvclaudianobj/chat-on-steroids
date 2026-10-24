@@ -1,4 +1,4 @@
-/** Opt-in push-to-talk for the currently selected CLIProxy chat.
+/** Opt-in push-to-talk for the currently selected ChatGPT or CLIProxy chat.
  * MediaRecorder retains bounded audio only in memory until the selected transcriber consumes it.
  * J3 adds the user's OpenAI-compatible voice provider, sentence-by-sentence spoken answers with
  * barge-in, optional continuous conversation and a visible turn state.
@@ -119,6 +119,10 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   let phase: JarvisPhase = 'idle';
   let speechVoice = preferences.voice;
   let answer: { sessionId: string; turnId: string; splitter: JarvisSentenceSplitter; spoken: number } | null = null;
+  // A native outbox acceptance is NOT a ChatGPT turn. Only the browser's recorded
+  // user_message with this exact inputId can bind the resulting assistant turn.
+  let nativePending: { sessionId: string; inputId: string; generation: number } | null = null;
+  let nativeDeadline: ReturnType<typeof setTimeout> | null = null;
   let answerDone = false;
   let resumeTimer: ReturnType<typeof setTimeout> | null = null;
   const recognitionAvailable = api.dictationSupported && typeof api.startDictation === 'function';
@@ -207,6 +211,9 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     void api.jarvisSpeakCancel?.().catch(() => undefined);
     if (systemSpeech()) speechSynthesis.cancel();
   };
+  const clearNativeDeadline = (): void => {
+    if (nativeDeadline) { clearTimeout(nativeDeadline); nativeDeadline = null; }
+  };
 
   const fillList = (id: string, values: readonly string[]): void => {
     const list = maybe<HTMLDataListElement>(id);
@@ -274,7 +281,10 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   };
   const eligible = (): string | null => {
     const chat = selected();
-    return chat && isApiConversationId(chat.conversationId) && (!chat.engine || chat.engine === 'cliproxy') ? chat.id : null;
+    if (!chat?.conversationId) return null;
+    return isApiConversationId(chat.conversationId)
+      ? (!chat.engine || chat.engine === 'cliproxy' ? chat.id : null)
+      : (!chat.engine || chat.engine === 'chatgpt' ? chat.id : null);
   };
   const phaseText = (): string => phase === 'listening' ? t('Listening…') : phase === 'stopping' || phase === 'transcribing' ? t('Transcribing…')
     : phase === 'thinking' ? t('Thinking…') : phase === 'speaking' ? t('Speaking… press to interrupt') : '';
@@ -291,7 +301,7 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
       returnChat.textContent = t('Return to previous chat');
     }
     const reason = !preferences.enabled ? '' : !eligible()
-      ? t('Jarvis works in a CLIProxy API chat. The g4f.space preset configures speech services, not a chat. Open or create a CLIProxy chat.')
+      ? t('Jarvis needs a ChatGPT or CLIProxy conversation. The voice provider configures audio, not chat.')
       : !consented ? t('Enable microphone and audio transmission consent in Jarvis settings for this session.')
       : !recorderAvailable && mode() !== 'windows' ? t('This app cannot access microphone recording. Check system permissions and restart the app.')
       : !mode() ? t('No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.')
@@ -308,7 +318,7 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     }
     if (!mode()) status.textContent = t('No transcription engine available. Configure a voice provider, a CLIProxy audio model, an installed local Whisper engine, or Windows speech recognition.') + (capability.error ? ` ${capability.error}` : '');
     else if (!consented) status.textContent = t('Enable microphone consent to use Jarvis.');
-    else if (!eligible()) status.textContent = t('Select a CLIProxy chat to use Jarvis.');
+    else if (!eligible()) status.textContent = t('Select a ChatGPT or CLIProxy chat to use Jarvis.');
     else if (!running && !status.textContent) status.textContent = t('Jarvis is ready.');
   }
   createChat?.addEventListener('click', () => {
@@ -368,6 +378,8 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     running = false;
     stopping = false;
     answer = null;
+    nativePending = null;
+    clearNativeDeadline();
     answerDone = false;
     silence();
     phase = 'idle';
@@ -389,9 +401,9 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     return last;
   }
   function start(options: { handsFree?: boolean } = {}): void {
-    if (phase === 'speaking' || phase === 'thinking' || answer) {
+    if (phase === 'speaking' || phase === 'thinking' || answer || nativePending) {
       // Barge-in: the person talks over Jarvis, so its voice stops at once.
-      answer = null; answerDone = false; silence();
+      answer = null; nativePending = null; clearNativeDeadline(); answerDone = false; silence();
       if (phase === 'speaking' || phase === 'thinking') phase = 'idle';
     }
     if (resumeTimer) { clearTimeout(resumeTimer); resumeTimer = null; }
@@ -487,20 +499,42 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
       paint();
       if (!shouldSend) { status.textContent = t('No speech was sent.'); return; }
       status.textContent = t('Sending Jarvis message…');
-      // Sending a CLIProxy message can outlive the next PTT press or loss of microphone consent.
+      // Either transport can outlive the next PTT press or loss of microphone consent.
       // A late receipt belongs to the capture that submitted it, never to the new voice turn.
       const submittedAttempt = attempt;
       const currentSend = (): boolean => submittedAttempt === attempt && eligible() === target &&
         preferences.enabled && consented && phase === 'thinking';
-      void api.apiChatSend(target!, text).then(reply => {
-        if (!currentSend()) return;
-        if (reply.ok) {
-          answer = { sessionId: target!, turnId: reply.data.turnId, splitter: new JarvisSentenceSplitter(), spoken: 0 };
-          answerDone = false;
-          status.textContent = t('Jarvis message sent to this CLIProxy chat.');
+      const chat = selected();
+      if (chat?.conversationId && !isApiConversationId(chat.conversationId)) {
+        const inputId = crypto.randomUUID();
+        void api.sendInput({ id: inputId, sessionId: target, text, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null }).then(reply => {
+          if (!currentSend()) return;
+          if (!reply.ok || reply.data.id !== inputId || reply.data.sessionId !== target ||
+              reply.data.state === 'failed' || reply.data.state === 'cancelled') {
+            status.textContent = t('Jarvis message could not be sent.'); setPhase('idle'); return;
+          }
+          nativePending = { sessionId: target!, inputId, generation: submittedAttempt };
+          status.textContent = t('Waiting for ChatGPT to confirm the Jarvis message…');
+          nativeDeadline = setTimeout(() => {
+            if (nativePending?.inputId !== inputId) return;
+            nativePending = null;
+            nativeDeadline = null;
+            status.textContent = t('ChatGPT did not confirm the Jarvis message. Check this chat in the timeline.');
+            if (phase === 'thinking') setPhase('idle');
+          }, 120_000);
           void readAnswer();
-        } else { status.textContent = t(reply.error); setPhase('idle'); }
-      }).catch(() => { if (currentSend()) { status.textContent = t('Jarvis message could not be sent.'); setPhase('idle'); } });
+        }).catch(() => { if (currentSend()) { status.textContent = t('Jarvis message could not be sent.'); setPhase('idle'); } });
+      } else {
+        void api.apiChatSend(target!, text).then(reply => {
+          if (!currentSend()) return;
+          if (reply.ok) {
+            answer = { sessionId: target!, turnId: reply.data.turnId, splitter: new JarvisSentenceSplitter(), spoken: 0 };
+            answerDone = false;
+            status.textContent = t('Jarvis message sent to this CLIProxy chat.');
+            void readAnswer();
+          } else { status.textContent = t(reply.error); setPhase('idle'); }
+        }).catch(() => { if (currentSend()) { status.textContent = t('Jarvis message could not be sent.'); setPhase('idle'); } });
+      }
     } else if (event.type === 'status' && event.status === 'listening') status.textContent = t('Listening…');
   }
   api.onDictationEvent(eventReceived);
@@ -524,12 +558,26 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     try {
       do {
         readAgain = false;
-        const current = answer;
-        if (!current) return;
+        let current = answer;
+        const pending = nativePending;
+        if (!current && !pending) return;
         if (!api.getSession) return;
-        const reply = await api.getSession(current.sessionId, { limit: 80 });
-        if (!reply.ok || answer !== current) continue;
-        if (selected()?.id !== current.sessionId) { answer = null; silence(); setPhase('idle'); return; }
+        const sessionId = (current ?? pending)!.sessionId;
+        const reply = await api.getSession(sessionId, { limit: 80 });
+        if (!reply.ok || answer !== current || nativePending !== pending) continue;
+        if (selected()?.id !== sessionId || !consented || !preferences.enabled) { cancel(); return; }
+        if (pending) {
+          if (pending.generation !== attempt || phase !== 'thinking') { nativePending = null; return; }
+          const submitted = reply.data.events.find(event => event.kind === 'user_message' &&
+            event.inputId === pending.inputId && event.inputDelivery === 'confirmed' && !!event.turnId);
+          if (!submitted?.turnId) continue;
+          nativePending = null;
+          clearNativeDeadline();
+          current = { sessionId: pending.sessionId, turnId: submitted.turnId, splitter: new JarvisSentenceSplitter(), spoken: 0 };
+          answer = current;
+          status.textContent = t('Jarvis message delivered to ChatGPT.');
+        }
+        if (!current) continue;
         const messages = new Map<string, Extract<SessionEvent, { kind: 'assistant_message' }>>();
         let ended = false;
         for (const event of reply.data.events) {
@@ -555,7 +603,7 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     finally { reading = false; }
   }
   api.onSessionChanged(change => {
-    const expected = answer;
+    const expected = answer ?? nativePending;
     if (!expected || (change?.sessionIds && !change.sessionIds.includes(expected.sessionId))) return;
     void readAnswer();
   });
@@ -566,7 +614,7 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
     voice: providerVoice?.value ?? preferences.provider.voice
   });
   function persist(): void {
-    if (running) cancel();
+    if (running || stopping || nativePending || answer || phase === 'thinking' || speech.speaking) cancel();
     const before = JSON.stringify(preferences.provider);
     preferences = parseJarvisPreferences({
       enabled: enable.checked, key: key.value, language: language.value, tts: tts.checked, voice: voice.value, engine: engine?.value ?? preferences.engine,
@@ -634,7 +682,7 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   });
   window.addEventListener('keyup', event => { if (held && event.code === preferences.key) { held = false; stop(); } }, true);
   window.addEventListener('blur', () => { held = false; cancel(); });
-  window.addEventListener('jarvis:selection', () => { if (running || stopping || answer || speech.speaking) cancel(); paint(); });
+  window.addEventListener('jarvis:selection', () => { if (running || stopping || nativePending || answer || phase === 'thinking' || speech.speaking) cancel(); paint(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });
   window.addEventListener('beforeunload', cancel, { once: true });
   // Consent and capture must never survive a page reload.
