@@ -8,7 +8,7 @@ import { putVault, useVault, vaultStatus } from './marks-vault.js';
 import { logInfo, logWarn, redact } from './logger.js';
 import {
   JARVIS_VOICE_VAULT, jarvisVoiceUsesFallback, parseJarvisVoiceBaseUrl, rankJarvisVoiceModels,
-  type JarvisVoiceConfig, type JarvisVoiceKeySlot
+  type JarvisVoiceConfig, type JarvisVoiceKeySlot, type JarvisVoiceRouting
 } from '../shared/jarvis-voice.js';
 
 export type JarvisAudioMime = 'audio/webm' | 'audio/ogg' | 'audio/mp4' | 'audio/wav';
@@ -122,9 +122,9 @@ async function readBounded(response: Response, max: number): Promise<Buffer> {
  * One request with the primary key; a 401/403/429/5xx is retried once with the fallback key.
  * A provider without keys is called without authorization (for example a local server).
  */
-async function voiceRequest(config: JarvisVoiceConfig, path: string, init: () => RequestInit, signal: AbortSignal): Promise<Response> {
+async function voiceRequest(config: JarvisVoiceConfig, path: string, init: () => RequestInit, signal: AbortSignal, slot?: JarvisVoiceKeySlot): Promise<Response> {
   const base = parseJarvisVoiceBaseUrl(config.baseUrl);
-  const slots = ['primary', 'fallback', 'fallback2', 'fallback3'] as const;
+  const slots: readonly JarvisVoiceKeySlot[] = slot ? [slot] : ['primary', 'fallback', 'fallback2', 'fallback3'];
   const keys = (await Promise.all(slots.map(slot => deps.credential(slot, base.origin)))).filter((key): key is VoiceCredential => !!key);
   // Never upload captured microphone audio to Google without an origin-bound key.
   if (base.origin === 'https://generativelanguage.googleapis.com' && !keys.length) {
@@ -285,7 +285,7 @@ export async function transcribeJarvisVoice(config: JarvisVoiceConfig, mime: Jar
   return text;
 }
 
-async function speechResponse(config: JarvisVoiceConfig, text: string, signal: AbortSignal): Promise<{ mime: string; response: Response }> {
+async function speechResponse(config: JarvisVoiceConfig, text: string, signal: AbortSignal, slot?: JarvisVoiceKeySlot): Promise<{ mime: string; response: Response }> {
   if (!config.baseUrl || !config.ttsModel || !config.voice) throw new Error('Configure the voice provider URL, speech model and voice.');
   const input = text.trim().slice(0, 4000);
   if (!input) throw new Error('Nothing to speak.');
@@ -297,7 +297,7 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
       body: JSON.stringify({ model: config.ttsModel, input: [{ type: 'user_input', content: [{
         type: 'text', text: input, annotations: [{ type: 'speech_metadata', style: 'Natural Brazilian Portuguese, warm conversational delivery, medium pace.' }]
       }] }], response_format: { type: 'audio' }, generation_config: { speech_config: [{ voice: config.voice }] } })
-    }), signal);
+    }), signal, slot);
     if (!response.ok) throw await failure(response, 'Gemini speech');
     const payload = JSON.parse((await readBounded(response, MAX_AUDIO * 2)).toString()) as {
       steps?: { type?: string; content?: { type?: string; data?: string }[] }[]
@@ -312,7 +312,7 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
   const response = await voiceRequest(config, '/audio/speech', () => ({
     method: 'POST', headers: { 'content-type': 'application/json', accept: 'audio/mpeg,audio/*;q=0.9' },
     body: JSON.stringify({ model: config.ttsModel, input, voice: config.voice, response_format: 'mp3' })
-  }), signal);
+  }), signal, slot);
   if (!response.ok) throw await failure(response, 'speech');
   const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
   if (!/^audio\/|^application\/(ogg|octet-stream)$/.test(type)) {
@@ -323,9 +323,71 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
   return { response, mime: type === 'application/ogg' ? 'audio/ogg' : type === 'application/octet-stream' ? 'audio/mpeg' : type };
 }
 
+type RoutedVoice = { config: JarvisVoiceConfig; slot: JarvisVoiceKeySlot; id: string };
+const routePinned = new Map<string, { route: RoutedVoice; until: number }>();
+const routeCooldown = new Map<string, number>();
+const FAILURE_COOLDOWN_MS = 30_000;
+const GROUP_TTL_MS = 120_000;
+function voiceCandidates(config: JarvisVoiceConfig, routing: JarvisVoiceRouting): RoutedVoice[] {
+  const google = config.baseUrl.startsWith('https://generativelanguage.googleapis.com/') ?
+    [{ config, slot: 'primary' as const, id: 'gemini' }] : [];
+  const g4f = routing.g4f.flatMap((entry, index): RoutedVoice[] => {
+    if (!entry.baseUrl || !entry.ttsModel || !entry.voice) return [];
+    try {
+      const baseUrl = parseJarvisVoiceBaseUrl(entry.baseUrl).toString().replace(/\/+$/, '');
+      return [{ config: { baseUrl, sttMode: 'chat-audio', sttModel: '', ttsModel: entry.ttsModel, voice: entry.voice },
+        slot: index === 0 ? 'g4f1' : 'g4f2', id: `g4f${index + 1}` }];
+    } catch { return []; }
+  });
+  // Existing non-Google voice providers retain the legacy behavior.
+  if (!google.length) return [];
+  return routing.mode === 'g4f-first' ? [...g4f, ...google] : [...google, ...g4f];
+}
+export async function jarvisVoiceRouteStatus(routing: JarvisVoiceRouting): Promise<{ g4f1: boolean; g4f2: boolean; error: string | null }> {
+  const result = { g4f1: false, g4f2: false, error: null as string | null };
+  for (let i = 0; i < 2; i++) {
+    const entry = routing.g4f[i]!;
+    if (!entry.baseUrl) continue;
+    try { result[i === 0 ? 'g4f1' : 'g4f2'] = !!await deps.credential(i === 0 ? 'g4f1' : 'g4f2', parseJarvisVoiceBaseUrl(entry.baseUrl).origin); }
+    catch { result.error = 'A saved G4F credential is unavailable for its configured provider URL.'; }
+  }
+  return result;
+}
+/** Each answer is pinned to one voice/provider; a fallback only occurs before audible output. */
+async function routedSpeechResponse(config: JarvisVoiceConfig, text: string, signal: AbortSignal,
+  routing?: JarvisVoiceRouting, groupId?: string): Promise<{ mime: string; response: Response }> {
+  if (!routing || routing.mode === 'off') return speechResponse(config, text, signal);
+  const candidates = voiceCandidates(config, routing);
+  if (!candidates.length) return speechResponse(config, text, signal);
+  const now = Date.now();
+  for (const [key, group] of routePinned) if (group.until <= now) routePinned.delete(key);
+  const pinned = groupId && routePinned.get(groupId)?.route;
+  const ordered = pinned ? [pinned] : candidates;
+  let lastError: unknown;
+  for (const candidate of ordered) {
+    signal.throwIfAborted();
+    if (!pinned && (routeCooldown.get(candidate.id) ?? 0) > now) continue;
+    if (candidate.slot !== 'primary' && !await deps.credential(candidate.slot, parseJarvisVoiceBaseUrl(candidate.config.baseUrl).origin)) continue;
+    try {
+      const result = await speechResponse(candidate.config, text, signal, candidate.slot);
+      if (groupId && !pinned) routePinned.set(groupId, { route: candidate, until: Date.now() + GROUP_TTL_MS });
+      return result;
+    } catch (error) {
+      if (signal.aborted) throw error;
+      lastError = error;
+      // Quota failure is shared among keys within one project. Never retry another Gemini key.
+      if (/HTTP (429|500|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT/.test(String(error))) {
+        routeCooldown.set(candidate.id, Date.now() + FAILURE_COOLDOWN_MS);
+      } else if (!/HTTP (401|403)/.test(String(error))) throw error;
+      if (pinned) throw error; // Never change a speaker in the middle of the same answer.
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error('No configured speech provider is currently available.');
+}
+
 /** Compatibility route: providers and clients without incremental playback get one bounded buffer. */
-export async function speakJarvisVoice(config: JarvisVoiceConfig, text: string, signal: AbortSignal): Promise<{ mime: string; bytes: Uint8Array }> {
-  const { response, mime } = await speechResponse(config, text, signal);
+export async function speakJarvisVoice(config: JarvisVoiceConfig, text: string, signal: AbortSignal, routing?: JarvisVoiceRouting, groupId?: string): Promise<{ mime: string; bytes: Uint8Array }> {
+  const { response, mime } = await routedSpeechResponse(config, text, signal, routing, groupId);
   const bytes = await readBounded(response, MAX_AUDIO);
   if (!bytes.length) throw new Error('Voice provider speech returned no audio.');
   return { mime: mime === 'audio/mpeg' && bytes.subarray(0, 4).toString() === 'OggS' ? 'audio/ogg' : mime, bytes: new Uint8Array(bytes) };
@@ -343,10 +405,10 @@ export type JarvisAudioStreamEvent =
  */
 export async function streamJarvisVoice(
   config: JarvisVoiceConfig, text: string, requestId: string, signal: AbortSignal,
-  emit: (event: JarvisAudioStreamEvent) => void
+  emit: (event: JarvisAudioStreamEvent) => void, routing?: JarvisVoiceRouting, groupId?: string
 ): Promise<{ firstByteMs: number; totalMs: number; bytes: number }> {
   const started = performance.now();
-  const { response, mime } = await speechResponse(config, text, signal);
+  const { response, mime } = await routedSpeechResponse(config, text, signal, routing, groupId);
   signal.throwIfAborted();
   emit({ requestId, type: 'start', mime });
   if (!response.body) throw new Error('Voice provider speech returned no audio.');

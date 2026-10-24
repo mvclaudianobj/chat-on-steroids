@@ -146,9 +146,10 @@ const api = {
   /** Jarvis J3: the voice provider's catalog and whether its Vault K keys exist (never their values). */
   jarvisVoiceStatus: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig) => call<import('../main/jarvis-voice.js').JarvisVoiceStatus>('jarvis:audio', { action: 'voice-status', voice }),
   jarvisVoiceSetKey: (slot: import('../shared/jarvis-voice.js').JarvisVoiceKeySlot, baseUrl: string, value: string, password: string) => call<boolean>('jarvis:audio', { action: 'voice-key', slot, baseUrl, value, password }),
-  jarvisSpeak: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string) => call<{ mime: string; bytes: Uint8Array }>('jarvis:audio', { action: 'speak', voice, text }),
-  jarvisSpeakStream: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string, requestId: string) =>
-    call<{ firstByteMs: number; totalMs: number; bytes: number }>('jarvis:audio', { action: 'speak-stream', voice, text, requestId }),
+  jarvisVoiceRouteStatus: (routing: import('../shared/jarvis-voice.js').JarvisVoiceRouting) => call<{ g4f1: boolean; g4f2: boolean; error: string | null }>('jarvis:audio', { action: 'voice-route-status', routing }),
+  jarvisSpeak: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string, routing?: import('../shared/jarvis-voice.js').JarvisVoiceRouting, groupId?: string) => call<{ mime: string; bytes: Uint8Array }>('jarvis:audio', { action: 'speak', voice, text, routing, groupId }),
+  jarvisSpeakStream: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string, requestId: string, routing?: import('../shared/jarvis-voice.js').JarvisVoiceRouting, groupId?: string) =>
+    call<{ firstByteMs: number; totalMs: number; bytes: number }>('jarvis:audio', { action: 'speak-stream', voice, text, requestId, routing, groupId }),
   onJarvisSpeechStream: (listener: (event: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }) => void): (() => void) => {
     const wrapped = (_event: unknown, chunk: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }): void => listener(chunk);
     ipcRenderer.on('jarvis:speech-stream', wrapped);

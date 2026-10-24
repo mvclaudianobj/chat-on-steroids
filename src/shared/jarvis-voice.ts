@@ -6,7 +6,7 @@
 import { z } from 'zod';
 
 /** Vault K names; each entry is bound to the provider origin with header `Authorization`. */
-export const JARVIS_VOICE_VAULT = { primary: 'jarvis/voice-primary', fallback: 'jarvis/voice-fallback', fallback2: 'jarvis/voice-fallback-2', fallback3: 'jarvis/voice-fallback-3' } as const;
+export const JARVIS_VOICE_VAULT = { primary: 'jarvis/voice-primary', fallback: 'jarvis/voice-fallback', fallback2: 'jarvis/voice-fallback-2', fallback3: 'jarvis/voice-fallback-3', g4f1: 'jarvis/voice-g4f-1', g4f2: 'jarvis/voice-g4f-2' } as const;
 export type JarvisVoiceKeySlot = keyof typeof JARVIS_VOICE_VAULT;
 
 /**
@@ -22,6 +22,27 @@ export interface JarvisVoiceConfig {
   sttModel: string;
   ttsModel: string;
   voice: string;
+}
+
+export const jarvisVoiceRoutingSchema = z.object({
+  mode: z.enum(['off', 'gemini-first', 'g4f-first']),
+  g4f: z.tuple([z.object({ baseUrl: z.string().max(300), ttsModel: z.string().max(200), voice: z.string().max(64) }).strict(),
+    z.object({ baseUrl: z.string().max(300), ttsModel: z.string().max(200), voice: z.string().max(64) }).strict()])
+}).strict();
+export type JarvisVoiceRouting = z.infer<typeof jarvisVoiceRoutingSchema>;
+export const emptyJarvisVoiceRouting = (): JarvisVoiceRouting => ({ mode: 'off', g4f: [
+  { baseUrl: '', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' },
+  { baseUrl: '', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' }
+] });
+export function parseJarvisVoiceRouting(raw: unknown): JarvisVoiceRouting {
+  const parsed = jarvisVoiceRoutingSchema.safeParse(raw);
+  if (!parsed.success) return emptyJarvisVoiceRouting();
+  for (const slot of parsed.data.g4f) {
+    if (slot.baseUrl) { try { parseJarvisVoiceBaseUrl(slot.baseUrl); } catch { return emptyJarvisVoiceRouting(); } }
+    if (slot.ttsModel && !MODEL.test(slot.ttsModel)) return emptyJarvisVoiceRouting();
+    if (slot.voice && !VOICE.test(slot.voice)) return emptyJarvisVoiceRouting();
+  }
+  return parsed.data;
 }
 
 export const emptyJarvisVoiceConfig = (): JarvisVoiceConfig => ({ baseUrl: '', sttMode: 'transcriptions', sttModel: '', ttsModel: '', voice: '' });

@@ -17,8 +17,8 @@ vi.mock('../src/main/marks-vault.js', () => ({
   putVault: vault.put
 }));
 
-import { configureJarvisVoiceForTests, jarvisVoiceStatus, speakJarvisVoice, streamJarvisVoice, storeJarvisVoiceKey, transcribeJarvisVoice } from '../src/main/jarvis-voice.js';
-import { JARVIS_VOICE_VAULT, type JarvisVoiceConfig } from '../src/shared/jarvis-voice.js';
+import { configureJarvisVoiceForTests, jarvisVoiceStatus, jarvisVoiceRouteStatus, speakJarvisVoice, streamJarvisVoice, storeJarvisVoiceKey, transcribeJarvisVoice } from '../src/main/jarvis-voice.js';
+import { JARVIS_VOICE_VAULT, type JarvisVoiceConfig, type JarvisVoiceRouting } from '../src/shared/jarvis-voice.js';
 
 // Test-only placeholder tokens: never real provider credentials.
 const PRIMARY = 'test-primary-token';
@@ -301,5 +301,49 @@ describe('Jarvis voice provider (fake OpenAI-compatible server)', () => {
     expect(vault.put).toHaveBeenCalledWith({ name: 'jarvis/voice-primary', value: PRIMARY, origin: 'https://g4f.space', header: 'Authorization' }, 'master-password-for-tests');
     await expect(storeJarvisVoiceKey('fallback', 'http://g4f.space/v1', FALLBACK, 'x')).rejects.toThrow('HTTPS');
     await expect(storeJarvisVoiceKey('fallback', 'https://g4f.space/v1', 'two words', 'x')).rejects.toThrow('one token');
+  });
+});
+
+
+describe('Jarvis provider routing across Gemini and two G4F accounts', () => {
+  const google = (): JarvisVoiceConfig => ({ baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: 'gemini-3.5-transcribe', ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' });
+  const routing = (mode: 'off' | 'gemini-first' | 'g4f-first'): JarvisVoiceRouting => ({ mode, g4f: [
+    { baseUrl: 'https://g4f-test.example/v1', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' },
+    { baseUrl: 'https://g4f-test.example/v1', ttsModel: 'gpt-4o-mini-tts', voice: 'nova' }
+  ] });
+  it('keeps two G4F credentials separate even on the same host, never returns secrets', async () => {
+    configureJarvisVoiceForTests({ credential: async slot => slot === 'g4f1' || slot === 'g4f2' ? { header: 'Authorization', value: `fixture-${slot}` } : null });
+    expect(await jarvisVoiceRouteStatus(routing('g4f-first'))).toEqual({ g4f1: true, g4f2: true, error: null });
+  });
+  it('falls back to independent G4F when Gemini is rate limited, without trying multiple Gemini keys', async () => {
+    const seen: { origin: string; key: string }[] = [];
+    configureJarvisVoiceForTests({ credential: async slot => ({ header: slot.startsWith('g4f') ? 'Authorization' : 'x-goog-api-key', value: `fixture-${slot}` }),
+      fetch: async (url, init) => {
+        const headers = init?.headers as Record<string, string>;
+        seen.push({ origin: new URL(String(url)).origin, key: headers['x-goog-api-key'] ?? headers.Authorization ?? '' });
+        return String(url).includes('generativelanguage') ? Response.json({ error: { message: 'rate limited' } }, { status: 429 })
+          : new Response(Buffer.from('ID3audio'), { headers: { 'content-type': 'audio/mpeg' } });
+      } });
+    const result = await speakJarvisVoice(google(), 'Olá', signal(), routing('gemini-first'));
+    expect(result.mime).toBe('audio/mpeg');
+    expect(seen).toEqual([
+      { origin: 'https://generativelanguage.googleapis.com', key: 'fixture-primary' },
+      { origin: 'https://g4f-test.example', key: 'Bearer fixture-g4f1' }
+    ]);
+  });
+  it('does not change speaker/provider within a pinned answer after a later failure', async () => {
+    const id = crypto.randomUUID();
+    const seen: string[] = [];
+    let fail = false;
+    configureJarvisVoiceForTests({ credential: async slot => slot === 'g4f1' || slot === 'g4f2' ? { header: 'Authorization', value: `fixture-${slot}` } : null,
+      fetch: async (_url, init) => {
+        const credential = (init?.headers as Record<string, string>).Authorization;
+        seen.push(credential);
+        return fail ? new Response(null, { status: 503 }) : new Response(Buffer.from('ID3audio'), { headers: { 'content-type': 'audio/mpeg' } });
+      } });
+    await speakJarvisVoice(google(), 'Primeira frase', signal(), routing('g4f-first'), id);
+    fail = true;
+    await expect(speakJarvisVoice(google(), 'Segunda frase', signal(), routing('g4f-first'), id)).rejects.toThrow('503');
+    expect(seen).toEqual(['Bearer fixture-g4f1', 'Bearer fixture-g4f1']);
   });
 });
