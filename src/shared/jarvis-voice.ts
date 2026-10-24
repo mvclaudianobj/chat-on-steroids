@@ -67,7 +67,7 @@ export function parseJarvisVoiceConfig(value: unknown): JarvisVoiceConfig {
     // Revisions -7/-8 shipped absent/generic Gemini STT models. Migrate only
     // those known defaults; preserve explicit custom choices and Vault entries.
     sttModel: baseUrl === 'https://generativelanguage.googleapis.com/v1beta' &&
-      (!model(text('sttModel', 200)) || ['gemini-3.8-flash', 'gemini-3.8-flash-lite'].includes(model(text('sttModel', 200))))
+      (!model(text('sttModel', 200)) || ['gemini-3.8-flash', 'gemini-3.8-flash-lite', 'gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'].includes(model(text('sttModel', 200))))
       ? 'gemini-3.5-transcribe' : model(text('sttModel', 200)),
     ttsModel: model(text('ttsModel', 200)),
     voice: VOICE.test(text('voice', 64)) ? text('voice', 64) : ''

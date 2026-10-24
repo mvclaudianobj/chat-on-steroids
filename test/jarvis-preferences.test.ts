@@ -40,6 +40,10 @@ describe('Jarvis preference admission', () => {
     expect(JARVIS_VOICE_PRESETS['Google Gemini TTS'].sttModel).toBe('gemini-3.5-transcribe');
     expect(parseJarvisPreferences({ provider: { ...fromRevisionSeven.provider, sttModel: 'gemini-3.8-flash' } }).provider.sttModel).toBe('gemini-3.5-transcribe');
     expect(parseJarvisPreferences({ provider: { ...fromRevisionSeven.provider, sttModel: 'gemini-3.8-flash-lite' } }).provider.sttModel).toBe('gemini-3.5-transcribe');
+    // The Gemini TTS setting was sometimes copied into the STT field by earlier versions.
+    // Never send a speech-generation model to the transcription endpoint.
+    expect(parseJarvisPreferences({ provider: { ...fromRevisionSeven.provider, sttModel: 'gemini-3.8-flash-tts' } }).provider.sttModel).toBe('gemini-3.5-transcribe');
+    expect(parseJarvisPreferences({ provider: { ...fromRevisionSeven.provider, sttModel: 'gemini-3.8-flash-lite-tts' } }).provider.sttModel).toBe('gemini-3.5-transcribe');
     expect(parseJarvisPreferences({ provider: { ...fromRevisionSeven.provider, sttModel: 'gemini-custom-audio' } }).provider.sttModel).toBe('gemini-custom-audio');
     expect(parseJarvisPreferences({ provider: { baseUrl: 'https://g4f.space/v1', sttModel: '' } }).provider.sttModel).toBe('');
   });
