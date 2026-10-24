@@ -4107,5 +4107,9 @@
   "Selected local scope": "선택한 로컬 범위",
 "Credential saved": "자격 증명 저장됨",
   "No saved credential": "저장된 자격 증명 없음",
-  "Credential status unavailable": "자격 증명 상태를 확인할 수 없음"
+  "Credential status unavailable": "자격 증명 상태를 확인할 수 없음",
+  "Remove saved key": "저장된 키 삭제",
+  "Remove the saved API key?": "저장된 API 키를 삭제하시겠습니까?",
+  "Remove saved password": "저장된 비밀번호 삭제",
+  "Remove the saved management password?": "저장된 관리 비밀번호를 삭제하시겠습니까?"
 }

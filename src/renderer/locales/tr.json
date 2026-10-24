@@ -4155,5 +4155,9 @@
   "Selected local scope": "Seçilen yerel kapsam",
 "Credential saved": "Kimlik bilgisi kaydedildi",
   "No saved credential": "Kayıtlı kimlik bilgisi yok",
-  "Credential status unavailable": "Kimlik bilgisi durumu kullanılamıyor"
+  "Credential status unavailable": "Kimlik bilgisi durumu kullanılamıyor",
+  "Remove saved key": "Kayıtlı anahtarı kaldır",
+  "Remove the saved API key?": "Kayıtlı API anahtarı kaldırılsın mı?",
+  "Remove saved password": "Kayıtlı parolayı kaldır",
+  "Remove the saved management password?": "Kayıtlı yönetim parolası kaldırılsın mı?"
 }

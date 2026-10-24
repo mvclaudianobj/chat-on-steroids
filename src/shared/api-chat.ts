@@ -77,6 +77,7 @@ export interface ApiChatSettings {
 /** What the renderer may know: never the key, only whether one is stored or needed. */
 export interface ApiChatStatus extends ApiChatSettings {
   hasKey: boolean;
+  keyPresence: 'saved' | 'absent' | 'unavailable';
   /** Whether the endpoint answered its model list on the last check; null before any check. */
   detected: boolean | null;
   /** True once the endpoint refused a request for lacking a key. */

@@ -78,9 +78,12 @@ export function createCliProxyManageUi(api: AppApi, card: HTMLElement, moduleSta
   // Management password and API keys, before the console row.
   const password = withId(el('input', { type: 'password', autocomplete: 'off', spellcheck: false }), 'cliProxyManagementKey');
   const savePassword = button('cliProxySaveManagementKey', () => t('Save password'));
+  const removePassword = button('cliProxyRemoveManagementKey', () => t('Remove saved password'));
   const passwordState = withId(el('span', { className: 'modules-detail' }), 'cliProxyManagementKeyState');
   const passwordRow = el('span', { className: 'api-chat-key' });
-  passwordRow.append(password, savePassword, passwordState);
+  passwordState.setAttribute('role', 'status');
+  password.setAttribute('aria-describedby', 'cliProxyManagementKeyState');
+  passwordRow.append(password, savePassword, removePassword, passwordState);
   const passwordField = el('div', { className: 'setting cliproxy-field' });
   passwordField.append(heading(() => t('Management password'), () => t('Stored encrypted on this computer. The console opens signed in with it.')), passwordRow);
 
@@ -138,6 +141,8 @@ export function createCliProxyManageUi(api: AppApi, card: HTMLElement, moduleSta
 
     password.disabled = busy || !running;
     savePassword.disabled = busy || !running;
+    password.placeholder = status?.hasManagementKey ? '••••••••' : '';
+    removePassword.disabled = busy || !running || !status?.hasManagementKey;
     passwordState.textContent = !status?.hasManagementKey ? t('No password saved')
       : status.managementKeyValid === false ? t('The saved password was rejected') : t('A password is saved');
     passwordState.classList.toggle('modules-error', status?.managementKeyValid === false);
@@ -195,9 +200,15 @@ export function createCliProxyManageUi(api: AppApi, card: HTMLElement, moduleSta
 
   savePassword.addEventListener('click', () => {
     const value = password.value;
+    if (!value.trim()) return;
     password.value = '';
     void act(async () => accept(await api.cliProxySetManagementKey(value)) &&
       (say(value.trim() ? t('Password saved.') : t('Password removed.')), true));
+  });
+  removePassword.addEventListener('click', () => {
+    if (!status?.hasManagementKey || !window.confirm(t('Remove the saved management password?'))) return;
+    password.value = '';
+    void act(async () => accept(await api.cliProxySetManagementKey('')) && (say(t('Password removed.')), true));
   });
   password.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); savePassword.click(); } });
   createKey.addEventListener('click', () => void act(async () =>

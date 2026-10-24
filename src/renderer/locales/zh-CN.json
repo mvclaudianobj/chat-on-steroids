@@ -4107,5 +4107,9 @@
   "Selected local scope": "所选本地范围",
 "Credential saved": "凭据已保存",
   "No saved credential": "没有已保存的凭据",
-  "Credential status unavailable": "凭据状态不可用"
+  "Credential status unavailable": "凭据状态不可用",
+  "Remove saved key": "移除已保存的密钥",
+  "Remove the saved API key?": "移除已保存的 API 密钥？",
+  "Remove saved password": "移除已保存的密码",
+  "Remove the saved management password?": "移除已保存的管理密码？"
 }

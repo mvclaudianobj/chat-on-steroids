@@ -4107,5 +4107,9 @@
   "Selected local scope": "選択したローカル範囲",
 "Credential saved": "認証情報を保存済み",
   "No saved credential": "保存された認証情報なし",
-  "Credential status unavailable": "認証情報の状態を取得できません"
+  "Credential status unavailable": "認証情報の状態を取得できません",
+  "Remove saved key": "保存されたキーを削除",
+  "Remove the saved API key?": "保存された API キーを削除しますか？",
+  "Remove saved password": "保存されたパスワードを削除",
+  "Remove the saved management password?": "保存された管理パスワードを削除しますか？"
 }

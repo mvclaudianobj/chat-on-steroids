@@ -4155,5 +4155,9 @@
   "Selected local scope": "Ausgewählter lokaler Bereich",
 "Credential saved": "Zugangsdaten gespeichert",
   "No saved credential": "Keine Zugangsdaten gespeichert",
-  "Credential status unavailable": "Status der Zugangsdaten nicht verfügbar"
+  "Credential status unavailable": "Status der Zugangsdaten nicht verfügbar",
+  "Remove saved key": "Gespeicherten Schlüssel entfernen",
+  "Remove the saved API key?": "Gespeicherten API-Schlüssel entfernen?",
+  "Remove saved password": "Gespeichertes Passwort entfernen",
+  "Remove the saved management password?": "Gespeichertes Verwaltungspasswort entfernen?"
 }

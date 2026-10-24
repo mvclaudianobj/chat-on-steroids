@@ -4203,5 +4203,9 @@
   "Selected local scope": "Escopo local selecionado",
 "Credential saved": "Credencial salva",
   "No saved credential": "Nenhuma credencial salva",
-  "Credential status unavailable": "Estado da credencial indisponível"
+  "Credential status unavailable": "Estado da credencial indisponível",
+  "Remove saved key": "Remover chave salva",
+  "Remove the saved API key?": "Remover a chave de API salva?",
+  "Remove saved password": "Remover senha salva",
+  "Remove the saved management password?": "Remover a senha de administração salva?"
 }

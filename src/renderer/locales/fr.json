@@ -4203,5 +4203,9 @@
   "Selected local scope": "Périmètre local sélectionné",
 "Credential saved": "Identifiant enregistré",
   "No saved credential": "Aucun identifiant enregistré",
-  "Credential status unavailable": "État des identifiants indisponible"
+  "Credential status unavailable": "État des identifiants indisponible",
+  "Remove saved key": "Supprimer la clé enregistrée",
+  "Remove the saved API key?": "Supprimer la clé API enregistrée ?",
+  "Remove saved password": "Supprimer le mot de passe enregistré",
+  "Remove the saved management password?": "Supprimer le mot de passe administrateur enregistré ?"
 }

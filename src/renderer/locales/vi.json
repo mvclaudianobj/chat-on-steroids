@@ -4107,5 +4107,9 @@
   "Selected local scope": "Phạm vi cục bộ đã chọn",
 "Credential saved": "Đã lưu thông tin đăng nhập",
   "No saved credential": "Chưa lưu thông tin đăng nhập",
-  "Credential status unavailable": "Không có trạng thái thông tin đăng nhập"
+  "Credential status unavailable": "Không có trạng thái thông tin đăng nhập",
+  "Remove saved key": "Xóa khóa đã lưu",
+  "Remove the saved API key?": "Xóa khóa API đã lưu?",
+  "Remove saved password": "Xóa mật khẩu đã lưu",
+  "Remove the saved management password?": "Xóa mật khẩu quản trị đã lưu?"
 }

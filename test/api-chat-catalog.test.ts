@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const durable = new Map<string, unknown>();
 const secrets = new Map<string, string>();
 let revision = 1;
+let storageAvailable = true;
+let unreadable = false;
 vi.mock('../src/main/durable.js', () => ({
   readDurable: async (name: string) => durable.get(name) ?? null,
   writeDurableNow: async (name: string, value: unknown) => { durable.set(name, structuredClone(value)); }
@@ -10,6 +12,8 @@ vi.mock('../src/main/durable.js', () => ({
 vi.mock('../src/main/secrets.js', () => ({
   getSecret: async (key: string) => secrets.get(key) ?? null,
   hasSecret: async (key: string) => secrets.has(key),
+  secureStorageStatus: async () => ({ available: storageAvailable, detail: storageAvailable ? null : 'unavailable' }),
+  storedSecretsUnreadable: () => unreadable,
   setSecret: async (key: string, value: string) => { revision++; if (value.trim()) secrets.set(key, value.trim()); else secrets.delete(key); },
   secretsRevision: () => revision
 }));
@@ -28,6 +32,8 @@ const listing = { object: 'list', data: [
 ] };
 
 beforeEach(() => {
+  storageAvailable = true;
+  unreadable = false;
   durable.clear();
   secrets.clear();
   resetApiChatCatalogForTests();
@@ -58,13 +64,26 @@ describe('API chat catalogue and settings', () => {
   });
 
   it('reports whether a key is stored without ever returning it', async () => {
-    expect(await apiChatStatus()).toEqual({ endpoint: 'http://127.0.0.1:18081/v1', model: null, effort: null, favorites: [], recents: [], hasKey: false, detected: null, keyRequired: false });
+    expect(await apiChatStatus()).toEqual({ endpoint: 'http://127.0.0.1:18081/v1', model: null, effort: null, favorites: [], recents: [], hasKey: false, keyPresence: 'absent', detected: null, keyRequired: false });
     await setApiChatKey('sk-secret');
     const status = await apiChatStatus();
     expect(status.hasKey).toBe(true);
+    expect(status.keyPresence).toBe('saved');
     expect(JSON.stringify(status)).not.toContain('sk-secret');
     await setApiChatKey('');
     expect((await apiChatStatus()).hasKey).toBe(false);
+    expect((await apiChatStatus()).keyPresence).toBe('absent');
+  });
+
+  it('never mistakes locked or unreadable secure storage for an absent API key', async () => {
+    await setApiChatKey('synthetic-token');
+    storageAvailable = false;
+    expect(await apiChatStatus()).toMatchObject({ hasKey: false, keyPresence: 'unavailable', keyRequired: false });
+    storageAvailable = true;
+    unreadable = true;
+    expect(await apiChatStatus()).toMatchObject({ hasKey: false, keyPresence: 'unavailable' });
+    unreadable = false;
+    expect(await apiChatStatus()).toMatchObject({ hasKey: true, keyPresence: 'saved' });
   });
 
   it('saves a checked endpoint, model and effort, and refuses unsafe or unknown values', async () => {

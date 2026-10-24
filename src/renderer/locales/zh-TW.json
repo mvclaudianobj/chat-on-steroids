@@ -4107,5 +4107,9 @@
   "Selected local scope": "選取的本機範圍",
 "Credential saved": "憑證已儲存",
   "No saved credential": "沒有已儲存的憑證",
-  "Credential status unavailable": "憑證狀態無法取得"
+  "Credential status unavailable": "憑證狀態無法取得",
+  "Remove saved key": "移除已儲存的金鑰",
+  "Remove the saved API key?": "移除已儲存的 API 金鑰？",
+  "Remove saved password": "移除已儲存的密碼",
+  "Remove the saved management password?": "移除已儲存的管理密碼？"
 }
