@@ -31,7 +31,7 @@ async function fixture() {
   const request=await getCompany();
   // The direct legacy authorize path writes phase admitted; O7 only runs from active phase.
   // Set up using the authorized internal broker progress mutation.
-  await mutateCompany('progress',{id:chiefId,workerId,runId,state:'active'});
+  await mutateCompany('progress',{id:chiefId,workerId,runId,state:'active',conversationId:'synthetic-authenticated-chief'});
   const target=(await mutateCompany('create',{...create,title:'Triage target'})).requests[0]!.id;
   expect(request.requests.length).toBe(1);
   return target;
@@ -65,6 +65,19 @@ describe('O7 verified internal autonomy',()=>{
     await broker.grantDelegation('marks2','internal-triage');
     const replaced={...service,status:async()=>({runId,workers:[{id:workerId,runId,label:`marks2:${chiefId}`,state:'active',result:null,conversationId:'replacement-chief-chat'}]})};
     await expect(createCompanyBroker(replaced).applyDelegatedTriage()).rejects.toThrow('no longer active');
+  });
+  it('refuses to grant new chief authority after the ticket-bound conversation was replaced',async()=>{
+    const target=await fixture();
+    // A different broker worker conversation may be returned for the same run and seat.
+    const staleStatus={...service,status:async()=>({runId,workers:[{id:workerId,runId,
+      label:`marks2:${chiefId}`,state:'active',result:null,conversationId:'replaced-ticket-chat'}]})};
+    const snapshot=await getCompany();
+    expect(snapshot.requests.find(row=>row.id===chiefId)?.execution?.conversationId).toBe('synthetic-authenticated-chief');
+    await expect(createCompanyBroker(staleStatus).grantDelegation('marks2','internal-triage'))
+      .rejects.toThrow(/conversation|authenticated worker session/i);
+    const after=await getCompany();
+    expect(after.delegation.mode).toBe('manual');
+    expect(after.requests.find(row=>row.id===target)?.status).toBe('inbox');
   });
   it('binds configured seat and exact broker owner/run/worker and survives recovery',async()=>{
     await fixture();const state=await createCompanyBroker(service).grantDelegation('marks2','internal-triage','director');

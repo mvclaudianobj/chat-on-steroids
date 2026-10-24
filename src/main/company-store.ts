@@ -142,6 +142,7 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
             row.execution?.mode === 'live' && row.execution.phase === 'running' &&
             row.status === 'working' && row.execution.ownerId === fields.binding!.ownerId &&
             row.execution.runId === fields.binding!.runId && row.execution.workerId === fields.binding!.workerId &&
+            row.execution.conversationId === fields.binding!.conversationId &&
             `${row.seat}:${row.id}` === fields.binding!.label)))
           throw new Error('Chief worker binding cannot be verified');
         if (seat && fields?.scope !== 'internal-triage') throw new Error('Worker delegation only supports internal triage');

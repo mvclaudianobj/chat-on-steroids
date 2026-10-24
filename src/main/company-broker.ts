@@ -112,8 +112,8 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
     const chief=candidates[0]!, bound=chief.execution!;
     const status=await backend.status(chief.id,bound.runId!);
     const verified = status.workers.filter(worker=>worker.id===bound.workerId && worker.runId===bound.runId &&
-      worker.label===labelFor(chief) && worker.state==='active' && typeof worker.conversationId==='string' &&
-      worker.conversationId.length>0 && worker.conversationId.length<=160);
+      worker.label===labelFor(chief) && worker.state==='active' && !!bound.conversationId &&
+      worker.conversationId===bound.conversationId && worker.conversationId.length<=160);
     if (status.runId!==bound.runId || verified.length!==1)
       throw new Error('Selected chief has no active authenticated worker session');
     const now=Date.now();

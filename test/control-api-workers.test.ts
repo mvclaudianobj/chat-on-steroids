@@ -253,7 +253,8 @@ it('applies and acknowledges a Company O7 decision through the real local worker
     }]})).body;
     broker.bindConversation('worker-1','ephemeral-company-chief',assigned.runId);
     await companyStore.mutateCompany('authorize',{id:chiefId,ownerId:chiefId,workerId:'worker-1',runId:assigned.runId});
-    await companyStore.mutateCompany('progress',{id:chiefId,workerId:'worker-1',runId:assigned.runId,state:'active'});
+    await companyStore.mutateCompany('progress',{id:chiefId,workerId:'worker-1',runId:assigned.runId,
+      state:'active',conversationId:'ephemeral-company-chief'});
     const targetId=(await companyStore.mutateCompany('create',{...fields,title:'Queue target'})).requests[0]!.id;
     const companyBroker=createCompanyBroker();
     const grant=await companyBroker.grantDelegation('marks2','internal-triage','manager');
