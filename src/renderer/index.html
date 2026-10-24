@@ -313,6 +313,24 @@
                 <p id="jarvisProviderStatus" role="status" aria-live="polite"></p>
               </div>
             </section>
+            <section class="appearance-section" id="jarvisRoutingSettings">
+              <header class="settings-section-head"><div><h2>TTS routing: Gemini + G4F</h2><p>Choose the fallback order for spoken replies. Your four Gemini keys remain in the provider vault, and both G4F profiles have separate credentials.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>TTS routing order</b><em>Off uses the current provider. Gemini first or G4F first tries the preferred group, then the other when permitted.</em></span><select id="jarvisRoutingMode"><option value="off">Off</option><option value="gemini-first">Gemini first</option><option value="g4f-first">G4F first</option></select></label>
+                <h3>G4F profile 1</h3>
+                <label class="setting"><span class="setting-text"><b>G4F profile 1 URL</b><em>HTTPS endpoint for the first independent G4F account.</em></span><input id="jarvisG4f1Url" type="url" maxlength="300" spellcheck="false" placeholder="https://g4f.space/v1" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 1 TTS model</b></span><input id="jarvisG4f1Model" type="text" maxlength="200" spellcheck="false" placeholder="gpt-4o-mini-tts" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 1 voice</b></span><input id="jarvisG4f1Voice" type="text" maxlength="64" spellcheck="false" placeholder="alloy" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 1 key</b><em>Blank means the stored key stays unchanged.</em></span><input id="jarvisG4f1Key" type="password" maxlength="16384" autocomplete="off" aria-describedby="jarvisG4fStatus" /></label>
+                <h3>G4F profile 2</h3>
+                <label class="setting"><span class="setting-text"><b>G4F profile 2 URL</b><em>May use the same host as profile 1 with a different account.</em></span><input id="jarvisG4f2Url" type="url" maxlength="300" spellcheck="false" placeholder="https://g4f.space/v1" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 2 TTS model</b></span><input id="jarvisG4f2Model" type="text" maxlength="200" spellcheck="false" placeholder="gpt-4o-mini-tts" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 2 voice</b></span><input id="jarvisG4f2Voice" type="text" maxlength="64" spellcheck="false" placeholder="alloy" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 2 key</b><em>Blank means the stored key stays unchanged.</em></span><input id="jarvisG4f2Key" type="password" maxlength="16384" autocomplete="off" aria-describedby="jarvisG4fStatus" /></label>
+                <button type="button" class="btn" id="jarvisG4fSaveKeys">Save G4F keys in the vault</button>
+                <p id="jarvisG4fStatus" role="status" aria-live="polite"></p>
+              </div>
+            </section>
           </div>
         </section>
         <section class="panel appearance-panel brain-panel scroll" data-panel="brain" aria-labelledby="brainTitle">

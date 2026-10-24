@@ -3,7 +3,11 @@ import { parseJarvisPreferences } from '../src/renderer/jarvis.js';
 import { jarvisVoiceSttReady, JARVIS_VOICE_PRESETS } from '../src/shared/jarvis-voice.js';
 
 const provider = { baseUrl: '', sttMode: 'transcriptions', sttModel: '', ttsModel: '', voice: '' };
-const base = { enabled: false, key: 'F8', language: '', tts: false, voice: '', engine: 'auto', audioModel: '', ttsEngine: 'auto', continuous: false, earcons: true, provider, version: 2 };
+const base = { enabled: false, key: 'F8', language: '', tts: false, voice: '', engine: 'auto', audioModel: '', ttsEngine: 'auto', continuous: false, earcons: true, provider,
+  routing: { mode: 'off', g4f: [
+    { baseUrl: '', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' },
+    { baseUrl: '', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' }
+  ] }, version: 2 };
 
 describe('Jarvis preference admission', () => {
   it('starts opt-out, push-to-talk only and with no speech synthesis', () => {

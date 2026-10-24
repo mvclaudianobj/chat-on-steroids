@@ -13,6 +13,11 @@ const skeleton = `<!doctype html><html><body>
   <input id="jarvisProviderUrl"><select id="jarvisSttMode"><option value="transcriptions">Transcriptions</option><option value="chat-audio">Chat audio</option></select>
   <input id="jarvisSttModel"><input id="jarvisTtsModel"><input id="jarvisProviderVoice">
   <input id="jarvisProviderKey" type="password"><input id="jarvisProviderFallbackKey" type="password">
+  <input id="jarvisVaultPassword" type="password">
+  <select id="jarvisRoutingMode"><option value="off">Off</option><option value="gemini-first">Gemini first</option><option value="g4f-first">G4F first</option></select>
+  <input id="jarvisG4f1Url"><input id="jarvisG4f1Model"><input id="jarvisG4f1Voice"><input id="jarvisG4f1Key" type="password">
+  <input id="jarvisG4f2Url"><input id="jarvisG4f2Model"><input id="jarvisG4f2Voice"><input id="jarvisG4f2Key" type="password">
+  <button id="jarvisG4fSaveKeys"></button><p id="jarvisG4fStatus" role="status"></p>
   <p id="jarvisSettingsStatus"></p><p id="jarvisProviderStatus"></p><textarea id="chatInput"></textarea>
   <p id="jarvisActiveChat" role="status"></p><p id="jarvisReadiness" role="status"></p>
   <span id="jarvisModelInfo"></span><button id="jarvisGoToChat"></button><button id="jarvisSetupChat" hidden></button>
@@ -29,13 +34,18 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; providerUnavailable?: boolean; microphoneDenied?: boolean;
   deferredProviderStatus?: boolean;
   google?: boolean; language?: string;
+  routingMode?: 'off' | 'gemini-first' | 'g4f-first';
   initialEvents?: unknown[]; initialTurns?: Record<string, { origin: number; time: number; questionId: string }> } = {}) {
   page = new JSDOM(skeleton, { url: 'https://local.test/' });
   const window = page.window;
   window.localStorage.setItem('chat-marks.jarvis.settings.v1', JSON.stringify({ enabled: options.enabled !== false, tts: options.tts ?? true, continuous: options.continuous ?? false, earcons: false,
     language: options.language ?? '', provider: options.noProvider ? { ...voice, baseUrl: '' }
       : options.google ? { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: 'gemini-3.5-transcribe', ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' }
-      : options.g4f ? { baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_synthetic:gemini', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' } : voice, version: 2 }));
+      : options.g4f ? { baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_synthetic:gemini', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' } : voice,
+    routing: { mode: options.routingMode ?? 'off', g4f: [
+      { baseUrl: 'https://g4f.space/v1', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' },
+      { baseUrl: 'https://voice-two.example/v1', ttsModel: 'gpt-4o-mini-tts', voice: 'nova' }
+    ] }, version: 2 }));
   Object.assign(globalThis, { window, document: window.document, localStorage: window.localStorage, Event: window.Event, Option: window.Option });
   const tracks = [{ stop: vi.fn() }];
   const getUserMedia = vi.fn(async () => {
@@ -75,6 +85,8 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     ? { ok: false as const, error: 'provider down' } : { ok: true as const, data: `text from ${engine}` });
   const speak = vi.fn(async (_voice: unknown, text: string) => ({ ok: true as const, data: { mime: 'audio/mpeg', bytes: new TextEncoder().encode(text) } }));
   const speakCancel = vi.fn(async () => ({ ok: true as const, data: null }));
+  const routeStatus = vi.fn(async () => ({ ok: true as const, data: { g4f1: true, g4f2: false, error: null } }));
+  const setKey = vi.fn(async () => ({ ok: true as const, data: true }));
   const send = vi.fn(async () => ({ ok: true as const, data: { turnId: 'turn-01' } }));
   const sendInput = vi.fn(async (input: { id: string; sessionId: string | null; text: string }) => ({ ok: true as const, data: { ...input, state: 'queued' } }));
   const statusResolvers: Array<(reply: { ok: true; data: { models: string[]; stt: string[]; tts: string[]; primary: boolean; fallback: boolean; ffmpeg: boolean; error: string | null } }) => void> = [];
@@ -89,6 +101,7 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
       })
       : options.providerUnavailable ? { ok: false as const, error: 'Vault unreadable' } : ({ ok: true as const, data: { models: [], stt: ['whisper-1'], tts: ['gpt-4o-mini-tts'], primary: true, fallback: true, ffmpeg: true, error: null } }),
     jarvisTranscribe: transcribe, jarvisSpeak: speak, jarvisSpeakCancel: speakCancel,
+    jarvisVoiceRouteStatus: routeStatus, jarvisVoiceSetKey: setKey,
     jarvisCancel: async () => ({ ok: true as const, data: null }),
     startDictation: vi.fn(), stopDictation: vi.fn(async () => ({ ok: true, data: undefined })), apiChatSend: send, sendInput,
     onDictationEvent: () => () => undefined,
@@ -143,8 +156,55 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   };
   const rejectProviderCheck = async (index: number) => { statusRejectors[index]?.(new Error('old provider unavailable')); await flush(); };
   return { element, hold, release, flush, stream, nativeEvents, switchTo, finishProviderCheck, rejectProviderCheck, statusResolvers,
-    transcribe, speak, speakCancel, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat, openSettings, openChat };
+    transcribe, speak, speakCancel, routeStatus, setKey, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat, openSettings, openChat };
 }
+
+describe('Jarvis Gemini/G4F public routing settings', () => {
+  it('persists both independent G4F profiles, never persists credentials, and shows saved-key masks from main status', async () => {
+    const f = await fixture({ routingMode: 'gemini-first' });
+    expect(f.element<HTMLSelectElement>('jarvisRoutingMode').value).toBe('gemini-first');
+    await f.flush();
+    expect(f.element<HTMLInputElement>('jarvisG4f1Key').placeholder).toBe('••••••••');
+    expect(f.element<HTMLInputElement>('jarvisG4f2Key').placeholder).toBe('');
+    expect(f.element<HTMLInputElement>('jarvisG4f1Key').value).toBe('');
+    f.element<HTMLInputElement>('jarvisG4f1Url').value = 'https://same-host.example/v1';
+    f.element<HTMLInputElement>('jarvisG4f2Url').value = 'https://same-host.example/v1';
+    f.element<HTMLInputElement>('jarvisG4f2Model').value = 'model-two';
+    f.element<HTMLSelectElement>('jarvisRoutingMode').value = 'g4f-first';
+    f.element<HTMLSelectElement>('jarvisRoutingMode').dispatchEvent(new page!.window.Event('change'));
+    const stored = JSON.parse(page!.window.localStorage.getItem('chat-marks.jarvis.settings.v1')!);
+    expect(stored.routing.mode).toBe('g4f-first');
+    expect(stored.routing.g4f).toEqual([
+      { baseUrl: 'https://same-host.example/v1', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' },
+      { baseUrl: 'https://same-host.example/v1', ttsModel: 'model-two', voice: 'nova' }
+    ]);
+    expect(JSON.stringify(stored)).not.toMatch(/password|credential|synthetic-secret/);
+    f.element<HTMLInputElement>('jarvisVaultPassword').value = 'synthetic-secret';
+    f.element<HTMLInputElement>('jarvisG4f2Key').value = 'second-key';
+    f.element<HTMLButtonElement>('jarvisG4fSaveKeys').click(); await f.flush();
+    expect(f.setKey).toHaveBeenCalledOnce();
+    expect(f.setKey).toHaveBeenCalledWith('g4f2', 'https://same-host.example/v1', 'second-key', 'synthetic-secret');
+    expect(f.element<HTMLInputElement>('jarvisG4f2Key').value).toBe('');
+    expect(page!.window.localStorage.getItem('chat-marks.jarvis.settings.v1')).not.toContain('second-key');
+  });
+
+  it('keeps the same groupId for each spoken sentence, and rotates it after interruption', async () => {
+    const f = await fixture({ routingMode: 'g4f-first' });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    await f.stream('Primeira frase do Jarvis. Segunda frase do Jarvis. E terceira.', true, true);
+    const requests = f.speak.mock.calls;
+    expect(requests.length).toBeGreaterThanOrEqual(2);
+    const routing = requests[0]?.[2] as { mode: string };
+    const group = requests[0]?.[3] as string;
+    expect(routing.mode).toBe('g4f-first');
+    expect(group).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(requests.slice(1).every(row => row[3] === group)).toBe(true);
+    f.hold(); await f.flush();
+    f.release(); await f.flush();
+    await f.stream('Nova resposta, com uma frase completa.', true, true);
+    expect(f.speak.mock.calls.at(-1)?.[3]).not.toBe(group);
+  });
+});
 
 describe('Jarvis automatic voice for typed ChatGPT messages', () => {
   const chatA = { id: 'typed-chat-A', conversationId: 'conversation-A', engine: 'chatgpt' };

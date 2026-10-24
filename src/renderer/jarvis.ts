@@ -9,7 +9,8 @@ import type { DictationEvent } from '../shared/dictation.js';
 import type { SessionEvent } from '../shared/session.js';
 import {
   JARVIS_VOICE_PRESETS, JARVIS_VOICE_SUGGESTIONS, JarvisSentenceSplitter, emptyJarvisVoiceConfig, jarvisVoiceSttReady,
-  jarvisVoiceTtsReady, parseJarvisVoiceConfig, type JarvisVoiceConfig
+  jarvisVoiceTtsReady, parseJarvisVoiceConfig, emptyJarvisVoiceRouting, parseJarvisVoiceRouting,
+  type JarvisVoiceConfig, type JarvisVoiceRouting
 } from '../shared/jarvis-voice.js';
 import type { AppApi } from '../preload/index.js';
 import { onLanguageChange, t } from './i18n.js';
@@ -23,18 +24,18 @@ type TtsEngine = 'auto' | 'provider' | 'system';
 export type JarvisPhase = 'idle' | 'listening' | 'stopping' | 'transcribing' | 'thinking' | 'speaking';
 type Preferences = {
   enabled: boolean; key: 'F8' | 'F9' | 'F10' | 'F11'; language: string; tts: boolean; voice: string; engine: EngineChoice; audioModel: string;
-  ttsEngine: TtsEngine; continuous: boolean; earcons: boolean; provider: JarvisVoiceConfig; version: 2;
+  ttsEngine: TtsEngine; continuous: boolean; earcons: boolean; provider: JarvisVoiceConfig; routing: JarvisVoiceRouting; version: 2;
 };
 const defaults: Preferences = {
   enabled: false, key: 'F8', language: '', tts: false, voice: '', engine: 'auto', audioModel: '',
-  ttsEngine: 'auto', continuous: false, earcons: true, provider: emptyJarvisVoiceConfig(), version: 2
+  ttsEngine: 'auto', continuous: false, earcons: true, provider: emptyJarvisVoiceConfig(), routing: emptyJarvisVoiceRouting(), version: 2
 };
 /** Default order once a voice provider is configured: provider → CLIProxy → local Whisper → Windows. */
 const ORDER: Engine[] = ['provider', 'cliproxy', 'local', 'windows'];
 const MAX_SPOKEN = 8000;
 
 export function parseJarvisPreferences(value: unknown): Preferences {
-  if (!value || typeof value !== 'object') return { ...defaults, provider: emptyJarvisVoiceConfig() };
+  if (!value || typeof value !== 'object') return { ...defaults, provider: emptyJarvisVoiceConfig(), routing: emptyJarvisVoiceRouting() };
   const data = value as Partial<Omit<Preferences, 'engine' | 'version'>> & { engine?: unknown; version?: unknown };
   let engine: EngineChoice = data.engine === 'provider' || data.engine === 'cliproxy' || data.engine === 'local' || data.engine === 'windows' ? data.engine : 'auto';
   // J1/J2 stored their default "cliproxy" on every save; the J3 default adds the provider first.
@@ -51,6 +52,7 @@ export function parseJarvisPreferences(value: unknown): Preferences {
     continuous: data.continuous === true,
     earcons: data.earcons !== false,
     provider: parseJarvisVoiceConfig(data.provider),
+    routing: parseJarvisVoiceRouting(data.routing),
     version: 2
   };
 }
@@ -93,6 +95,14 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   const ttsModel = maybe<HTMLInputElement>('jarvisTtsModel');
   const providerVoice = maybe<HTMLInputElement>('jarvisProviderVoice');
   const providerStatus = maybe<HTMLElement>('jarvisProviderStatus');
+  const routeMode = maybe<HTMLSelectElement>('jarvisRoutingMode');
+  const routeStatus = maybe<HTMLElement>('jarvisG4fStatus');
+  const routeFields = [1, 2].map(n => ({
+    url: maybe<HTMLInputElement>(`jarvisG4f${n}Url`),
+    model: maybe<HTMLInputElement>(`jarvisG4f${n}Model`),
+    voice: maybe<HTMLInputElement>(`jarvisG4f${n}Voice`),
+    key: maybe<HTMLInputElement>(`jarvisG4f${n}Key`)
+  }));
   const stateLabel = maybe<HTMLElement>('jarvisStatus');
   const createChat = maybe<HTMLButtonElement>('jarvisCreateCliProxyChat');
   const returnChat = maybe<HTMLButtonElement>('jarvisReturnChat');
@@ -108,6 +118,16 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   if (ttsEngine) ttsEngine.value = preferences.ttsEngine;
   if (continuous) continuous.checked = preferences.continuous;
   if (earcons) earcons.checked = preferences.earcons;
+  const showRouting = (): void => {
+    if (routeMode) routeMode.value = preferences.routing.mode;
+    routeFields.forEach((fields, n) => {
+      const config = preferences.routing.g4f[n]!;
+      if (fields.url) fields.url.value = config.baseUrl;
+      if (fields.model) fields.model.value = config.ttsModel;
+      if (fields.voice) fields.voice.value = config.voice;
+    });
+  };
+  showRouting();
   const showProvider = (): void => {
     const config = preferences.provider;
     if (providerUrl) providerUrl.value = config.baseUrl;
@@ -135,6 +155,11 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   let stopWatching: () => void = () => undefined;
   let phase: JarvisPhase = 'idle';
   let speechVoice = preferences.voice;
+  let speechGroup: { turn: string; id: string } | null = null;
+  const activateSpeechGroup = (sessionId: string, turnId: string): void => {
+    const turn = `${sessionId}:${turnId}`;
+    if (speechGroup?.turn !== turn) speechGroup = { turn, id: crypto.randomUUID() };
+  };
   let answer: { sessionId: string; turnId: string; splitter: JarvisSentenceSplitter; spoken: number } | null = null;
   // The recorded question -> response relation also covers ordinary typed messages.
   // Each selection/voice opt-in gets a new baseline so historical answers stay silent.
@@ -182,6 +207,47 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     (preferences.ttsEngine === 'provider' || (preferences.ttsEngine === 'auto' && providerReachable()));
   const speaks = (): boolean => preferences.tts && (providerSpeaks() || systemSpeech());
   const liveStreams = new Set<JarvisProgressiveAudio>();
+  type RouteReply = { ok: true; data: { g4f1: boolean; g4f2: boolean; error: string | null } } | { ok: false; error: string };
+  const routedApi = api as AppApi & {
+    jarvisVoiceRouteStatus?: (routing: JarvisVoiceRouting) => Promise<RouteReply>;
+  };
+  let routeCheck = 0;
+  const refreshRouteStatus = (): void => {
+    const generation = ++routeCheck;
+    if (!routeStatus) return;
+    routeFields.forEach(fields => {
+      if (fields.key) { fields.key.value = ''; fields.key.placeholder = ''; fields.key.setAttribute('aria-label', t('G4F credential not verified.')); }
+    });
+    routeStatus.textContent = t('Checking G4F credentials…');
+    if (!routedApi.jarvisVoiceRouteStatus) {
+      routeStatus.textContent = t('G4F routing is unavailable in this version.');
+      return;
+    }
+    const routing = preferences.routing;
+    void routedApi.jarvisVoiceRouteStatus(routing).then(reply => {
+      if (generation !== routeCheck || routing !== preferences.routing) return;
+      if (!reply.ok) { routeStatus.textContent = reply.error; return; }
+      const states = [reply.data.g4f1, reply.data.g4f2];
+      routeFields.forEach((fields, n) => {
+        if (!fields.key) return;
+        const saved = states[n] === true;
+        fields.key.placeholder = saved ? '••••••••' : '';
+        fields.key.setAttribute('aria-label', t(saved ? 'G4F credential saved.' : 'No G4F credential saved.'));
+      });
+      routeStatus.textContent = reply.data.error ?? states.map((saved, n) =>
+        `${t('G4F profile')} ${n + 1}: ${t(saved ? 'G4F credential saved.' : 'No G4F credential saved.')}`).join(' ');
+    }).catch(() => {
+      if (generation === routeCheck) routeStatus.textContent = t('G4F credential status unavailable.');
+    });
+  };
+  const readRouting = (): JarvisVoiceRouting => parseJarvisVoiceRouting({
+    mode: routeMode?.value ?? preferences.routing.mode,
+    g4f: routeFields.map((fields, n) => ({
+      baseUrl: fields.url?.value ?? preferences.routing.g4f[n]?.baseUrl,
+      ttsModel: fields.model?.value ?? preferences.routing.g4f[n]?.ttsModel,
+      voice: fields.voice?.value ?? preferences.routing.g4f[n]?.voice
+    }))
+  });
 
   const setPhase = (next: JarvisPhase): void => { phase = next; paint(); };
   const cue = (kind: 'listen' | 'done' | 'error'): void => { if (preferences.earcons) playEarcon(kind); };
@@ -197,12 +263,20 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
             const player = new JarvisProgressiveAudio(requestId, api.onJarvisSpeechStream);
             liveStreams.add(player);
             if (signal.aborted) { player.cancel(); liveStreams.delete(player); return { kind: 'system', text: '' }; }
-            void api.jarvisSpeakStream(preferences.provider, text, requestId).then(reply => {
+            const groupId = speechGroup?.id ?? crypto.randomUUID();
+            const speakStream = api.jarvisSpeakStream as unknown as (
+              provider: JarvisVoiceConfig, text: string, requestId: string, routing: JarvisVoiceRouting, groupId: string
+            ) => ReturnType<NonNullable<typeof api.jarvisSpeakStream>>;
+            void speakStream(preferences.provider, text, requestId, preferences.routing, groupId).then(reply => {
               if (!reply.ok) player.fail(new Error(reply.error));
             }).catch(error => player.fail(error));
             return { kind: 'stream', player };
           }
-          const reply = await api.jarvisSpeak(preferences.provider, text);
+          const groupId = speechGroup?.id ?? crypto.randomUUID();
+          const speak = api.jarvisSpeak as unknown as (
+            provider: JarvisVoiceConfig, text: string, routing: JarvisVoiceRouting, groupId: string
+          ) => ReturnType<typeof api.jarvisSpeak>;
+          const reply = await speak(preferences.provider, text, preferences.routing, groupId);
           if (reply.ok) {
             if (signal.aborted) return { kind: 'system', text: '' };
             return { kind: 'audio', url: URL.createObjectURL(new Blob([new Uint8Array(reply.data.bytes)], { type: reply.data.mime })) };
@@ -246,6 +320,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   });
   /** Barge-in or cancel: stop the voice now, wherever it comes from. */
   const silence = (): void => {
+    speechGroup = null;
     speech.stop();
     for (const stream of liveStreams) stream.cancel();
     liveStreams.clear();
@@ -712,6 +787,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         const bounded = sentences.filter(sentence => { spoken += sentence.length; return spoken <= MAX_SPOKEN; });
         if (bounded.length) {
           if (speech.speaking || speech.queued) silence();
+          activateSpeechGroup(watch.sessionId, turnId);
           speech.enqueue(bounded);
         }
       }
@@ -778,6 +854,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
             current.spoken += sentence.length;
             return current.spoken <= MAX_SPOKEN;
           });
+          if (sentences.length) activateSpeechGroup(current.sessionId, current.turnId);
           speech.enqueue(sentences);
         }
         if (ended) {
@@ -806,20 +883,24 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     if (running || stopping || nativePending || answer || phase === 'thinking' || speech.speaking) cancel();
     resetTypedWatch();
     const before = JSON.stringify(preferences.provider);
+    const oldRouting = JSON.stringify(preferences.routing);
     preferences = parseJarvisPreferences({
       enabled: enable.checked, key: key.value, language: language.value, tts: tts.checked, voice: voice.value, engine: engine?.value ?? preferences.engine,
       audioModel: audioModel?.value ?? preferences.audioModel, ttsEngine: ttsEngine?.value ?? preferences.ttsEngine,
-      continuous: continuous?.checked ?? preferences.continuous, earcons: earcons?.checked ?? preferences.earcons, provider: readProvider(), version: 2
+      continuous: continuous?.checked ?? preferences.continuous, earcons: earcons?.checked ?? preferences.earcons,
+      provider: readProvider(), routing: readRouting(), version: 2
     });
     try { localStorage.setItem(KEY, JSON.stringify(preferences)); } catch { /* preferences stay for this session */ }
     if (!preferences.enabled) { cancel(); consented = false; consent.checked = false; }
     if (JSON.stringify(preferences.provider) !== before) { showProvider(); refreshProvider(); }
     else if (preferences.enabled) refresh();
+    if (JSON.stringify(preferences.routing) !== oldRouting) { showRouting(); refreshRouteStatus(); }
     paintProvider();
     paint();
     void readAnswer();
   }
-  for (const element of [enable, key, language, tts, voice, engine, audioModel, ttsEngine, continuous, earcons, providerUrl, sttMode, sttModel, ttsModel, providerVoice]) element?.addEventListener('change', persist);
+  for (const element of [enable, key, language, tts, voice, engine, audioModel, ttsEngine, continuous, earcons, providerUrl, sttMode, sttModel, ttsModel, providerVoice,
+    routeMode, ...routeFields.flatMap(fields => [fields.url, fields.model, fields.voice])]) element?.addEventListener('change', persist);
   preset?.addEventListener('change', () => {
     const chosen = JARVIS_VOICE_PRESETS[preset.value as keyof typeof JARVIS_VOICE_PRESETS];
     if (!chosen) return;
@@ -852,6 +933,27 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       say(t('Keys saved in the vault.'));
       refreshProvider();
     })().catch(() => say(t('The keys could not be saved.')));
+  });
+  maybe<HTMLButtonElement>('jarvisG4fSaveKeys')?.addEventListener('click', () => {
+    const writes = routeFields.flatMap((fields, n) => fields.key?.value.trim()
+      ? [{ slot: (n === 0 ? 'g4f1' : 'g4f2') as 'g4f1' | 'g4f2', key: fields.key,
+        value: fields.key.value.trim(), url: readRouting().g4f[n]!.baseUrl }] : []);
+    if (!writes.length) { if (routeStatus) routeStatus.textContent = t('Enter a G4F key to save.'); return; }
+    if (writes.some(write => !write.url)) { if (routeStatus) routeStatus.textContent = t('Enter the G4F profile URL first.'); return; }
+    const password = maybe<HTMLInputElement>('jarvisVaultPassword');
+    if (!password?.value) { if (routeStatus) routeStatus.textContent = t('Enter the vault master password first.'); password?.focus(); return; }
+    const master = password.value;
+    const saveKey = api.jarvisVoiceSetKey as unknown as (slot: 'g4f1' | 'g4f2', url: string, value: string, password: string) =>
+      ReturnType<typeof api.jarvisVoiceSetKey>;
+    void (async () => {
+      for (const write of writes) {
+        const reply = await saveKey(write.slot, write.url, write.value, master);
+        if (!reply.ok) { if (routeStatus) routeStatus.textContent = reply.error; return; }
+        write.key.value = '';
+      }
+      password.value = '';
+      refreshRouteStatus();
+    })().catch(() => { if (routeStatus) routeStatus.textContent = t('G4F key could not be saved.'); });
   });
   maybe<HTMLButtonElement>('jarvisTestProviderVoice')?.addEventListener('click', () => {
     const button = maybe<HTMLButtonElement>('jarvisTestProviderVoice');
@@ -910,6 +1012,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   onLanguageChange(paint);
   // Consent and capture must never survive a page reload.
   refresh();
+  refreshRouteStatus();
   paintProvider();
   paint();
 }
