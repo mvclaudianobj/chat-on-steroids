@@ -366,6 +366,24 @@ describe('Jarvis provider routing across Gemini and two G4F accounts', () => {
       expect(origins).toEqual(['https://generativelanguage.googleapis.com', 'https://g4f-test.example', 'https://g4f-test.example', 'https://generativelanguage.googleapis.com']);
     } finally { date.mockRestore(); }
   });
+  it('falls back within a bounded interval when a provider hangs before first audio', async () => {
+    const origins: string[] = [];
+    configureJarvisVoiceForTests({ routeTimeoutMs: 20,
+      credential: async slot => ({ header: slot.startsWith('g4f') ? 'Authorization' : 'x-goog-api-key', value: `fixture-${slot}` }),
+      fetch: async (url, request) => {
+        const origin = new URL(String(url)).origin;
+        origins.push(origin);
+        if (origin.includes('generativelanguage')) return await new Promise<Response>((_resolve, reject) => {
+          request?.signal?.addEventListener('abort', () => reject(request.signal?.reason), { once: true });
+        });
+        return new Response(Buffer.from('ID3audio'), { headers: { 'content-type': 'audio/mpeg' } });
+      } });
+    const started = performance.now();
+    const result = await speakJarvisVoice(google(), 'Teste', signal(), routing('gemini-first'));
+    expect(result.mime).toBe('audio/mpeg');
+    expect(performance.now() - started).toBeLessThan(900);
+    expect(origins).toEqual(['https://generativelanguage.googleapis.com', 'https://g4f-test.example']);
+  });
   it('prevents prefetch concurrency from selecting different providers for one answer', async () => {
     const id = crypto.randomUUID();
     const seen: string[] = [];

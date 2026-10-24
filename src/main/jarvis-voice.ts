@@ -24,6 +24,7 @@ interface Dependencies {
   ffmpeg(): Promise<boolean>;
   toWav(bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array>;
   fetch: typeof fetch;
+  routeTimeoutMs: number;
 }
 
 /** A missing vault or entry means "no key"; an entry bound elsewhere is an explicit error. */
@@ -74,7 +75,7 @@ function ffmpegToWav(bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array
   });
 }
 
-const defaults: Dependencies = { credential: vaultCredential, ffmpeg: ffmpegAvailable, toWav: ffmpegToWav, fetch: (...args) => fetch(...args) };
+const defaults: Dependencies = { credential: vaultCredential, ffmpeg: ffmpegAvailable, toWav: ffmpegToWav, fetch: (...args) => fetch(...args), routeTimeoutMs: 12_000 };
 let deps: Dependencies = defaults;
 export function configureJarvisVoiceForTests(override: Partial<Dependencies> | null): void { deps = override ? { ...defaults, ...override } : defaults; routeCooldown.clear(); routeFailureReason.clear(); routePinned.clear(); routeSelectionInFlight.clear(); }
 
@@ -402,7 +403,8 @@ async function selectSpeechResponse(config: JarvisVoiceConfig, text: string, sig
     }
     if (candidate.slot !== 'primary' && !await deps.credential(candidate.slot, parseJarvisVoiceBaseUrl(candidate.config.baseUrl).origin)) continue;
     try {
-      const result = await speechResponse(candidate.config, text, signal, candidate.slot);
+      const limited = AbortSignal.any([signal, AbortSignal.timeout(deps.routeTimeoutMs)]);
+      const result = await speechResponse(candidate.config, text, limited, candidate.slot);
       if (groupId && !pinned) routePinned.set(groupId, { route: candidate, until: Date.now() + GROUP_TTL_MS });
       logInfo(`jarvis: voice route ${candidate.id} ready in ${Math.round(performance.now() - routeStarted)} ms${pinned ? ' (pinned)' : ''}`);
       return result;
@@ -410,7 +412,7 @@ async function selectSpeechResponse(config: JarvisVoiceConfig, text: string, sig
       if (signal.aborted) throw error;
       lastError = error;
       // Quota failure is shared among keys within one project. Never retry another Gemini key.
-      if (/HTTP (429|500|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT/.test(String(error))) {
+      if (/HTTP (429|500|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT|TimeoutError|timeout/i.test(String(error))) {
         routeCooldown.set(candidate.id, Date.now() + (error instanceof ProviderUnavailable && error.retryAfterMs !== null ? error.retryAfterMs : FAILURE_COOLDOWN_MS));
         routeFailureReason.set(candidate.id, error instanceof ProviderUnavailable ? `HTTP ${error.code}` : 'network');
       } else if (!/HTTP (401|403)/.test(String(error))) throw error;
