@@ -338,7 +338,7 @@ describe('Jarvis provider routing across Gemini and two G4F accounts', () => {
     configureJarvisVoiceForTests({ credential: async slot => slot === 'g4f1' || slot === 'g4f2' ? { header: 'Authorization', value: `fixture-${slot}` } : null,
       fetch: async (_url, init) => {
         const credential = (init?.headers as Record<string, string>).Authorization;
-        seen.push(credential);
+        seen.push(credential ?? "");
         return fail ? new Response(null, { status: 503 }) : new Response(Buffer.from('ID3audio'), { headers: { 'content-type': 'audio/mpeg' } });
       } });
     await speakJarvisVoice(google(), 'Primeira frase', signal(), routing('g4f-first'), id);
