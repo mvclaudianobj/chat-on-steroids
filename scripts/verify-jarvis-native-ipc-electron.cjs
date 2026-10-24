@@ -93,9 +93,12 @@ const synthetic = {
       fakeWindow.composerFixture.events.push(
         {seq:100,kind:'assistant_message',turnId:'not-jarvis-turn',messageId:'wrong',message:{text:'Do not speak a different turn.',truncated:false,chars:30},final:false},
         {seq:101,kind:'user_message',inputId:payload.id,inputDelivery:'offered',turnId:'unconfirmed',message:{text:payload.text,truncated:false,chars:payload.text.length}},
-        {seq:102,kind:'user_message',inputId:payload.id,inputDelivery:'confirmed',turnId:'confirmed-turn',message:{text:payload.text,truncated:false,chars:payload.text.length}},
+        {seq:102,kind:'user_message',messageId:'confirmed-question',inputId:payload.id,inputDelivery:'confirmed',turnId:'native-user-turn',message:{text:payload.text,truncated:false,chars:payload.text.length}},
         {seq:103,kind:'assistant_message',turnId:'confirmed-turn',messageId:'confirmed-answer',message:{text:'A resposta certa veio do ChatGPT. Continua aqui',truncated:false,chars:49},final:false}
       );
+      fakeWindow.composerFixture.summary.timelineTurns={
+        'confirmed-turn':{origin:102,time:Date.now(),questionId:'confirmed-question'}
+      };
       if(win&&!win.isDestroyed())win.webContents.send('session:changed',{sessionIds:['composer-preview']});
     },100);
     return result;
