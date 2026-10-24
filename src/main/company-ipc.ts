@@ -5,9 +5,20 @@ import { activateRealCompany, restoreDemoCompany, getCompany, mutateCompany } fr
 import { createCompanyBroker } from './company-broker.js';
 import { createCompanyObserver } from './company-observability.js';
 import { mainText } from './main-texts.js';
+import { companyLocalConsentCopy, localGrantDecision, readLocalCompanyGrants, recordLocalCompanyRequest, revokeLocalCompanyGrant } from './company-local-grants.js';
 
 export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
+  z.object({ action: z.literal('localGrants') }).strict(),
+  z.object({ action: z.literal('localGrantRevoke'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
+  z.object({ action: z.literal('localGrantRequest'), payload: z.object({
+    mode: z.enum(['task', 'agent', 'coo']), scope: z.enum(['company-local-read', 'company-local-triage', 'company-local-review']),
+    subject: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('coo'), principal: z.literal('marks-coo') }).strict(),
+      z.object({ kind: z.literal('worker'), ownerId: z.string().uuid(), runId: z.string().uuid(),
+        workerId: z.string().regex(/^worker-[1-9]\d*$/), conversationId: z.string().min(8).max(160) }).strict()
+    ]), requestId: z.string().uuid()
+  }).strict() }).strict(),
   z.object({ action: z.literal('observe') }).strict(),
   z.object({ action: z.literal('dispatch'), payload: z.object({ id: z.string().uuid(), consent: z.literal(true) }).strict() }).strict(),
   z.object({ action: z.literal('refreshBroker'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
@@ -34,6 +45,7 @@ export const companyIpcSchema = z.discriminatedUnion('action', [
 ]);
 export type CompanyIpcRequest = z.infer<typeof companyIpcSchema>;
 export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void {
+  // Caller must initialize the persistent userData before registering this handler.
   const broker = createCompanyBroker();
   const observer = createCompanyObserver();
   ipcMain.handle('marksCompany:request', async (event, payload: unknown) => {
@@ -45,6 +57,23 @@ export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void 
     try {
       if (parsed.data.action === 'authorize' || parsed.data.action === 'report' || parsed.data.action === 'confirm' || parsed.data.action === 'attendance') return { ok: false, error: 'Broker/COO identity and evidence verification are not yet connected; operation refused' };
       const request = parsed.data;
+      if (request.action === 'localGrants') return { ok: true, data: await readLocalCompanyGrants() };
+      if (request.action === 'localGrantRevoke') return { ok: true, data: await revokeLocalCompanyGrant(request.payload.id) };
+      if (request.action === 'localGrantRequest') {
+        const copy = companyLocalConsentCopy(request.payload.mode, request.payload.scope);
+        const frequency = await recordLocalCompanyRequest(request.payload);
+        const decision = await dialog.showMessageBox(window, { type: 'warning', title: copy.title,
+          message: copy.title, detail: copy.detail + (frequency.suggestExpansion ?
+            ' Três solicitações equivalentes: você pode escolher ampliar o escopo em uma autorização futura. Nenhuma ampliação é automática.' : ''),
+          buttons: ['Cancelar', 'Autorizar'], defaultId: 0, cancelId: 0, noLink: true });
+        if (decision.response !== 1 || window.isDestroyed() || event.sender !== window.webContents ||
+          event.senderFrame !== window.webContents.mainFrame) return { ok: false, error: 'Explicit consent required' };
+        // The existing external broker has no attested local role principal. A renderer's
+        // subject is a request, not proof; keep this boundary closed until wired to local attestation.
+        const result = await localGrantDecision({ ...request.payload, attestation: null, consent: true });
+        return result.authorized ? { ok: true, data: result } :
+          { ok: false, error: 'No locally attested Company identity; persistent grant refused' };
+      }
       if (request.action === 'dispatch' || request.action === 'sendInvitations' || request.action === 'reviewBroker' || request.action === 'delegationGrant' || request.action === 'delegationRevoke' || request.action === 'activateReal' || request.action === 'restoreDemo') {
         const decision = await dialog.showMessageBox(window, {
           type: 'warning', title: mainText('Authorize Company workers'),

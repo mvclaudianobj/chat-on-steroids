@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { getCompany, initCompanyStore, mutateCompany, resetCompanyStoreForTests } from '../src/main/company-store.js';
 import { registerCompanyIpc } from '../src/main/company-ipc.js';
+import { initCompanyLocalGrants, resetCompanyLocalGrantsForTests, readLocalCompanyGrants } from '../src/main/company-local-grants.js';
 
 const native = vi.hoisted(() => ({
   handler: null as null | ((event: unknown, payload: unknown) => Promise<{ok:boolean;data?:unknown;error?:string}>),
@@ -41,10 +42,27 @@ beforeAll(()=>registerCompanyIpc(()=>window as never));
 beforeEach(async()=>{
   home=await mkdtemp(path.join(os.tmpdir(),'company-live-ipc-'));
   initCompanyStore(home);
+  initCompanyLocalGrants(home);
   contents.mainFrame=frame;
   native.response=0;native.prompts=[];native.dispatches=0;
 });
-afterEach(async()=>{resetCompanyStoreForTests();await rm(home,{recursive:true,force:true});});
+afterEach(async()=>{resetCompanyStoreForTests();resetCompanyLocalGrantsForTests();await rm(home,{recursive:true,force:true});});
+
+it('asks explicit native consent for durable grants but denies unproven broker chair even after approval', async () => {
+  const request = { action: 'localGrantRequest', payload: { mode: 'agent', scope: 'company-local-read',
+    subject: { kind: 'worker', ownerId: '11111111-1111-4111-8111-111111111111',
+      runId: '22222222-2222-4222-8222-222222222222', workerId: 'worker-1', conversationId: 'synthetic-chat' },
+    requestId: '33333333-3333-4333-8333-333333333333' } };
+  expect((await invoke(request)).ok).toBe(false);
+  native.response = 1;
+  const refused = await invoke(request);
+  expect(refused.ok).toBe(false);
+  expect(refused.error).toMatch(/attested/);
+  expect(native.prompts).toContain('Autorizar sempre ESTE agente para escopo específico');
+  expect((await readLocalCompanyGrants()).grants).toEqual([]);
+  expect((await invoke({ action: 'localGrants' })).ok).toBe(true);
+  expect((await invoke({ action: 'localGrantRevoke', payload: { id: request.payload.requestId } })).data).toBe(false);
+});
 
 describe('Company activation through the actual main IPC boundary with synthetic broker',()=>{
   it('requires main frame and native CEO confirmation before creating any backup or live state',async()=>{
