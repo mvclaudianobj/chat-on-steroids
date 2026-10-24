@@ -4175,5 +4175,6 @@
   "Assign seat for real work": "Назначить место для работы",
   "Select a configured seat before authorizing a worker.": "Выберите настроенное место перед разрешением на запуск.",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "Место настроено, но исполнитель не запущен. Перед запуском брокер проверяет разрешения.",
-  "Company operating mode": "Режим работы компании"
+  "Company operating mode": "Режим работы компании",
+  "For other approval options, continue in ChatGPT if they are available there.": "Для других вариантов разрешения продолжите в ChatGPT, если они там доступны."
 }

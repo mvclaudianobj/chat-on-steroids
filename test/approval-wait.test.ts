@@ -340,6 +340,21 @@ describe('the page detector', () => {
     expect(api.answerApprovalCard(old, 'deny')).toBe('card_changed');
   });
 
+  it('does not invent a persistent action when a native options menu is present but its choices are not exposed', () => {
+    const main = dom.window.document.querySelector('main')!;
+    main.innerHTML = liveCard();
+    const menu = main.querySelector('button[aria-haspopup="menu"]')!;
+    let menuClicks = 0;
+    menu.addEventListener('click', () => { menuClicks++; });
+    const found = api.approvalCard()!;
+    expect(found).toMatchObject({ allow: true });
+    expect(api.answerApprovalCard(found.node, 'always')).toBe('unavailable');
+    expect(menuClicks).toBe(0);
+    main.innerHTML = liveCard(true);
+    expect(api.answerApprovalCard(api.approvalCard()!.node, 'always')).toBe('unavailable');
+    expect(menuClicks).toBe(0);
+  });
+
   it('ignores an answered card, a hidden one and one on a kept page', () => {
     const main = dom.window.document.querySelector('main')!;
     main.innerHTML = card('<button disabled>Ablehnen</button><button disabled>Einmal zulassen</button>');

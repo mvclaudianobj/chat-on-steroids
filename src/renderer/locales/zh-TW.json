@@ -4031,5 +4031,6 @@
   "Assign seat for real work": "為真實任務指派席位",
   "Select a configured seat before authorizing a worker.": "授權代理前請選擇已設定席位。",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "席位已設定，但目前沒有執行中的代理。調度服務會先檢查權限。",
-  "Company operating mode": "公司運作模式"
+  "Company operating mode": "公司運作模式",
+  "For other approval options, continue in ChatGPT if they are available there.": "如需其他核准選項，請在 ChatGPT 中繼續操作（如果有提供）。"
 }

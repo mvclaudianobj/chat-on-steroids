@@ -4377,11 +4377,12 @@ function approvalCardPanel(sessionId: string): HTMLElement {
   const actions = el('div', 'approval-card-actions');
   const status = el('p', 'approval-card-status');
   status.hidden = true;
+  const nativeOptions = el('p', 'approval-card-status', () => t('For other approval options, continue in ChatGPT if they are available there.'));
   const deny = el('button', 'btn btn-solid', () => t('Deny')) as HTMLButtonElement;
   const allow = el('button', 'btn btn-solid is-primary', () => t('Allow once')) as HTMLButtonElement;
   deny.type = allow.type = 'button';
   actions.append(deny, allow);
-  panel.append(words, actions, status);
+  panel.append(words, actions, nativeOptions, status);
   let card: ApprovalCardView | null = null;
   const say = (text: () => string): void => { status.hidden = false; ui(status, 'textContent', text); };
   const show = (next: ApprovalCardView | null): void => {

@@ -4127,5 +4127,6 @@
   "Assign seat for real work": "Atribuir cadeira para trabalho real",
   "Select a configured seat before authorizing a worker.": "Escolha uma cadeira configurada antes de autorizar um worker.",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "A cadeira está configurada, mas nenhum worker está executando. O broker verifica as permissões antes da admissão.",
-  "Company operating mode": "Modo de operação da empresa"
+  "Company operating mode": "Modo de operação da empresa",
+  "For other approval options, continue in ChatGPT if they are available there.": "Para outras opções de autorização, continue no próprio ChatGPT, se estiverem disponíveis."
 }
