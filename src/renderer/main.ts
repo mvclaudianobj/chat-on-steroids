@@ -138,7 +138,8 @@ onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
 // Chat Marks: API chats select their session and follow the selected one.
 const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId, selectedChat: selectedChatSession, selectChat: selectChatSession });
-initJarvis(api, selectedChatSession, { createCliProxyChat: () => marksModulesUi.createJarvisChat(), selectChat: selectChatSession });
+initJarvis(api, selectedChatSession, { createCliProxyChat: () => marksModulesUi.createJarvisChat(), selectChat: selectChatSession,
+  openSettings: () => showTab('jarvis'), openChat: () => showTab('chat') });
 const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'

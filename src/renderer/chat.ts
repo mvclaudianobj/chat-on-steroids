@@ -8578,10 +8578,12 @@ function showView(name: string): void {
 }
 
 /** Chat Marks: the selected chat and selection by id, for Marks modules (renderer/api-chat-ui.ts). */
-export function selectedChatSession(): { id: string; conversationId: string | null; engine?: AgentEngineId } | null {
+export function selectedChatSession(): { id: string; conversationId: string | null; engine?: AgentEngineId; title?: string; model?: string } | null {
   if (!selectedId) return null;
   const row = sessions.find(entry => entry.id === selectedId);
-  return { id: selectedId, conversationId: row?.conversationId ?? null, ...(row?.engine ? { engine: row.engine } : {}) };
+  return { id: selectedId, conversationId: row?.conversationId ?? null,
+    ...(row?.engine ? { engine: row.engine } : {}), ...(row?.title ? { title: row.title } : {}),
+    ...(row && row.selectedModel?.conversationId === row.conversationId && row.selectedModel?.model ? { model: row.selectedModel.model } : {}) };
 }
 export async function selectChatSession(id: string): Promise<void> {
   // A list read begun before the chat existed would drop the selection; this read supersedes it.

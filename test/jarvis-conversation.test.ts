@@ -11,6 +11,8 @@ const skeleton = `<!doctype html><html><body>
   <select id="jarvisVoice"><option value="">System default</option></select>
   <input id="jarvisContinuous" type="checkbox"><input id="jarvisEarcons" type="checkbox">
   <p id="jarvisSettingsStatus"></p><p id="jarvisProviderStatus"></p><textarea id="chatInput"></textarea>
+  <p id="jarvisActiveChat" role="status"></p><p id="jarvisReadiness" role="status"></p>
+  <span id="jarvisModelInfo"></span><button id="jarvisGoToChat"></button><button id="jarvisSetupChat" hidden></button>
   <button id="jarvisTalk" hidden type="button" aria-pressed="false"></button><span id="jarvisStatus" hidden></span>
   <button id="jarvisCreateCliProxyChat" hidden type="button"></button><button id="jarvisReturnChat" hidden type="button"></button>
   </body></html>`;
@@ -20,14 +22,17 @@ afterEach(() => { page?.window.close(); page = null; vi.unstubAllGlobals(); vi.r
 
 async function fixture(options: { tts?: boolean; continuous?: boolean; providerTranscribe?: 'ok' | 'fail';
   selected?: { id: string; conversationId: string | null; engine?: string } | null; consent?: boolean; noAudioEngines?: boolean;
-  g4f?: boolean; createFailure?: boolean } = {}) {
+  g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; microphoneDenied?: boolean } = {}) {
   page = new JSDOM(skeleton, { url: 'https://local.test/' });
   const window = page.window;
-  window.localStorage.setItem('chat-marks.jarvis.settings.v1', JSON.stringify({ enabled: true, tts: options.tts ?? true, continuous: options.continuous ?? false, earcons: false,
-    provider: options.g4f ? { baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_synthetic:gemini', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' } : voice, version: 2 }));
+  window.localStorage.setItem('chat-marks.jarvis.settings.v1', JSON.stringify({ enabled: options.enabled !== false, tts: options.tts ?? true, continuous: options.continuous ?? false, earcons: false,
+    provider: options.noProvider ? { ...voice, baseUrl: '' } : options.g4f ? { baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_synthetic:gemini', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' } : voice, version: 2 }));
   Object.assign(globalThis, { window, document: window.document, localStorage: window.localStorage, Event: window.Event, Option: window.Option });
   const tracks = [{ stop: vi.fn() }];
-  const getUserMedia = vi.fn(async () => ({ getTracks: () => tracks }));
+  const getUserMedia = vi.fn(async () => {
+    if (options.microphoneDenied) throw new Error('NotAllowedError: synthetic denial');
+    return { getTracks: () => tracks };
+  });
   Object.defineProperty(window.navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } });
   vi.stubGlobal('navigator', window.navigator);
   class Recorder {
@@ -85,7 +90,9 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     if (id === oldChat?.id) selected = oldChat;
     window.dispatchEvent(new window.Event('jarvis:selection'));
   });
-  initJarvis(api as unknown as AppApi, () => selected, { createCliProxyChat, selectChat });
+  const openSettings = vi.fn();
+  const openChat = vi.fn();
+  initJarvis(api as unknown as AppApi, () => selected, { createCliProxyChat, selectChat, openSettings, openChat });
   const element = <T extends HTMLElement>(id: string): T => window.document.getElementById(id) as T;
   const flush = async () => { for (let n = 0; n < 30; n++) await Promise.resolve(); };
   await flush();
@@ -105,8 +112,40 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     changed({ sessionIds: [selected?.id ?? ''] });
     await flush();
   };
-  return { element, hold, release, flush, stream, nativeEvents, transcribe, speak, speakCancel, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat };
+  return { element, hold, release, flush, stream, nativeEvents, transcribe, speak, speakCancel, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat, openSettings, openChat };
 }
+
+describe('Jarvis native GPT discovery and setup', () => {
+  const normal = { id: 'native-chat-01', conversationId: 'chatgpt-realistic', engine: 'chatgpt' };
+  it('shows an inactive ChatGPT-native microphone and lets the user open setup without recording', async () => {
+    const f = await fixture({ selected: normal, enabled: false, consent: false });
+    expect(f.element<HTMLButtonElement>('jarvisTalk').hidden).toBe(false);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(true);
+    expect(f.element<HTMLButtonElement>('jarvisSetupChat').hidden).toBe(false);
+    f.element<HTMLButtonElement>('jarvisSetupChat').click();
+    expect(f.openSettings).toHaveBeenCalledOnce();
+    expect(f.getUserMedia).not.toHaveBeenCalled();
+    expect(f.element('jarvisActiveChat').textContent).toMatch(/ChatGPT/);
+    f.element<HTMLButtonElement>('jarvisGoToChat').click();
+    expect(f.openChat).toHaveBeenCalledOnce();
+  });
+  it('reports missing STT and inactive reply voice before enabling hands-free capture', async () => {
+    const f = await fixture({ selected: normal, noAudioEngines: true, noProvider: true, tts: false });
+    expect(f.element('jarvisReadiness').textContent).toMatch(/transcription|STT/i);
+    expect(f.element('jarvisReadiness').textContent).toMatch(/speak|voice|speech|TTS/i);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(true);
+    f.hold(); await f.flush();
+    expect(f.getUserMedia).not.toHaveBeenCalled();
+  });
+  it('does not send anything if the system denies microphone permission', async () => {
+    const f = await fixture({ selected: normal, microphoneDenied: true });
+    f.hold(); await f.flush();
+    expect(f.getUserMedia).toHaveBeenCalledOnce();
+    expect(f.sendInput).not.toHaveBeenCalled();
+    expect(f.element('jarvisSettingsStatus').textContent).toMatch(/microphone access/i);
+    expect(f.element('jarvisTalk').dataset.state).toBe('idle');
+  });
+});
 
 describe('Jarvis native ChatGPT bridge ownership', () => {
   const normal = { id: 'native-chat-01', conversationId: 'chatgpt-realistic', engine: 'chatgpt' };

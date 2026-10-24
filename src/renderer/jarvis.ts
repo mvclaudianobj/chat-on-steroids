@@ -11,7 +11,7 @@ import {
   jarvisVoiceTtsReady, parseJarvisVoiceConfig, type JarvisVoiceConfig
 } from '../shared/jarvis-voice.js';
 import type { AppApi } from '../preload/index.js';
-import { t } from './i18n.js';
+import { onLanguageChange, t } from './i18n.js';
 import { JarvisSpeechQueue, playEarcon, watchSilence } from './jarvis-speech.js';
 import { JarvisProgressiveAudio } from './jarvis-progressive.js';
 
@@ -57,12 +57,23 @@ export function parseJarvisPreferences(value: unknown): Preferences {
 type ProviderCapability = { checked: boolean; primary: boolean; fallback: boolean; ffmpeg: boolean; stt: string[]; tts: string[]; error: string | null };
 type Playable = { kind: 'audio'; url: string } | { kind: 'system'; text: string } | { kind: 'stream'; player: JarvisProgressiveAudio };
 
-export interface JarvisChatActions { createCliProxyChat(): Promise<string | null>; selectChat(id: string): Promise<void> | void }
-export function initJarvis(api: AppApi, selected: () => { id: string; conversationId: string | null; engine?: string } | null, actions?: JarvisChatActions): void {
+export interface JarvisChatActions {
+  createCliProxyChat(): Promise<string | null>;
+  selectChat(id: string): Promise<void> | void;
+  openSettings?(): void;
+  openChat?(): void;
+}
+type JarvisSelection = { id: string; conversationId: string | null; engine?: string; title?: string; model?: string };
+export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, actions?: JarvisChatActions): void {
   const find = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
   const maybe = <T extends HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
   const button = find<HTMLButtonElement>('jarvisTalk');
   const status = find<HTMLElement>('jarvisSettingsStatus');
+  const targetLabel = maybe<HTMLElement>('jarvisActiveChat');
+  const readiness = maybe<HTMLElement>('jarvisReadiness');
+  const modelLabel = maybe<HTMLElement>('jarvisModelInfo');
+  const goToChat = maybe<HTMLButtonElement>('jarvisGoToChat');
+  const setupChat = maybe<HTMLButtonElement>('jarvisSetupChat');
   const enable = find<HTMLInputElement>('jarvisEnabled');
   const consent = find<HTMLInputElement>('jarvisConsent');
   const key = find<HTMLSelectElement>('jarvisKey');
@@ -289,38 +300,68 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   const phaseText = (): string => phase === 'listening' ? t('Listening…') : phase === 'stopping' || phase === 'transcribing' ? t('Transcribing…')
     : phase === 'thinking' ? t('Thinking…') : phase === 'speaking' ? t('Speaking… press to interrupt') : '';
   function paint(): void {
-    button.hidden = !preferences.enabled;
-    button.disabled = !mode() || !consented || !eligible() || stopping;
+    const chat = selected();
+    const target = eligible();
+    const native = !!target && !!chat?.conversationId && !isApiConversationId(chat.conversationId);
+    const stt = mode();
+    const ready = preferences.enabled && !!stt && consented && !!target && !stopping;
+    // Keep the microphone discoverable in the normal ChatGPT composer, including
+    // before initial opt-in. Setup is an explicit UI action and never captures audio.
+    button.hidden = !native && !preferences.enabled;
+    button.disabled = !ready;
+    if (setupChat) {
+      setupChat.hidden = !native || (ready && speaks());
+      setupChat.textContent = t('Set up Jarvis');
+    }
+    if (targetLabel) targetLabel.textContent = !target
+      ? t('No active ChatGPT conversation. Select a normal chat, then return to Jarvis settings.')
+      : native ? t('Selected ChatGPT conversation: {0}', [chat?.title?.trim() || t('Current chat')])
+        : t('Selected CLIProxy conversation: {0}', [chat?.title?.trim() || t('Current chat')]);
+    if (goToChat) goToChat.disabled = !target;
+    if (modelLabel) modelLabel.textContent = !target ? t('Select a ChatGPT conversation')
+      : chat?.model ? t('Current chat model: {0}', [chat.model])
+        : native ? t('ChatGPT model: use the model selected in this chat') : t('CLIProxy model: use the model selected in this chat');
+    if (readiness) {
+      const checks = [!preferences.enabled ? t('Enable Jarvis to start.') : !target ? t('Select a ChatGPT or CLIProxy conversation.')
+        : !consented ? t('Allow microphone capture and audio transmission for this session.')
+          : stt ? t('Speech-to-text (STT) is ready.') : t('Speech-to-text (STT) is not configured or available.')];
+      checks.push(!preferences.tts ? t('Spoken replies (TTS) are off. Enable Speak replies to hear ChatGPT.')
+        : speaks() ? t('Spoken replies (TTS) are available.') : t('Spoken replies (TTS) need a working provider or system voice.'));
+      readiness.textContent = checks.join(' ');
+    }
     if (createChat) {
-      createChat.hidden = !preferences.enabled || !!eligible() || !actions;
+      createChat.hidden = !preferences.enabled || !!target || !actions;
       createChat.disabled = creating;
-      createChat.textContent = t(creating ? 'Creating CLIProxy chat…' : 'Open Jarvis in a CLIProxy chat');
+      createChat.textContent = t(creating ? 'Creating CLIProxy chat…' : 'Open optional CLIProxy chat');
     }
     if (returnChat) {
-      returnChat.hidden = !preferences.enabled || !previousChat || !eligible() || !actions;
+      returnChat.hidden = !preferences.enabled || !previousChat || !target || !actions;
       returnChat.textContent = t('Return to previous chat');
     }
-    const reason = !preferences.enabled ? '' : !eligible()
+    const reason = !preferences.enabled ? t('Set up Jarvis in Settings to speak with ChatGPT.') : !target
       ? t('Jarvis needs a ChatGPT or CLIProxy conversation. The voice provider configures audio, not chat.')
       : !consented ? t('Enable microphone and audio transmission consent in Jarvis settings for this session.')
-      : !recorderAvailable && mode() !== 'windows' ? t('This app cannot access microphone recording. Check system permissions and restart the app.')
-      : !mode() ? t('No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.')
+      : !stt ? t('No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.')
+      : !recorderAvailable && stt !== 'windows' ? t('This app cannot access microphone recording. Check system permissions and restart the app.')
       : '';
     const shown = running ? stopping ? 'stopping' : 'listening' : phase;
     button.dataset.state = shown;
     button.setAttribute('aria-pressed', String(running));
+    button.setAttribute('aria-label', native ? t('Hold to speak to Jarvis in ChatGPT') : t('Hold to speak to Jarvis'));
     button.title = reason || (phase === 'speaking' ? t('Press to interrupt Jarvis') : t('Hold to speak to Jarvis')) + ` (${preferences.key})`;
     if (stateLabel) {
       stateLabel.dataset.state = shown;
-      stateLabel.textContent = preferences.enabled ? reason || phaseText() : '';
+      stateLabel.textContent = reason || phaseText();
       stateLabel.title = reason;
-      stateLabel.hidden = !preferences.enabled || (!reason && shown === 'idle');
+      stateLabel.hidden = !native && !preferences.enabled || (!reason && shown === 'idle');
     }
     if (!mode()) status.textContent = t('No transcription engine available. Configure a voice provider, a CLIProxy audio model, an installed local Whisper engine, or Windows speech recognition.') + (capability.error ? ` ${capability.error}` : '');
     else if (!consented) status.textContent = t('Enable microphone consent to use Jarvis.');
     else if (!eligible()) status.textContent = t('Select a ChatGPT or CLIProxy chat to use Jarvis.');
     else if (!running && !status.textContent) status.textContent = t('Jarvis is ready.');
   }
+  setupChat?.addEventListener('click', () => { actions?.openSettings?.(); });
+  goToChat?.addEventListener('click', () => { if (eligible()) actions?.openChat?.(); });
   createChat?.addEventListener('click', () => {
     if (!actions || creating || !preferences.enabled || eligible()) return;
     const origin = selected()?.id ?? null;
@@ -685,6 +726,7 @@ export function initJarvis(api: AppApi, selected: () => { id: string; conversati
   window.addEventListener('jarvis:selection', () => { if (running || stopping || nativePending || answer || phase === 'thinking' || speech.speaking) cancel(); paint(); });
   document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });
   window.addEventListener('beforeunload', cancel, { once: true });
+  onLanguageChange(paint);
   // Consent and capture must never survive a page reload.
   refresh();
   paintProvider();
