@@ -278,8 +278,10 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
       !binding.ownerId || !binding.runId || !binding.workerId || !binding.reportId || !binding.result)
       throw new Error('A broker-authenticated completion report is required');
     const status=await backend.status(binding.ownerId,binding.runId);
-    if (status.workers.filter(w=>w.id===binding.workerId && w.runId===binding.runId &&
-      w.label===labelFor(request) && ['sleeping','finished'].includes(w.state) && w.result===binding.result).length!==1)
+    if (status.runId!==binding.runId || !binding.conversationId ||
+      status.workers.filter(w=>w.id===binding.workerId && w.runId===binding.runId &&
+      w.label===labelFor(request) && w.conversationId===binding.conversationId &&
+      ['sleeping','finished'].includes(w.state) && w.result===binding.result).length!==1)
       throw new Error('Worker is not settled with the matching broker result');
     current=await mutateCompany('confirm',{id,workerId:binding.workerId,runId:binding.runId,reportId:binding.reportId,evidence});
     return current;

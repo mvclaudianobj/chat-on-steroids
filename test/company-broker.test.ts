@@ -9,14 +9,14 @@ let root: string;
 const runId = '00000000-0000-4000-8000-000000000202';
 const create = { title:'Synthetic task',project:'Pilot',owner:'marks-cto' as const,origin:'ceo' as const,acceptance:'An independently reviewable result',engine:'chatgpt',model:'gpt-6',tokenBudget:1000,timeBudgetMinutes:30,dueAt:null };
 function fake() {
-  let state='invited'; let label=''; let reports: Array<{id:string;from:string;runId:string;time:number;text:string;origin?:'broker-event'|'authenticated-worker-message'}>=[]; let spawned=0;
+  let state='invited'; let label=''; let conversationId='test-fake-worker'; let reports: Array<{id:string;from:string;runId:string;time:number;text:string;origin?:'broker-event'|'authenticated-worker-message'}>=[]; let spawned=0;
   const backend: CompanyWorkerBackend = {
     async spawn(_owner,labelArg){spawned++;label=labelArg;return {runId,workerId:'worker-5'};},
-    async status(){return {runId,workers:label?[{id:'worker-5',runId,label,state,conversationId:'test-fake-worker',result:state==='sleeping'?'Finished synthetic job':null}]:[]};},
+    async status(){return {runId,workers:label?[{id:'worker-5',runId,label,state,conversationId,result:state==='sleeping'?'Finished synthetic job':null}]:[]};},
     async reports(){return reports;},
     async send(){return 'q1';}, async ack(){}
   };
-  return {backend,setState:(next:string)=>{state=next;}, setReports:(next:typeof reports)=>{reports=next;},spawns:()=>spawned};
+  return {backend,setState:(next:string)=>{state=next;},setConversation:(next:string)=>{conversationId=next;}, setReports:(next:typeof reports)=>{reports=next;},spawns:()=>spawned};
 }
 async function assigned() { const id=(await mutateCompany('create',create)).requests[0]!.id;await mutateCompany('seat',{id,seat:'marks5'});await mutateCompany('move',{id,status:'assigned'});return id; }
 beforeEach(async()=>{root=await fs.mkdtemp(path.join(tmpdir(),'company-broker-test-'));initCompanyStore(root);});
@@ -34,6 +34,21 @@ describe('broker-bound Company',()=>{
   await expect(broker.review(id,'')).rejects.toThrow();
   await broker.review(id,'COO verified the synthetic receipt');
   expect(companySeatView(await getCompany(),'marks5').state).toBe('rest-confirmed');
+ });
+ it('refuses CEO confirmation when the broker reuses a worker slot with a different conversation',async()=>{
+  const id=await assigned();const stub=fake();const broker=createCompanyBroker(stub.backend);
+  await broker.dispatch(id);stub.setState('active');await broker.refresh(id);
+  stub.setState('sleeping');stub.setReports([{id:'receipt',from:'worker-5',runId,time:Date.now(),
+    text:'[worker-5 reported] Finished synthetic job',origin:'broker-event'}]);
+  await broker.refresh(id);
+  expect((await getCompany()).requests[0]?.execution?.conversationId).toBe('test-fake-worker');
+  stub.setConversation('another-conversation');
+  await expect(broker.review(id,'CEO review of this result')).rejects.toThrow(/matching broker result/i);
+  expect((await getCompany()).requests[0]?.status).toBe('review');
+  expect((await getCompany()).requests[0]?.cooConfirmation).toBeUndefined();
+  stub.setConversation('test-fake-worker');
+  await broker.review(id,'CEO review of this result');
+  expect((await getCompany()).requests[0]?.status).toBe('done');
  });
  it('never repeats an ambiguous spawn or trusts a swapped broker worker',async()=>{
   const id=await assigned();const backend=fake();const broker=createCompanyBroker({...backend.backend,spawn:async()=>{throw new Error('unknown acceptance');}});
