@@ -19,6 +19,30 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); dom.window.close(); });
 
+it.each(languages)('localizes the Archived section and its accessible controls in %s', async locale => {
+  window.localStorage.setItem('cos.ui.language', locale);
+  const { initLanguage, t } = await import('../src/renderer/i18n.js');
+  initLanguage();
+  const catalog = catalogs[locale];
+  const expected = (source: string) => catalog?.[source] ?? source;
+  for (const source of ['Archive', 'Restore', 'Archived', 'Chat archived', 'Chat restored', 'No archived chats',
+    'Search archived chats', 'Restore chat to the main list', 'Move chat to Archived without deleting its history']) {
+    expect(t(source)).toBe(expected(source));
+    expect(t(source).trim()).not.toBe('');
+  }
+  const section = document.getElementById('archivesSection') as HTMLDetailsElement;
+  expect(section).not.toBeNull();
+  expect(section.querySelector('.ph-archive[aria-hidden="true"]')).not.toBeNull();
+  expect(section.querySelector('summary')?.textContent).toContain(expected('Archived'));
+  const search = document.getElementById('archivesSearch') as HTMLInputElement;
+  expect(search.getAttribute('aria-label')).toBe(expected('Search archived chats'));
+  expect(search.placeholder).toBe(expected('Search archived chats'));
+  expect(search.type).toBe('search');
+  const more = document.getElementById('archivesMore') as HTMLButtonElement;
+  expect(more.textContent).toBe(expected('Show more'));
+  expect(more.type).toBe('button');
+});
+
 // Includes the Traditional Chinese selector regression from aliceric27's #243.
 it.each(languages)('restores %s and synchronizes accessible setup flags, settings and reloads', async locale => {
   window.localStorage.setItem('cos.ui.language', locale);

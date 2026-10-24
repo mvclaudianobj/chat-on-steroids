@@ -673,6 +673,112 @@ async function mountInbox(apiOverrides: Record<string, (...args: any[]) => any>)
   await settle();
   return mounted;
 }
+
+it('archives and restores a project chat through the actual sidebar menu with search, paging and same transcript', async () => {
+  const project = projectSidebarFixture().project;
+  const original = inboxChat('archive-dom-original', { title: 'Findable review', projectId: project.id, updatedAt: Date.now() });
+  const other = inboxChat('archive-dom-other', { title: 'Other task', updatedAt: Date.now() - 100 });
+  const old = inboxChat('archive-dom-old', { title: 'Findable older', archivedAt: Date.now() - 1000 });
+  const records = [original, other, old];
+  let archived = new Set(['archive-dom-old']);
+  const archiveRequests: Array<{ id: string; archived: boolean }> = [];
+  const detailReads: string[] = [];
+  const page = (options?: { archived?: boolean; search?: string; cursor?: { id: string }; limit?: number }) => {
+    let rows = records.filter(row => archived.has(row.id) === (options?.archived === true))
+      .map(row => ({ ...row, archivedAt: archived.has(row.id) ? Date.now() - 100 : undefined }));
+    if (options?.search) rows = rows.filter(row => row.title.toLowerCase().includes(options.search!.toLowerCase()));
+    const start = options?.cursor ? rows.findIndex(row => row.id === options.cursor?.id) + 1 : 0;
+    return listed(rows.slice(start, start + (options?.archived ? 1 : 60)), {
+      total: rows.length, nextCursor: start + (options?.archived ? 1 : 60) < rows.length
+        ? { updatedAt: rows[start]!.updatedAt, id: rows[start]!.id } : null
+    });
+  };
+  const mounted = await mountInbox({
+    listProjects: async () => ({ ok: true, data: [project] }),
+    listSessions: async (options?: { archived?: boolean; search?: string; cursor?: { id: string } }) => page(options),
+    archiveSession: async (id: string, state: boolean) => {
+      archiveRequests.push({ id, archived: state });
+      if (state) archived.add(id); else archived.delete(id);
+      return { ok: true, data: { ...records.find(row => row.id === id), archivedAt: state ? Date.now() : undefined } };
+    },
+    getSession: async (id: string) => {
+      detailReads.push(id);
+      return { ok: true, data: { summary: records.find(row => row.id === id), events: [
+        { kind: 'note', seq: 1, time: 1, source: 'app', message: { text: 'History intact', chars: 14, truncated: false } }
+      ], total: 1, nextFrom: 2 } };
+    }
+  });
+  const doc = mounted.window.document;
+  await waitFor(() => expect(doc.querySelector('.sess[data-id="archive-dom-original"]')).not.toBeNull());
+  const originalMenu = rowMenuItem(doc.querySelector('.sess[data-id="archive-dom-original"]')!, 'archive');
+  expect(originalMenu?.textContent).toBe('Archive');
+  originalMenu!.click();
+  await waitFor(() => expect(archiveRequests).toEqual([{ id: original.id, archived: true }]));
+  await waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="archive-dom-original"]')).toBeNull());
+
+  const section = doc.getElementById('archivesSection') as HTMLDetailsElement;
+  section.open = true;
+  section.dispatchEvent(new mounted.window.Event('toggle'));
+  await waitFor(() => expect(doc.querySelector('#archivesList .sess[data-id="archive-dom-original"]')).not.toBeNull());
+  expect(doc.getElementById('archivesCount')!.textContent).toBe('2');
+  const more = doc.getElementById('archivesMore') as HTMLButtonElement;
+  expect(more.hidden).toBe(false);
+  more.click();
+  await waitFor(() => expect(doc.querySelectorAll('#archivesList .sess')).toHaveLength(2));
+
+  const search = doc.getElementById('archivesSearch') as HTMLInputElement;
+  search.value = 'review';
+  search.dispatchEvent(new mounted.window.Event('input', { bubbles: true }));
+  await waitFor(() => expect(doc.querySelectorAll('#archivesList .sess')).toHaveLength(1));
+  expect(doc.querySelector('#archivesList .sess[data-id="archive-dom-original"]')).not.toBeNull();
+  const archivedRow = doc.querySelector('#archivesList .sess[data-id="archive-dom-original"]')!;
+  (archivedRow.querySelector('.sess-top') as HTMLElement).click();
+  await waitFor(() => expect(detailReads).toContain(original.id));
+  expect((await rowMenuItem(doc.querySelector('#archivesList .sess[data-id="archive-dom-original"]')!, 'restore'))?.textContent).toBe('Restore');
+  rowMenuItem(doc.querySelector('#archivesList .sess[data-id="archive-dom-original"]')!, 'restore')!.click();
+  await waitFor(() => expect(archiveRequests).toContainEqual({ id: original.id, archived: false }));
+  await waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="archive-dom-original"]')).not.toBeNull());
+  expect(doc.querySelector('#archivesList .sess[data-id="archive-dom-original"]')).toBeNull();
+});
+
+it('offers Archive to a completed worker row and restores that worker beneath its original prime', async () => {
+  const now = Date.now();
+  const parent = inboxChat('worker-archive-parent', { title: 'Prime', updatedAt: now });
+  const child = inboxChat('worker-archive-child', {
+    title: 'Completed worker', updatedAt: now - 100, lastFinishReportAt: now - 200,
+    origin: { kind: 'worker', fromSessionId: parent.id, agentId: 'worker-1', task: 'Finished task' }
+  });
+  const archived = new Set<string>();
+  const changes: Array<[string, boolean]> = [];
+  const mounted = await mountInbox({
+    listSessions: async (options?: { archived?: boolean }) => listed(
+      [parent, child].filter(row => archived.has(row.id) === (options?.archived === true))
+        .map(row => ({ ...row, archivedAt: archived.has(row.id) ? now : undefined })),
+      { total: options?.archived ? archived.size : 2 - archived.size, nextCursor: null }),
+    archiveSession: async (id: string, yes: boolean) => {
+      changes.push([id, yes]);
+      if (yes) archived.add(id); else archived.delete(id);
+      return { ok: true, data: { ...[parent, child].find(row => row.id === id), archivedAt: yes ? now : undefined } };
+    }
+  });
+  const doc = mounted.window.document;
+  await waitFor(() => expect(doc.querySelector('#chatList .sess[data-id="worker-archive-parent"]')).not.toBeNull());
+  doc.querySelector<HTMLButtonElement>('#chatList .sess[data-id="worker-archive-parent"] .worker-toggle')!.click();
+  const workerRow = () => doc.querySelector('#chatList .sess[data-id="worker-archive-child"]');
+  expect(workerRow()).not.toBeNull();
+  expect(rowMenuItem(workerRow()!, 'archive')?.textContent).toBe('Archive');
+  rowMenuItem(workerRow()!, 'archive')!.click();
+  await waitFor(() => expect(changes).toContainEqual([child.id, true]));
+  await waitFor(() => expect(workerRow()).toBeNull());
+  const section = doc.getElementById('archivesSection') as HTMLDetailsElement;
+  section.open = true;
+  section.dispatchEvent(new mounted.window.Event('toggle'));
+  await waitFor(() => expect(doc.querySelector('#archivesList .sess[data-id="worker-archive-child"]')).not.toBeNull());
+  rowMenuItem(doc.querySelector('#archivesList .sess[data-id="worker-archive-child"]')!, 'restore')!.click();
+  await waitFor(() => expect(changes).toContainEqual([child.id, false]));
+  await waitFor(() => expect(workerRow()).not.toBeNull());
+  expect(workerRow()!.querySelector('.sess-top')?.textContent).toContain('Completed worker');
+});
 const inboxProjects = () => ({
   alpha: { id: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000001', name: 'Alpha', path: 'C:\\alpha', createdAt: 1, color: 'teal' as const },
   beta: { id: 'aaaaaaaa-bbbb-4ccc-8ddd-000000000002', name: 'Bêta', path: 'C:\\beta', createdAt: 2 }

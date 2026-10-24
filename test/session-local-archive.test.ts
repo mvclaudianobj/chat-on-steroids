@@ -1,14 +1,18 @@
-import { beforeEach, afterEach, describe, expect, it } from 'vitest';
+import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { appendEvent, createSession, getSession, initSessionStore, listSessionPage, resetSessionStoreForTests, setSessionArchived } from '../src/main/session/store.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 let dir = '';
 beforeEach(async () => {
   dir = await makeTempDir('marks-local-archive-');
+  vi.stubEnv('HOME', dir);
+  vi.stubEnv('XDG_CONFIG_HOME', `${dir}/config`);
+  vi.stubEnv('XDG_DATA_HOME', `${dir}/data`);
   initSessionStore(dir);
 });
 afterEach(async () => {
   resetSessionStoreForTests();
+  vi.unstubAllEnvs();
   await removeTempDir(dir);
 });
 

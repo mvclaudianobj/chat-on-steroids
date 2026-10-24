@@ -42,7 +42,7 @@ vi.mock('../src/main/mcp/persistent-paths.js', () => ({
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
-const { appendEvent, createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
+const { appendEvent, createSession, getSession, initSessionStore, listSessionPage, rebindSession, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { pendingCommands, resetBridgeForTests, setBrowserOpener, startBridge, stopBridge } = await import(
   '../src/main/bridge.js'
@@ -627,6 +627,9 @@ beforeAll(async () => {
       quitToInstallCalls += 1;
     }
   );
+  // registerIpc normally uses Electron app.getPath('userData'); the Electron mock above
+  // deliberately returns '', so pin the Company store to this test's disposable directory.
+  (await import('../src/main/company-store.js')).initCompanyStore(dir);
 });
 
 afterAll(async () => {
@@ -660,6 +663,115 @@ beforeEach(async () => {
     sessions: { ...defaultConfig().sessions, record: true },
     multiAgent: { enabled: true, maxWorkers: 3, allowUnattributedCalls: false, recoverAgentTabs: true }
   });
+});
+
+it('archives over Electron IPC, preserves the session on restart and refuses active broker members', async () => {
+  const ordinary = await createSession({ title: 'Archived ordinary', conversationId: 'archive-ipc-chat' });
+  await appendEvent(ordinary.id, { time: Date.now(), source: 'app', kind: 'note',
+    message: { text: 'Keep this timeline', chars: 18, truncated: false } });
+  const invoke = (channel: string, payload: unknown) => handlers.get(channel)!(null, payload) as Promise<any>;
+  expect(await invoke('sessions:archive', { id: ordinary.id, archived: true })).toMatchObject({ ok: true, data: { id: ordinary.id } });
+  const live = await invoke('sessions:list', { limit: 1 });
+  expect(live.data.sessions).not.toContainEqual(expect.objectContaining({ id: ordinary.id }));
+  const stored = await invoke('sessions:list', { archived: true, limit: 60 });
+  expect(stored.data.sessions).toContainEqual(expect.objectContaining({ id: ordinary.id }));
+  expect((await invoke('sessions:events', { id: ordinary.id, limit: 10 })).data.events).toEqual(
+    expect.arrayContaining([expect.objectContaining({ kind: 'note' })]));
+
+  resetSessionStoreForTests();
+  expect((await listSessionPage({ archived: true })).sessions.find(row => row.id === ordinary.id)?.id).toBe(ordinary.id);
+  expect(await invoke('sessions:archive', { id: ordinary.id, archived: false })).toMatchObject({
+    ok: true, data: { id: ordinary.id, archivedAt: undefined }
+  });
+  expect((await getSession(ordinary.id))?.events).toBe(1);
+
+  const prime = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a001';
+  const workerChat = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a002';
+  const run = spawn({ workers: [{ task: 'Work is still active' }], caller: { conversationId: prime } });
+  expect(bindConversation('worker-1', workerChat, run.runId)).toBe(true);
+  const worker = await createSession({ title: 'Active worker', conversationId: workerChat,
+    origin: { kind: 'worker', fromSessionId: ordinary.id, agentId: 'worker-1', task: 'Work is still active' } });
+  expect((await invoke('sessions:archive', { id: worker.id, archived: true })).ok).toBe(false);
+  const primeSession = await createSession({ title: 'COO prime owner', conversationId: prime });
+  expect((await invoke('sessions:archive', { id: primeSession.id, archived: true })).ok).toBe(false);
+});
+
+it('refuses approval, exact COO and live Company integration bindings; archives a finished worker and revives it on new work', async () => {
+  const invoke = (id: string, archived = true) => handlers.get('sessions:archive')!(null, { id, archived }) as Promise<any>;
+  const companyStore = await import('../src/main/company-store.js');
+  const approval = await import('../src/main/approval-wait.js');
+  const companyFile = path.join(dir, 'company', 'company.json');
+  const previous = await fs.readFile(companyFile, 'utf8').catch(() => null);
+  const approvalChat = 'archive-waiting-approval';
+  const waiting = await createSession({ title: 'Waiting for approval', conversationId: approvalChat });
+  const now = Date.now();
+  try {
+    await approval.noteApprovalCard(approvalChat, true, waiting.id, {
+      record: async () => ({ seq: 1, time: now }), notify: () => undefined, log: () => undefined
+    }, now);
+    expect((await invoke(waiting.id)).ok).toBe(false);
+    approval.resetApprovalWaits();
+
+    const coo = await createSession({ title: 'Company COO', conversationId: 'company-coo-proof' });
+    const integration = await createSession({ title: 'Active integration', conversationId: 'company-integration-proof' });
+    const snapshot = await companyStore.mutateCompany('create', {
+      title: 'Synthetic integration', project: 'Fixture', owner: 'marks-coo',
+      origin: 'ceo', acceptance: 'Synthetic acceptance', engine: 'chatgpt', model: 'test',
+      tokenBudget: 100, timeBudgetMinutes: 5, dueAt: null
+    });
+    snapshot.delegation = {
+      mode: 'delegated', delegate: 'marks1', chiefTitle: 'operations',
+      scopes: ['internal-triage'], epoch: 1, grantedAt: now, revokedAt: null,
+      binding: { seat: 'marks1', ownerId: snapshot.requests[0]!.id,
+        runId: 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a101', workerId: 'worker-1', label: 'COO',
+        conversationId: coo.conversationId!, verifiedAt: now, expiresAt: now + 60_000 }
+    };
+    snapshot.requests[0]!.execution = {
+      mode: 'live', phase: 'running', ownerId: snapshot.requests[0]!.id,
+      workerId: 'worker-1', runId: 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a102',
+      conversationId: integration.conversationId!, reportId: null, result: null,
+      evidence: null, authorizedAt: now
+    };
+    await fs.writeFile(companyFile, JSON.stringify(snapshot), 'utf8');
+    expect((await invoke(coo.id)).ok).toBe(false);
+    expect((await invoke(integration.id)).ok).toBe(false);
+  } finally {
+    approval.resetApprovalWaits();
+    if (previous === null) await fs.rm(companyFile, { force: true });
+    else await fs.writeFile(companyFile, previous, 'utf8');
+  }
+
+  const prime = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a201';
+  const conversation = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a202';
+  const run = spawn({ caller: { conversationId: prime }, workers: [{ task: 'Completed work' }] });
+  expect(bindConversation('worker-1', conversation, run.runId)).toBe(true);
+  const worker = await createSession({ title: 'Verified worker completion', conversationId: conversation, origin: {
+    kind: 'worker', fromSessionId: waiting.id, agentId: 'worker-1', task: 'Completed work'
+  } });
+  // The browser can prove completion without a second MCP `agents finish` recording.
+  finishAgent({ conversationId: conversation }, 'Completed work');
+  expect((await getSession(worker.id))?.lastFinishReportAt).toBeNull();
+  expect((await invoke(worker.id)).ok).toBe(true);
+  expect((await getSession(worker.id))?.archivedAt).toBeTypeOf('number');
+
+  sendMessage({ conversationId: prime }, 'worker-1', 'Follow-up task');
+  expect((await import('../src/main/agents.js')).agentInfoForOwnedConversation(conversation)?.state).toBe('waking');
+  expect((await invoke(worker.id)).ok).toBe(true); // Idempotent archival is harmless while already hidden.
+  await appendEvent(worker.id, { time: Date.now() + 500, source: 'extension', kind: 'turn_start', turnId: 'worker-revived' });
+  expect((await getSession(worker.id))?.archivedAt).toBeUndefined();
+  await appendEvent(worker.id, { time: Date.now() + 600, source: 'extension', kind: 'turn_end', turnId: 'worker-revived', outcome: 'completed' });
+  expect((await invoke(worker.id)).ok).toBe(false); // Waking still owns its reserved slot.
+
+  const quietPrime = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a301';
+  const quietChat = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a302';
+  const quiet = spawn({ caller: { conversationId: quietPrime }, workers: [{ task: 'No proved completion' }] });
+  expect(bindConversation('worker-1', quietChat, quiet.runId)).toBe(true);
+  (await import('../src/main/agents.js')).sleepWorker('worker-1', 'No contact', quiet.runId);
+  const uncertain = await createSession({ title: 'Unproven sleeping worker', conversationId: quietChat, origin: {
+    kind: 'worker', fromSessionId: waiting.id, agentId: 'worker-1', task: 'No proved completion'
+  } });
+  expect((await import('../src/main/agents.js')).agentInfoForOwnedConversation(quietChat)?.state).toBe('sleeping');
+  expect((await invoke(uncertain.id)).ok).toBe(false);
 });
 
 it('keeps origin history navigation separate from live revision cursors over IPC', async () => {

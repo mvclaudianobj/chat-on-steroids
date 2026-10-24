@@ -166,10 +166,14 @@ let visible = false;
 
 let sessions: SessionSummary[] = [];
 let archivedSessions: SessionSummary[] = [];
-let archivedTotal = 0;
+let archivedTotal = -1;
 let archiveCursor: { updatedAt: number; id: string } | null = null;
 let archiveQuery = '';
 let archiveLoadGeneration = 0;
+let archiveLoading = false;
+let archiveRefreshQueued = false;
+let archiveAppendQueued = false;
+let archiveLoadedOlder = false;
 let pressure = new Map<string, TokenPressure>();
 let sessionTotal = 0;
 let sessionPageCursor: { updatedAt: number; id: string } | null = null;
@@ -1588,24 +1592,58 @@ async function changeArchiveStatus(id: string, archived: boolean): Promise<void>
 }
 
 async function loadArchivedSessions(append = false): Promise<void> {
+  if (append && !archiveCursor) return;
+  if (archiveLoading) {
+    if (append) archiveAppendQueued = true;
+    else archiveRefreshQueued = true;
+    return;
+  }
+  archiveLoading = true;
   const generation = ++archiveLoadGeneration;
-  const page = await run(api.listSessions({
-    archived: true, limit: SESSION_PAGE_SIZE,
-    ...(archiveQuery ? { search: archiveQuery } : {}),
-    ...(append && archiveCursor ? { cursor: archiveCursor } : {})
-  }));
-  if (!page || generation !== archiveLoadGeneration) return;
-  archivedSessions = append ? [...archivedSessions, ...page.sessions.filter(row => !archivedSessions.some(old => old.id === row.id))] : page.sessions;
-  archiveCursor = page.nextCursor;
-  archivedTotal = page.total;
-  paintArchivedSessions();
+  try {
+    const page = await run(api.listSessions({
+      archived: true, limit: SESSION_PAGE_SIZE,
+      ...(archiveQuery ? { search: archiveQuery } : {}),
+      ...(append && archiveCursor ? { cursor: archiveCursor } : {})
+    }));
+    if (!page || generation !== archiveLoadGeneration) return;
+    if (append) {
+      archiveLoadedOlder = true;
+      archivedSessions = [...archivedSessions, ...page.sessions.filter(row => !archivedSessions.some(old => old.id === row.id))];
+      archiveCursor = page.nextCursor;
+    } else if (archiveLoadedOlder) {
+      // A status push must not discard already-requested archive pages.
+      const last = page.sessions.at(-1);
+      const present = new Set(page.sessions.map(row => row.id));
+      archivedSessions = [...page.sessions, ...archivedSessions.filter(row => !present.has(row.id) && last &&
+        (row.updatedAt < last.updatedAt || (row.updatedAt === last.updatedAt && row.id < last.id)))];
+      if (!page.nextCursor) archiveCursor = null;
+    } else {
+      archivedSessions = page.sessions;
+      archiveCursor = page.nextCursor;
+    }
+    archivedTotal = page.total;
+    paintArchivedSessions();
+  } finally {
+    // A search changed while this response was in flight: leave its newer request in charge.
+    if (generation !== archiveLoadGeneration) return;
+    archiveLoading = false;
+    if (archiveAppendQueued && archiveCursor) {
+      archiveAppendQueued = false;
+      archiveRefreshQueued = false;
+      void loadArchivedSessions(true);
+    } else if (archiveRefreshQueued) {
+      archiveRefreshQueued = false;
+      void loadArchivedSessions();
+    }
+  }
 }
 
 function paintArchivedSessions(): void {
   const list = $('archivesList');
   const section = $('archivesSection');
   const count = $('archivesCount');
-  count.textContent = String(archivedTotal);
+  count.textContent = archivedTotal < 0 ? '' : String(archivedTotal);
   const rows = archivedSessions.map(summary => {
     const row = sessionRow(summary);
     row.classList.add('archived-session-row');
@@ -1615,7 +1653,7 @@ function paintArchivedSessions(): void {
   if (!rows.length) list.append(el('p', 'empty', () => t('No archived chats')));
   const more = $<HTMLButtonElement>('archivesMore');
   more.hidden = !archiveCursor;
-  section.querySelector('summary')?.setAttribute('aria-label', t('Archived'));
+  section.querySelector('summary')?.setAttribute('aria-label', archivedTotal < 0 ? t('Archived') : `${t('Archived')} (${archivedTotal})`);
 }
 
 function sortSessionRows(rows: SessionSummary[]): SessionSummary[] {
@@ -9321,6 +9359,24 @@ export function initChat(next: Deps): void {
     pendingNewInput = null;
     selectSession(row.dataset.id);
   });
+  // Archived rows live outside #sessionList so paging them never changes Inbox totals.
+  // Give their button-equivalent title the same explicit click/keyboard selection behavior.
+  $('archivesList').addEventListener('click', event => {
+    const control = (event.target as HTMLElement).closest<HTMLElement>('[data-session-select]');
+    const id = control?.closest<HTMLElement>('[data-id]')?.dataset.id;
+    if (!id || id === selectedId) return;
+    pendingNewInput = null;
+    selectSession(id);
+  });
+  $('archivesList').addEventListener('keydown', event => {
+    if (event.altKey || event.ctrlKey || event.metaKey || !['Enter', ' '].includes(event.key)) return;
+    const control = (event.target as HTMLElement).closest<HTMLElement>('[data-session-select]');
+    if (!control || event.target !== control) return;
+    const id = control.closest<HTMLElement>('[data-id]')?.dataset.id;
+    if (!id) return;
+    event.preventDefault();
+    if (id !== selectedId) { pendingNewInput = null; selectSession(id); }
+  });
   initChatCycle($('sessionList'), () => selectedId);
   $('sessionList').closest<HTMLElement>('.scroll')?.addEventListener('scroll', maybePageSessions);
   // Prefetch the visible edge, retaining direction across collapsed batches.
@@ -9415,6 +9471,12 @@ export function initChat(next: Deps): void {
   $<HTMLInputElement>('archivesSearch').addEventListener('input', event => {
     archiveQuery = (event.target as HTMLInputElement).value.trim();
     archiveCursor = null;
+    archiveLoadedOlder = false;
+    // A query change retires any older request, even if its response arrives later.
+    archiveLoadGeneration++;
+    archiveLoading = false;
+    archiveRefreshQueued = false;
+    archiveAppendQueued = false;
     void loadArchivedSessions();
   });
   $('archivesMore').addEventListener('click', () => void loadArchivedSessions(true));
