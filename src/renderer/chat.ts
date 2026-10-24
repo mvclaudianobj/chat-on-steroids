@@ -109,7 +109,7 @@ import {
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
-import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, hostApprovalAttemptFailed, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
@@ -4418,12 +4418,24 @@ function approvalCardPanel(sessionId: string): HTMLElement {
       return;
     }
     say(() => t('Sending your answer to ChatGPT…'));
-    // The page takes the answer on its next poll (every 2 s while the card stands).
+    // A DOM click is only delivery, never proof that ChatGPT accepted the answer.
+    // Keep observing the actual card: a re-render or ignored synthetic click can
+    // leave the same approval waiting, and must not be shown as completion.
     for (let attempt = 0; attempt < 40 && panel.isConnected; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       const next = await refresh();
-      if (!next || (next.answer && next.answer.outcome !== null)) return;
+      if (hostApprovalAttemptFailed(next)) return;
+      if (!next) {
+        // Absence can be a successful host answer or a stale/failed read.
+        // Never display an invented positive acknowledgement here.
+        return;
+      }
+      if (next.answer?.outcome === 'clicked') {
+        say(() => t('ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.'));
+      }
     }
+    if (panel.isConnected && card)
+      say(() => t('ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.'));
   };
   deny.addEventListener('click', () => void answer('deny'));
   allow.addEventListener('click', () => void answer('allow'));

@@ -4080,5 +4080,7 @@
   "Select a configured seat before authorizing a worker.": "Wähle einen konfigurierten Platz, bevor du einen Worker freigibst.",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "Der Platz ist konfiguriert, aber kein Worker läuft. Der Broker prüft die Berechtigungen vor dem Start.",
   "Company operating mode": "Betriebsmodus des Unternehmens",
-  "For other approval options, continue in ChatGPT if they are available there.": "Für weitere Genehmigungsoptionen fahre in ChatGPT fort, sofern sie dort verfügbar sind."
+  "For other approval options, continue in ChatGPT if they are available there.": "Für weitere Genehmigungsoptionen fahre in ChatGPT fort, sofern sie dort verfügbar sind.",
+  "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "Die ChatGPT-Schaltfläche wurde gedrückt, aber die Genehmigungskarte ist noch sichtbar. Bestätige im Browser, falls sie nicht verschwindet.",
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT hat die Antwort in der App nicht bestätigt. Öffne diesen Chat im Browser, um die Genehmigung abzuschließen."
 }

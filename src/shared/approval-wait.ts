@@ -20,3 +20,9 @@ export interface ApprovalCardView {
   allow: boolean;
   answer: { choice: 'allow' | 'deny'; outcome: 'clicked' | 'card_changed' | 'unavailable' | 'expired' | null } | null;
 }
+
+/** A click acknowledgement is not a host acceptance receipt. Keep watching that card. */
+export function hostApprovalAttemptFailed(view: ApprovalCardView | null): boolean {
+  return view?.answer?.outcome === 'card_changed' || view?.answer?.outcome === 'unavailable'
+    || view?.answer?.outcome === 'expired';
+}

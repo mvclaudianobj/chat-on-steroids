@@ -4032,5 +4032,7 @@
   "Select a configured seat before authorizing a worker.": "작업자를 승인하기 전에 설정된 좌석을 선택하세요.",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "좌석은 설정되어 있지만 실행 중인 작업자는 없습니다. 브로커가 실행 전에 권한을 확인합니다.",
   "Company operating mode": "회사 운영 모드",
-  "For other approval options, continue in ChatGPT if they are available there.": "다른 승인 옵션이 제공되는 경우 ChatGPT에서 계속 진행하세요."
+  "For other approval options, continue in ChatGPT if they are available there.": "다른 승인 옵션이 제공되는 경우 ChatGPT에서 계속 진행하세요.",
+  "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "ChatGPT 버튼을 눌렀지만 승인 카드가 여전히 표시됩니다. 사라지지 않으면 브라우저에서 확인하세요.",
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "앱에서 ChatGPT의 승인 결과를 확인하지 못했습니다. 브라우저에서 이 대화를 열어 승인을 마치세요."
 }

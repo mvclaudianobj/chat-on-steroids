@@ -4080,5 +4080,7 @@
   "Select a configured seat before authorizing a worker.": "Çalışana izin vermeden önce yapılandırılmış koltuk seçin.",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "Koltuk yapılandırılmış ancak çalışan çalışmıyor. Aracı, başlamadan önce izinleri kontrol eder.",
   "Company operating mode": "Şirket çalışma modu",
-  "For other approval options, continue in ChatGPT if they are available there.": "Diğer onay seçenekleri mevcutsa ChatGPT üzerinden devam edin."
+  "For other approval options, continue in ChatGPT if they are available there.": "Diğer onay seçenekleri mevcutsa ChatGPT üzerinden devam edin.",
+  "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "ChatGPT düğmesine basıldı ancak izin kartı hâlâ görünüyor. Kaybolmazsa tarayıcıda onaylayın.",
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT uygulamada yanıtı doğrulamadı. İzni tamamlamak için bu sohbeti tarayıcıda açın."
 }

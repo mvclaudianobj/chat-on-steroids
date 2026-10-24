@@ -4032,5 +4032,7 @@
   "Select a configured seat before authorizing a worker.": "授权代理前请选择已配置席位。",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "席位已配置，但没有运行中的代理。调度服务将在启动前检查权限。",
   "Company operating mode": "公司运行模式",
-  "For other approval options, continue in ChatGPT if they are available there.": "如需其他批准选项，请在 ChatGPT 中继续操作（如果可用）。"
+  "For other approval options, continue in ChatGPT if they are available there.": "如需其他批准选项，请在 ChatGPT 中继续操作（如果可用）。",
+  "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "已点击 ChatGPT 按钮，但授权卡片仍然可见。如果未消失，请在浏览器中确认。",
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT 未在应用中确认回复。请在浏览器中打开此对话以完成授权。"
 }

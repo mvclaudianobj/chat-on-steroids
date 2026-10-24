@@ -5,7 +5,21 @@ import {
   APPROVAL_ANSWER_MS, APPROVAL_FRESH_MS, APPROVAL_GONE_MS, APPROVAL_NOTICE_GRACE_MS, approvalAnswerFor, approvalCardView, approvalCardWaiting, approvalWaitingChats, noteApprovalCard,
   requestApprovalAnswer, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps
 } from '../src/main/approval-wait.js';
-import { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT } from '../src/shared/approval-wait.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT, hostApprovalAttemptFailed, type ApprovalCardView } from '../src/shared/approval-wait.js';
+
+describe('host approval delivery versus acceptance', () => {
+  const card = (outcome: ApprovalCardView['answer']): ApprovalCardView =>
+    ({ id:'card-1234', lines:['Synthetic approval'], allow:true, answer:outcome });
+  it('keeps observing after a click, since the host card may remain on screen', () => {
+    expect(hostApprovalAttemptFailed(card({choice:'allow',outcome:'clicked'}))).toBe(false);
+    expect(hostApprovalAttemptFailed(card({choice:'allow',outcome:null}))).toBe(false);
+    expect(hostApprovalAttemptFailed(null)).toBe(false);
+  });
+  it('stops polling on host refusal, stale card or expiration', () => {
+    for (const outcome of ['card_changed','unavailable','expired'] as const)
+      expect(hostApprovalAttemptFailed(card({choice:'allow',outcome}))).toBe(true);
+  });
+});
 
 // VM stress test, 2026-10-06: ChatGPT's own approval card stalled a Loop and nobody was told.
 

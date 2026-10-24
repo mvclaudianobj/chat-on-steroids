@@ -4176,5 +4176,7 @@
   "Select a configured seat before authorizing a worker.": "Выберите настроенное место перед разрешением на запуск.",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "Место настроено, но исполнитель не запущен. Перед запуском брокер проверяет разрешения.",
   "Company operating mode": "Режим работы компании",
-  "For other approval options, continue in ChatGPT if they are available there.": "Для других вариантов разрешения продолжите в ChatGPT, если они там доступны."
+  "For other approval options, continue in ChatGPT if they are available there.": "Для других вариантов разрешения продолжите в ChatGPT, если они там доступны.",
+  "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "Кнопка ChatGPT нажата, но запрос разрешения всё ещё виден. Если он не исчезнет, подтвердите в браузере.",
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT не подтвердил ответ в приложении. Откройте этот чат в браузере, чтобы завершить разрешение."
 }

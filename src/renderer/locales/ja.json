@@ -4032,5 +4032,7 @@
   "Select a configured seat before authorizing a worker.": "ワーカーを承認する前に設定済みの席を選択してください。",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "席は設定されていますが、稼働中のワーカーはいません。ブローカーが権限を確認します。",
   "Company operating mode": "会社の運用モード",
-  "For other approval options, continue in ChatGPT if they are available there.": "他の承認オプションがある場合は、ChatGPT 上で続行してください。"
+  "For other approval options, continue in ChatGPT if they are available there.": "他の承認オプションがある場合は、ChatGPT 上で続行してください。",
+  "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "ChatGPT のボタンは押されましたが、承認カードはまだ表示されています。消えない場合はブラウザで確認してください。",
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "アプリでは ChatGPT の回答確認ができませんでした。ブラウザでこのチャットを開いて承認を完了してください。"
 }

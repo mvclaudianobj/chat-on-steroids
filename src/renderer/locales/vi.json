@@ -4032,5 +4032,7 @@
   "Select a configured seat before authorizing a worker.": "Chọn vị trí đã cấu hình trước khi cho phép chạy tác nhân.",
   "The seat is configured but no worker is running. The broker checks permissions before admission.": "Vị trí đã cấu hình nhưng chưa có tác nhân chạy. Môi giới kiểm tra quyền trước khi cho phép.",
   "Company operating mode": "Chế độ hoạt động của công ty",
-  "For other approval options, continue in ChatGPT if they are available there.": "Để xem các lựa chọn phê duyệt khác, hãy tiếp tục trong ChatGPT nếu có."
+  "For other approval options, continue in ChatGPT if they are available there.": "Để xem các lựa chọn phê duyệt khác, hãy tiếp tục trong ChatGPT nếu có.",
+  "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "Đã nhấn nút ChatGPT nhưng thẻ phê duyệt vẫn hiển thị. Hãy xác nhận trong trình duyệt nếu thẻ không biến mất.",
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT chưa xác nhận câu trả lời trong ứng dụng. Mở cuộc trò chuyện này trong trình duyệt để hoàn tất phê duyệt."
 }
