@@ -88,6 +88,25 @@ describe('broker-bound Company',()=>{
   await broker.reconcileMeeting(meeting.id);
   expect((await getCompany()).meetings[0]?.invitations?.find(row=>row.seat==='marks5')?.state).toBe('accepted');
  });
+ it('rejects a meeting receipt when the broker conversation changes while reports are fetched',async()=>{
+  const id=await assigned();
+  const meeting=(await mutateCompany('meeting',{title:'Synthetic session race',agenda:'Verify identity',durationMinutes:20})).meetings[0]!;
+  let conversationId='original-meeting-worker';
+  const acknowledged:string[]=[];
+  const backend:CompanyWorkerBackend={
+    async spawn(){return {runId,workerId:'worker-5'};},
+    async status(){return {runId,workers:[{id:'worker-5',runId,label:`marks5:${id}`,state:'active',conversationId,result:null}]};},
+    async reports(){conversationId='replaced-meeting-worker';return [{id:'stale-meeting-receipt',from:'worker-5',runId,time:Date.now(),origin:'authenticated-worker-message',text:`MEETING_ACK:${meeting.id}:accepted`}];},
+    async send(){return 'queued-meeting-invitation';},
+    async ack(_owner,_run,receipt){acknowledged.push(receipt);}
+  };
+  const broker=createCompanyBroker(backend);
+  await broker.dispatch(id);await broker.refresh(id);await broker.sendInvitations(meeting.id);
+  await broker.reconcileMeeting(meeting.id);
+  const invite=(await getCompany()).meetings.find(row=>row.id===meeting.id)?.invitations?.find(row=>row.seat==='marks5');
+  expect(invite).toMatchObject({state:'invited',confirmedAt:null,evidence:null});
+  expect(acknowledged).toEqual([]);
+ });
  it('does not publish a running worker without a bound conversation, and refuses a conversation swap before the report ACK',async()=>{
   const id=await assigned();
   const sent: string[]=[];

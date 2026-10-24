@@ -327,10 +327,26 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
         row.execution.runId===delivery.runId && row.execution.workerId===delivery.workerId &&
         !!row.execution.conversationId);
       if (status.runId!==delivery.runId || !linked) continue;
-      const worker = status.workers.find(w=>w.id===delivery.workerId && w.runId===delivery.runId &&
-        w.label===labelFor(linked) && w.conversationId===linked.execution!.conversationId);
-      if (!worker) continue;
+      const bound = (worker: z.infer<typeof workerStatus>) => worker.id===delivery.workerId && worker.runId===delivery.runId &&
+        worker.label===labelFor(linked) && worker.conversationId===linked.execution!.conversationId;
+      if (status.workers.filter(bound).length!==1) continue;
       const messages = await backend.reports(delivery.ownerId,delivery.runId);
+      // A worker can be rebound while the report lookup is in flight. Recheck
+      // both the broker conversation and the durable invitation before a receipt
+      // can become attendance or be acknowledged.
+      const recent = await getCompany();
+      const latestInvite = recent.meetings.find(m=>m.id===meetingId)?.invitations?.find(i=>i.seat===invitation.seat);
+      const latestTicket = recent.requests.find(row=>row.id===delivery.ownerId && row.seat===invitation.seat &&
+        row.execution?.ownerId===delivery.ownerId && row.execution.runId===delivery.runId &&
+        row.execution.workerId===delivery.workerId && row.execution.conversationId===linked.execution!.conversationId);
+      if (!latestInvite?.delivery || !latestTicket || latestInvite.delivery.ownerId!==delivery.ownerId ||
+          latestInvite.delivery.runId!==delivery.runId || latestInvite.delivery.workerId!==delivery.workerId ||
+          latestInvite.delivery.queuedId!==delivery.queuedId) continue;
+      const freshStatus = await backend.status(delivery.ownerId,delivery.runId);
+      const freshWorkers = freshStatus.workers.filter(bound);
+      if (freshStatus.runId!==delivery.runId || freshWorkers.length!==1) continue;
+      const worker = freshWorkers[0]!;
+      Object.assign(invitation,latestInvite);
       for (const message of messages) {
         if (message.origin!=='authenticated-worker-message' ||
             message.from!==delivery.workerId || message.runId!==delivery.runId || message.time<delivery.at ||
