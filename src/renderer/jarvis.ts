@@ -4,6 +4,7 @@
  * barge-in, optional continuous conversation and a visible turn state.
  */
 import { isApiConversationId } from '../shared/api-chat.js';
+import { responseTurnId } from '../shared/chronology.js';
 import type { DictationEvent } from '../shared/dictation.js';
 import type { SessionEvent } from '../shared/session.js';
 import {
@@ -609,12 +610,24 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         if (selected()?.id !== sessionId || !consented || !preferences.enabled) { cancel(); return; }
         if (pending) {
           if (pending.generation !== attempt || phase !== 'thinking') { nativePending = null; return; }
-          const submitted = reply.data.events.find(event => event.kind === 'user_message' &&
-            event.inputId === pending.inputId && event.inputDelivery === 'confirmed' && !!event.turnId);
-          if (!submitted?.turnId) continue;
+          const submitted = reply.data.events.filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+            event.kind === 'user_message').find(event => event.inputId === pending.inputId &&
+            event.inputDelivery === 'confirmed' && (!!event.messageId || !!event.turnId));
+          if (!submitted) continue;
+          // ChatGPT's native user-message turnId is not the response turnId. The recorder's
+          // exact questionId -> response-turn relation is the only valid bridge between them.
+          // The relation may arrive after the confirmed input: wait for the next session change.
+          const turns = reply.data.summary?.timelineTurns;
+          const linked = turns && submitted.messageId
+            ? [...new Set(Object.entries(turns)
+              .filter(([, turn]) => turn.questionId === submitted.messageId)
+              .map(([id]) => responseTurnId(turns, id)))] : [];
+          // No recorded relation or two independent responses: leave the input pending.
+          const responseTurn = linked.length === 1 ? linked[0] : null;
+          if (!responseTurn) continue;
           nativePending = null;
           clearNativeDeadline();
-          current = { sessionId: pending.sessionId, turnId: submitted.turnId, splitter: new JarvisSentenceSplitter(), spoken: 0 };
+          current = { sessionId: pending.sessionId, turnId: responseTurn, splitter: new JarvisSentenceSplitter(), spoken: 0 };
           answer = current;
           status.textContent = t('Jarvis message delivered to ChatGPT.');
         }

@@ -60,6 +60,7 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
   let changed: (change?: { sessionIds?: string[] }) => void = () => undefined;
   let events: unknown[] = [];
+  let sessionSummary: { timelineTurns: Record<string, { origin: number; time: number; questionId: string }> } | null = null;
   const transcribe = vi.fn(async (engine: string, ..._rest: unknown[]) => engine === 'provider' && options.providerTranscribe === 'fail'
     ? { ok: false as const, error: 'provider down' } : { ok: true as const, data: `text from ${engine}` });
   const speak = vi.fn(async (_voice: unknown, text: string) => ({ ok: true as const, data: { mime: 'audio/mpeg', bytes: new TextEncoder().encode(text) } }));
@@ -75,7 +76,7 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     startDictation: vi.fn(), stopDictation: vi.fn(async () => ({ ok: true, data: undefined })), apiChatSend: send, sendInput,
     onDictationEvent: () => () => undefined,
     onSessionChanged: (callback: typeof changed) => { changed = callback; return () => undefined; },
-    getSession: vi.fn(async () => ({ ok: true as const, data: { events, summary: null, total: events.length, nextFrom: 0 } }))
+    getSession: vi.fn(async () => ({ ok: true as const, data: { events, summary: sessionSummary, total: events.length, nextFrom: 0 } }))
   };
   let selected = options.selected === undefined
     ? ({ id: 'test-jarvis-0001', conversationId: 'cosapi-test-jarvis', engine: 'cliproxy' }) : options.selected;
@@ -107,8 +108,9 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     changed({ sessionIds: ['test-jarvis-0001'] });
     await flush();
   };
-  const nativeEvents = async (rows: unknown[]) => {
+  const nativeEvents = async (rows: unknown[], turns?: Record<string, { origin: number; time: number; questionId: string }>) => {
     events = rows;
+    sessionSummary = turns ? { timelineTurns: turns } : null;
     changed({ sessionIds: [selected?.id ?? ''] });
     await flush();
   };
@@ -152,6 +154,49 @@ describe('Jarvis native ChatGPT bridge ownership', () => {
   const message = (turnId: string, text: string) => ({ kind: 'assistant_message', turnId, messageId: 'm-'+turnId,
     seq: 3, message: { text, truncated: false, chars: text.length }, final: false });
 
+  it('speaks the real response turn linked by questionId when the native user turn id differs', async () => {
+    const f = await fixture({ selected: normal, g4f: true });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [input] = f.sendInput.mock.calls[0]!;
+    await f.nativeEvents([
+      { kind: 'user_message', messageId: 'native-question-17', inputId: input.id, inputDelivery: 'confirmed',
+        turnId: 'native-user-turn-uuid', seq: 1 },
+      message('provider-response-turn-18', 'Agora a voz deve sair pelo provedor G4F. Ainda em andamento')
+    ], { 'provider-response-turn-18': { origin: 2, time: 100, questionId: 'native-question-17' } });
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Agora a voz deve sair pelo provedor G4F.']);
+  });
+
+  it('waits for the persisted question link instead of reading an unrelated response', async () => {
+    const f = await fixture({ selected: normal, g4f: true });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [input] = f.sendInput.mock.calls[0]!;
+    const rows = [
+      { kind: 'user_message', messageId: 'question-claimed', inputId: input.id, inputDelivery: 'confirmed',
+        turnId: 'user-message-uuid', seq: 1 },
+      message('response-owned', 'Esta resposta pertence ao Jarvis. Continuando'),
+      message('response-foreign', 'Esta resposta pertence a outro turno. Continuando')
+    ];
+    await f.nativeEvents(rows, { 'response-foreign': { origin: 2, time: 100, questionId: 'other-question' } });
+    expect(f.speak).not.toHaveBeenCalled();
+    await f.nativeEvents(rows, { 'response-owned': { origin: 2, time: 100, questionId: 'question-claimed' },
+      'response-foreign': { origin: 3, time: 101, questionId: 'other-question' } });
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Esta resposta pertence ao Jarvis.']);
+  });
+
+  it('refuses two distinct response turns claiming the same question', async () => {
+    const f = await fixture({ selected: normal, g4f: true });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [input] = f.sendInput.mock.calls[0]!;
+    await f.nativeEvents([
+      { kind: 'user_message', messageId: 'question-ambiguous', inputId: input.id,
+        inputDelivery: 'confirmed', turnId: 'user-message-uuid', seq: 1 },
+      message('response-one', 'Primeira resposta, que ainda nao tem dono comprovado. Continuando'),
+      message('response-two', 'Segunda resposta, que ainda nao tem dono comprovado. Continuando')
+    ], { 'response-one': { origin: 2, time: 100, questionId: 'question-ambiguous' },
+      'response-two': { origin: 3, time: 101, questionId: 'question-ambiguous' } });
+    expect(f.speak).not.toHaveBeenCalled();
+  });
+
   it('sends STT through the native outbox and speaks only its confirmed input turn', async () => {
     const f = await fixture({ selected: normal, g4f: true });
     expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(false);
@@ -169,10 +214,11 @@ describe('Jarvis native ChatGPT bridge ownership', () => {
     ]);
     expect(f.speak).not.toHaveBeenCalled();
     await f.nativeEvents([
-      { kind: 'user_message', inputId: input.id, inputDelivery: 'confirmed', turnId: 'native-turn', seq: 2 },
+      { kind: 'user_message', messageId: 'native-question', inputId: input.id, inputDelivery: 'confirmed', turnId: 'native-question-uuid', seq: 2 },
       message('wrong-turn', 'Outra resposta não pode falar.'),
       message('native-turn', 'Resposta correta, do mesmo turno. Em andamento')
-    ]);
+    ], { 'native-turn': { origin: 2, time: 100, questionId: 'native-question' },
+      'wrong-turn': { origin: 3, time: 101, questionId: 'other-question' } });
     expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Resposta correta, do mesmo turno.']);
   });
 
@@ -181,13 +227,17 @@ describe('Jarvis native ChatGPT bridge ownership', () => {
     f.hold(); await f.flush(); f.release(); await f.flush();
     const [first] = f.sendInput.mock.calls[0]!;
     f.hold(); await f.flush();
-    await f.nativeEvents([{ kind: 'user_message', inputId: first.id, inputDelivery: 'confirmed', turnId: 'old', seq: 1 }, message('old', 'Fala antiga bloqueada.')]);
+    await f.nativeEvents([{ kind: 'user_message', messageId: 'question-old', inputId: first.id,
+      inputDelivery: 'confirmed', turnId: 'native-uuid-old', seq: 1 }, message('old', 'Fala antiga bloqueada.')],
+    { old: { origin: 1, time: 100, questionId: 'question-old' } });
     expect(f.speak).not.toHaveBeenCalled();
     expect(f.element('jarvisTalk').dataset.state).toBe('listening');
     expect(f.sendInput).toHaveBeenCalledTimes(1);
     f.release(); await f.flush();
     const [second] = f.sendInput.mock.calls[1]!;
-    await f.nativeEvents([{ kind: 'user_message', inputId: second.id, inputDelivery: 'confirmed', turnId: 'new', seq: 1 }, message('new', 'Só a fala nova será ouvida. Continua')]);
+    await f.nativeEvents([{ kind: 'user_message', messageId: 'question-new', inputId: second.id,
+      inputDelivery: 'confirmed', turnId: 'native-uuid-new', seq: 1 }, message('new', 'Só a fala nova será ouvida. Continua')],
+    { new: { origin: 2, time: 200, questionId: 'question-new' } });
     await f.flush();
     expect(f.element('jarvisSettingsStatus').textContent).toContain('delivered to ChatGPT');
     expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Só a fala nova será ouvida.']);
