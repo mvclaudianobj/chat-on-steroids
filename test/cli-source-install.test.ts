@@ -54,4 +54,15 @@ describe.skipIf(process.platform !== 'linux')('published CLI module updates', ()
     expect(readlinkSync(launcher)).toBe(before);
     expect(existsSync(path.join(fixture.home, 'modules/codex/versions'))).toBe(true);
   });
+
+  it('rechecks active turns after staging and before mutating an external npm prefix', async () => {
+    const prefix = path.join(os.homedir(), '.local');
+    let checks = 0;
+    await expect(installPublishedCli('codex', '@openai/codex', '1.2.3', 'update-external', prefix, async () => {
+      checks++;
+      throw new Error('turn_started_during_download');
+    })).rejects.toThrow('turn_started_during_download');
+    expect(checks).toBe(1);
+    expect(fixture.commands.filter(row => row.includes('--global'))).toHaveLength(0);
+  });
 });

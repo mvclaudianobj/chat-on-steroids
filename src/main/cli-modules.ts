@@ -479,7 +479,10 @@ export async function cliAction(id: CliId, action: 'enable' | 'disable' | 'insta
         if (id === 'codex' && (await import('./agent-engine/codex.js')).codexHasActiveTurns()) throw new Error('Wait for Codex to finish answering before updating its installed CLI');
         if (id === 'claude' && (await import('./agent-engine/claude.js')).claudeEngine.hasActiveTurns()) throw new Error('Wait for Claude to finish answering before updating its installed CLI');
       }
-      await installPublishedCli(id, source.package, expected, action, prefix);
+      await installPublishedCli(id, source.package, expected, action, prefix, action === 'update-external' ? async () => {
+        if (id === 'codex' && (await import('./agent-engine/codex.js')).codexHasActiveTurns()) throw new Error('Wait for Codex to finish answering before updating its installed CLI');
+        if (id === 'claude' && (await import('./agent-engine/claude.js')).claudeEngine.hasActiveTurns()) throw new Error('Wait for Claude to finish answering before updating its installed CLI');
+      } : undefined);
       pendingRestarts.add(id);
       deferIdleRestart();
     } finally { installations.delete(id); }

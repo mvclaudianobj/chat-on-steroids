@@ -55,7 +55,7 @@ export type InstallMode = 'install' | 'update' | 'update-external';
 
 /** The confirmed version is rechecked against latest, its canonical tarball and SHA512. */
 export async function installPublishedCli(id: PublishedId, packageName: string, expected: string, mode: InstallMode,
-  externalPrefix: string | null = null): Promise<void> {
+  externalPrefix: string | null = null, beforeExternalWrite?: () => Promise<void>): Promise<void> {
   if (PACKAGES[id] !== packageName) throw new Error('unexpected_package');
   if (active.has(id)) throw new Error('install_running');
   active.add(id);
@@ -64,8 +64,8 @@ export async function installPublishedCli(id: PublishedId, packageName: string, 
     const meta = await fetchNpmVersion(packageName, expected);
     if (meta.tarball !== npmTarballUrl(packageName, expected)) throw new Error('download_failed');
     const archive = await downloadNpmTarball(meta, LIMIT);
-    if (process.platform === 'win32') await installWsl(id, expected, mode, archive, externalPrefix);
-    else await installLocal(id, expected, mode, archive, externalPrefix);
+    if (process.platform === 'win32') await installWsl(id, expected, mode, archive, externalPrefix, beforeExternalWrite);
+    else await installLocal(id, expected, mode, archive, externalPrefix, beforeExternalWrite);
     cache.delete(id);
   } finally { active.delete(id); }
 }
@@ -81,7 +81,8 @@ const safeEnv = (home: string): NodeJS.ProcessEnv => {
     LANG: 'C', TMPDIR: os.tmpdir(), NO_COLOR: '1', npm_config_update_notifier: 'false' };
 };
 
-async function installLocal(id: PublishedId, expected: string, mode: InstallMode, archive: Buffer, externalPrefix: string | null): Promise<void> {
+async function installLocal(id: PublishedId, expected: string, mode: InstallMode, archive: Buffer, externalPrefix: string | null,
+  beforeExternalWrite?: () => Promise<void>): Promise<void> {
   const root = path.join(app.getPath('userData'), 'modules');
   const moduleDir = path.join(root, id);
   const stage = path.join(moduleDir, `.stage-${randomUUID()}`);
@@ -107,6 +108,7 @@ async function installLocal(id: PublishedId, expected: string, mode: InstallMode
     if (version !== expected) throw new Error('version_mismatch');
     if (mode === 'update-external') {
       if (!externalPrefix || externalPrefix !== path.join(os.homedir(), '.local')) throw new Error('external_not_writable');
+      await beforeExternalWrite?.();
       await runNpm(externalPrefix, true);
       return;
     }
@@ -150,7 +152,8 @@ export async function verifiedVersion(id: PublishedId, binary: string, probeHome
   return null;
 }
 
-async function installWsl(id: PublishedId, expected: string, mode: InstallMode, archive: Buffer, externalPrefix: string | null): Promise<void> {
+async function installWsl(id: PublishedId, expected: string, mode: InstallMode, archive: Buffer, externalPrefix: string | null,
+  beforeExternalWrite?: () => Promise<void>): Promise<void> {
   const runner = wslRunner;
   const run = (file: string, args: string[], timeout?: number) => runner.run(file, args, timeout);
   const home = (await run('/usr/bin/env', ['printenv', 'HOME'])).stdout.trim();
@@ -176,6 +179,7 @@ async function installWsl(id: PublishedId, expected: string, mode: InstallMode, 
     if (verified !== expected) throw new Error('version_mismatch');
     if (mode === 'update-external') {
       if (externalPrefix !== `${home}/.local`) throw new Error('external_not_writable');
+      await beforeExternalWrite?.();
       await install(externalPrefix, true);
       return;
     }
