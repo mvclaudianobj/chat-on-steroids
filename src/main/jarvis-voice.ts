@@ -13,7 +13,7 @@ import {
 
 export type JarvisAudioMime = 'audio/webm' | 'audio/ogg' | 'audio/mp4' | 'audio/wav';
 export interface VoiceCredential { header: string; value: string }
-export interface JarvisVoiceStatus { models: string[]; stt: string[]; tts: string[]; primary: boolean; fallback: boolean; ffmpeg: boolean; error: string | null }
+export interface JarvisVoiceStatus { models: string[]; stt: string[]; tts: string[]; primary: boolean; fallback: boolean; fallback2: boolean; fallback3: boolean; ffmpeg: boolean; error: string | null }
 
 const MAX_JSON = 2_000_000;
 const MAX_AUDIO = 16_000_000;
@@ -124,9 +124,8 @@ async function readBounded(response: Response, max: number): Promise<Buffer> {
  */
 async function voiceRequest(config: JarvisVoiceConfig, path: string, init: () => RequestInit, signal: AbortSignal): Promise<Response> {
   const base = parseJarvisVoiceBaseUrl(config.baseUrl);
-  const primary = await deps.credential('primary', base.origin);
-  const fallback = await deps.credential('fallback', base.origin);
-  const keys = [primary, fallback].filter((key): key is VoiceCredential => !!key);
+  const slots = ['primary', 'fallback', 'fallback2', 'fallback3'] as const;
+  const keys = (await Promise.all(slots.map(slot => deps.credential(slot, base.origin)))).filter((key): key is VoiceCredential => !!key);
   // Never upload captured microphone audio to Google without an origin-bound key.
   if (base.origin === 'https://generativelanguage.googleapis.com' && !keys.length) {
     throw new Error('Save your Google AI Studio key in the vault before using Gemini speech.');
@@ -138,9 +137,11 @@ async function voiceRequest(config: JarvisVoiceConfig, path: string, init: () =>
       ...request, headers: { ...(request.headers as Record<string, string>), ...authorization(attempts[index]!) },
       redirect: 'error', credentials: 'omit', cache: 'no-store', signal
     });
-    if (response.ok || index === attempts.length - 1 || !jarvisVoiceUsesFallback(response.status)) return response;
+    // Gemini rate limits are per project, not per API key. Do not fan out 429s
+    // across keys that may share the same quota.
+    if (response.ok || index === attempts.length - 1 || response.status === 429 && base.origin === 'https://generativelanguage.googleapis.com' || !jarvisVoiceUsesFallback(response.status)) return response;
     await response.body?.cancel().catch(() => undefined);
-    logInfo(`jarvis: voice provider ${path} answered HTTP ${response.status} to the primary key; retrying with the fallback key`);
+    logInfo(`jarvis: voice provider ${path} answered HTTP ${response.status} to credential slot ${index + 1}; trying another configured slot`);
   }
   throw new Error('Voice provider request was not sent.');
 }
@@ -148,17 +149,19 @@ async function voiceRequest(config: JarvisVoiceConfig, path: string, init: () =>
 const timeout = (signal: AbortSignal, ms: number): AbortSignal => AbortSignal.any([signal, AbortSignal.timeout(ms)]);
 
 export async function jarvisVoiceStatus(config: JarvisVoiceConfig, signal = new AbortController().signal): Promise<JarvisVoiceStatus> {
-  const result: JarvisVoiceStatus = { models: [], stt: [], tts: [], primary: false, fallback: false, ffmpeg: await deps.ffmpeg(), error: null };
+  const result: JarvisVoiceStatus = { models: [], stt: [], tts: [], primary: false, fallback: false, fallback2: false, fallback3: false, ffmpeg: await deps.ffmpeg(), error: null };
   if (!config.baseUrl) return result;
   try {
     const origin = parseJarvisVoiceBaseUrl(config.baseUrl).origin;
     result.primary = !!(await deps.credential('primary', origin));
     result.fallback = !!(await deps.credential('fallback', origin));
+    result.fallback2 = !!(await deps.credential('fallback2', origin));
+    result.fallback3 = !!(await deps.credential('fallback3', origin));
     if (origin === 'https://generativelanguage.googleapis.com') {
       result.stt = ['gemini-3.5-transcribe'];
       result.tts = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
       result.models = [...result.stt, ...result.tts];
-      if (!result.primary && !result.fallback) result.error = 'Save your Google AI Studio key to enable Gemini speech.';
+      if (!result.primary && !result.fallback && !result.fallback2 && !result.fallback3) result.error = 'Save your Google AI Studio key to enable Gemini speech.';
       return result;
     }
     const response = await voiceRequest(config, '/models', () => ({ method: 'GET', headers: { accept: 'application/json' } }), timeout(signal, 15_000));
@@ -287,7 +290,7 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
   const input = text.trim().slice(0, 4000);
   if (!input) throw new Error('Nothing to speak.');
   if (parseJarvisVoiceBaseUrl(config.baseUrl).origin === 'https://generativelanguage.googleapis.com') {
-    const googleKey = await deps.credential('primary', 'https://generativelanguage.googleapis.com') ?? await deps.credential('fallback', 'https://generativelanguage.googleapis.com');
+    const googleKey = await deps.credential('primary', 'https://generativelanguage.googleapis.com') ?? await deps.credential('fallback', 'https://generativelanguage.googleapis.com') ?? await deps.credential('fallback2', 'https://generativelanguage.googleapis.com') ?? await deps.credential('fallback3', 'https://generativelanguage.googleapis.com');
     if (!googleKey) throw new Error('Save your Google AI Studio key in the vault before testing speech.');
     const response = await voiceRequest(config, '/interactions', () => ({
       method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },

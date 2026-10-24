@@ -4207,5 +4207,9 @@
   "Remove saved key": "Supprimer la clé enregistrée",
   "Remove the saved API key?": "Supprimer la clé API enregistrée ?",
   "Remove saved password": "Supprimer le mot de passe enregistré",
-  "Remove the saved management password?": "Supprimer le mot de passe administrateur enregistré ?"
+  "Remove the saved management password?": "Supprimer le mot de passe administrateur enregistré ?",
+  "Fallback key 2": "Clé de secours 2",
+  "Additional credential used if the previous key fails. Project quotas still apply.": "Identifiant supplémentaire si la clé précédente échoue. Les limites du projet restent applicables.",
+  "Fallback key 3": "Clé de secours 3",
+  "Additional credential used if the previous keys fail. Project quotas still apply.": "Identifiant supplémentaire si les clés précédentes échouent. Les limites du projet restent applicables."
 }

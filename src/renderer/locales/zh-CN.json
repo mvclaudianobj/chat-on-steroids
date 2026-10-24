@@ -4111,5 +4111,9 @@
   "Remove saved key": "移除已保存的密钥",
   "Remove the saved API key?": "移除已保存的 API 密钥？",
   "Remove saved password": "移除已保存的密码",
-  "Remove the saved management password?": "移除已保存的管理密码？"
+  "Remove the saved management password?": "移除已保存的管理密码？",
+  "Fallback key 2": "备用密钥 2",
+  "Additional credential used if the previous key fails. Project quotas still apply.": "前一密钥失败时使用的额外密钥。项目配额仍然适用。",
+  "Fallback key 3": "备用密钥 3",
+  "Additional credential used if the previous keys fail. Project quotas still apply.": "前面密钥失败时使用的额外密钥。项目配额仍然适用。"
 }

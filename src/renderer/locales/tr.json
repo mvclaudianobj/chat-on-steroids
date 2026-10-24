@@ -4159,5 +4159,9 @@
   "Remove saved key": "Kayıtlı anahtarı kaldır",
   "Remove the saved API key?": "Kayıtlı API anahtarı kaldırılsın mı?",
   "Remove saved password": "Kayıtlı parolayı kaldır",
-  "Remove the saved management password?": "Kayıtlı yönetim parolası kaldırılsın mı?"
+  "Remove the saved management password?": "Kayıtlı yönetim parolası kaldırılsın mı?",
+  "Fallback key 2": "Yedek anahtar 2",
+  "Additional credential used if the previous key fails. Project quotas still apply.": "Önceki anahtar başarısız olursa kullanılır. Proje limitleri geçerlidir.",
+  "Fallback key 3": "Yedek anahtar 3",
+  "Additional credential used if the previous keys fail. Project quotas still apply.": "Önceki anahtarlar başarısız olursa kullanılır. Proje limitleri geçerlidir."
 }

@@ -4111,5 +4111,9 @@
   "Remove saved key": "保存されたキーを削除",
   "Remove the saved API key?": "保存された API キーを削除しますか？",
   "Remove saved password": "保存されたパスワードを削除",
-  "Remove the saved management password?": "保存された管理パスワードを削除しますか？"
+  "Remove the saved management password?": "保存された管理パスワードを削除しますか？",
+  "Fallback key 2": "予備キー 2",
+  "Additional credential used if the previous key fails. Project quotas still apply.": "前のキーが失敗した場合の追加キー。プロジェクトの上限は引き続き適用されます。",
+  "Fallback key 3": "予備キー 3",
+  "Additional credential used if the previous keys fail. Project quotas still apply.": "前のキーが失敗した場合の追加キー。プロジェクトの上限は引き続き適用されます。"
 }

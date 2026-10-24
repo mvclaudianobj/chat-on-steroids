@@ -4255,5 +4255,9 @@
   "Remove saved key": "Удалить сохраненный ключ",
   "Remove the saved API key?": "Удалить сохраненный ключ API?",
   "Remove saved password": "Удалить сохраненный пароль",
-  "Remove the saved management password?": "Удалить сохраненный пароль администратора?"
+  "Remove the saved management password?": "Удалить сохраненный пароль администратора?",
+  "Fallback key 2": "Резервный ключ 2",
+  "Additional credential used if the previous key fails. Project quotas still apply.": "Дополнительный ключ при сбое предыдущего. Ограничения проекта сохраняются.",
+  "Fallback key 3": "Резервный ключ 3",
+  "Additional credential used if the previous keys fail. Project quotas still apply.": "Дополнительный ключ при сбое предыдущих. Ограничения проекта сохраняются."
 }

@@ -4207,5 +4207,9 @@
   "Remove saved key": "Remover chave salva",
   "Remove the saved API key?": "Remover a chave de API salva?",
   "Remove saved password": "Remover senha salva",
-  "Remove the saved management password?": "Remover a senha de administração salva?"
+  "Remove the saved management password?": "Remover a senha de administração salva?",
+  "Fallback key 2": "Chave de reserva 2",
+  "Additional credential used if the previous key fails. Project quotas still apply.": "Credencial adicional usada quando a anterior falha. Os limites por projeto continuam válidos.",
+  "Fallback key 3": "Chave de reserva 3",
+  "Additional credential used if the previous keys fail. Project quotas still apply.": "Credencial adicional usada quando as anteriores falham. Os limites por projeto continuam válidos."
 }

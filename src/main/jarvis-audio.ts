@@ -19,7 +19,7 @@ const audio = z.object({ action: z.literal('transcribe'), engine: z.enum(['clipr
   voice: jarvisVoiceConfigSchema.optional() }).strict();
 const status = z.object({ action: z.literal('status') }).strict();
 const voiceStatus = z.object({ action: z.literal('voice-status'), voice: jarvisVoiceConfigSchema }).strict();
-const voiceKey = z.object({ action: z.literal('voice-key'), slot: z.enum(['primary', 'fallback']), baseUrl: z.string().min(1).max(300),
+const voiceKey = z.object({ action: z.literal('voice-key'), slot: z.enum(['primary', 'fallback', 'fallback2', 'fallback3']), baseUrl: z.string().min(1).max(300),
   value: z.string().trim().min(1).max(16384), password: z.string().min(1).max(1024) }).strict();
 const speak = z.object({ action: z.literal('speak'), voice: jarvisVoiceConfigSchema, text: z.string().min(1).max(4000) }).strict();
 const speakStream = z.object({ action: z.literal('speak-stream'), voice: jarvisVoiceConfigSchema, text: z.string().min(1).max(4000), requestId: z.string().uuid() }).strict();

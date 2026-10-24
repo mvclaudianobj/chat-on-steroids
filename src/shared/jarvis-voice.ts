@@ -6,7 +6,7 @@
 import { z } from 'zod';
 
 /** Vault K names; each entry is bound to the provider origin with header `Authorization`. */
-export const JARVIS_VOICE_VAULT = { primary: 'jarvis/voice-primary', fallback: 'jarvis/voice-fallback' } as const;
+export const JARVIS_VOICE_VAULT = { primary: 'jarvis/voice-primary', fallback: 'jarvis/voice-fallback', fallback2: 'jarvis/voice-fallback-2', fallback3: 'jarvis/voice-fallback-3' } as const;
 export type JarvisVoiceKeySlot = keyof typeof JARVIS_VOICE_VAULT;
 
 /**

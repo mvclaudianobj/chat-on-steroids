@@ -55,7 +55,7 @@ export function parseJarvisPreferences(value: unknown): Preferences {
   };
 }
 
-type ProviderCapability = { checked: boolean; primary: boolean; fallback: boolean; ffmpeg: boolean; stt: string[]; tts: string[]; error: string | null };
+type ProviderCapability = { checked: boolean; primary: boolean; fallback: boolean; fallback2?: boolean; fallback3?: boolean; ffmpeg: boolean; stt: string[]; tts: string[]; error: string | null };
 type Playable = { kind: 'audio'; url: string } | { kind: 'system'; text: string } | { kind: 'stream'; player: JarvisProgressiveAudio };
 
 export interface JarvisChatActions {
@@ -270,20 +270,24 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       if (!field) return;
       field.placeholder = provider.checked && saved ? '••••••••' : '';
       field.setAttribute('aria-label', !provider.checked
-        ? t('Checking the voice provider…') : provider.error && !provider.primary && !provider.fallback
+        ? t('Checking the voice provider…') : provider.error && !provider.primary && !provider.fallback && !provider.fallback2 && !provider.fallback3
           ? t('Voice provider is unavailable.') : saved ? t(savedText) : t(absentText));
       field.setAttribute('aria-describedby', 'jarvisProviderStatus');
     };
     keyState('jarvisProviderKey', provider.primary, 'Primary key saved.', 'No primary key saved.');
     keyState('jarvisProviderFallbackKey', provider.fallback, 'Fallback key saved.', 'No fallback key saved.');
+    keyState('jarvisProviderFallbackKey2', provider.fallback2 === true, 'Fallback key saved.', 'No fallback key saved.');
+    keyState('jarvisProviderFallbackKey3', provider.fallback3 === true, 'Fallback key saved.', 'No fallback key saved.');
     if (!providerStatus) return;
     const config = preferences.provider;
     if (!config.baseUrl) { providerStatus.textContent = t('No voice provider configured.'); return; }
     // An unreadable provider must not be announced as two absent credentials.
-    if (provider.error && !provider.primary && !provider.fallback) { providerStatus.textContent = provider.error; return; }
+    if (provider.error && !provider.primary && !provider.fallback && !provider.fallback2 && !provider.fallback3) { providerStatus.textContent = provider.error; return; }
     const parts = [
       provider.primary ? t('Primary key saved.') : t('No primary key saved.'),
-      provider.fallback ? t('Fallback key saved.') : t('No fallback key saved.')
+      provider.fallback ? t('Fallback key saved.') : t('No fallback key saved.'),
+      `2: ${provider.fallback2 ? t('Fallback key saved.') : t('No fallback key saved.')}`,
+      `3: ${provider.fallback3 ? t('Fallback key saved.') : t('No fallback key saved.')}`
     ];
     if (provider.checked && !provider.error) parts.push(t('Model list read.'));
     if (provider.checked && !provider.error && provider.stt.length && config.sttModel && !provider.stt.includes(config.sttModel)) {
@@ -313,7 +317,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       if (!reply.ok) { provider = { ...provider, checked: true, primary: false, fallback: false, error: reply.error }; paintProvider(); paint(); return; }
       const data = reply.data;
       provider = {
-        checked: true, primary: data?.primary === true, fallback: data?.fallback === true, ffmpeg: data?.ffmpeg === true,
+        checked: true, primary: data?.primary === true, fallback: data?.fallback === true, fallback2: data?.fallback2 === true, fallback3: data?.fallback3 === true, ffmpeg: data?.ffmpeg === true,
         stt: Array.isArray(data?.stt) ? data.stt : [], tts: Array.isArray(data?.tts) ? data.tts : [],
         error: typeof data?.error === 'string' ? data.error : null
       };
@@ -829,12 +833,14 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   maybe<HTMLButtonElement>('jarvisSaveKeys')?.addEventListener('click', () => {
     const primary = maybe<HTMLInputElement>('jarvisProviderKey');
     const fallback = maybe<HTMLInputElement>('jarvisProviderFallbackKey');
+    const fallback2 = maybe<HTMLInputElement>('jarvisProviderFallbackKey2');
+    const fallback3 = maybe<HTMLInputElement>('jarvisProviderFallbackKey3');
     const password = maybe<HTMLInputElement>('jarvisVaultPassword');
     const say = (text: string): void => { if (providerStatus) providerStatus.textContent = text; };
     const baseUrl = preferences.provider.baseUrl;
     if (!baseUrl) { say(t('Enter the provider URL first.')); return; }
     if (!password?.value) { say(t('Enter the vault master password first.')); password?.focus(); return; }
-    const writes = ([['primary', primary], ['fallback', fallback]] as const).filter(([, field]) => field?.value.trim());
+    const writes = ([['primary', primary], ['fallback', fallback], ['fallback2', fallback2], ['fallback3', fallback3]] as const).filter(([, field]) => field?.value.trim());
     if (!writes.length) { say(t('Enter a key to save.')); return; }
     void (async () => {
       for (const [slot, field] of writes) {

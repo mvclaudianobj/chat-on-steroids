@@ -4111,5 +4111,9 @@
   "Remove saved key": "저장된 키 삭제",
   "Remove the saved API key?": "저장된 API 키를 삭제하시겠습니까?",
   "Remove saved password": "저장된 비밀번호 삭제",
-  "Remove the saved management password?": "저장된 관리 비밀번호를 삭제하시겠습니까?"
+  "Remove the saved management password?": "저장된 관리 비밀번호를 삭제하시겠습니까?",
+  "Fallback key 2": "예비 키 2",
+  "Additional credential used if the previous key fails. Project quotas still apply.": "이전 키가 실패할 때 사용할 추가 키입니다. 프로젝트 제한은 계속 적용됩니다.",
+  "Fallback key 3": "예비 키 3",
+  "Additional credential used if the previous keys fail. Project quotas still apply.": "이전 키들이 실패할 때 사용할 추가 키입니다. 프로젝트 제한은 계속 적용됩니다."
 }

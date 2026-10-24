@@ -76,6 +76,37 @@ const signal = () => new AbortController().signal;
 
 describe('Google Gemini TTS provider contract', () => {
   const google = (): JarvisVoiceConfig => ({ baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: '', ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' });
+  it('stores four origin-bound credentials, publishes only boolean presence, and uses ordered fallback for 401', async () => {
+    const origin = 'https://generativelanguage.googleapis.com';
+    const slots = ['primary', 'fallback', 'fallback2', 'fallback3'] as const;
+    const attempts: string[] = [];
+    for (const [index, slot] of slots.entries()) {
+      const value = `fixture-only-${index}`;
+      vault.entries.set(JARVIS_VOICE_VAULT[slot], { name: JARVIS_VOICE_VAULT[slot], value, origin, header: 'x-goog-api-key' });
+    }
+    configureJarvisVoiceForTests({ fetch: async (_url, init) => {
+      const key = (init?.headers as Record<string, string>)['x-goog-api-key']!;
+      attempts.push(key);
+      return key === 'fixture-only-3' ? Response.json({ output_text: 'funcionou' }) : Response.json({ error: { message: 'invalid key' } }, { status: 401 });
+    } });
+    const status = await jarvisVoiceStatus({ ...google(), sttModel: 'gemini-3.5-transcribe' });
+    expect(status).toMatchObject({ primary: true, fallback: true, fallback2: true, fallback3: true });
+    for (const slot of slots) expect(JSON.stringify(status)).not.toContain(vault.entries.get(JARVIS_VOICE_VAULT[slot])!.value);
+    expect(await transcribeJarvisVoice({ ...google(), sttModel: 'gemini-3.5-transcribe' }, 'audio/webm', new Uint8Array([1]), 'pt-BR', signal())).toBe('funcionou');
+    expect(attempts).toEqual(['fixture-only-0', 'fixture-only-1', 'fixture-only-2', 'fixture-only-3']);
+  });
+  it('does not fan out Gemini HTTP 429 across multiple keys sharing project rate limits', async () => {
+    const attempts: string[] = [];
+    configureJarvisVoiceForTests({
+      credential: async slot => ({ header: 'x-goog-api-key', value: slot }),
+      fetch: async (_url, options) => {
+        attempts.push((options?.headers as Record<string, string>)['x-goog-api-key']!);
+        return Response.json({ error: { message: 'quota' } }, { status: 429, headers: { 'retry-after': '30' } });
+      }
+    });
+    await expect(transcribeJarvisVoice({ ...google(), sttModel: 'gemini-3.5-transcribe' }, 'audio/webm', new Uint8Array([1]), 'pt-BR', signal())).rejects.toThrow('429');
+    expect(attempts).toEqual(['primary']);
+  });
   it('requires an origin-bound vault credential', async () => {
     await expect(speakJarvisVoice(google(), 'Olá.', signal())).rejects.toThrow('Save your Google AI Studio key');
   });

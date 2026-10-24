@@ -4159,5 +4159,9 @@
   "Remove saved key": "Gespeicherten Schlüssel entfernen",
   "Remove the saved API key?": "Gespeicherten API-Schlüssel entfernen?",
   "Remove saved password": "Gespeichertes Passwort entfernen",
-  "Remove the saved management password?": "Gespeichertes Verwaltungspasswort entfernen?"
+  "Remove the saved management password?": "Gespeichertes Verwaltungspasswort entfernen?",
+  "Fallback key 2": "Ersatzschlüssel 2",
+  "Additional credential used if the previous key fails. Project quotas still apply.": "Zusätzlicher Schlüssel bei Ausfall des vorherigen. Projektlimits gelten weiterhin.",
+  "Fallback key 3": "Ersatzschlüssel 3",
+  "Additional credential used if the previous keys fail. Project quotas still apply.": "Zusätzlicher Schlüssel bei Ausfall der vorherigen. Projektlimits gelten weiterhin."
 }

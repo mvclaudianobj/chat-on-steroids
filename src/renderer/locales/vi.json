@@ -4111,5 +4111,9 @@
   "Remove saved key": "Xóa khóa đã lưu",
   "Remove the saved API key?": "Xóa khóa API đã lưu?",
   "Remove saved password": "Xóa mật khẩu đã lưu",
-  "Remove the saved management password?": "Xóa mật khẩu quản trị đã lưu?"
+  "Remove the saved management password?": "Xóa mật khẩu quản trị đã lưu?",
+  "Fallback key 2": "Khóa dự phòng 2",
+  "Additional credential used if the previous key fails. Project quotas still apply.": "Khóa bổ sung khi khóa trước không hoạt động. Hạn mức dự án vẫn áp dụng.",
+  "Fallback key 3": "Khóa dự phòng 3",
+  "Additional credential used if the previous keys fail. Project quotas still apply.": "Khóa bổ sung khi các khóa trước không hoạt động. Hạn mức dự án vẫn áp dụng."
 }
