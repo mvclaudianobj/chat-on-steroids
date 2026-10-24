@@ -14,7 +14,7 @@ let server, win;
 const fixture = `(() => {
   try { localStorage.setItem('cos.ui.language','en'); } catch {}
   const original=window.api,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
-  let company=null;
+  let company=null,demoBackup=null;
   const methods={
     markWhatsNewSeen:()=>ok(null),
     getState:async()=>{const reply=await original.getState();reply.data.config=fixtureMerge(fixtureDefaults,reply.data.config);reply.data.config.ui={...reply.data.config.ui,language:'en',theme:'dark'};return reply;},
@@ -32,6 +32,28 @@ const fixture = `(() => {
         company.requests.find(r=>r.status==='done').cooConfirmation={actor:'marks-coo',at:now-1000,workerId:'worker-5',reportId:'fixture-report-5',evidence:'fixture-COO-acceptance'};
         company.activities=company.requests.map((r,i)=>({id:'00000000-0000-4000-8000-'+String(200+i).padStart(12,'0'),at:r.updatedAt,actor:r.owner,kind:'request',requestId:r.id,message:r.title+' · '+r.status}));return ok(company);
       }
+      if(request.action==='activateReal'){
+        demoBackup=structuredClone(company);
+        company={version:1,company:structuredClone(company.company),requests:[],meetings:[],activities:[],demo:false,
+          delegation:{mode:'manual',delegate:null,chiefTitle:null,binding:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null},
+          delegationAudit:[],demoRecovery:{backupId:'00000000-0000-4000-8000-000000000999',startedAt:Date.now()}};
+        return ok(company);
+      }
+      if(request.action==='restoreDemo'){if(company.requests.length)return {ok:false,error:'Real company has changed'};company=demoBackup;return ok(company);}
+      if(request.action==='create'){
+        const id='00000000-0000-4000-8000-000000000111',now=Date.now();
+        const payload=request.payload;
+        company.requests=[{...payload,id,seat:null,tokensUsed:0,minutesUsed:0,status:'inbox',history:[{at:now,actor:'ceo',note:'Created real ticket'}],
+          raci:{responsible:payload.owner,accountable:'ceo',consulted:[],informed:[]},createdAt:now,updatedAt:now}];
+        company.activities=[{id:'00000000-0000-4000-8000-000000000112',at:now,actor:'ceo',kind:'request',requestId:id,message:'Created real ticket'}];
+        return ok(company);
+      }
+      if(request.action==='prepare'){
+        const ticket=company.requests.find(r=>r.id===request.payload.id);
+        if(ticket?.status!=='inbox')return {ok:false,error:'Ticket not in inbox'};
+        ticket.seat=request.payload.seat;ticket.status='assigned';return ok(company);
+      }
+      if(request.action==='dispatch')return {ok:false,error:'Broker owner authorization unavailable in synthetic fixture; worker was not started'};
       if(request.action==='move'){company.requests.find(r=>r.id===request.payload.id).status=request.payload.status;return ok(company);}
       return ok(company);
     }
@@ -94,6 +116,28 @@ app.whenReady().then(async()=>{
   assert.equal(await js("document.getElementById('companyDialog').open"),true);
   assert.ok((await js("document.getElementById('companyDialogContent').textContent")).includes('Acceptance criteria'));
   assert.deepEqual(errors,[]);
+  // The real-company transition remains an explicit UI operation; fake broker denies dispatch.
+  await js("document.querySelector('#companyModeActions button').click()");
+  assert.equal(await js("document.getElementById('companyDialog').open"),true);
+  await js("document.querySelector('#companyDialogActions button').click()");
+  await until("document.getElementById('companyModeBanner').dataset.mode==='real'");
+  assert.equal(await js("document.querySelectorAll('.company-ticket').length"),0);
+  assert.ok((await js("document.getElementById('companyModeBanner').textContent")).includes('configured seats'));
+  await js("document.getElementById('companyNewRequest').click()");
+  await js("document.querySelector('#companyDialogContent input').value='Real synthetic ticket'");
+  await js("document.querySelector('#companyDialogActions button').click()");
+  await until("document.querySelectorAll('.company-ticket').length===1");
+  await js("document.querySelector('.company-ticket').click()");
+  await js("document.querySelectorAll('#companyDialogContent select')[1].value='marks2'");
+  await js("[...document.querySelectorAll('#companyDialogActions button')].find(b=>b.textContent.includes('Assign seat for real work')).click()");
+  await until("document.querySelector('.company-ticket').textContent.includes('marks2')");
+  await js("document.querySelector('.company-ticket').click()");
+  await js("[...document.querySelectorAll('#companyDialogActions button')].find(b=>b.textContent.includes('Authorize real worker')).click()");
+  await until("document.querySelector('.company-error')?.textContent.includes('Broker owner authorization unavailable')");
+  assert.equal(await js("document.querySelectorAll('.company-column[data-status=working] .company-ticket').length"),0);
+  assert.ok((await js("document.querySelector('.company-error')?.textContent")).includes('worker was not started'));
+  assert.deepEqual(errors,[]);
+  await screenshot('company-real-broker-denied.png');
   console.log('PASS: Company synthetic board, office, rest room, meeting details, both themes, request dialog. Screenshots: '+output);
   win.destroy();await server.close();app.exit(0);
 }).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'company-error.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await server?.close();app.exit(1);});

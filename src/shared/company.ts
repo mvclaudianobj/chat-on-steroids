@@ -79,6 +79,7 @@ export const companyMeetingSchema = z.object({
 }).strict();
 export const companyActivitySchema = z.object({ id: z.string().uuid(), at: tick, actor, kind: z.enum(['request', 'move', 'seat', 'meeting', 'company']), requestId: z.string().uuid().optional(), message: safeText(400) }).strict();
 export const companySnapshotSchema = z.object({ version: z.literal(1), company: companySchema, requests: z.array(companyRequestSchema).max(500), meetings: z.array(companyMeetingSchema).max(150), activities: z.array(companyActivitySchema).max(1000), demo: z.boolean(),
+  demoRecovery: z.object({ backupId: z.string().uuid(), startedAt: tick }).strict().optional(),
   delegation: companyDelegationSchema.default({mode:'manual',delegate:null,chiefTitle:null,binding:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null}),
   delegationAudit: z.array(companyDelegationAuditSchema).max(300).default([])
 }).strict().superRefine((data, context) => {

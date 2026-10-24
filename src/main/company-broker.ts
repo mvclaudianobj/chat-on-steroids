@@ -188,7 +188,8 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
     if (request.engine !== 'chatgpt') throw new Error('This worker broker supports ChatGPT only');
     if (!request.tokenBudget || !request.timeBudgetMinutes) throw new Error('Positive budgets required');
     // A preflight refuses disabled workers or revoked settings before reserving any ticket.
-    await backend.status(request.id);
+    try { await backend.status(request.id); }
+    catch { throw new Error('Worker broker unavailable or owner permission denied. Check the Core connection and worker permissions; no worker was started.'); }
     current = await mutateCompany('reserve', { id });
     const saved = ticket(current, id);
     const response = await backend.spawn(id, labelFor(saved),

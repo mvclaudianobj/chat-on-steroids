@@ -1,7 +1,7 @@
 import { dialog, ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema, companyMeetingKindSchema, companyChiefSchema, companyDelegationScopeSchema, companyChiefTitleSchema } from '../shared/company.js';
-import { getCompany, mutateCompany } from './company-store.js';
+import { activateRealCompany, restoreDemoCompany, getCompany, mutateCompany } from './company-store.js';
 import { createCompanyBroker } from './company-broker.js';
 import { createCompanyObserver } from './company-observability.js';
 
@@ -17,8 +17,11 @@ export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('sendInvitations'), payload: z.object({ id: z.string().uuid(), consent: z.literal(true) }).strict() }).strict(),
   z.object({ action: z.literal('reconcileMeeting'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
   z.object({ action: z.literal('demo') }).strict(),
+  z.object({ action: z.literal('activateReal'), consent: z.literal(true) }).strict(),
+  z.object({ action: z.literal('restoreDemo'), consent: z.literal(true) }).strict(),
   z.object({ action: z.literal('configure'), payload: z.object({ name: z.string().trim().min(1).max(100), seatCount: z.number().int().min(1).max(99) }).strict() }).strict(),
   z.object({ action: z.literal('create'), payload: z.object({ title: z.string().trim().min(1).max(160), project: z.string().trim().min(1).max(120), owner: companyRoleSchema, origin: z.union([z.literal('ceo'), companyRoleSchema]), acceptance: z.string().trim().min(1).max(1200), engine: z.string().trim().min(1).max(60), model: z.string().trim().min(1).max(120), tokenBudget: z.number().int().min(0).max(10_000_000), timeBudgetMinutes: z.number().int().min(0).max(525600), dueAt: z.number().int().nonnegative().nullable() }).strict() }).strict(),
+  z.object({ action: z.literal('prepare'), payload: z.object({ id: z.string().uuid(), seat: companySeatSchema }).strict() }).strict(),
   z.object({ action: z.literal('move'), payload: z.object({ id: z.string().uuid(), status: companyStateNameSchema }).strict() }).strict(),
   z.object({ action: z.literal('authorize'), payload: z.object({ id: z.string().uuid(), ownerId: z.string().uuid(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/), runId: z.string().uuid(), consent: z.literal(true) }).strict() }).strict(),
   z.object({ action: z.literal('report'), payload: z.object({ id: z.string().uuid(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/), runId: z.string().uuid(), reportId: z.string().min(1).max(100), result: z.string().trim().min(1).max(1200), evidence: z.string().trim().min(1).max(1200), outcome: z.enum(['completed','failed']) }).strict() }).strict(),
@@ -41,21 +44,27 @@ export function registerCompanyIpc(getWindow: () => BrowserWindow | null): void 
     try {
       if (parsed.data.action === 'authorize' || parsed.data.action === 'report' || parsed.data.action === 'confirm' || parsed.data.action === 'attendance') return { ok: false, error: 'Broker/COO identity and evidence verification are not yet connected; operation refused' };
       const request = parsed.data;
-      if (request.action === 'dispatch' || request.action === 'sendInvitations' || request.action === 'reviewBroker' || request.action === 'delegationGrant' || request.action === 'delegationRevoke') {
+      if (request.action === 'dispatch' || request.action === 'sendInvitations' || request.action === 'reviewBroker' || request.action === 'delegationGrant' || request.action === 'delegationRevoke' || request.action === 'activateReal' || request.action === 'restoreDemo') {
         const decision = await dialog.showMessageBox(window, {
           type: 'warning', title: 'Authorize Company workers',
-          message: request.action === 'dispatch' ? 'Start an actual ChatGPT worker for this assigned seat?' :
+          message: request.action === 'activateReal' ? 'Preserve the complete demonstration in a local versioned backup and start an EMPTY real company?' :
+            request.action === 'restoreDemo' ? 'Restore the demonstration backup? This is allowed only before any real company changes.' :
+            request.action === 'dispatch' ? 'Start an actual ChatGPT worker for this assigned seat?' :
             request.action === 'sendInvitations' ? 'Send real meeting invitations to connected workers? Some sleeping workers may wake.' :
             request.action === 'reviewBroker' ? 'Personally approve this verified completion as CEO?' :
             request.action === 'delegationGrant' ? 'Delegate only the selected internal operations to this verified chief? Other permissions remain mandatory.' :
             'Revoke COO delegation immediately?',
-          detail: 'This uses the local worker broker with its existing permissions and budget guidance. It cannot guarantee hard token/time caps.',
+          detail: request.action === 'activateReal' ? 'All demo tickets, meetings and simulated worker states remain in the backup. No real workers will start. The company name and configured seats are preserved.' :
+            request.action === 'restoreDemo' ? 'Backup integrity and the unchanged empty real state will be checked before restoring. The backup file is retained.' :
+            'This uses the local worker broker with its existing permissions and budget guidance. It cannot guarantee hard token/time caps.',
           buttons: ['Cancel', 'Authorize'], defaultId: 0, cancelId: 0, noLink: true
         });
-        if (decision.response !== 1 || window.isDestroyed() || event.sender !== window.webContents)
+        if (decision.response !== 1 || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame)
           return { ok: false, error: 'Human authorization was not granted' };
       }
       const data = request.action === 'get' ? await getCompany() :
+        request.action === 'activateReal' ? await activateRealCompany() :
+        request.action === 'restoreDemo' ? await restoreDemoCompany() :
         request.action === 'observe' ? await observer.snapshot() :
         request.action === 'delegationGrant' ? await broker.grantDelegation(request.payload.delegate,request.payload.scope,request.payload.chiefTitle) :
         request.action === 'syncDelegatedTriage' ? await broker.applyDelegatedTriage() :

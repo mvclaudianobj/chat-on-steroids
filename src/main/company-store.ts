@@ -1,6 +1,6 @@
 /** Main-owned, local-only company state; never executes requests or calls external services. */
-import { randomUUID } from 'node:crypto';
-import { promises as fs } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { promises as fs, constants } from 'node:fs';
 import path from 'node:path';
 import { companySnapshotSchema, companySeats, demoCompany, emptyCompany, type CompanySnapshot, type CompanyRequest } from '../shared/company.js';
 
@@ -37,7 +37,71 @@ function serialized<T>(fn: () => Promise<T>): Promise<T> {
   const job = queue.then(fn); queue = job.then(() => undefined, () => undefined); return job;
 }
 export function getCompany(): Promise<CompanySnapshot> { return serialized(load); }
-export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'confirmDelegated' | 'delegationGrant' | 'delegationRevoke' | 'delegationDeny' | 'delegationTriage' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered', payload: unknown): Promise<CompanySnapshot> {
+
+/** Migration is deliberately separate from sample data insertion and broker admission.
+ * The complete demo must reach a private immutable backup before the empty live view is published. */
+function blankFromDemo(demo: CompanySnapshot, backupId: string, startedAt: number): CompanySnapshot {
+  const live = emptyCompany();
+  live.company = { ...demo.company, seats: [...demo.company.seats] };
+  live.demoRecovery = { backupId, startedAt };
+  return companySnapshotSchema.parse(live);
+}
+async function backupDirectory(): Promise<string> {
+  const destination = path.join(await directory(), 'demo-backups');
+  await fs.mkdir(destination, { recursive: true, mode: 0o700 });
+  const info = await fs.lstat(destination);
+  if (!info.isDirectory() || info.isSymbolicLink()) throw new Error('Invalid demo backup directory');
+  await fs.chmod(destination, 0o700);
+  return destination;
+}
+async function readDemoBackup(id: string): Promise<CompanySnapshot> {
+  const file = path.join(await backupDirectory(), `${id}.json`);
+  const handle = await fs.open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  try {
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > 2_100_000) throw new Error('Invalid demo backup');
+    const saved: unknown = JSON.parse(await handle.readFile('utf8'));
+    if (!saved || typeof saved !== 'object') throw new Error('Invalid demo backup');
+    const record = saved as Record<string, unknown>;
+    if (record['version'] !== 1 || record['backupId'] !== id || typeof record['sha256'] !== 'string') throw new Error('Invalid demo backup');
+    const snapshot = companySnapshotSchema.parse(record['snapshot']);
+    if (!snapshot.demo || createHash('sha256').update(JSON.stringify(snapshot)).digest('hex') !== record['sha256'])
+      throw new Error('Demo backup integrity check failed');
+    return snapshot;
+  } finally { await handle.close(); }
+}
+export function activateRealCompany(): Promise<CompanySnapshot> {
+  return serialized(async () => {
+    const demo = await load();
+    if (!demo.demo) throw new Error('Only a demonstration can be converted to a real company');
+    const backupId = randomUUID(), startedAt = Date.now();
+    const source = companySnapshotSchema.parse(demo);
+    const record = {version:1,backupId,createdAt:startedAt,sha256:createHash('sha256').update(JSON.stringify(source)).digest('hex'),snapshot:source};
+    const file = path.join(await backupDirectory(), `${backupId}.json`);
+    // A completed file flush precedes replacing company.json, even if the app exits suddenly.
+    const handle = await fs.open(file, 'wx', 0o600);
+    try { await handle.writeFile(JSON.stringify(record)); await handle.sync(); }
+    finally { await handle.close(); }
+    await readDemoBackup(backupId);
+    const live = blankFromDemo(source, backupId, startedAt);
+    await save(live);
+    return live;
+  });
+}
+export function restoreDemoCompany(): Promise<CompanySnapshot> {
+  return serialized(async () => {
+    const current = await load();
+    if (current.demo || !current.demoRecovery) throw new Error('No real company with a demo backup to restore');
+    const original = await readDemoBackup(current.demoRecovery.backupId);
+    // Roll back only while absolutely no real work/configuration has been authored since transition.
+    const pristine = blankFromDemo(original, current.demoRecovery.backupId, current.demoRecovery.startedAt);
+    if (JSON.stringify(current) !== JSON.stringify(pristine))
+      throw new Error('Real company has changed; backup retained, automatic restore refused');
+    await save(original);
+    return original;
+  });
+}
+export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'confirmDelegated' | 'delegationGrant' | 'delegationRevoke' | 'delegationDeny' | 'delegationTriage' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered', payload: unknown): Promise<CompanySnapshot> {
   return serialized(async () => {
     const current = await load();
     if (action === 'demo') {
@@ -45,6 +109,20 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
       const demo = demoCompany(); await save(demo); return demo;
     }
     const now = Date.now();
+    if (action === 'prepare') {
+      if (current.demo) throw new Error('Convert the demonstration before assigning real workers');
+      const fields = payload as { id: string; seat: string };
+      const request = current.requests.find(row => row.id === fields.id);
+      if (!request || request.status !== 'inbox' || request.execution || request.seat) throw new Error('Only a new inbox ticket can be prepared');
+      if (!current.company.seats.slice(0,10).includes(fields.seat as `marks${number}`) ||
+        current.requests.some(row => row.id !== fields.id && row.seat === fields.seat &&
+          (row.status === 'working' || row.execution && ['admitted','running','awaiting-authorization'].includes(row.execution.phase))))
+        throw new Error('Selected seat is unavailable for a real worker');
+      request.seat = fields.seat as `marks${number}`; request.status = 'assigned'; request.updatedAt = now;
+      request.history.push({at:now,actor:'ceo',note:`Prepared configured seat ${fields.seat}; broker admission still requires approval`,from:'inbox',to:'assigned'});
+      current.activities.unshift({id:randomUUID(),at:now,actor:'ceo',kind:'seat',requestId:request.id,message:`Ticket assigned to ${fields.seat}; worker not started`});
+      await save(current); return current;
+    }
     if (action === 'delegationGrant' || action === 'delegationRevoke') {
       if (current.demo) throw new Error('Delegation is unavailable for synthetic company data');
       const previousDelegate = current.delegation.delegate;

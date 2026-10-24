@@ -43,8 +43,8 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   async function change(request: Parameters<AppApi['company']>[0]): Promise<void> {
     if (loading) return;
     loading = true;
-    try { await send(request); close(); }
-    catch (error) { const notice = el('p', 'company-error', (error as Error).message); content.append(notice); }
+    try { await send(request); close(); if (request.action === 'activateReal' || request.action === 'restoreDemo') { observed=null; await loadObservation(); } }
+    catch (error) { const notice = el('p', 'company-error', (error as Error).message); notice.setAttribute('role','alert'); content.append(notice); }
     finally { loading = false; }
   }
   function field(label: string, node: HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement): HTMLElement {
@@ -55,6 +55,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     const node = el('select'); for (const name of options) { const option = el('option', '', format(name)); option.value = name; node.append(option); } node.value = value; return node;
   }
   function newRequest(): void {
+    if (snapshot?.demo) { startRealDialog(); return; }
     open('New request');
     const requestTitle = input(); requestTitle.required = true;
     const project = input('General');
@@ -65,11 +66,27 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     const tokens = input('10000', 'number'); tokens.min = '0'; tokens.max = '10000000';
     const minutes = input('120', 'number'); minutes.min = '0'; minutes.max = '525600';
     content.append(field('Request title', requestTitle), field('Project', project), field('Responsible role', owner), field('Engine', engine), field('Model', model), field('Acceptance criteria', acceptance), field('Token budget', tokens), field('Time budget (minutes)', minutes));
+    content.append(el('p','company-dialog-hint',t('Only ChatGPT tickets can currently dispatch workers through the broker. Other engines remain manual.')));
     const save = button('Create request', () => {
       if (!requestTitle.value.trim() || !project.value.trim() || !acceptance.value.trim()) { requestTitle.reportValidity(); return; }
       void change({ action: 'create', payload: { title: requestTitle.value.trim(), project: project.value.trim(), owner: owner.value as typeof COMPANY_ROLES[number], origin: 'ceo', engine: engine.value, model: model.value.trim(), acceptance: acceptance.value.trim(), tokenBudget: Number(tokens.value), timeBudgetMinutes: Number(minutes.value), dueAt: null } });
     }, 'btn btn-solid'); actions.append(save);
     requestTitle.focus();
+  }
+  function startRealDialog(): void {
+    if (!snapshot?.demo) return;
+    open('Preserve demo and start real company');
+    content.append(el('p','company-dialog-hint',t('The demo will be backed up locally before a real empty company is created. Your configured company name and seats stay unchanged.')),
+      el('p','company-dialog-hint',`${snapshot.requests.length} ${t('sample tickets')} · ${snapshot.meetings.length} ${t('sample meetings')} · ${snapshot.company.seatCount} ${t('configured seats')}`),
+      el('p','company-dialog-hint',t('No worker will be started by this operation. Broker authorization is still required for each real ticket.')));
+    actions.append(button('Preserve demo and start real company',()=>void change({action:'activateReal',consent:true}),'btn btn-solid'));
+  }
+  function restoreDemoDialog(): void {
+    if (!snapshot?.demoRecovery || snapshot.demo) return;
+    open('Restore saved demonstration');
+    content.append(el('p','company-dialog-hint',t('A restore is available only before editing or creating real work. The original backup remains stored.')),
+      el('p','company-dialog-hint',`${t('Demo backup ID')}: ${snapshot.demoRecovery.backupId}`));
+    actions.append(button('Restore saved demonstration',()=>void change({action:'restoreDemo',consent:true}),'btn btn-solid'));
   }
   function settings(): void {
     if (!snapshot) return;
@@ -111,8 +128,15 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     content.append(el('h4', '', t('History')));
     const history = el('div', 'company-history'); for (const item of request.history.slice(-10).reverse()) history.append(el('p', '', `${date(item.at)} · ${item.actor}: ${item.note}`)); content.append(history);
     actions.append(button('Save assignment', () => void change({ action: 'seat', payload: { id, seat: seat.value || null } })));
+    if (!snapshot.demo && request.status==='inbox' && !request.execution && !request.seat) {
+      actions.append(button('Assign seat for real work',()=>{
+        if(!seat.value){seat.reportValidity();content.append(el('p','company-error',t('Select a configured seat before authorizing a worker.')));return;}
+        void change({action:'prepare',payload:{id,seat:seat.value}});
+      },'btn btn-solid'));
+    }
     if (!snapshot.demo && request.status === 'assigned' && request.seat && !request.execution) {
       actions.append(button('Authorize real worker', () => void change({action:'dispatch',payload:{id,consent:true}}),'btn btn-solid'));
+      content.append(el('p','company-dialog-hint',t('The seat is configured but no worker is running. The broker checks permissions before admission.')));
     }
     if (!snapshot.demo && request.execution && ['admitted','running','awaiting-authorization'].includes(request.execution.phase)) {
       actions.append(button('Check broker progress', () => void change({action:'refreshBroker',payload:{id}})));
@@ -195,7 +219,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
         const work = snapshot!.requests.filter(r => r.seat === seat && r.status !== 'done').sort((a, b) => priority(b.status) - priority(a.status))[0];
         const desk = button(seat, () => { if (work) detail(work.id); }, 'company-desk');
         const state = companySeatView(snapshot!, seat, current).state;
-        const label = t(seatStateLabels[state]);
+        const label = !snapshot!.demo && state === 'rest-free' ? t('Configured seat · no authenticated worker') : t(seatStateLabels[state]);
         desk.dataset.seat = seat; desk.dataset.state = state;
         desk.setAttribute('aria-label', `${seat}: ${label}`);
         desk.prepend(el('span', 'company-desk-avatar', seat.slice(5))); desk.append(chip(label));
@@ -217,7 +241,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     restHeader.append(restSymbol, restHeadText); lounge.append(restHeader);
     const restList = el('ul', 'company-rest-list'); restList.setAttribute('aria-label', t('Resting employees'));
     for (const entry of resting) {
-      const label = t(seatStateLabels[entry.state]);
+      const label = !snapshot.demo && entry.state === 'rest-free' ? t('Configured seat · no authenticated worker') : t(seatStateLabels[entry.state]);
       const li = el('li', 'company-rest-worker'); li.dataset.seat = entry.seat; li.dataset.restKind = entry.state;
       li.setAttribute('aria-label', `${entry.seat}: ${label}`);
       const avatar = el('span', 'company-desk-avatar', entry.seat.slice(5)); avatar.setAttribute('aria-hidden','true');
@@ -230,6 +254,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     }
     lounge.append(restList);
     if (!resting.length) lounge.append(el('p', 'company-rest-empty', t('No employees are eligible for rest right now.')));
+    if (!snapshot.demo) lounge.append(el('p','company-rest-demo',t('Configured seats do not prove a connected worker.')));
     if (snapshot.demo) lounge.append(el('p', 'company-rest-demo', t('Synthetic example · not live worker status')));
     office.append(lounge);
     if (snapshot.meetings.length) { const meeting = el('section', 'company-room company-meeting'); meeting.append(el('h2', '', t('Meeting room'))); for (const row of snapshot.meetings) { meeting.append(button(row.title,()=>meetingDetail(row.id),'company-ceo-action'), el('p', '', `${row.participants.join(' · ')} · ${row.durationMinutes} min`), el('p', '', row.minutes)); for (const decision of row.decisions) meeting.append(el('p', 'company-dialog-hint', `• ${decision}`)); } office.append(meeting); }
@@ -289,6 +314,25 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   function paint(): void {
     if (!snapshot) return;
     $('companyTitle').textContent = snapshot.company.name;
+    const mode = $('companyModeBanner'), explanation=$('companyModeExplanation'), modeActions=$('companyModeActions');
+    mode.dataset.mode=snapshot.demo?'demo':'real'; explanation.replaceChildren(); modeActions.replaceChildren();
+    const modeTitle=snapshot.demo?'Demonstration · sample data':'Real company · workers require broker authorization';
+    const modeHelp=snapshot.demo?'Your demonstration contains sample tickets and a meeting. These are examples, never live workers.':
+      'A real company has configured seats, not authenticated workers. Create a ticket and choose a seat before requesting broker authorization.';
+    explanation.append(el('strong','',t(modeTitle)),el('p','',t(modeHelp)));
+    const present=observed?.seats.filter(row=>row.source==='broker' && row.state==='working' && !row.error).length??0;
+    if (!snapshot.demo) explanation.append(el('p','company-mode-proof',`${snapshot.company.seatCount} ${t('configured seats')} · ${present} ${t('broker-observed active workers')}`),
+      el('p','company-mode-proof',t('Broker availability and worker identity must be verified on each dispatch. No worker starts merely from a seat.')));
+    if(snapshot.demo) modeActions.append(button('Preserve demo and start real company',startRealDialog,'btn btn-solid'));
+    else {
+      modeActions.append(button('Create real ticket',newRequest,'btn btn-solid'),button('Refresh observations',()=>void loadObservation()));
+      if(snapshot.demoRecovery) modeActions.append(button('Restore saved demonstration',restoreDemoDialog));
+    }
+    const preview=document.querySelector('.company-preview');
+    if(preview)preview.textContent=t(modeTitle);
+    const modeIndicator=document.querySelector('.company-mode');
+    if(modeIndicator)modeIndicator.textContent=t(modeTitle);
+    $('companyNewRequest').textContent=t(snapshot.demo?'Preserve demo and start real company':'Create real ticket');
     $('companyBoard').hidden = view !== 'board'; $('companyOffice').hidden = view !== 'office'; $('companyRpg').hidden=view!=='rpg';
     $('companyBoardTab').classList.toggle('is-sel', view === 'board'); $('companyOfficeTab').classList.toggle('is-sel', view === 'office'); $('companyRpgTab').classList.toggle('is-sel',view==='rpg');
     $('companyBoardTab').setAttribute('aria-pressed', String(view === 'board')); $('companyOfficeTab').setAttribute('aria-pressed', String(view === 'office')); $('companyRpgTab').setAttribute('aria-pressed',String(view==='rpg'));
@@ -304,7 +348,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     ceo.append(el('p','company-muted',snapshot.delegation?.mode !== 'delegated' ? t('Manual approval is active by default.') :
       `${t('Selected operations chief')}: ${snapshot.delegation.delegate} · ${snapshot.delegation.scopes.join(', ')}`));
     ceo.append(button('Operational approvals',settings,'company-ceo-action'));
-    ceo.append(button('Convene all workers',newMeeting,'company-ceo-action'));
+    if(!snapshot.demo)ceo.append(button('Convene all workers',newMeeting,'company-ceo-action'));
     const requests = snapshot.requests.filter(r => r.status === 'needs-ceo');
     if (!requests.length) ceo.append(el('p', 'company-muted', t('All clear. Nothing needs your decision.')));
     for (const item of requests) ceo.append(button(`◉ ${item.title}  →`, () => detail(item.id), 'company-ceo-action'));
