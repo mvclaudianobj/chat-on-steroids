@@ -347,7 +347,22 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
       if (freshStatus.runId!==delivery.runId || freshWorkers.length!==1) continue;
       const worker = freshWorkers[0]!;
       Object.assign(invitation,latestInvite);
-      for (const message of messages) {
+      for (const [index, message] of messages.entries()) {
+        // Each ACK can yield control to another broker incarnation. Do not
+        // consume the next receipt using proof captured before the prior ACK.
+        if (index > 0) {
+          const latest = await getCompany();
+          const sameInvite = latest.meetings.find(m=>m.id===meetingId)?.invitations?.find(i=>i.seat===invitation.seat);
+          const sameTicket = latest.requests.find(row=>row.id===delivery.ownerId && row.seat===invitation.seat &&
+            row.execution?.ownerId===delivery.ownerId && row.execution.runId===delivery.runId &&
+            row.execution.workerId===delivery.workerId && row.execution.conversationId===linked.execution!.conversationId);
+          if (!sameInvite?.delivery || !sameTicket || sameInvite.delivery.queuedId!==delivery.queuedId ||
+              sameInvite.delivery.ownerId!==delivery.ownerId || sameInvite.delivery.runId!==delivery.runId ||
+              sameInvite.delivery.workerId!==delivery.workerId) break;
+          const afterAck = await backend.status(delivery.ownerId,delivery.runId);
+          if (afterAck.runId!==delivery.runId || afterAck.workers.filter(bound).length!==1) break;
+          Object.assign(invitation,sameInvite);
+        }
         if (message.origin!=='authenticated-worker-message' ||
             message.from!==delivery.workerId || message.runId!==delivery.runId || message.time<delivery.at ||
             message.id===invitation.evidence) continue;

@@ -107,6 +107,29 @@ describe('broker-bound Company',()=>{
   expect(invite).toMatchObject({state:'invited',confirmedAt:null,evidence:null});
   expect(acknowledged).toEqual([]);
  });
+ it('does not apply a second meeting receipt after ACK switches broker conversation',async()=>{
+  const id=await assigned();
+  const meeting=(await mutateCompany('meeting',{title:'ACK epoch race',agenda:'Receipt identity',durationMinutes:20})).meetings[0]!;
+  let conversationId='meeting-chat-original';
+  const acked:string[]=[];
+  const backend:CompanyWorkerBackend={
+    async spawn(){return {runId,workerId:'worker-5'};},
+    async status(){return {runId,workers:[{id:'worker-5',runId,label:`marks5:${id}`,state:'active',conversationId,result:null}]};},
+    async reports(){return [
+      {id:'first-receipt',from:'worker-5',runId,time:Date.now(),origin:'authenticated-worker-message',text:`MEETING_ACK:${meeting.id}:accepted`},
+      {id:'second-receipt',from:'worker-5',runId,time:Date.now(),origin:'authenticated-worker-message',text:`MEETING_ACK:${meeting.id}:present`}
+    ];},
+    async send(){return 'queued-invitation';},
+    async ack(_owner,_run,receipt){acked.push(receipt);if(receipt==='first-receipt')conversationId='meeting-chat-replaced';}
+  };
+  const broker=createCompanyBroker(backend);
+  await broker.dispatch(id);await broker.refresh(id);await broker.sendInvitations(meeting.id);
+  await broker.reconcileMeeting(meeting.id);
+  const invite=(await getCompany()).meetings.find(row=>row.id===meeting.id)?.invitations?.find(row=>row.seat==='marks5');
+  expect(invite?.state).toBe('accepted');
+  expect(invite?.evidence).toBe('first-receipt');
+  expect(acked).toEqual(['first-receipt']);
+ });
  it('does not publish a running worker without a bound conversation, and refuses a conversation swap before the report ACK',async()=>{
   const id=await assigned();
   const sent: string[]=[];
