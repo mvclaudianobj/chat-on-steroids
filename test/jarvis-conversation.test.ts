@@ -83,7 +83,7 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     options.initialTurns ? { timelineTurns: options.initialTurns } : null;
   const transcribe = vi.fn(async (engine: string, ..._rest: unknown[]) => engine === 'provider' && options.providerTranscribe === 'fail'
     ? { ok: false as const, error: 'provider down' } : { ok: true as const, data: `text from ${engine}` });
-  const speak = vi.fn(async (_voice: unknown, text: string) => ({ ok: true as const, data: { mime: 'audio/mpeg', bytes: new TextEncoder().encode(text) } }));
+  const speak = vi.fn(async (_voice: unknown, text: string, _routing?: unknown, _groupId?: string) => ({ ok: true as const, data: { mime: 'audio/mpeg', bytes: new TextEncoder().encode(text) } }));
   const speakCancel = vi.fn(async () => ({ ok: true as const, data: null }));
   const routeStatus = vi.fn(async () => ({ ok: true as const, data: { g4f1: true, g4f2: false, error: null } }));
   const setKey = vi.fn(async () => ({ ok: true as const, data: true }));
