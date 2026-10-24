@@ -100,7 +100,7 @@ async function failure(response: Response, what: string): Promise<Error> {
   return new Error(`Voice provider ${what} returned HTTP ${response.status}${detail ? `: ${detail}` : '.'}`);
 }
 
-async function readBounded(response: Response, max: number): Promise<Buffer> {
+async function readBounded(response: Response, max: number, signal?: AbortSignal): Promise<Buffer> {
   const length = Number(response.headers.get('content-length'));
   if (Number.isFinite(length) && length > max) { await response.body?.cancel().catch(() => undefined); throw new Error('Voice provider response is too large.'); }
   if (!response.body) return Buffer.alloc(0);
@@ -109,13 +109,23 @@ async function readBounded(response: Response, max: number): Promise<Buffer> {
   let size = 0;
   try {
     for (;;) {
-      const { done, value } = await reader.read();
+      const { done, value } = signal
+        ? await new Promise<ReadableStreamReadResult<Uint8Array>>((resolve, reject) => {
+          if (signal.aborted) { reject(signal.reason); return; }
+          const onAbort = () => reject(signal.reason);
+          signal.addEventListener('abort', onAbort, { once: true });
+          void reader.read().then(
+            value => { signal.removeEventListener('abort', onAbort); resolve(value); },
+            error => { signal.removeEventListener('abort', onAbort); reject(error); }
+          );
+        })
+        : await reader.read();
       if (done) break;
       size += value.byteLength;
       if (size > max) throw new Error('Voice provider response is too large.');
       chunks.push(value);
     }
-  } catch (error) { await reader.cancel().catch(() => undefined); throw error; }
+  } catch (error) { void reader.cancel().catch(() => undefined); throw error; }
   return Buffer.concat(chunks);
 }
 
@@ -298,7 +308,7 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
       }] }], response_format: { type: 'audio' }, generation_config: { speech_config: [{ voice: config.voice }] } })
     }), signal, slot);
     if (!response.ok) { const retryAfterMs = retryAfterDelay(response); const error = await failure(response, 'Gemini speech'); throw new ProviderUnavailable(response.status, retryAfterMs, error.message); }
-    const payload = JSON.parse((await readBounded(response, MAX_AUDIO * 2)).toString()) as {
+    const payload = JSON.parse((await readBounded(response, MAX_AUDIO * 2, signal)).toString()) as {
       steps?: { type?: string; content?: { type?: string; data?: string }[] }[]
     };
     const encoded = payload.steps?.flatMap(step => step.type === 'model_output' ? step.content ?? [] : [])
@@ -436,7 +446,7 @@ async function selectSpeechResponse(config: JarvisVoiceConfig, text: string, sig
 /** Compatibility route: providers and clients without incremental playback get one bounded buffer. */
 export async function speakJarvisVoice(config: JarvisVoiceConfig, text: string, signal: AbortSignal, routing?: JarvisVoiceRouting, groupId?: string): Promise<{ mime: string; bytes: Uint8Array }> {
   const { response, mime } = await routedSpeechResponse(config, text, signal, routing, groupId);
-  const bytes = await readBounded(response, MAX_AUDIO);
+  const bytes = await readBounded(response, MAX_AUDIO, signal);
   if (!bytes.length) throw new Error('Voice provider speech returned no audio.');
   return { mime: mime === 'audio/mpeg' && bytes.subarray(0, 4).toString() === 'OggS' ? 'audio/ogg' : mime, bytes: new Uint8Array(bytes) };
 }
