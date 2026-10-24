@@ -26,6 +26,7 @@ let generation = 0;
 let restart: ReturnType<typeof setTimeout> | null = null;
 let wantConnection = false;
 let connecting: Promise<void> | null = null;
+let disconnecting: Promise<void> | null = null;
 let saving: Promise<void> = Promise.resolve();
 let retryCount = 0;
 let qrDeadline: ReturnType<typeof setTimeout> | null = null;
@@ -157,6 +158,9 @@ async function connect(): Promise<void> {
   });
 }
 export async function startWhatsAppWeb(): Promise<WhatsAppWebStatus> {
+  // Disconnect owns logout and session removal. A new Connect intent waits for that
+  // transition to commit before opening a socket or inspecting saved credentials.
+  if (disconnecting) await disconnecting;
   wantConnection = true;
   // A deliberate user retry supersedes the scheduled backoff immediately.
   if (restart) { clearTimeout(restart); restart = null; }
@@ -172,7 +176,7 @@ export async function startWhatsAppWeb(): Promise<WhatsAppWebStatus> {
   }
   return getWhatsAppWebStatus();
 }
-export async function disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus> {
+async function disconnectNow(): Promise<void> {
   const active = socket;
   wantConnection = false;
   ++generation;
@@ -183,6 +187,14 @@ export async function disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus> {
   await bounded(saving.catch(() => undefined), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
   await fs.rm(directory(), { recursive: true, force: true });
   status = { state: 'disconnected' };
+}
+export async function disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus> {
+  if (!disconnecting) {
+    const task = disconnectNow();
+    disconnecting = task;
+    void task.finally(() => { if (disconnecting === task) disconnecting = null; }).catch(() => undefined);
+  }
+  await disconnecting;
   return getWhatsAppWebStatus();
 }
 export async function sendWhatsAppWeb(number: string, message: string): Promise<void> {

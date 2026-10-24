@@ -124,6 +124,20 @@ it('disconnect closes socket, removes local credentials, and prevents auto recon
   sock.ev.emit('connection.update', { connection: 'close' });
   expect(mocks.sockets).toHaveLength(1);
 });
+it('keeps a new manual connect requested during an unfinished disconnect', async () => {
+  await web.startWhatsAppWeb();
+  const old = mocks.sockets[0]!;
+  let releaseLogout!: () => void;
+  const logoutWaiting = new Promise<void>(resolve => { releaseLogout = resolve; });
+  old.logout.mockImplementation(() => logoutWaiting);
+  const disconnect = web.disconnectWhatsAppWeb();
+  const reconnect = web.startWhatsAppWeb();
+  releaseLogout();
+  await disconnect;
+  await reconnect;
+  expect(mocks.sockets).toHaveLength(2);
+  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connecting' });
+});
 it('only resumes with stored auth files', async () => {
   await web.resumeWhatsAppWeb();
   expect(mocks.sockets).toHaveLength(0);
