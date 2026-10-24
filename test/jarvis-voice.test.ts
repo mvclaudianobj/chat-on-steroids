@@ -343,6 +343,29 @@ describe('Jarvis provider routing across Gemini and two G4F accounts', () => {
     await speakJarvisVoice(google(), 'Segundo', signal(), routing('gemini-first'));
     expect(seen).toEqual(['https://generativelanguage.googleapis.com', 'https://g4f-test.example', 'https://g4f-test.example']);
   });
+  it('recovers after the Retry-After window without replaying prior speech or credentials', async () => {
+    let clock = Date.now();
+    const date = vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      const origins: string[] = [];
+      configureJarvisVoiceForTests({ credential: async slot => ({ header: slot.startsWith('g4f') ? 'Authorization' : 'x-goog-api-key', value: `fixture-${slot}` }),
+        fetch: async url => {
+          const origin = new URL(String(url)).origin;
+          origins.push(origin);
+          if (origin.includes('generativelanguage') && origins.filter(x => x === origin).length === 1)
+            return Response.json({ error: { message: 'quota' } }, { status: 429, headers: { 'retry-after': '2' } });
+          return origin.includes('generativelanguage')
+            ? Response.json({ steps: [{ type: 'model_output', content: [{ type: 'audio', data: Buffer.from('RIFFtest').toString('base64') }] }] })
+            : new Response(Buffer.from('ID3audio'), { headers: { 'content-type': 'audio/mpeg' } });
+        } });
+      await speakJarvisVoice(google(), 'Um', signal(), routing('gemini-first'));
+      clock += 1_000;
+      await speakJarvisVoice(google(), 'Dois', signal(), routing('gemini-first'));
+      clock += 2_000;
+      await speakJarvisVoice(google(), 'Tres', signal(), routing('gemini-first'));
+      expect(origins).toEqual(['https://generativelanguage.googleapis.com', 'https://g4f-test.example', 'https://g4f-test.example', 'https://generativelanguage.googleapis.com']);
+    } finally { date.mockRestore(); }
+  });
   it('prevents prefetch concurrency from selecting different providers for one answer', async () => {
     const id = crypto.randomUUID();
     const seen: string[] = [];
