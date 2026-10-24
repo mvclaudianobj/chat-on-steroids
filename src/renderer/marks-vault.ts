@@ -48,6 +48,22 @@ export function initMarksVaultUi(api: AppApi): void {
   const status = $('vaultStatus');
   const rows = $('vaultEntries');
   const pending = $('vaultPending');
+  const secretName = $('vaultName') as HTMLInputElement;
+  const secretValue = $('vaultValue') as HTMLInputElement;
+  const secretPresence = document.createElement('span');
+  secretPresence.id = 'vaultValueState';
+  secretPresence.setAttribute('role', 'status');
+  secretValue.setAttribute('aria-describedby', 'vaultValueState');
+  secretValue.insertAdjacentElement('afterend', secretPresence);
+  let storedNames: Set<string> | null = null;
+  let vaultReady = false;
+  const paintSecretPresence = (): void => {
+    const present = vaultReady && storedNames?.has(secretName.value.trim()) === true;
+    // The mask is presentation only; never put a saved secret or the mask in input.value.
+    secretValue.placeholder = present ? '••••••••' : '';
+    secretPresence.textContent = !vaultReady || storedNames === null ? t('Vault unavailable.') : present ? t('Key in vault') : t('No key');
+  };
+  secretName.addEventListener('input', () => { secretValue.value = ''; paintSecretPresence(); });
   const floating = document.createElement('aside');
   floating.id = 'marksVaultApprovalBanner';
   floating.setAttribute('role', 'alert');
@@ -76,10 +92,14 @@ export function initMarksVaultUi(api: AppApi): void {
     const state = await call('status');
     if (state.ok && state.data && typeof state.data === 'object') {
       const s = state.data as { created: boolean; ready: boolean; count: number | null };
+      vaultReady = s.ready;
       status.textContent = !s.created ? t('Vault not created.') : s.ready ? t('{0} secret(s) stored securely.', [s.count]) : t('Vault requires master password recovery on this computer.');
-    } else status.textContent = t('Vault unavailable.');
+    } else { vaultReady = false; status.textContent = t('Vault unavailable.'); }
     const listed = await call('list');
     rows.replaceChildren();
+    storedNames = vaultReady && listed.ok && Array.isArray(listed.data)
+      ? new Set((listed.data as Array<{ name: string }>).map(item => item.name)) : null;
+    paintSecretPresence();
     if (listed.ok && Array.isArray(listed.data)) for (const item of listed.data as Array<{ name: string; origin: string; header: string }>) {
       const row = document.createElement('p');
       row.textContent = `${item.name} · ${item.origin || t('Local only')} · ${item.header}`;
@@ -124,7 +144,11 @@ export function initMarksVaultUi(api: AppApi): void {
     vaultExport: () => call('export', { password: pass() }),
     vaultChangePassword: () => call('changePassword', { oldPassword: pass(), newPassword: entry('NewPassword') })
   };
-  for (const [id, fn] of Object.entries(buttons)) $(id).addEventListener('click', () => void action(fn, true, id));
+  for (const [id, fn] of Object.entries(buttons)) $(id).addEventListener('click', () => void action(async () => {
+    const result = await fn();
+    if (result.ok && (id === 'vaultSave' || id === 'vaultRemove')) secretValue.value = '';
+    return result;
+  }, true, id));
   $('vaultReveal').addEventListener('click', () => void action(async () => {
     const result = await call('reveal', { password: pass(), name: entry('Name') });
     if (result.ok) {

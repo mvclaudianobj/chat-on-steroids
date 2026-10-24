@@ -129,4 +129,14 @@ describe('vault approval change events', () => {
     expect(source).not.toMatch(/setInterval\(/);
     expect(source).toContain('onVaultPendingChanged');
   });
+  it('uses authenticated vault names for saved-value indicators without filling the password field', async () => {
+    const { readFileSync } = await import('node:fs');
+    const source = readFileSync(new URL('../src/renderer/marks-vault.ts', import.meta.url), 'utf8');
+    expect(source).toContain("const listed = await call('list')");
+    expect(source).toContain('storedNames = vaultReady && listed.ok && Array.isArray(listed.data)');
+    expect(source).toContain("secretValue.placeholder = present ? '••••••••' : ''");
+    expect(source).toContain("secretValue.setAttribute('aria-describedby', 'vaultValueState')");
+    expect(source).toContain("secretName.addEventListener('input', () => { secretValue.value = ''; paintSecretPresence(); })");
+    expect(source).not.toMatch(/secretValue\.value\s*=\s*['\"]•/);
+  });
 });
