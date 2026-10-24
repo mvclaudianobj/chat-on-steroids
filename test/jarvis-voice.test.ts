@@ -311,6 +311,53 @@ describe('Jarvis provider routing across Gemini and two G4F accounts', () => {
     { baseUrl: 'https://g4f-test.example/v1', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' },
     { baseUrl: 'https://g4f-test.example/v1', ttsModel: 'gpt-4o-mini-tts', voice: 'nova' }
   ] });
+  it('uses a saved later Gemini slot when primary is absent and pins it across one answer', async () => {
+    const attempts: string[] = [];
+    configureJarvisVoiceForTests({
+      credential: async slot => slot === 'fallback2' ? { header: 'x-goog-api-key', value: 'fixture-fallback2' } : null,
+      fetch: async (_url, init) => {
+        attempts.push((init?.headers as Record<string, string>)['x-goog-api-key'] ?? 'missing');
+        return Response.json({ steps: [{ type: 'model_output', content: [{ type: 'audio', data: Buffer.from('RIFFtest').toString('base64') }] }] });
+      }
+    });
+    const groupId = crypto.randomUUID();
+    await speakJarvisVoice(google(), 'Primeira', signal(), routing('gemini-first'), groupId);
+    await speakJarvisVoice(google(), 'Segunda', signal(), routing('gemini-first'), groupId);
+    expect(attempts).toEqual(['fixture-fallback2', 'fixture-fallback2']);
+  });
+  it('recovers from Gemini key-specific HTTP 401 without switching voice inside the answer', async () => {
+    const attempts: string[] = [];
+    configureJarvisVoiceForTests({
+      credential: async slot => ['primary', 'fallback'].includes(slot) ? { header: 'x-goog-api-key', value: `fixture-${slot}` } : null,
+      fetch: async (_url, init) => {
+        const key = (init?.headers as Record<string, string>)['x-goog-api-key']!;
+        attempts.push(key);
+        return key === 'fixture-primary'
+          ? Response.json({ error: { message: 'invalid credential' } }, { status: 401 })
+          : Response.json({ steps: [{ type: 'model_output', content: [{ type: 'audio', data: Buffer.from('RIFFtest').toString('base64') }] }] });
+      }
+    });
+    const groupId = crypto.randomUUID();
+    await speakJarvisVoice(google(), 'Primeira', signal(), routing('gemini-first'), groupId);
+    await speakJarvisVoice(google(), 'Segunda', signal(), routing('gemini-first'), groupId);
+    expect(attempts).toEqual(['fixture-primary', 'fixture-fallback', 'fixture-fallback']);
+  });
+  it('never uses a primary key bound to another origin when a valid Gemini fallback exists', async () => {
+    const attempts: string[] = [];
+    configureJarvisVoiceForTests({
+      credential: async slot => {
+        if (slot === 'primary') throw new Error('The saved primary voice key belongs to another address.');
+        return slot === 'fallback' ? { header: 'x-goog-api-key', value: 'fixture-gemini-fallback' } : null;
+      },
+      fetch: async (_url, init) => {
+        attempts.push((init?.headers as Record<string, string>)['x-goog-api-key'] ?? 'unauthenticated');
+        return Response.json({ steps: [{ type: 'model_output', content: [{ type: 'audio', data: Buffer.from('RIFFtest').toString('base64') }] }] });
+      }
+    });
+    const speech = await speakJarvisVoice(google(), 'Validar origem', signal(), routing('gemini-first'));
+    expect(speech.mime).toBe('audio/wav');
+    expect(attempts).toEqual(['fixture-gemini-fallback']);
+  });
   it('keeps two G4F credentials separate even on the same host, never returns secrets', async () => {
     configureJarvisVoiceForTests({ credential: async slot => slot === 'g4f1' || slot === 'g4f2' ? { header: 'Authorization', value: `fixture-${slot}` } : null });
     expect(await jarvisVoiceRouteStatus(routing('g4f-first'))).toEqual({ g4f1: true, g4f2: true, error: null });

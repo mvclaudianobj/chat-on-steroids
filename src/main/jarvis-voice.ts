@@ -291,8 +291,6 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
   const input = text.trim().slice(0, 4000);
   if (!input) throw new Error('Nothing to speak.');
   if (parseJarvisVoiceBaseUrl(config.baseUrl).origin === 'https://generativelanguage.googleapis.com') {
-    const googleKey = await deps.credential('primary', 'https://generativelanguage.googleapis.com') ?? await deps.credential('fallback', 'https://generativelanguage.googleapis.com') ?? await deps.credential('fallback2', 'https://generativelanguage.googleapis.com') ?? await deps.credential('fallback3', 'https://generativelanguage.googleapis.com');
-    if (!googleKey) throw new Error('Save your Google AI Studio key in the vault before testing speech.');
     const response = await voiceRequest(config, '/interactions', () => ({
       method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
       body: JSON.stringify({ model: config.ttsModel, input: [{ type: 'user_input', content: [{
@@ -345,7 +343,7 @@ class ProviderUnavailable extends Error {
 const GROUP_TTL_MS = 120_000;
 function voiceCandidates(config: JarvisVoiceConfig, routing: JarvisVoiceRouting): RoutedVoice[] {
   const google = config.baseUrl.startsWith('https://generativelanguage.googleapis.com/') ?
-    [{ config, slot: 'primary' as const, id: 'gemini' }] : [];
+    (['primary', 'fallback', 'fallback2', 'fallback3'] as const).map(slot => ({ config, slot, id: 'gemini' })) : [];
   const g4f = routing.g4f.flatMap((entry, index): RoutedVoice[] => {
     if (!entry.baseUrl || !entry.ttsModel || !entry.voice) return [];
     try {
@@ -401,7 +399,19 @@ async function selectSpeechResponse(config: JarvisVoiceConfig, text: string, sig
       logInfo(`jarvis: skipping ${candidate.id} TTS (${routeFailureReason.get(candidate.id) ?? 'unavailable'}, cooldown)`);
       continue;
     }
-    if (candidate.slot !== 'primary' && !await deps.credential(candidate.slot, parseJarvisVoiceBaseUrl(candidate.config.baseUrl).origin)) continue;
+    // Each configured Gemini credential can recover from an invalid/missing
+    // individual key; one shared provider id enforces a single cooldown on
+    // quota/availability errors, so 429 never fans out across a Google project.
+    try {
+      if (!await deps.credential(candidate.slot, parseJarvisVoiceBaseUrl(candidate.config.baseUrl).origin)) continue;
+    } catch (error) {
+      // A stale credential from another origin must never be uploaded to
+      // Gemini or prevent a different, correctly bound slot from working.
+      if (pinned) throw error;
+      lastError = error;
+      logWarn(`jarvis: voice key slot ${candidate.slot} unavailable for configured provider`);
+      continue;
+    }
     try {
       const limited = AbortSignal.any([signal, AbortSignal.timeout(deps.routeTimeoutMs)]);
       const result = await speechResponse(candidate.config, text, limited, candidate.slot);
