@@ -169,6 +169,8 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   const systemSpeech = (): boolean => typeof window !== 'undefined' && 'speechSynthesis' in window;
   let capability: { models: string[]; local: boolean; windows: boolean; error: string | null } = { models: [], local: false, windows: recognitionAvailable, error: null };
   let provider: ProviderCapability = { checked: false, primary: false, fallback: false, ffmpeg: false, stt: [], tts: [], error: null };
+  let providerCheckGeneration = 0;
+  let providerStatusConfig: string | null = null;
   let media: { recorder: MediaRecorder; stream: MediaStream; chunks: Blob[]; bytes: number; id: number; mode: Engine } | null = null;
   const modes = (): Engine[] => preferences.engine === 'auto' ? ORDER : [preferences.engine, ...ORDER.filter(candidate => candidate !== preferences.engine)];
   const providerReachable = (): boolean => provider.primary || provider.fallback || (provider.checked && !provider.error);
@@ -292,12 +294,22 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     providerStatus.textContent = parts.join(' ');
   }
   const refreshProvider = (): void => {
+    const generation = ++providerCheckGeneration;
     if (!api.jarvisVoiceStatus) return;
     const config = preferences.provider;
-    if (!config.baseUrl) { provider = { ...provider, checked: false, primary: false, fallback: false, error: null }; paintProvider(); paint(); return; }
+    const configKey = JSON.stringify(config);
+    // A credential or model catalog observed for another URL/model is never
+    // authority to arm the microphone while this configuration is still loading.
+    if (providerStatusConfig !== configKey) {
+      provider = { checked: false, primary: false, fallback: false, ffmpeg: false, stt: [], tts: [], error: null };
+      providerStatusConfig = null;
+      paint();
+    }
+    if (!config.baseUrl) { providerStatusConfig = null; paintProvider(); paint(); return; }
     if (providerStatus) providerStatus.textContent = t('Checking the voice provider…');
     void api.jarvisVoiceStatus(config).then(reply => {
-      if (JSON.stringify(preferences.provider) !== JSON.stringify(config)) return;
+      if (generation !== providerCheckGeneration || JSON.stringify(preferences.provider) !== JSON.stringify(config)) return;
+      providerStatusConfig = configKey;
       if (!reply.ok) { provider = { ...provider, checked: true, primary: false, fallback: false, error: reply.error }; paintProvider(); paint(); return; }
       const data = reply.data;
       provider = {
@@ -309,7 +321,12 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       fillList('jarvisTtsModels', provider.tts);
       paintProvider();
       paint();
-    }).catch(() => { provider = { ...provider, checked: true, primary: false, fallback: false, error: t('Voice provider is unavailable.') }; paintProvider(); paint(); });
+    }).catch(() => {
+      if (generation !== providerCheckGeneration || JSON.stringify(preferences.provider) !== JSON.stringify(config)) return;
+      providerStatusConfig = configKey;
+      provider = { ...provider, checked: true, primary: false, fallback: false, error: t('Voice provider is unavailable.') };
+      paintProvider(); paint();
+    });
   };
   const refresh = (): void => {
     refreshProvider();

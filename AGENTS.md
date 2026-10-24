@@ -3179,7 +3179,7 @@ in real Electron at narrow/wide widths and multiple zoom levels.
 
 ### Chat Marks Jarvis (J, J2, J3 voice provider)
 
-Jarvis is opt-in push-to-talk for a selected CLIProxy API chat (`src/renderer/jarvis.ts`,
+Jarvis is opt-in push-to-talk for a selected normal ChatGPT or CLIProxy API chat (`src/renderer/jarvis.ts`,
 Settings > Jarvis). J used Windows dictation; J2 added in-memory MediaRecorder capture on every
 OS with CLIProxy `/audio/transcriptions` and an already installed whisper.cpp
 (`src/main/jarvis-audio.ts`, IPC `jarvis:audio`, main-window/main-frame only). J3 adds:
@@ -3189,14 +3189,21 @@ OS with CLIProxy `/audio/transcriptions` and an already installed whisper.cpp
   suggestions from `GET {base}/models`. Keys are Vault K entries `jarvis/voice-primary` and
   `jarvis/voice-fallback`, bound to the exact origin with header `Authorization`; saving needs the
   master password (`storeJarvisVoiceKey`), daily use reads them with `useVault` in main and never
-  returns them. A 401/403/429/5xx with the primary key is retried once with the fallback.
+  returns them. Google Gemini uses its origin-bound `x-goog-api-key` header. A 401/403/429/5xx
+  with the primary key is retried once with the fallback.
   STT is `POST /audio/transcriptions` (multipart, the recorded webm/ogg/mp4; one WAV retry through
   an installed ffmpeg when the provider rejects the format or returns empty text) or
   `chat-audio`: a multimodal chat model on `/chat/completions` with `input_audio` WAV (needs
   ffmpeg). g4f.space currently answers `/audio/transcriptions` with empty text, so its preset
   uses `chat-audio`; its `srv_…:` model ids change, so the page warns when the chosen id is not in
   the live list. TTS is `POST /audio/speech` (`response_format: mp3`), bounded and played from a
-  blob URL. Nothing is written to disk; logs carry timings and statuses, never keys or text.
+  blob URL. Gemini 3.5 Transcribe instead uses `/v1beta/interactions` with inline bounded audio,
+  `generation_config.transcription_config` and `output_text`/`model_output`; `generateContent`
+  cannot be used as its dedicated transcription endpoint. Gemini TTS uses Interactions WAV.
+  Renderer provider status is scoped to the exact config and latest request generation: older
+  missing-key/error checks cannot disable a newly initialized motor, and a different provider's
+  cached credential status cannot arm its microphone. Nothing is written to disk; logs carry
+  timings and statuses, never keys or text.
 - **OS permission and CSP**: the default session denies every permission request except an
   audio-only `media` request from the main window's own main frame and page URL
   (`src/main/jarvis-permissions.ts`); before J3 that handler denied the microphone too, so J2
@@ -3209,7 +3216,9 @@ OS with CLIProxy `/audio/transcriptions` and an already installed whisper.cpp
   feed `JarvisSentenceSplitter`; complete sentences go to `JarvisSpeechQueue`
   (`src/renderer/jarvis-speech.ts`), which synthesizes one sentence ahead while the current one
   plays and stops everything at once on barge-in (push-to-talk while speaking or thinking, chat
-  change, blur). `turn_end` flushes the rest. Optional continuous conversation listens again
+  change, blur). Typed ChatGPT replies speak only once when the corresponding recorded turn
+  finishes, with prior chat history ignored and newer questions superseding older pending replies.
+  `turn_end` flushes the rest. Optional continuous conversation listens again
   450 ms after the spoken answer, ending on 1.4 s of silence (`JarvisSilenceGate`, Web Audio
   level) and pausing after 8 s without speech; push-to-talk stays the default. Earcons are short
   Web Audio tones (on by default, switchable). The composer shows `#jarvisStatus` and the button

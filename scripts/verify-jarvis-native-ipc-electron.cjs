@@ -45,18 +45,36 @@ const config = defaultConfig();
 
 let win=null, vite=null, failedFallback=false;
 const reqs={ audio:[], speech:[], tries:[], sends:[], interrupted:0 };
-const voiceBase='http://127.0.0.1:18789/v1'; // Parsed as an allowed loopback origin; NO server connects here.
-const voice={baseUrl:voiceBase, sttMode:'transcriptions', sttModel:'whisper-1', ttsModel:'gpt-4o-mini-tts', voice:'alloy'};
+const fakeGemini=process.env.JARVIS_GEMINI_STT_REGRESSION==='1';
+const voiceBase=fakeGemini?'https://generativelanguage.googleapis.com/v1beta':'http://127.0.0.1:18789/v1'; // Network is always intercepted.
+const voice={baseUrl:voiceBase, sttMode:'transcriptions', sttModel:fakeGemini?'gemini-3.5-transcribe':'whisper-1',
+  ttsModel:fakeGemini?'gemini-3.8-flash-tts':'gpt-4o-mini-tts', voice:fakeGemini?'Charon':'alloy'};
 const respond=(body,headers={})=>new Response(body,{status:200,headers});
 configureJarvisVoiceForTests({
   ffmpeg:async()=>false,
-  credential:async slot=>({header:'Authorization',value:slot==='primary'?'synthetic-primary':'synthetic-fallback'}),
+  credential:async slot=>({header:fakeGemini?'x-goog-api-key':'Authorization',value:slot==='primary'?'synthetic-primary':'synthetic-fallback'}),
   fetch:async (url,init)=>{
     const route=new URL(url).pathname;
-    const key=String(init.headers.Authorization??'');
-    reqs.tries.push({route,key:key==='Bearer synthetic-primary'?'primary':'fallback'});
+    const key=String(init.headers.Authorization??init.headers['x-goog-api-key']??'');
+    reqs.tries.push({route,key:key==='Bearer synthetic-primary'||key==='synthetic-primary'?'primary':'fallback'});
     if (route.endsWith('/models')) return respond(JSON.stringify({data:[{id:'whisper-1'},{id:'gpt-4o-mini-tts'}]}),{'content-type':'application/json'});
-    if (key==='Bearer synthetic-primary' || failedFallback) return new Response(JSON.stringify({error:{message:'synthetic outage'}}),{status:503,headers:{'content-type':'application/json'}});
+    if (key==='Bearer synthetic-primary' || key==='synthetic-primary' || failedFallback) return new Response(JSON.stringify({error:{message:'synthetic outage'}}),{status:503,headers:{'content-type':'application/json'}});
+    if (fakeGemini && route.endsWith('/interactions')) {
+      const body=JSON.parse(init.body);
+      if (body.model==='gemini-3.5-transcribe') {
+        assert.equal(body.input[0].type,'audio');
+        assert.equal(body.input[0].mime_type,'audio/webm');
+        assert.deepEqual(body.generation_config.transcription_config.language_codes,['pt-BR']);
+        assert.ok(body.input[0].data,'microphone capture must go directly to Gemini Interactions');
+        reqs.audio.push(route);
+        return Response.json({output_text:'Pergunta normal via STT real IPC.'});
+      }
+      if (body.model==='gemini-3.8-flash-tts') {
+        reqs.speech.push(body.input[0].content[0].text);
+        return Response.json({steps:[{type:'model_output',content:[{type:'audio',data:Buffer.from('RIFF-synthetic-gemini-voice').toString('base64')}]}]});
+      }
+      throw Error('Unexpected synthetic Gemini model');
+    }
     if (route.endsWith('/audio/transcriptions')) {
       reqs.audio.push(route);
       return respond(JSON.stringify({text:'Pergunta normal via STT real IPC.'}),{'content-type':'application/json'});
@@ -128,7 +146,7 @@ for (const channel of ['vault:status','vault:list','vault:pending','remoteHosts:
 const allowedChannels=[...channels].filter(channel=>channel!=='jarvis:audio');
 const rendererFixture=`(() => {
   localStorage.setItem('cos.ui.language','en');
-  localStorage.setItem('chat-marks.jarvis.settings.v1',JSON.stringify({version:2,enabled:false,tts:false,earcons:false,
+  localStorage.setItem('chat-marks.jarvis.settings.v1',JSON.stringify({version:2,enabled:false,tts:false,earcons:false,language:${JSON.stringify(fakeGemini?'pt-BR':'')},
     provider:${JSON.stringify(voice)}}));
   let stops=0, plays=0;
   window.jarvisHardwareFake={get stops(){return stops;},get plays(){return plays;}};
@@ -193,8 +211,9 @@ app.whenReady().then(async()=>{
   assert.equal(reqs.sends.length,1);
   assert.equal(reqs.audio.length,1);
   assert.deepEqual(reqs.speech,['A resposta certa veio do ChatGPT.']);
-  assert.ok(reqs.tries.some(e=>e.route.endsWith('/audio/transcriptions')&&e.key==='primary'));
-  assert.ok(reqs.tries.some(e=>e.route.endsWith('/audio/transcriptions')&&e.key==='fallback'));
+  const sttPath=fakeGemini?'/interactions':'/audio/transcriptions';
+  assert.ok(reqs.tries.some(e=>e.route.endsWith(sttPath)&&e.key==='primary'));
+  assert.ok(reqs.tries.some(e=>e.route.endsWith(sttPath)&&e.key==='fallback'));
   assert.ok((await js('window.jarvisHardwareFake.stops'))>=1);
   const first=JSON.stringify({ipc:'real preload+jarvis main',audio:reqs.audio.length,spoken:reqs.speech,sends:reqs.sends.length,fallback:reqs.tries.filter(e=>e.key==='fallback').length});
   // Opt-in P0 regression: a normal typed send must also trigger Jarvis TTS,
@@ -218,6 +237,6 @@ app.whenReady().then(async()=>{
   await until('document.getElementById("jarvisSettingsStatus").textContent.includes("503")');
   assert.equal(reqs.sends.length,process.env.JARVIS_TYPED_TTS_REGRESSION==='1'?2:1,'failed STT cannot queue a second message');
   assert.deepEqual(consoleErrors,[]);
-  console.log('PASS multiprocess '+first+' + failure fail-closed STT; no real mic, account or provider');
+  console.log('PASS multiprocess '+first+' + failure fail-closed STT'+(fakeGemini?' via Gemini PT-BR Interactions':'')+'; no real mic, account or provider');
   win.destroy();await vite.close();rmSync(temp,{recursive:true,force:true});app.exit(0);
 }).catch(async error=>{console.error(error);if(win&&!win.isDestroyed())win.destroy();await vite?.close();rmSync(temp,{recursive:true,force:true});app.exit(1);});

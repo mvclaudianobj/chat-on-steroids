@@ -17,6 +17,7 @@ const skeleton = `<!doctype html><html><body>
   <p id="jarvisActiveChat" role="status"></p><p id="jarvisReadiness" role="status"></p>
   <span id="jarvisModelInfo"></span><button id="jarvisGoToChat"></button><button id="jarvisSetupChat" hidden></button>
   <button id="jarvisTalk" hidden type="button" aria-pressed="false"></button><span id="jarvisStatus" hidden></span>
+  <button id="jarvisRefreshAudio" type="button"></button>
   <button id="jarvisCreateCliProxyChat" hidden type="button"></button><button id="jarvisReturnChat" hidden type="button"></button>
   </body></html>`;
 const voice = { baseUrl: 'https://voice.test/v1', sttMode: 'transcriptions', sttModel: 'whisper-1', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' };
@@ -26,6 +27,7 @@ afterEach(() => { page?.window.close(); page = null; vi.unstubAllGlobals(); vi.r
 async function fixture(options: { tts?: boolean; continuous?: boolean; providerTranscribe?: 'ok' | 'fail';
   selected?: { id: string; conversationId: string | null; engine?: string } | null; consent?: boolean; noAudioEngines?: boolean;
   g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; providerUnavailable?: boolean; microphoneDenied?: boolean;
+  deferredProviderStatus?: boolean;
   google?: boolean; language?: string;
   initialEvents?: unknown[]; initialTurns?: Record<string, { origin: number; time: number; questionId: string }> } = {}) {
   page = new JSDOM(skeleton, { url: 'https://local.test/' });
@@ -75,10 +77,17 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   const speakCancel = vi.fn(async () => ({ ok: true as const, data: null }));
   const send = vi.fn(async () => ({ ok: true as const, data: { turnId: 'turn-01' } }));
   const sendInput = vi.fn(async (input: { id: string; sessionId: string | null; text: string }) => ({ ok: true as const, data: { ...input, state: 'queued' } }));
+  const statusResolvers: Array<(reply: { ok: true; data: { models: string[]; stt: string[]; tts: string[]; primary: boolean; fallback: boolean; ffmpeg: boolean; error: string | null } }) => void> = [];
+  const statusRejectors: Array<(error: Error) => void> = [];
   const api = {
     dictationSupported: false,
     jarvisAudioStatus: async () => ({ ok: true as const, data: { models: options.noAudioEngines ? [] : ['whisper-1'], local: false, windows: false, error: null } }),
-    jarvisVoiceStatus: async () => options.providerUnavailable ? { ok: false as const, error: 'Vault unreadable' } : ({ ok: true as const, data: { models: [], stt: ['whisper-1'], tts: ['gpt-4o-mini-tts'], primary: true, fallback: true, ffmpeg: true, error: null } }),
+    jarvisVoiceStatus: async () => options.deferredProviderStatus
+      ? await new Promise<{ ok: true; data: { models: string[]; stt: string[]; tts: string[]; primary: boolean; fallback: boolean; ffmpeg: boolean; error: string | null } }>((resolve, reject) => {
+        statusResolvers.push(resolve);
+        statusRejectors.push(reject);
+      })
+      : options.providerUnavailable ? { ok: false as const, error: 'Vault unreadable' } : ({ ok: true as const, data: { models: [], stt: ['whisper-1'], tts: ['gpt-4o-mini-tts'], primary: true, fallback: true, ffmpeg: true, error: null } }),
     jarvisTranscribe: transcribe, jarvisSpeak: speak, jarvisSpeakCancel: speakCancel,
     jarvisCancel: async () => ({ ok: true as const, data: null }),
     startDictation: vi.fn(), stopDictation: vi.fn(async () => ({ ok: true, data: undefined })), apiChatSend: send, sendInput,
@@ -126,7 +135,15 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     selected = target;
     window.dispatchEvent(new window.Event('jarvis:selection'));
   };
-  return { element, hold, release, flush, stream, nativeEvents, switchTo, transcribe, speak, speakCancel, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat, openSettings, openChat };
+  const finishProviderCheck = async (index: number, saved: boolean) => {
+    statusResolvers[index]?.({ ok: true, data: { models: ['gemini-3.5-transcribe', 'gemini-3.8-flash-tts'],
+      stt: ['gemini-3.5-transcribe'], tts: ['gemini-3.8-flash-tts'], primary: saved, fallback: false, ffmpeg: false,
+      error: saved ? null : 'Save your Google AI Studio key to enable Gemini speech.' } });
+    await flush();
+  };
+  const rejectProviderCheck = async (index: number) => { statusRejectors[index]?.(new Error('old provider unavailable')); await flush(); };
+  return { element, hold, release, flush, stream, nativeEvents, switchTo, finishProviderCheck, rejectProviderCheck, statusResolvers,
+    transcribe, speak, speakCancel, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat, openSettings, openChat };
 }
 
 describe('Jarvis automatic voice for typed ChatGPT messages', () => {
@@ -221,6 +238,44 @@ describe('Jarvis automatic voice for typed ChatGPT messages', () => {
 
 describe('Jarvis native GPT discovery and setup', () => {
   const normal = { id: 'native-chat-01', conversationId: 'chatgpt-realistic', engine: 'chatgpt' };
+  it('keeps Gemini STT ready when an older status (before saved key) finishes after the fresh status', async () => {
+    const f = await fixture({ selected: normal, google: true, noAudioEngines: true, deferredProviderStatus: true });
+    expect(f.statusResolvers).toHaveLength(1);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(true);
+    f.element<HTMLButtonElement>('jarvisRefreshAudio').click();
+    await f.flush();
+    expect(f.statusResolvers).toHaveLength(2);
+    await f.finishProviderCheck(1, true);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(false);
+    await f.finishProviderCheck(0, false);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(false);
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    expect(f.transcribe.mock.calls[0]?.[0]).toBe('provider');
+  });
+  it('keeps Gemini STT ready when an older failed status arrives after a newer success', async () => {
+    const f = await fixture({ selected: normal, google: true, noAudioEngines: true, deferredProviderStatus: true });
+    f.element<HTMLButtonElement>('jarvisRefreshAudio').click();
+    await f.flush();
+    await f.finishProviderCheck(1, true);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(false);
+    await f.rejectProviderCheck(0);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(false);
+  });
+  it('revokes readiness immediately when Gemini provider URL changes before the new check finishes', async () => {
+    const f = await fixture({ selected: normal, google: true, noAudioEngines: true, deferredProviderStatus: true });
+    await f.finishProviderCheck(0, true);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(false);
+    const providerUrl = f.element<HTMLInputElement>('jarvisProviderUrl');
+    providerUrl.value = 'https://another-provider.example/v1';
+    providerUrl.dispatchEvent(new page!.window.Event('change'));
+    await f.flush();
+    expect(f.statusResolvers).toHaveLength(2);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(true);
+    f.hold(); await f.flush();
+    expect(f.getUserMedia).not.toHaveBeenCalled();
+    await f.finishProviderCheck(1, false);
+    expect(f.element<HTMLButtonElement>('jarvisTalk').disabled).toBe(true);
+  });
   it('shows an inactive ChatGPT-native microphone and lets the user open setup without recording', async () => {
     const f = await fixture({ selected: normal, enabled: false, consent: false });
     expect(f.element<HTMLButtonElement>('jarvisTalk').hidden).toBe(false);

@@ -184,9 +184,9 @@ export async function storeJarvisVoiceKey(slot: JarvisVoiceKeySlot, baseUrl: str
 const fileName = (mime: JarvisAudioMime): string => mime === 'audio/wav' ? 'jarvis.wav' : mime === 'audio/mp4' ? 'jarvis.m4a' : mime === 'audio/ogg' ? 'jarvis.ogg' : 'jarvis.webm';
 const cleanTranscript = (text: string): string => text.trim().replace(/^["“'«]+|["”'»]+$/g, '').trim().slice(0, MAX_TEXT);
 
-/** Gemini text generation accepts short microphone recordings as inline audio.
- * This is a different protocol from OpenAI's /audio/transcriptions and cannot
- * be driven by merely setting an STT model in the Gemini TTS preset.
+/** Gemini's dedicated transcription model uses the Interactions API, not
+ * generateContent. Short microphone recordings stay inline and in memory;
+ * the Interactions response owns output_text / model_output, not candidates.
  */
 async function viaGeminiTranscription(
   config: JarvisVoiceConfig, mime: JarvisAudioMime, bytes: Uint8Array, language: string, signal: AbortSignal
@@ -197,18 +197,23 @@ async function viaGeminiTranscription(
     throw new Error('Select a Gemini audio-understanding model for transcription.');
   }
   const codes = language && /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/.test(language) ? [language] : [];
-  const response = await voiceRequest(config, `/models/${config.sttModel}:generateContent`, () => ({
+  const response = await voiceRequest(config, '/interactions', () => ({
     method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
-    body: JSON.stringify({ contents: [{ role: 'user', parts: [
-      { inlineData: { mimeType: mime, data: Buffer.from(bytes).toString('base64') } }
-    ] }], generationConfig: { audioTranscriptionConfig: { languageCodes: codes, mode: 'VERBATIM' } } })
+    body: JSON.stringify({ model: config.sttModel,
+      input: [{ type: 'audio', mime_type: mime, data: Buffer.from(bytes).toString('base64') }],
+      generation_config: { transcription_config: { language_codes: codes, mode: 'verbatim' } }
+    })
   }), timeout(signal, 45_000));
   if (!response.ok) throw await failure(response, 'Gemini transcription');
   const parsed = JSON.parse((await readBounded(response, MAX_JSON)).toString()) as {
-    candidates?: { content?: { parts?: { text?: unknown }[] } }[]
+    output_text?: unknown;
+    steps?: { type?: string; content?: { type?: string; text?: unknown }[] }[];
   };
-  const text = parsed.candidates?.[0]?.content?.parts
-    ?.map(part => typeof part.text === 'string' ? part.text : '').join('') ?? '';
+  const text = typeof parsed.output_text === 'string' ? parsed.output_text
+    : (parsed.steps ?? []).filter(step => step.type === 'model_output')
+      .flatMap(step => step.content ?? [])
+      .filter(part => part.type === 'text' && typeof part.text === 'string')
+      .map(part => part.text as string).join('');
   return cleanTranscript(text);
 }
 
