@@ -60,7 +60,9 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'move' |
         if (seat && (!fields?.binding || !fields.binding.conversationId || fields.binding.seat !== delegate ||
           fields.binding.expiresAt <= now || fields.binding.verifiedAt > now ||
           !current.requests.some(row => row.id === fields.binding!.ownerId && row.seat === delegate &&
-            row.execution?.mode === 'live' && row.execution.ownerId === fields.binding!.ownerId &&
+            row.status === 'working' && row.execution?.phase === 'running' &&
+            row.execution?.mode === 'live' && row.execution.phase === 'running' &&
+            row.status === 'working' && row.execution.ownerId === fields.binding!.ownerId &&
             row.execution.runId === fields.binding!.runId && row.execution.workerId === fields.binding!.workerId &&
             `${row.seat}:${row.id}` === fields.binding!.label)))
           throw new Error('Chief worker binding cannot be verified');

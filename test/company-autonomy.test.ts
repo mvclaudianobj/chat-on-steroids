@@ -156,4 +156,18 @@ describe('O7 verified internal autonomy',()=>{
     await expect(chief.applyDelegatedTriage()).rejects.toThrow('no longer active');
     expect((await getCompany()).requests.find(row=>row.id===target)?.status).toBe('inbox');
   });
+  it('cannot grant a chief after its worker report settled between broker status and durable grant',async()=>{
+    await fixture();
+    const stale: CompanyWorkerBackend={...service,async status() {
+      await mutateCompany('report',{id:chiefId,workerId,runId,reportId:'finished-chief',
+        result:'Finished synthetic task',evidence:'broker fixture',outcome:'completed'});
+      return {runId,workers:[{id:workerId,runId,label:`marks2:${chiefId}`,
+        state:'active',result:null,conversationId:'synthetic-authenticated-chief'}]};
+    }};
+    await expect(createCompanyBroker(stale).grantDelegation('marks2','internal-triage'))
+      .rejects.toThrow(/binding|active|running/i);
+    const snapshot=await getCompany();
+    expect(snapshot.delegation.mode).toBe('manual');
+    expect(snapshot.requests.find(row=>row.id===chiefId)?.execution?.phase).toBe('reported');
+  });
 });
