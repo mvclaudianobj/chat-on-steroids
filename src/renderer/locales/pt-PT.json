@@ -4195,5 +4195,6 @@
   "Always authorize COO for all LOCAL scopes": "Autorizar sempre o COO para todos os âmbitos LOCAIS",
   "A locally attested broker identity is required.": "É necessária uma identidade do broker atestada localmente.",
   "Local grant audit": "Auditoria de permissões locais",
-  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Três pedidos equivalentes. Pode pedir ampliação, sem aprovação automática."
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Três pedidos equivalentes. Pode pedir ampliação, sem aprovação automática.",
+  "Selected local scope": "Âmbito local selecionado"
 }

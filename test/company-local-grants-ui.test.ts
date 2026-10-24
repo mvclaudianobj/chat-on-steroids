@@ -63,4 +63,5 @@ it('displays grant options only for attested matching worker; COO choice stays d
   await tick();
   expect(host.querySelectorAll('div[aria-label] button')).toHaveLength(3);
   expect(host.querySelectorAll('div[aria-label] button:disabled')).toHaveLength(1);
+  expect(host.querySelectorAll('select option')).toHaveLength(3);
 });

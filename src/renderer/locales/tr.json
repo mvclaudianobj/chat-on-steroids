@@ -4147,5 +4147,6 @@
   "Always authorize COO for all LOCAL scopes": "COO için tüm YEREL kapsamları her zaman onayla",
   "A locally attested broker identity is required.": "Yerel doğrulanmış aracı kimliği gereklidir.",
   "Local grant audit": "Yerel izin denetimi",
-  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Üç eşdeğer istek. Genişletme otomatik onaylanmaz."
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Üç eşdeğer istek. Genişletme otomatik onaylanmaz.",
+  "Selected local scope": "Seçilen yerel kapsam"
 }

@@ -4243,5 +4243,6 @@
   "Always authorize COO for all LOCAL scopes": "Всегда разрешать COO все ЛОКАЛЬНЫЕ области",
   "A locally attested broker identity is required.": "Требуется локально подтверждённая личность брокера.",
   "Local grant audit": "Аудит локальных разрешений",
-  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Три одинаковых запроса. Расширение требует отдельного согласия."
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Три одинаковых запроса. Расширение требует отдельного согласия.",
+  "Selected local scope": "Выбранная локальная область"
 }

@@ -58,6 +58,17 @@ export function mountCompanyLocalGrants(host: HTMLElement, api: Pick<AppApi, 'co
     if (!view.grants.length) host.append(line('p', 'No active local grants'));
     const controls = document.createElement('div');
     controls.setAttribute('aria-label', t('Local grant authorization options'));
+    const scopeLabel = document.createElement('label');
+    scopeLabel.textContent = t('Selected local scope');
+    const scopeSelect = document.createElement('select');
+    scopeSelect.setAttribute('aria-label', t('Selected local scope'));
+    for (const scope of ['company-local-read', 'company-local-triage', 'company-local-review'] as const) {
+      const option = document.createElement('option'); option.value = scope; option.textContent = scope;
+      scopeSelect.append(option);
+    }
+    scopeSelect.disabled = !view.authority.verified;
+    scopeLabel.append(scopeSelect);
+    controls.append(scopeLabel);
     const options = [
       ['task', 'Authorize this task'],
       ['agent', 'Always authorize THIS agent for selected local scope'],
@@ -74,7 +85,7 @@ export function mountCompanyLocalGrants(host: HTMLElement, api: Pick<AppApi, 'co
       control.addEventListener('click', () => {
         if (!view.authority.subject || control.disabled) return;
         control.disabled = true;
-        void api.requestCompanyLocalGrant({ mode, scope: 'company-local-read',
+        void api.requestCompanyLocalGrant({ mode, scope: scopeSelect.value as 'company-local-read' | 'company-local-triage' | 'company-local-review',
           subject: view.authority.subject, requestId: crypto.randomUUID() }).then(async response => {
           if (!response.ok) throw new Error(response.error);
           await refresh();

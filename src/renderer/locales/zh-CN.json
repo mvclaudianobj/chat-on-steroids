@@ -4099,5 +4099,6 @@
   "Always authorize COO for all LOCAL scopes": "始终授权 COO 的所有本地范围",
   "A locally attested broker identity is required.": "需要本地验证的代理身份。",
   "Local grant audit": "本地授权审计",
-  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "发现三次相同请求。扩大范围不会自动批准。"
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "发现三次相同请求。扩大范围不会自动批准。",
+  "Selected local scope": "所选本地范围"
 }

@@ -4099,5 +4099,6 @@
   "Always authorize COO for all LOCAL scopes": "永久授權 COO 的所有本機範圍",
   "A locally attested broker identity is required.": "需要本機驗證的代理身分。",
   "Local grant audit": "本機授權稽核",
-  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "偵測到三次相同請求。擴大範圍不會自動批准。"
+  "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "偵測到三次相同請求。擴大範圍不會自動批准。",
+  "Selected local scope": "選取的本機範圍"
 }
