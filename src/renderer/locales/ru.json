@@ -1,4 +1,5 @@
 {
+  "Test provider voice (PT-BR)": "Проверить голос провайдера (PT-BR)",
   "Install with Chat Marks ({0})": "Установить через Chat Marks ({0})",
   "Install {0} {1} in Chat Marks? Your existing external installation stays unchanged; the new version is used after current turns finish.": "Установить {0} {1} в Chat Marks? Внешняя установка останется без изменений; новая версия начнёт использоваться после завершения текущих запросов.",
   "This external CLI cannot be updated through npm. Install a managed copy in Chat Marks instead.": "Эту внешнюю CLI нельзя обновить через npm. Установите управляемую Chat Marks копию.",
