@@ -34,6 +34,9 @@ export class JarvisProgressiveAudio {
   /** No earlier or later turn can send chunks into this request's playback. */
   accept(event: JarvisProgressEvent): void {
     if (this.stopped || this.error || event.requestId !== this.requestId) return;
+    // Main already committed the complete stream. Replayed starts, errors,
+    // chunks or ends must not interrupt its buffered, not-yet-played audio.
+    if (this.finished) return;
     if (event.type === 'error') { this.fail(new Error(event.error)); return; }
     if (event.type === 'start') {
       if (this.mime) { this.fail(new Error('Duplicate speech stream start.')); return; }
@@ -63,9 +66,6 @@ export class JarvisProgressiveAudio {
       return;
     }
     if (!this.mime) { this.fail(new Error('Speech stream has no audio format.')); return; }
-    // Completed streams are immutable. Late duplicated chunk/end events from
-    // the bridge cannot extend the audio or reopen a finished source.
-    if (this.finished) return;
     if (event.type === 'chunk') {
       this.total += event.bytes.byteLength;
       if (this.total > 16_000_000) { this.fail(new Error('Audio stream is too large.')); return; }

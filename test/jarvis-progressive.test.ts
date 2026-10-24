@@ -133,10 +133,14 @@ describe('Jarvis incremental audio playback', () => {
     await vi.waitFor(() => expect(FakeMediaSource.ended).toBe(1));
     send({ requestId: 'turn-a', type: 'end' });
     send({ requestId: 'turn-a', type: 'chunk', bytes: new Uint8Array([4, 5]) });
+    send({ requestId: 'turn-a', type: 'start', mime: 'audio/mpeg' });
     await Promise.resolve();
     expect(FakeBuffer.appended).toEqual([3]);
     expect(FakeMediaSource.ended).toBe(1);
+    const playing = player.play(new AbortController().signal);
+    expect(FakeAudio.played).toBe(1);
     player.cancel();
+    await playing;
   });
 
   it('drops late audio on interruption without playing the previous turn', async () => {
