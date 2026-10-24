@@ -66,6 +66,28 @@ describe('broker-bound Company',()=>{
   const actual=(await getCompany()).meetings[0]!;
   expect(actual.invitations).toHaveLength(10);expect(actual.invitations!.every(r=>r.state==='invited'&&!r.confirmedAt)).toBe(true);
  });
+ it('only accepts meeting attendance from a bound worker conversation and authenticated report origin',async()=>{
+  const id=await assigned();
+  const meeting=(await mutateCompany('meeting',{title:'Synthetic meeting',agenda:'Verify presence',durationMinutes:20})).meetings[0]!;
+  let conversation='real-worker-conversation';
+  let origin:'broker-event'|'authenticated-worker-message'='broker-event';
+  const backend:CompanyWorkerBackend={
+    async spawn(){return {runId,workerId:'worker-5'};},
+    async status(){return {runId,workers:[{id:'worker-5',runId,label:`marks5:${id}`,state:'active',conversationId:conversation,result:null}]};},
+    async reports(){return [{id:'meeting-receipt',from:'worker-5',runId,time:Date.now(),origin,text:`MEETING_ACK:${meeting.id}:accepted`}]},
+    async send(){return 'queued-1';},async ack(){}
+  };
+  const broker=createCompanyBroker(backend);
+  await broker.dispatch(id);await broker.refresh(id);await broker.sendInvitations(meeting.id);
+  await broker.reconcileMeeting(meeting.id);
+  expect((await getCompany()).meetings[0]?.invitations?.find(row=>row.seat==='marks5')?.state).toBe('invited');
+  origin='authenticated-worker-message';conversation='replaced-conversation';
+  await broker.reconcileMeeting(meeting.id);
+  expect((await getCompany()).meetings[0]?.invitations?.find(row=>row.seat==='marks5')?.state).toBe('invited');
+  conversation='real-worker-conversation';
+  await broker.reconcileMeeting(meeting.id);
+  expect((await getCompany()).meetings[0]?.invitations?.find(row=>row.seat==='marks5')?.state).toBe('accepted');
+ });
  it('does not publish a running worker without a bound conversation, and refuses a conversation swap before the report ACK',async()=>{
   const id=await assigned();
   const sent: string[]=[];

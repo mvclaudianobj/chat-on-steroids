@@ -299,7 +299,9 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
       if (!matching.length) continue; // invited, but no authorized reachable worker
       const owner = matching[0]!.execution!;
       const status = await backend.status(owner.ownerId!, owner.runId!);
-      if (status.workers.filter(w=>w.id===owner.workerId && w.runId===owner.runId).length!==1) continue;
+      if (status.runId!==owner.runId || !owner.conversationId ||
+        status.workers.filter(w=>w.id===owner.workerId && w.runId===owner.runId &&
+          w.label===labelFor(matching[0]!) && w.conversationId===owner.conversationId).length!==1) continue;
       await mutateCompany('inviteReserve',{ id: meetingId,seat:invitation.seat,ownerId:owner.ownerId,runId:owner.runId,workerId:owner.workerId });
       const queuedId = await backend.send(owner.ownerId!,owner.runId!,owner.workerId!,
         `Company meeting ${meeting.title}. Agenda: ${meeting.agenda ?? ''}. Meeting ID ${meeting.id}. `+
@@ -320,11 +322,18 @@ export function createCompanyBroker(backend: CompanyWorkerBackend = localCompany
       const delivery=invitation.delivery;
       if (!delivery?.queuedId) continue;
       const status = await backend.status(delivery.ownerId, delivery.runId);
-      const worker = status.workers.find(w=>w.id===delivery.workerId && w.runId===delivery.runId);
+      const linked = current.requests.find(row=>row.id===delivery.ownerId &&
+        row.seat===invitation.seat && row.execution?.ownerId===delivery.ownerId &&
+        row.execution.runId===delivery.runId && row.execution.workerId===delivery.workerId &&
+        !!row.execution.conversationId);
+      if (status.runId!==delivery.runId || !linked) continue;
+      const worker = status.workers.find(w=>w.id===delivery.workerId && w.runId===delivery.runId &&
+        w.label===labelFor(linked) && w.conversationId===linked.execution!.conversationId);
       if (!worker) continue;
       const messages = await backend.reports(delivery.ownerId,delivery.runId);
       for (const message of messages) {
-        if (message.from!==delivery.workerId || message.runId!==delivery.runId || message.time<delivery.at ||
+        if (message.origin!=='authenticated-worker-message' ||
+            message.from!==delivery.workerId || message.runId!==delivery.runId || message.time<delivery.at ||
             message.id===invitation.evidence) continue;
         const prefix = `MEETING_ACK:${meetingId}:`;
         const notePrefix = `MEETING_NOTE:${meetingId}:`;
