@@ -4081,6 +4081,8 @@
   "Keys saved in the vault.": "Schlüssel im Tresor gespeichert.",
   "The keys could not be saved.": "Die Schlüssel konnten nicht gespeichert werden.",
   "The speech-to-text model is not in the provider's model list.": "Das Sprache-zu-Text-Modell steht nicht in der Modellliste des Anbieters.",
+  "Jarvis first playback event after TTS enqueue (not verified audible): {0} ms.": "Erstes Jarvis-Wiedergabeereignis nach TTS-Einreihung (hörbarer Ton nicht bestätigt): {0} ms.",
+  "Playback events, not verified sound: first {0} ms; average gap {1} ms; segments {2}; errors {3}; queue peak {4}.": "Wiedergabeereignisse, kein nachgewiesener hörbarer Ton: erstes {0} ms; mittlere Lücke {1} ms; Segmente {2}; Fehler {3}; Warteschlangenspitze {4}.",
   "First audio": "Erste Audioausgabe:",
   "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.": "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.",
   "Selected operations chief": "Selected operations chief",

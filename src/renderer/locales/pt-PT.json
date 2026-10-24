@@ -4129,6 +4129,8 @@
   "Keys saved in the vault.": "Chaves guardadas no cofre.",
   "The keys could not be saved.": "Não foi possível guardar as chaves.",
   "The speech-to-text model is not in the provider's model list.": "O modelo de fala para texto não está na lista de modelos do fornecedor.",
+  "Jarvis first playback event after TTS enqueue (not verified audible): {0} ms.": "Primeiro evento de reprodução do Jarvis após colocar TTS na fila (som audível não confirmado): {0} ms.",
+  "Playback events, not verified sound: first {0} ms; average gap {1} ms; segments {2}; errors {3}; queue peak {4}.": "Eventos de reprodução, sem confirmar som audível: primeiro {0} ms; intervalo médio {1} ms; segmentos {2}; erros {3}; pico da fila {4}.",
   "First audio": "Primeiro áudio:",
   "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.": "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.",
   "Selected operations chief": "Selected operations chief",

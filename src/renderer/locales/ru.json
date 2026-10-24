@@ -4177,6 +4177,8 @@
   "Keys saved in the vault.": "Ключи сохранены в хранилище.",
   "The keys could not be saved.": "Не удалось сохранить ключи.",
   "The speech-to-text model is not in the provider's model list.": "Модели «речь в текст» нет в списке моделей провайдера.",
+  "Jarvis first playback event after TTS enqueue (not verified audible): {0} ms.": "Первое событие воспроизведения Jarvis после постановки TTS в очередь (звук на слух не проверен): {0} мс.",
+  "Playback events, not verified sound: first {0} ms; average gap {1} ms; segments {2}; errors {3}; queue peak {4}.": "События воспроизведения, не подтверждённый на слух звук: первое {0} мс; средняя пауза {1} мс; сегменты {2}; ошибки {3}; пик очереди {4}.",
   "First audio": "Первый звук:",
   "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.": "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.",
   "Selected operations chief": "Selected operations chief",

@@ -4033,6 +4033,8 @@
   "Keys saved in the vault.": "키를 보관함에 저장했습니다.",
   "The keys could not be saved.": "키를 저장할 수 없습니다.",
   "The speech-to-text model is not in the provider's model list.": "음성-텍스트 모델이 공급자의 모델 목록에 없습니다.",
+  "Jarvis first playback event after TTS enqueue (not verified audible): {0} ms.": "TTS 대기열 등록 후 Jarvis 첫 재생 이벤트(실제 청취 확인 아님): {0}ms.",
+  "Playback events, not verified sound: first {0} ms; average gap {1} ms; segments {2}; errors {3}; queue peak {4}.": "재생 이벤트(실제 소리 확인 아님): 첫 이벤트 {0}ms, 평균 간격 {1}ms, 구간 {2}, 오류 {3}, 최대 대기열 {4}.",
   "First audio": "첫 음성:",
   "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.": "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.",
   "Selected operations chief": "Selected operations chief",

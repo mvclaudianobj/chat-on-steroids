@@ -4033,6 +4033,8 @@
   "Keys saved in the vault.": "密钥已保存到保险库。",
   "The keys could not be saved.": "无法保存密钥。",
   "The speech-to-text model is not in the provider's model list.": "语音转文字模型不在服务商的模型列表中。",
+  "Jarvis first playback event after TTS enqueue (not verified audible): {0} ms.": "Jarvis TTS 入队后的首次播放事件（未验证实际可听声音）：{0} 毫秒。",
+  "Playback events, not verified sound: first {0} ms; average gap {1} ms; segments {2}; errors {3}; queue peak {4}.": "播放事件（未验证实际可听声音）：首次 {0} 毫秒；平均间隔 {1} 毫秒；片段 {2}；错误 {3}；队列峰值 {4}。",
   "First audio": "首段音频:",
   "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.": "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.",
   "Selected operations chief": "Selected operations chief",

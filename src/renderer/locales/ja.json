@@ -4033,6 +4033,8 @@
   "Keys saved in the vault.": "キーを保管庫に保存しました。",
   "The keys could not be saved.": "キーを保存できませんでした。",
   "The speech-to-text model is not in the provider's model list.": "音声認識モデルがプロバイダーのモデル一覧にありません。",
+  "Jarvis first playback event after TTS enqueue (not verified audible): {0} ms.": "TTSキュー投入後のJarvisの最初の再生イベント（実際の可聴音は未確認）：{0} ms。",
+  "Playback events, not verified sound: first {0} ms; average gap {1} ms; segments {2}; errors {3}; queue peak {4}.": "再生イベント（実際の音は未確認）：最初 {0} ms、平均間隔 {1} ms、セグメント {2}、エラー {3}、最大キュー {4}。",
   "First audio": "最初の音声:",
   "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.": "Only internal triage for active verified workers can run automatically. Other system and service permissions still apply.",
   "Selected operations chief": "Selected operations chief",

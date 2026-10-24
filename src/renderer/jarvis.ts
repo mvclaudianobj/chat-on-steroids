@@ -16,6 +16,7 @@ import type { AppApi } from '../preload/index.js';
 import { onLanguageChange, t } from './i18n.js';
 import { JarvisSpeechQueue, JarvisStreamingSplitter, playEarcon, watchSilence } from './jarvis-speech.js';
 import { JarvisProgressiveAudio } from './jarvis-progressive.js';
+import { JarvisPlaybackMetrics } from './jarvis-playback-metrics.js';
 
 const KEY = 'chat-marks.jarvis.settings.v1';
 type Engine = 'provider' | 'cliproxy' | 'local' | 'windows';
@@ -156,9 +157,14 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   let phase: JarvisPhase = 'idle';
   let speechVoice = preferences.voice;
   let speechGroup: { turn: string; id: string } | null = null;
+  let playbackMetric: JarvisPlaybackMetrics | null = null;
   const activateSpeechGroup = (sessionId: string, turnId: string): void => {
     const turn = `${sessionId}:${turnId}`;
-    if (speechGroup?.turn !== turn) speechGroup = { turn, id: crypto.randomUUID() };
+    if (speechGroup?.turn !== turn) {
+      speechGroup = { turn, id: crypto.randomUUID() };
+      // Starts on the first TTS-ready clause, not when the user first spoke.
+      playbackMetric = new JarvisPlaybackMetrics(performance.now());
+    }
   };
   let answer: { sessionId: string; turnId: string; splitter: JarvisStreamingSplitter; spoken: number } | null = null;
   // The recorded question -> response relation also covers ordinary typed messages.
@@ -252,6 +258,22 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
 
   const setPhase = (next: JarvisPhase): void => { phase = next; paint(); };
   const cue = (kind: 'listen' | 'done' | 'error'): void => { if (preferences.earcons) playEarcon(kind); };
+  const recordFirstPlaying = (metric: JarvisPlaybackMetrics | null): void => {
+    if (!metric || playbackMetric !== metric) return;
+    metric.playing();
+    const first = metric.snapshot().firstPlayingEventMs;
+    if (first !== null) status.textContent = t('Jarvis first playback event after TTS enqueue (not verified audible): {0} ms.', [first]);
+  };
+  const recordEnded = (metric: JarvisPlaybackMetrics | null): void => {
+    if (metric && playbackMetric === metric) metric.ended();
+  };
+  const publishPlayback = (): void => {
+    const metric = playbackMetric;
+    if (!metric) return;
+    const sample = metric.summary();
+    status.textContent = t('Playback events, not verified sound: first {0} ms; average gap {1} ms; segments {2}; errors {3}; queue peak {4}.',
+      [sample.first ?? '—', sample.meanGap ?? '—', sample.played, sample.failures, sample.queuePeak]);
+  };
 
   const speech = new JarvisSpeechQueue<Playable>({
     synthesize: async (text, signal) => {
@@ -289,9 +311,11 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       return { kind: 'system', text };
     },
     play: (item, signal) => new Promise<void>((resolve, reject) => {
+      const metric = playbackMetric;
       if (item.kind === 'stream') {
-        void item.player.play(signal, ms => { status.textContent = `${t('First audio')} ${ms} ms`; })
-          .then(resolve, reject).finally(() => { item.player.cancel(); liveStreams.delete(item.player); });
+        void item.player.play(signal, () => recordFirstPlaying(metric))
+          .then(() => { if (!signal.aborted) recordEnded(metric); resolve(); }, reject)
+          .finally(() => { item.player.cancel(); liveStreams.delete(item.player); });
         return;
       }
       if (signal.aborted) { if (item.kind === 'audio') URL.revokeObjectURL(item.url); resolve(); return; }
@@ -301,7 +325,8 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         if (preferences.language) utterance.lang = preferences.language;
         const chosen = speechSynthesis.getVoices().find(candidate => candidate.voiceURI === preferences.voice);
         if (chosen) utterance.voice = chosen;
-        utterance.onend = () => resolve();
+        utterance.onstart = () => recordFirstPlaying(metric);
+        utterance.onend = () => { if (!signal.aborted) recordEnded(metric); resolve(); };
         utterance.onerror = () => resolve();
         signal.addEventListener('abort', () => { speechSynthesis.cancel(); resolve(); }, { once: true });
         speechSynthesis.speak(utterance);
@@ -309,19 +334,21 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       }
       const audio = new Audio(item.url);
       const done = (error?: unknown): void => { audio.onended = audio.onerror = null; URL.revokeObjectURL(item.url); if (error) reject(error); else resolve(); };
-      audio.onended = () => done();
+      audio.onplaying = () => recordFirstPlaying(metric);
+      audio.onended = () => { if (!signal.aborted) recordEnded(metric); done(); };
       audio.onerror = () => done(new Error('Audio playback failed'));
       signal.addEventListener('abort', () => { audio.pause(); done(); }, { once: true });
       audio.play().catch(error => done(error));
     })
   }, {
     speaking: active => { if (active) setPhase('speaking'); else if (phase === 'speaking') setPhase(answer ? 'thinking' : 'idle'); },
-    drained: () => { if (answerDone) turnComplete(); },
-    error: () => { status.textContent = t('Jarvis could not speak part of the answer.'); }
+    drained: () => { publishPlayback(); if (answerDone) turnComplete(); },
+    error: () => { playbackMetric?.failed(); status.textContent = t('Jarvis could not speak part of the answer.'); }
   });
   /** Barge-in or cancel: stop the voice now, wherever it comes from. */
   const silence = (): void => {
     speechGroup = null;
+    playbackMetric = null;
     speech.stop();
     for (const stream of liveStreams) stream.cancel();
     liveStreams.clear();
@@ -804,6 +831,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       });
       if (speaks() && bounded.length) {
         activateSpeechGroup(watch.sessionId, turnId);
+        playbackMetric?.queued(bounded.length + speech.queued);
         speech.enqueue(bounded);
       }
       if (complete) {
@@ -875,6 +903,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
             return current.spoken <= MAX_SPOKEN;
           });
           if (sentences.length) activateSpeechGroup(current.sessionId, current.turnId);
+          if (sentences.length) playbackMetric?.queued(sentences.length + speech.queued);
           speech.enqueue(sentences);
         }
         if (ended) {
