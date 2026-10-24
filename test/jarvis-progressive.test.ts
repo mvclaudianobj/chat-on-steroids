@@ -19,8 +19,16 @@ class FakeAudio {
   static played = 0;
   static created: FakeAudio[] = [];
   static loaded = 0;
+  static playAttempts = 0;
+  static delayPlay = false;
+  static releasePlay: (() => void) | null = null;
   constructor() { FakeAudio.created.push(this); }
-  play(): Promise<void> { this.paused = false; FakeAudio.played++; this.onplaying?.(); return Promise.resolve(); }
+  play(): Promise<void> {
+    FakeAudio.playAttempts++;
+    const start = () => { this.paused = false; FakeAudio.played++; this.onplaying?.(); };
+    if (FakeAudio.delayPlay) return new Promise(resolve => { FakeAudio.releasePlay = () => { start(); resolve(); }; });
+    start(); return Promise.resolve();
+  }
   pause(): void { this.paused = true; }
   load(): void { FakeAudio.loaded++; }
   removeAttribute(): void { this.src = ''; }
@@ -61,6 +69,9 @@ afterEach(() => {
   FakeAudio.played = 0;
   FakeAudio.created = [];
   FakeAudio.loaded = 0;
+  FakeAudio.playAttempts = 0;
+  FakeAudio.delayPlay = false;
+  FakeAudio.releasePlay = null;
   FakeBuffer.appended = [];
   FakeMediaSource.ended = 0;
   FakeMediaSource.last = null;
@@ -92,6 +103,40 @@ describe('Jarvis incremental audio playback', () => {
     await vi.waitFor(() => expect(FakeMediaSource.ended).toBe(1));
     player.cancel();
     await playing;
+  });
+  it('prepares MediaSource before playback and requests play only once while the first frames buffer', async () => {
+    const player = prepare();
+    FakeAudio.delayPlay = true;
+    send({ requestId: 'turn-a', type: 'start', mime: 'audio/mpeg' });
+    expect(FakeAudio.created).toHaveLength(1);
+    expect(FakeAudio.created[0]?.preload).toBe('auto');
+    expect(FakeAudio.loaded).toBe(1);
+    FakeMediaSource.last!.open();
+    const first = vi.fn();
+    const playing = player.play(new AbortController().signal, first);
+    send({ requestId: 'turn-a', type: 'chunk', bytes: new Uint8Array([1, 2, 3]) });
+    await vi.waitFor(() => expect(FakeAudio.playAttempts).toBe(1));
+    send({ requestId: 'turn-a', type: 'chunk', bytes: new Uint8Array([4, 5]) });
+    await vi.waitFor(() => expect(FakeBuffer.appended).toHaveLength(2));
+    expect(FakeAudio.playAttempts).toBe(1);
+    expect(first).not.toHaveBeenCalled();
+    FakeAudio.releasePlay?.();
+    expect(first).toHaveBeenCalledOnce();
+    player.cancel(); await playing;
+  });
+  it('drops repeated end and late chunks after the provider completed an MSE segment', async () => {
+    const player = prepare();
+    send({ requestId: 'turn-a', type: 'start', mime: 'audio/mpeg' });
+    FakeMediaSource.last!.open();
+    send({ requestId: 'turn-a', type: 'chunk', bytes: new Uint8Array([1, 2, 3]) });
+    send({ requestId: 'turn-a', type: 'end' });
+    await vi.waitFor(() => expect(FakeMediaSource.ended).toBe(1));
+    send({ requestId: 'turn-a', type: 'end' });
+    send({ requestId: 'turn-a', type: 'chunk', bytes: new Uint8Array([4, 5]) });
+    await Promise.resolve();
+    expect(FakeBuffer.appended).toEqual([3]);
+    expect(FakeMediaSource.ended).toBe(1);
+    player.cancel();
   });
 
   it('drops late audio on interruption without playing the previous turn', async () => {

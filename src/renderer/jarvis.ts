@@ -8,13 +8,13 @@ import { responseTurnId, type TimelineTurns } from '../shared/chronology.js';
 import type { DictationEvent } from '../shared/dictation.js';
 import type { SessionEvent } from '../shared/session.js';
 import {
-  JARVIS_VOICE_PRESETS, JARVIS_VOICE_SUGGESTIONS, JarvisSentenceSplitter, emptyJarvisVoiceConfig, jarvisVoiceSttReady,
+  JARVIS_VOICE_PRESETS, JARVIS_VOICE_SUGGESTIONS, emptyJarvisVoiceConfig, jarvisVoiceSttReady,
   jarvisVoiceTtsReady, parseJarvisVoiceConfig, emptyJarvisVoiceRouting, parseJarvisVoiceRouting,
   type JarvisVoiceConfig, type JarvisVoiceRouting
 } from '../shared/jarvis-voice.js';
 import type { AppApi } from '../preload/index.js';
 import { onLanguageChange, t } from './i18n.js';
-import { JarvisSpeechQueue, playEarcon, watchSilence } from './jarvis-speech.js';
+import { JarvisSpeechQueue, JarvisStreamingSplitter, playEarcon, watchSilence } from './jarvis-speech.js';
 import { JarvisProgressiveAudio } from './jarvis-progressive.js';
 
 const KEY = 'chat-marks.jarvis.settings.v1';
@@ -160,7 +160,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     const turn = `${sessionId}:${turnId}`;
     if (speechGroup?.turn !== turn) speechGroup = { turn, id: crypto.randomUUID() };
   };
-  let answer: { sessionId: string; turnId: string; splitter: JarvisSentenceSplitter; spoken: number } | null = null;
+  let answer: { sessionId: string; turnId: string; splitter: JarvisStreamingSplitter; spoken: number } | null = null;
   // The recorded question -> response relation also covers ordinary typed messages.
   // Each selection/voice opt-in gets a new baseline so historical answers stay silent.
   let typedWatch: {
@@ -711,7 +711,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         void api.apiChatSend(target!, text).then(reply => {
           if (!currentSend()) return;
           if (reply.ok) {
-            answer = { sessionId: target!, turnId: reply.data.turnId, splitter: new JarvisSentenceSplitter(), spoken: 0 };
+            answer = { sessionId: target!, turnId: reply.data.turnId, splitter: new JarvisStreamingSplitter(), spoken: 0 };
             answerDone = false;
             status.textContent = t('Jarvis message sent to this CLIProxy chat.');
             void readAnswer();
@@ -782,7 +782,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       watch.spoken.add(key);
       watch.pending.delete(questionId);
       if (speaks()) {
-        const sentences = new JarvisSentenceSplitter().finish(text);
+        const sentences = new JarvisStreamingSplitter().finish(text);
         let spoken = 0;
         const bounded = sentences.filter(sentence => { spoken += sentence.length; return spoken <= MAX_SPOKEN; });
         if (bounded.length) {
@@ -836,7 +836,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
           if (!responseTurn) continue;
           nativePending = null;
           clearNativeDeadline();
-          current = { sessionId: pending.sessionId, turnId: responseTurn, splitter: new JarvisSentenceSplitter(), spoken: 0 };
+          current = { sessionId: pending.sessionId, turnId: responseTurn, splitter: new JarvisStreamingSplitter(), spoken: 0 };
           answer = current;
           status.textContent = t('Jarvis message delivered to ChatGPT.');
         }

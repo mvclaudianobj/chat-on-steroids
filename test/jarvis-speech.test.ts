@@ -1,12 +1,44 @@
 import { describe, expect, it, vi } from 'vitest';
 import { allowJarvisMicrophone } from '../src/main/jarvis-permissions.js';
-import { JarvisSilenceGate, JarvisSpeechQueue } from '../src/renderer/jarvis-speech.js';
+import { JarvisSilenceGate, JarvisSpeechQueue, JarvisStreamingSplitter } from '../src/renderer/jarvis-speech.js';
 import { JarvisSentenceSplitter, jarvisVoiceConfigSchema, jarvisVoiceUsesFallback, parseJarvisVoiceBaseUrl, speakableText } from '../src/shared/jarvis-voice.js';
 
 const tick = async (n = 10) => { for (let i = 0; i < n; i++) await Promise.resolve(); };
 function deferred() { let resolve!: () => void; const promise = new Promise<void>(r => { resolve = r; }); return { promise, resolve }; }
 
 describe('Jarvis sentence splitting for streamed answers', () => {
+  it('starts a long PT-BR answer on a stable clause at 140 ms instead of waiting until the final period at 460 ms', () => {
+    const splitter = new JarvisStreamingSplitter();
+    const dispatched: { at: number; text: string }[] = [];
+    const partial = 'A primeira resposta apresenta detalhes sobre o tema com clareza e exemplos que ajudam você a acompanhar o raciocínio, ';
+    const snapshots = [
+      { at: 0, text: 'A primeira resposta apresenta detalhes sobre o tema' },
+      { at: 140, text: partial },
+      { at: 460, text: partial + 'enquanto o segundo trecho chega sem repetir nenhuma palavra. ' }
+    ];
+    for (const snapshot of snapshots) {
+      for (const text of splitter.push(snapshot.text)) dispatched.push({ at: snapshot.at, text });
+    }
+    expect(dispatched[0]?.at).toBe(140);
+    expect(dispatched[0]?.text).toContain('acompanhar o raciocínio');
+    const final = splitter.finish(snapshots[2]!.text);
+    const full = [...dispatched.map(event => event.text), ...final].join(' ');
+    expect(full.match(/acompanhar o raciocínio/g)).toHaveLength(1);
+    expect(full.match(/segundo trecho/g)).toHaveLength(1);
+    expect(splitter.finish(snapshots[2]!.text)).toEqual([]);
+  });
+
+  it('does not trigger early TTS inside unfinished code fences, links, or short stream duplicates', () => {
+    const splitter = new JarvisStreamingSplitter();
+    const code = 'Veja o arquivo antes do exemplo. ```typescript\n' +
+      'const query = "expressão de demonstração com uma linha bastante longa e explicações adicionais para quem aprende, ";\n';
+    expect(splitter.push(code)).toEqual(['Veja o arquivo antes do exemplo.']);
+    expect(splitter.push(code)).toEqual([]);
+    const continued = code + '```\nA explicação continua com palavras claras e frases adequadas, para um teste de voz estável.';
+    const spoken = splitter.finish(continued).join(' ');
+    expect(spoken).toContain('A explicação continua');
+    expect(spoken).not.toContain('const query');
+  });
   it('emits only complete sentences while the answer grows and the rest at the end', () => {
     const splitter = new JarvisSentenceSplitter(10);
     expect(splitter.push('Olá, tudo bem')).toEqual([]);

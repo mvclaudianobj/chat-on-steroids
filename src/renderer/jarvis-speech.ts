@@ -3,6 +3,54 @@
  * continuous conversation, and short earcons. The queue and the gate are DOM-free so they are
  * unit-tested; playback and synthesis are injected by `jarvis.ts`.
  */
+import { JarvisSentenceSplitter } from '../shared/jarvis-voice.js';
+
+/**
+ * Speech starts as soon as an answer reaches a stable, reasonably long clause,
+ * even when the model has not produced a sentence-ending period yet. The
+ * synthetic semicolon has the same UTF-16 width as the source comma: the
+ * underlying splitter's durable cursor therefore stays aligned with each
+ * later streaming snapshot, including repeated snapshots and finalization.
+ *
+ * Keep ordinary sentence boundaries and short clauses untouched. Avoid
+ * marking punctuation in code blocks or inline code.
+ */
+export class JarvisStreamingSplitter {
+  private readonly sentences = new JarvisSentenceSplitter();
+  constructor(private readonly minClauseChars = 96) {}
+
+  push(full: string): string[] { return this.sentences.push(this.clauses(full)); }
+  finish(full: string): string[] { return this.sentences.finish(this.clauses(full)); }
+  reset(): void { this.sentences.reset(); }
+
+  private clauses(full: string): string {
+    let rendered = '';
+    let since = 0;
+    let fence = false;
+    let inline = false;
+    for (let i = 0; i < full.length; i++) {
+      if (full.startsWith('```', i)) {
+        fence = !fence;
+        rendered += '```';
+        i += 2;
+        continue;
+      }
+      const char = full[i]!;
+      if (!fence && char === '`') inline = !inline;
+      if (!fence && !inline) {
+        if (/[.!?…。！？;:\n]/u.test(char)) since = i + 1;
+        if ((char === ',' || char === '，') && i - since >= this.minClauseChars &&
+            /\s/u.test(full[i + 1] ?? '')) {
+          rendered += ';';
+          since = i + 1;
+          continue;
+        }
+      }
+      rendered += char;
+    }
+    return rendered;
+  }
+}
 
 export interface SpeechBackend<T> {
   /** Turn a sentence into something playable (provider audio, or text for system speech). */

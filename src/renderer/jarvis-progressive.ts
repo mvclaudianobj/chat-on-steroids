@@ -17,6 +17,7 @@ export class JarvisProgressiveAudio {
   private stopped = false;
   private playing = false;
   private playbackRequested = false;
+  private playbackStarting = false;
   private source: MediaSource | null = null;
   private buffer: SourceBuffer | null = null;
   private audio: HTMLAudioElement | null = null;
@@ -41,9 +42,13 @@ export class JarvisProgressiveAudio {
       if (Media && Media.isTypeSupported(event.mime)) {
         this.source = new Media();
         this.audio = new Audio();
+        this.audio.preload = 'auto';
         this.url = URL.createObjectURL(this.source);
         this.audio.src = this.url;
         this.installAudioEvents();
+        // Attach MediaSource before the queue asks to play, so the next
+        // segment can buffer its initial frames while the current one speaks.
+        this.audio.load();
         this.source.addEventListener('sourceopen', () => {
           if (this.stopped || !this.source || this.source.readyState !== 'open') return;
           try {
@@ -58,6 +63,9 @@ export class JarvisProgressiveAudio {
       return;
     }
     if (!this.mime) { this.fail(new Error('Speech stream has no audio format.')); return; }
+    // Completed streams are immutable. Late duplicated chunk/end events from
+    // the bridge cannot extend the audio or reopen a finished source.
+    if (this.finished) return;
     if (event.type === 'chunk') {
       this.total += event.bytes.byteLength;
       if (this.total > 16_000_000) { this.fail(new Error('Audio stream is too large.')); return; }
@@ -87,6 +95,7 @@ export class JarvisProgressiveAudio {
   cancel(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.playbackStarting = false;
     this.unsubscribe();
     this.received.length = 0;
     if (this.audio) {
@@ -149,7 +158,10 @@ export class JarvisProgressiveAudio {
   }
 
   private startPlayback(): void {
-    if (!this.audio || this.stopped || !this.playbackRequested || !this.audio.paused) return;
-    void this.audio.play().catch(error => { if (!this.stopped) this.fail(error); });
+    if (!this.audio || this.stopped || !this.playbackRequested || !this.audio.paused || this.playbackStarting) return;
+    this.playbackStarting = true;
+    void this.audio.play()
+      .then(() => { this.playbackStarting = false; })
+      .catch(error => { this.playbackStarting = false; if (!this.stopped) this.fail(error); });
   }
 }

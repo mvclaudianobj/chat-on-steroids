@@ -657,6 +657,26 @@ describe('Jarvis voice provider in the conversation', () => {
     expect(f.element('jarvisTalk').dataset.state).toBe('idle');
   });
 
+  it('begins a long PT-BR streamed clause before final punctuation, then cancels without replaying old audio', async () => {
+    const f = await fixture({ routingMode: 'gemini-first' });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const beginning = 'A primeira resposta apresenta detalhes sobre o tema com clareza e exemplos que ajudam você a acompanhar o raciocínio, ';
+    await f.stream(beginning);
+    expect(f.speak.mock.calls.length).toBe(1);
+    const calls = f.speak.mock.calls as unknown as Array<[unknown, string, unknown, string]>;
+    const groupId = calls[0]?.[3];
+    expect(groupId).toMatch(/^[a-f0-9-]{36}$/i);
+    await f.stream(beginning);
+    expect(f.speak).toHaveBeenCalledOnce();
+    await f.stream(beginning + 'e esta segunda parte completa o pensamento com palavras claras.', true, true);
+    expect(f.speak).toHaveBeenCalledTimes(2);
+    expect(calls[1]?.[3]).toBe(groupId);
+    f.hold(); await f.flush();
+    expect(f.players[0]?.paused).toBe(true);
+    await f.stream(beginning + 'e esta segunda parte completa o pensamento com palavras claras.', true, true);
+    expect(f.speak).toHaveBeenCalledTimes(2);
+  });
+
   it('barge-in: pressing push-to-talk while Jarvis speaks stops the voice and listens', async () => {
     const f = await fixture();
     f.hold(); await f.flush(); f.release(); await f.flush();
