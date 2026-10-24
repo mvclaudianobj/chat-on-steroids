@@ -9,6 +9,15 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.45.3] — P0 technical testing candidate
+
+- Jarvis opt-in speech can submit the transcript through the currently selected native ChatGPT conversation and speaks only its confirmed matching turn; synthetic microphone and TTS validated.
+- External ChatGPT approval cards report stable observed dismissal or lack of confirmation. Dismissal is not proof of provider acceptance, and permanent host grants are not exposed by this app.
+- Company DEMO can be backed up and converted to an empty REAL workspace through explicit confirmation; broker-issued local conversation receipts are checked, but independent external worker attestation remains unavailable and automatic delegation stays disabled.
+- WhatsApp notification QR lifecycle, reconnect attempts and concurrent outbound notification deduplication tested with fake transport only; real pairing requires separate manual testing.
+- **Not included in this technical candidate:** native local Archive/Archived/Restore of ordinary and worker chats. Development and review are ongoing in an isolated worker branch. Browser-side worker archiving remains separate.
+- No production installation, account login, real WhatsApp connection, live microphone or external broker identity has been verified by this test build.
+
 ## [2.1.45.2] — Chat Marks: Brain, Vault, Notifications and agents
 
 This release brings the community 2.1.45 improvements and the integrated Chat Marks modules into a single reviewed product revision.
