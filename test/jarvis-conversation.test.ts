@@ -10,6 +10,8 @@ const skeleton = `<!doctype html><html><body>
   <select id="jarvisEngine"><option value="auto">auto</option><option value="cliproxy">CLIProxy</option></select>
   <select id="jarvisVoice"><option value="">System default</option></select>
   <input id="jarvisContinuous" type="checkbox"><input id="jarvisEarcons" type="checkbox">
+  <input id="jarvisProviderUrl"><select id="jarvisSttMode"><option value="transcriptions">Transcriptions</option><option value="chat-audio">Chat audio</option></select>
+  <input id="jarvisSttModel"><input id="jarvisTtsModel"><input id="jarvisProviderVoice">
   <input id="jarvisProviderKey" type="password"><input id="jarvisProviderFallbackKey" type="password">
   <p id="jarvisSettingsStatus"></p><p id="jarvisProviderStatus"></p><textarea id="chatInput"></textarea>
   <p id="jarvisActiveChat" role="status"></p><p id="jarvisReadiness" role="status"></p>
@@ -24,11 +26,14 @@ afterEach(() => { page?.window.close(); page = null; vi.unstubAllGlobals(); vi.r
 async function fixture(options: { tts?: boolean; continuous?: boolean; providerTranscribe?: 'ok' | 'fail';
   selected?: { id: string; conversationId: string | null; engine?: string } | null; consent?: boolean; noAudioEngines?: boolean;
   g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; providerUnavailable?: boolean; microphoneDenied?: boolean;
+  google?: boolean; language?: string;
   initialEvents?: unknown[]; initialTurns?: Record<string, { origin: number; time: number; questionId: string }> } = {}) {
   page = new JSDOM(skeleton, { url: 'https://local.test/' });
   const window = page.window;
   window.localStorage.setItem('chat-marks.jarvis.settings.v1', JSON.stringify({ enabled: options.enabled !== false, tts: options.tts ?? true, continuous: options.continuous ?? false, earcons: false,
-    provider: options.noProvider ? { ...voice, baseUrl: '' } : options.g4f ? { baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_synthetic:gemini', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' } : voice, version: 2 }));
+    language: options.language ?? '', provider: options.noProvider ? { ...voice, baseUrl: '' }
+      : options.google ? { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: 'gemini-3.5-transcribe', ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' }
+      : options.g4f ? { baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_synthetic:gemini', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' } : voice, version: 2 }));
   Object.assign(globalThis, { window, document: window.document, localStorage: window.localStorage, Event: window.Event, Option: window.Option });
   const tracks = [{ stop: vi.fn() }];
   const getUserMedia = vi.fn(async () => {
@@ -158,6 +163,25 @@ describe('Jarvis automatic voice for typed ChatGPT messages', () => {
     expect(f.transcribe).not.toHaveBeenCalled();
   });
 
+  it('does not speak a superseded typed response that finishes after a newer question', async () => {
+    const f = await fixture({ selected: chatA });
+    await f.nativeEvents([question('q-old', 1)], turns('q-old', 'turn-old', 2));
+    await f.nativeEvents([question('q-old', 1), question('q-current', 3)], {
+      ...turns('q-old', 'turn-old', 2), ...turns('q-current', 'turn-current', 4)
+    });
+    await f.nativeEvents([
+      question('q-old', 1), question('q-current', 3),
+      answer('a-old', 'turn-old', 'Resposta superada nao deve tocar.', 5), completed('turn-old', 6)
+    ], { ...turns('q-old', 'turn-old', 2), ...turns('q-current', 'turn-current', 4) });
+    expect(f.speak).not.toHaveBeenCalled();
+    await f.nativeEvents([
+      question('q-old', 1), question('q-current', 3),
+      answer('a-old', 'turn-old', 'Resposta superada nao deve tocar.', 5), completed('turn-old', 6),
+      answer('a-current', 'turn-current', 'Somente a resposta atual deve tocar.', 7), completed('turn-current', 8)
+    ], { ...turns('q-old', 'turn-old', 2), ...turns('q-current', 'turn-current', 4) });
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Somente a resposta atual deve tocar.']);
+  });
+
   it('rejects ambiguous question links, failed turns and automatic follow-up messages', async () => {
     const f = await fixture({ selected: chatA });
     await f.nativeEvents([
@@ -231,6 +255,31 @@ describe('Jarvis native ChatGPT bridge ownership', () => {
   const normal = { id: 'native-chat-01', conversationId: 'chatgpt-realistic', engine: 'chatgpt' };
   const message = (turnId: string, text: string) => ({ kind: 'assistant_message', turnId, messageId: 'm-'+turnId,
     seq: 3, message: { text, truncated: false, chars: text.length }, final: false });
+
+  it('passes the Gemini PT-BR transcription choice through mic, selected native chat, streaming reply and TTS', async () => {
+    const f = await fixture({ selected: normal, google: true, language: 'pt-BR' });
+    expect(f.element<HTMLInputElement>('jarvisSttModel').value).toBe('gemini-3.5-transcribe');
+    expect(f.element<HTMLSelectElement>('jarvisSttMode').disabled).toBe(true);
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    expect(f.transcribe).toHaveBeenCalledWith('provider', '', 'pt-BR', 'audio/webm', expect.any(Uint8Array),
+      expect.objectContaining({ sttModel: 'gemini-3.5-transcribe', ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' }));
+    expect(f.sendInput).toHaveBeenCalledOnce();
+    const [input] = f.sendInput.mock.calls[0]!;
+    expect(input).toMatchObject({ sessionId: normal.id, text: 'text from provider' });
+    await f.nativeEvents([
+      { kind: 'user_message', messageId: 'question-gemini', inputId: input.id, inputDelivery: 'confirmed',
+        turnId: 'native-q', seq: 1 },
+      message('gemini-reply', 'Ouvindo em português brasileiro. A resposta ainda continua')
+    ], { 'gemini-reply': { origin: 2, time: 100, questionId: 'question-gemini' } });
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Ouvindo em português brasileiro.']);
+    expect(f.speak.mock.calls[0]?.[0]).toMatchObject({ baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+      ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' });
+    await f.nativeEvents([
+      { kind: 'user_message', messageId: 'question-gemini', inputId: input.id, inputDelivery: 'confirmed', turnId: 'native-q', seq: 1 },
+      message('gemini-reply', 'Ouvindo em português brasileiro. A resposta ainda continua')
+    ], { 'gemini-reply': { origin: 2, time: 100, questionId: 'question-gemini' } });
+    expect(f.speak).toHaveBeenCalledOnce();
+  });
 
   it('speaks the real response turn linked by questionId when the native user turn id differs', async () => {
     const f = await fixture({ selected: normal, g4f: true });

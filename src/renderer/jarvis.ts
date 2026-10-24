@@ -655,6 +655,9 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       if (watch.questions.has(id)) continue;
       watch.questions.add(id);
       if (!event.automatic && (!event.inputId || event.inputId !== nativePending?.inputId)) {
+        // A newer authored question supersedes any older pending reply, even if
+        // the old server turn finishes after this message was already submitted.
+        watch.pending.clear();
         watch.pending.add(id);
         newQuestion = true;
       }
