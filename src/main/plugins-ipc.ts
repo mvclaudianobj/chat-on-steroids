@@ -17,6 +17,10 @@ async function credentialSnapshot(): Promise<PluginSnapshot> {
     const entries = await Promise.all([...keys].map(async key => [key, await hasSecret(`plugin:${plugin.id}:${key}`)] as const));
     plugin.credentialPresence = Object.fromEntries(entries);
   }));
+  // A keychain read can fail after the initial available check. Treat a partially
+  // probed snapshot as unavailable, never as evidence that a saved key was removed.
+  if (storedSecretsUnreadable() || !(await secureStorageStatus()).available)
+    for (const plugin of state.plugins) delete plugin.credentialPresence;
   return state;
 }
 
