@@ -89,6 +89,21 @@ const synthetic = {
     assert.equal(payload.sessionId,'composer-preview','voice input must target existing normal chat');
     assert.equal(payload.mode,'auto');
     const result=await backend.sendInput(payload);
+    if(payload.text==='Mensagem digitada para Jarvis'){
+      setTimeout(()=>{
+        fakeWindow.composerFixture.events.push(
+          {seq:201,kind:'user_message',messageId:'typed-question',inputId:payload.id,inputDelivery:'confirmed',turnId:'typed-user-turn',message:{text:payload.text,truncated:false,chars:payload.text.length}},
+          {seq:202,kind:'assistant_message',turnId:'typed-answer-turn',messageId:'typed-answer',message:{text:'A resposta digitada chegou corretamente.',truncated:false,chars:39},final:true},
+          {seq:203,kind:'turn_end',turnId:'typed-answer-turn',outcome:'completed'}
+        );
+        fakeWindow.composerFixture.summary.timelineTurns={
+          ...fakeWindow.composerFixture.summary.timelineTurns,
+          'typed-answer-turn':{origin:201,time:Date.now(),questionId:'typed-question'}
+        };
+        if(win&&!win.isDestroyed())win.webContents.send('session:changed',{sessionIds:['composer-preview']});
+      },100);
+      return result;
+    }
     setTimeout(()=>{
       fakeWindow.composerFixture.events.push(
         {seq:100,kind:'assistant_message',turnId:'not-jarvis-turn',messageId:'wrong',message:{text:'Do not speak a different turn.',truncated:false,chars:30},final:false},
@@ -191,7 +206,8 @@ app.whenReady().then(async()=>{
     await js(`(()=>{const el=document.getElementById('chatInput');el.value='Mensagem digitada para Jarvis';el.dispatchEvent(new Event('input',{bubbles:true}));document.getElementById('chatSend').click();})()`);
     await until('window.api && document.getElementById("chatInput")',5000);
     assert.equal(reqs.audio.length,beforeAudio,'typed message must not start STT');
-    await until('window.jarvisHardwareFake.plays>=2',5000);
+    try { await until('window.jarvisHardwareFake.plays>=2',5000); }
+    catch(error){console.error('typed synthetic evidence',JSON.stringify({sends:reqs.sends.length,speech:reqs.speech,events:fakeWindow.composerFixture.events.filter(e=>e.seq>199),status:await js('document.getElementById("jarvisSettingsStatus").textContent')}));throw error;}
     assert.equal(reqs.speech.length,2,'typed response should be voiced once');
   }
   // Even a configured provider that fails both keys must not queue a second native input.
@@ -200,7 +216,7 @@ app.whenReady().then(async()=>{
   await pause(100);
   await js('window.dispatchEvent(new KeyboardEvent("keyup",{code:"F8",bubbles:true}))');
   await until('document.getElementById("jarvisSettingsStatus").textContent.includes("503")');
-  assert.equal(reqs.sends.length,1,'failed STT cannot queue a second message');
+  assert.equal(reqs.sends.length,process.env.JARVIS_TYPED_TTS_REGRESSION==='1'?2:1,'failed STT cannot queue a second message');
   assert.deepEqual(consoleErrors,[]);
   console.log('PASS multiprocess '+first+' + failure fail-closed STT; no real mic, account or provider');
   win.destroy();await vite.close();rmSync(temp,{recursive:true,force:true});app.exit(0);
