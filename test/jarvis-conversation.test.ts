@@ -10,6 +10,7 @@ const skeleton = `<!doctype html><html><body>
   <select id="jarvisEngine"><option value="auto">auto</option><option value="cliproxy">CLIProxy</option></select>
   <select id="jarvisVoice"><option value="">System default</option></select>
   <input id="jarvisContinuous" type="checkbox"><input id="jarvisEarcons" type="checkbox">
+  <input id="jarvisProviderKey" type="password"><input id="jarvisProviderFallbackKey" type="password">
   <p id="jarvisSettingsStatus"></p><p id="jarvisProviderStatus"></p><textarea id="chatInput"></textarea>
   <p id="jarvisActiveChat" role="status"></p><p id="jarvisReadiness" role="status"></p>
   <span id="jarvisModelInfo"></span><button id="jarvisGoToChat"></button><button id="jarvisSetupChat" hidden></button>
@@ -22,7 +23,7 @@ afterEach(() => { page?.window.close(); page = null; vi.unstubAllGlobals(); vi.r
 
 async function fixture(options: { tts?: boolean; continuous?: boolean; providerTranscribe?: 'ok' | 'fail';
   selected?: { id: string; conversationId: string | null; engine?: string } | null; consent?: boolean; noAudioEngines?: boolean;
-  g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; microphoneDenied?: boolean;
+  g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; providerUnavailable?: boolean; microphoneDenied?: boolean;
   initialEvents?: unknown[]; initialTurns?: Record<string, { origin: number; time: number; questionId: string }> } = {}) {
   page = new JSDOM(skeleton, { url: 'https://local.test/' });
   const window = page.window;
@@ -72,7 +73,7 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   const api = {
     dictationSupported: false,
     jarvisAudioStatus: async () => ({ ok: true as const, data: { models: options.noAudioEngines ? [] : ['whisper-1'], local: false, windows: false, error: null } }),
-    jarvisVoiceStatus: async () => ({ ok: true as const, data: { models: [], stt: ['whisper-1'], tts: ['gpt-4o-mini-tts'], primary: true, fallback: true, ffmpeg: true, error: null } }),
+    jarvisVoiceStatus: async () => options.providerUnavailable ? { ok: false as const, error: 'Vault unreadable' } : ({ ok: true as const, data: { models: [], stt: ['whisper-1'], tts: ['gpt-4o-mini-tts'], primary: true, fallback: true, ffmpeg: true, error: null } }),
     jarvisTranscribe: transcribe, jarvisSpeak: speak, jarvisSpeakCancel: speakCancel,
     jarvisCancel: async () => ({ ok: true as const, data: null }),
     startDictation: vi.fn(), stopDictation: vi.fn(async () => ({ ok: true, data: undefined })), apiChatSend: send, sendInput,
@@ -365,6 +366,24 @@ describe('Jarvis native ChatGPT bridge ownership', () => {
 });
 
 describe('Jarvis voice provider in the conversation', () => {
+  it('shows only verified provider-key presence as a visual mask without entering a secret', async () => {
+    const saved = await fixture({ g4f: true });
+    const primary = saved.element<HTMLInputElement>('jarvisProviderKey');
+    const fallback = saved.element<HTMLInputElement>('jarvisProviderFallbackKey');
+    expect(primary.placeholder).toBe('••••••••');
+    expect(fallback.placeholder).toBe('••••••••');
+    expect(primary.value).toBe('');
+    expect(fallback.value).toBe('');
+    const absent = await fixture({ noProvider: true });
+    expect(absent.element<HTMLInputElement>('jarvisProviderKey').placeholder).toBe('');
+    expect(absent.element<HTMLInputElement>('jarvisProviderFallbackKey').placeholder).toBe('');
+    const unreadable = await fixture({ g4f: true, providerUnavailable: true });
+    expect(unreadable.element<HTMLInputElement>('jarvisProviderKey').placeholder).toBe('');
+    expect(unreadable.element<HTMLInputElement>('jarvisProviderFallbackKey').placeholder).toBe('');
+    expect(unreadable.element('jarvisProviderStatus').textContent).toContain('Vault unreadable');
+    expect(unreadable.element('jarvisProviderStatus').textContent).not.toContain('No primary key saved');
+  });
+
   it('uses g4f voice in the current ChatGPT chat, with no forced CLIProxy migration', async () => {
     const f = await fixture({ g4f: true, consent: false, noAudioEngines: true,
       selected: { id: 'browser-chat', conversationId: 'chatgpt-realistic', engine: 'chatgpt' } });

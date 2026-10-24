@@ -261,9 +261,24 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   };
   fillList('jarvisProviderVoices', JARVIS_VOICE_SUGGESTIONS);
   function paintProvider(): void {
+    // A saved-key indicator is a placeholder, NEVER the password field value.
+    // Presence comes only from the main-process provider status, not the schema.
+    const keyState = (id: string, saved: boolean, savedText: string, absentText: string): void => {
+      const field = maybe<HTMLInputElement>(id);
+      if (!field) return;
+      field.placeholder = provider.checked && saved ? '••••••••' : '';
+      field.setAttribute('aria-label', !provider.checked
+        ? t('Checking the voice provider…') : provider.error && !provider.primary && !provider.fallback
+          ? t('Voice provider is unavailable.') : saved ? t(savedText) : t(absentText));
+      field.setAttribute('aria-describedby', 'jarvisProviderStatus');
+    };
+    keyState('jarvisProviderKey', provider.primary, 'Primary key saved.', 'No primary key saved.');
+    keyState('jarvisProviderFallbackKey', provider.fallback, 'Fallback key saved.', 'No fallback key saved.');
     if (!providerStatus) return;
     const config = preferences.provider;
     if (!config.baseUrl) { providerStatus.textContent = t('No voice provider configured.'); return; }
+    // An unreadable provider must not be announced as two absent credentials.
+    if (provider.error && !provider.primary && !provider.fallback) { providerStatus.textContent = provider.error; return; }
     const parts = [
       provider.primary ? t('Primary key saved.') : t('No primary key saved.'),
       provider.fallback ? t('Fallback key saved.') : t('No fallback key saved.')
@@ -283,7 +298,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     if (providerStatus) providerStatus.textContent = t('Checking the voice provider…');
     void api.jarvisVoiceStatus(config).then(reply => {
       if (JSON.stringify(preferences.provider) !== JSON.stringify(config)) return;
-      if (!reply.ok) { provider = { ...provider, checked: true, error: reply.error }; paintProvider(); paint(); return; }
+      if (!reply.ok) { provider = { ...provider, checked: true, primary: false, fallback: false, error: reply.error }; paintProvider(); paint(); return; }
       const data = reply.data;
       provider = {
         checked: true, primary: data?.primary === true, fallback: data?.fallback === true, ffmpeg: data?.ffmpeg === true,
@@ -294,7 +309,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       fillList('jarvisTtsModels', provider.tts);
       paintProvider();
       paint();
-    }).catch(() => { provider = { ...provider, checked: true, error: t('Voice provider is unavailable.') }; paintProvider(); paint(); });
+    }).catch(() => { provider = { ...provider, checked: true, primary: false, fallback: false, error: t('Voice provider is unavailable.') }; paintProvider(); paint(); });
   };
   const refresh = (): void => {
     refreshProvider();
