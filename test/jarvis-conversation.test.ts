@@ -222,6 +222,79 @@ describe('Jarvis automatic voice for typed ChatGPT messages', () => {
     [turnId]: { questionId, origin, time: origin * 100 }
   });
 
+  it('speaks authenticated typed streaming clauses before turn_end without replay, then finishes exactly once', async () => {
+    const f = await fixture({ selected: chatA, routingMode: 'gemini-first' });
+    const q = question('q-stream', 1);
+    const link = turns('q-stream', 'turn-stream', 2);
+    await f.nativeEvents([q], link);
+    const first = 'Esta primeira explicação chegou completa para que o Jarvis possa conversar naturalmente. ';
+    const second = 'A segunda parte também está disponível antes de terminar. ';
+    await f.nativeEvents([q, { ...answer('a-stream', 'turn-stream', first, 2), final: false }], link);
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual([first.trim()]);
+    await f.nativeEvents([q, { ...answer('a-stream', 'turn-stream', first, 2), final: false }], link);
+    expect(f.speak).toHaveBeenCalledTimes(1);
+    await f.nativeEvents([q, { ...answer('a-stream', 'turn-stream', first + second, 2), final: false }], link);
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual([first.trim(), second.trim()]);
+    await f.nativeEvents([q, answer('a-stream', 'turn-stream', first + second + ' Conclusão final.', 2), completed('turn-stream', 3)], link);
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual([first.trim(), second.trim(), 'Conclusão final.']);
+    const groups = f.speak.mock.calls.map(call => call[3] as string);
+    expect(new Set(groups).size).toBe(1);
+    await f.nativeEvents([q, answer('a-stream', 'turn-stream', first + second + ' Conclusão final.', 2), completed('turn-stream', 3)], link);
+    expect(f.speak).toHaveBeenCalledTimes(3);
+  });
+
+  it('interrupts an unfinished typed reply when a newer typed question arrives', async () => {
+    const f = await fixture({ selected: chatA });
+    const oldQ = question('q-old-stream', 1);
+    const oldLink = turns('q-old-stream', 'turn-old-stream', 2);
+    await f.nativeEvents([oldQ], oldLink);
+    await f.nativeEvents([oldQ, { ...answer('a-old-stream', 'turn-old-stream', 'A resposta antiga começou agora. ', 2), final: false }], oldLink);
+    expect(f.players[0]?.paused).toBe(false);
+    const newQ = question('q-new-stream', 3);
+    const both = { ...oldLink, ...turns('q-new-stream', 'turn-new-stream', 4) };
+    await f.nativeEvents([oldQ, newQ], both);
+    expect(f.players[0]?.paused).toBe(true);
+    await f.nativeEvents([oldQ, newQ, answer('a-old-stream', 'turn-old-stream', 'A resposta antiga começou agora. A resposta superada nunca deve tocar.', 5), completed('turn-old-stream', 6)], both);
+    expect(f.speak).toHaveBeenCalledTimes(1);
+    await f.nativeEvents([oldQ, newQ, answer('a-new-stream', 'turn-new-stream', 'Esta é a única resposta atual.', 7), completed('turn-new-stream', 8)], both);
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['A resposta antiga começou agora.', 'Esta é a única resposta atual.']);
+  });
+
+  it('handles twelve consecutive typed turns without cross-turn replay or voice-group reuse', async () => {
+    const f = await fixture({ selected: chatA, routingMode: 'gemini-first' });
+    const events: unknown[] = [];
+    const links: Record<string, { origin: number; time: number; questionId: string }> = {};
+    for (let i = 0; i < 12; i++) {
+      const qid = `q-sequence-${i}`;
+      const tid = `answer-sequence-${i}`;
+      links[tid] = { origin: i + 1, time: i * 100, questionId: qid };
+      events.push(question(qid, i * 3 + 1), answer(`msg-${i}`, tid, `Esta é a resposta válida do turno ${i}.`, i * 3 + 2), completed(tid, i * 3 + 3));
+      await f.nativeEvents(events, links);
+      expect(f.speak).toHaveBeenCalledTimes(i + 1);
+    }
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(
+      Array.from({ length: 12 }, (_, i) => `Esta é a resposta válida do turno ${i}.`)
+    );
+    expect(new Set(f.speak.mock.calls.map(call => call[3])).size).toBe(12);
+    await f.nativeEvents(events, links);
+    expect(f.speak).toHaveBeenCalledTimes(12);
+  });
+
+  it('silences partial typed speech after a stopped response and ignores the stale end', async () => {
+    const f = await fixture({ selected: chatA });
+    const q = question('q-interrupted', 1);
+    const link = turns('q-interrupted', 't-interrupted', 2);
+    await f.nativeEvents([q], link);
+    const partial = { ...answer('a-interrupted', 't-interrupted', 'Uma frase parcial chegou antes da interrupção. ', 2), final: false };
+    await f.nativeEvents([q, partial], link);
+    expect(f.players[0]?.paused).toBe(false);
+    await f.nativeEvents([q, partial, completed('t-interrupted', 3, 'stopped')], link);
+    expect(f.players[0]?.paused).toBe(true);
+    await f.nativeEvents([q, answer('a-interrupted', 't-interrupted', 'Uma frase parcial chegou antes da interrupção. Nunca repetir!', 2),
+      completed('t-interrupted', 3, 'stopped')], link);
+    expect(f.speak).toHaveBeenCalledTimes(1);
+  });
+
   it('speaks one new typed final once, while ignoring historical final and interim messages', async () => {
     const old = [question('old-q', 1), answer('old-a', 'old-turn', 'Historico nunca deve falar.', 2), completed('old-turn', 3)];
     const f = await fixture({ selected: chatA, initialEvents: old, initialTurns: turns('old-q', 'old-turn', 1) });
@@ -230,7 +303,7 @@ describe('Jarvis automatic voice for typed ChatGPT messages', () => {
     await f.nativeEvents([...old, newQuestion], { ...turns('old-q', 'old-turn', 1), ...turns('new-q', 'new-turn', 5) });
     await f.nativeEvents([...old, newQuestion, answer('new-a', 'new-turn', 'A resposta digitada chegou. Proxima parte.', 6)],
       { ...turns('old-q', 'old-turn', 1), ...turns('new-q', 'new-turn', 5) });
-    expect(f.speak).not.toHaveBeenCalled();
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['A resposta digitada chegou.']);
     const finished = [...old, newQuestion, answer('new-a', 'new-turn', 'A resposta digitada chegou. Proxima parte.', 6), completed('new-turn', 7)];
     await f.nativeEvents(finished, { ...turns('old-q', 'old-turn', 1), ...turns('new-q', 'new-turn', 5) });
     expect(f.speak.mock.calls.map(call => call[1])).toEqual(['A resposta digitada chegou.', 'Proxima parte.']);
@@ -370,6 +443,23 @@ describe('Jarvis native ChatGPT bridge ownership', () => {
   const normal = { id: 'native-chat-01', conversationId: 'chatgpt-realistic', engine: 'chatgpt' };
   const message = (turnId: string, text: string) => ({ kind: 'assistant_message', turnId, messageId: 'm-'+turnId,
     seq: 3, message: { text, truncated: false, chars: text.length }, final: false });
+
+  it('never mistakes a completed microphone question for a new typed question after nativePending clears', async () => {
+    const f = await fixture({ selected: normal, google: true, language: 'pt-BR' });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [submitted] = f.sendInput.mock.calls[0]!;
+    const question = { kind: 'user_message', messageId: 'spoken-q', inputId: submitted.id, inputDelivery: 'confirmed',
+      turnId: 'native-spoken-user', seq: 1, message: { text: 'Pergunta do microfone', chars: 21, truncated: false } };
+    const answer = { kind: 'assistant_message', turnId: 'response-spoken', messageId: 'spoken-a', seq: 2, final: true,
+      message: { text: 'Esta resposta pertence ao microfone.', chars: 35, truncated: false } };
+    const end = { kind: 'turn_end', turnId: 'response-spoken', seq: 3, outcome: 'completed' };
+    const links = { 'response-spoken': { origin: 1, time: 10, questionId: 'spoken-q' } };
+    await f.nativeEvents([question, answer, end], links);
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Esta resposta pertence ao microfone.']);
+    await f.nativeEvents([question, answer, end], links);
+    await f.nativeEvents([question, answer, end], links);
+    expect(f.speak).toHaveBeenCalledTimes(1);
+  });
 
   it('passes the Gemini PT-BR transcription choice through mic, selected native chat, streaming reply and TTS', async () => {
     const f = await fixture({ selected: normal, google: true, language: 'pt-BR' });

@@ -166,6 +166,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   let typedWatch: {
     sessionId: string; conversationId: string; ready: boolean; questions: Set<string>;
     pending: Set<string>; spoken: Set<string>;
+    streaming: { questionId: string; turnId: string; splitter: JarvisStreamingSplitter; spokenChars: number; snapshot: string } | null;
   } | null = null;
   let typedEpoch = 0;
   const resetTypedWatch = (): void => { typedWatch = null; typedEpoch++; };
@@ -179,7 +180,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     if (!target) return null;
     if (!typedWatch || typedWatch.sessionId !== target.sessionId || typedWatch.conversationId !== target.conversationId) {
       resetTypedWatch();
-      typedWatch = { ...target, ready: false, questions: new Set(), pending: new Set(), spoken: new Set() };
+      typedWatch = { ...target, ready: false, questions: new Set(), pending: new Set(), spoken: new Set(), streaming: null };
     }
     return typedWatch;
   };
@@ -734,7 +735,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   }
   let reading = false;
   let readAgain = false;
-  /** Only a newly observed, user-authored question with one *completed* linked response may speak. */
+  /** Stream only a uniquely linked, new user-authored typed answer. No historical replay. */
   function readTypedFinal(
     watch: NonNullable<typeof typedWatch>, events: SessionEvent[], turns: TimelineTurns | undefined
   ): void {
@@ -755,6 +756,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         // the old server turn finishes after this message was already submitted.
         watch.pending.clear();
         watch.pending.add(id);
+        watch.streaming = null;
         newQuestion = true;
       }
     }
@@ -769,27 +771,45 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       const turnId = linked[0]!;
       const key = `${questionId}:${turnId}`;
       if (watch.spoken.has(key)) { watch.pending.delete(questionId); continue; }
-      const completed = events.some(event => event.kind === 'turn_end' && event.outcome === 'completed' &&
-        !!event.turnId && responseTurnId(turns, event.turnId) === turnId);
-      if (!completed) continue;
+      const terminal = events.find(event => event.kind === 'turn_end' && !!event.turnId &&
+        responseTurnId(turns, event.turnId) === turnId);
+      if (terminal && terminal.kind === 'turn_end' && terminal.outcome !== 'completed') {
+        // A stopped/failed turn cannot continue speech from buffered partials.
+        if (watch.streaming?.turnId === turnId) silence();
+        watch.pending.delete(questionId);
+        watch.streaming = null;
+        watch.spoken.add(key);
+        continue;
+      }
       const messages = new Map<string, Extract<SessionEvent, { kind: 'assistant_message' }>>();
       for (const event of events) {
-        if (event.kind === 'assistant_message' && event.final && event.turnId &&
+        if (event.kind === 'assistant_message' && event.turnId &&
             responseTurnId(turns, event.turnId) === turnId) messages.set(event.messageId ?? String(event.seq), event);
       }
       const text = [...messages.values()].map(event => event.message.text).join('\n\n');
       if (!text.trim()) continue;
-      watch.spoken.add(key);
-      watch.pending.delete(questionId);
-      if (speaks()) {
-        const sentences = new JarvisStreamingSplitter().finish(text);
-        let spoken = 0;
-        const bounded = sentences.filter(sentence => { spoken += sentence.length; return spoken <= MAX_SPOKEN; });
-        if (bounded.length) {
-          if (speech.speaking || speech.queued) silence();
-          activateSpeechGroup(watch.sessionId, turnId);
-          speech.enqueue(bounded);
-        }
+      if (!watch.streaming || watch.streaming.questionId !== questionId || watch.streaming.turnId !== turnId) {
+        watch.streaming = { questionId, turnId, splitter: new JarvisStreamingSplitter(), spokenChars: 0, snapshot: '' };
+      }
+      const streaming = watch.streaming;
+      // Recorder snapshots must extend the same response. A replacement or
+      // retraction must not cause already spoken text to be played twice.
+      if (streaming.snapshot && !text.startsWith(streaming.snapshot)) continue;
+      streaming.snapshot = text;
+      const complete = !!terminal;
+      const sentences = complete ? streaming.splitter.finish(text) : streaming.splitter.push(text);
+      const bounded = sentences.filter(sentence => {
+        streaming.spokenChars += sentence.length;
+        return streaming.spokenChars <= MAX_SPOKEN;
+      });
+      if (speaks() && bounded.length) {
+        activateSpeechGroup(watch.sessionId, turnId);
+        speech.enqueue(bounded);
+      }
+      if (complete) {
+        watch.spoken.add(key);
+        watch.pending.delete(questionId);
+        watch.streaming = null;
       }
     }
     // Session reads are bounded, so keep only identities that can still be observed.
