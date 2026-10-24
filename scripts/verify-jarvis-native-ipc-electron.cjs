@@ -46,9 +46,12 @@ const config = defaultConfig();
 let win=null, vite=null, failedFallback=false;
 const reqs={ audio:[], speech:[], tries:[], sends:[], interrupted:0 };
 const fakeGemini=process.env.JARVIS_GEMINI_STT_REGRESSION==='1';
+const fakeG4fRouting=process.env.JARVIS_G4F_ROUTING_REGRESSION==='1';
+if(fakeG4fRouting&&!fakeGemini)throw Error('G4F routing regression requires Gemini STT fixture');
 const voiceBase=fakeGemini?'https://generativelanguage.googleapis.com/v1beta':'http://127.0.0.1:18789/v1'; // Network is always intercepted.
 const voice={baseUrl:voiceBase, sttMode:'transcriptions', sttModel:fakeGemini?'gemini-3.5-transcribe':'whisper-1',
   ttsModel:fakeGemini?'gemini-3.8-flash-tts':'gpt-4o-mini-tts', voice:fakeGemini?'Charon':'alloy'};
+const routing={mode:fakeG4fRouting?'gemini-first':'off',g4f:[{baseUrl:'https://g4f-qa.example/v1',ttsModel:'gpt-4o-mini-tts',voice:'alloy'},{baseUrl:'',ttsModel:'gpt-4o-mini-tts',voice:'alloy'}]};
 const respond=(body,headers={})=>new Response(body,{status:200,headers});
 configureJarvisVoiceForTests({
   ffmpeg:async()=>false,
@@ -147,7 +150,7 @@ const allowedChannels=[...channels].filter(channel=>channel!=='jarvis:audio');
 const rendererFixture=`(() => {
   localStorage.setItem('cos.ui.language','en');
   localStorage.setItem('chat-marks.jarvis.settings.v1',JSON.stringify({version:2,enabled:false,tts:false,earcons:false,language:${JSON.stringify(fakeGemini?'pt-BR':'')},
-    provider:${JSON.stringify(voice)}}));
+    provider:${JSON.stringify(voice)},routing:${JSON.stringify(routing)}}));
   let stops=0, plays=0;
   window.jarvisHardwareFake={get stops(){return stops;},get plays(){return plays;}};
   Object.defineProperty(navigator,'mediaDevices',{configurable:true,value:{getUserMedia:async()=>({getTracks:()=>[{stop:()=>stops++}]})}});
@@ -211,6 +214,10 @@ app.whenReady().then(async()=>{
   assert.equal(reqs.sends.length,1);
   assert.equal(reqs.audio.length,1);
   assert.deepEqual(reqs.speech,['A resposta certa veio do ChatGPT.']);
+  if(fakeG4fRouting){
+    assert.ok(reqs.tries.some(e=>e.route.endsWith('/audio/speech')&&e.key==='fallback'),'G4F synthetic fallback should synthesize after Gemini failure');
+    assert.ok(reqs.tries.some(e=>e.route.endsWith('/interactions')&&e.key==='primary'),'Gemini primary should be attempted first');
+  }
   const sttPath=fakeGemini?'/interactions':'/audio/transcriptions';
   assert.ok(reqs.tries.some(e=>e.route.endsWith(sttPath)&&e.key==='primary'));
   assert.ok(reqs.tries.some(e=>e.route.endsWith(sttPath)&&e.key==='fallback'));
