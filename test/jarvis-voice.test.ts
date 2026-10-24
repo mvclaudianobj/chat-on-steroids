@@ -331,6 +331,18 @@ describe('Jarvis provider routing across Gemini and two G4F accounts', () => {
       { origin: 'https://g4f-test.example', key: 'Bearer fixture-g4f1' }
     ]);
   });
+  it('honors provider Retry-After across answers and avoids re-requesting a cooled-down Gemini project', async () => {
+    const seen: string[] = [];
+    configureJarvisVoiceForTests({ credential: async slot => ({ header: slot.startsWith('g4f') ? 'Authorization' : 'x-goog-api-key', value: `fixture-${slot}` }),
+      fetch: async (url) => {
+        seen.push(new URL(String(url)).origin);
+        return String(url).includes('generativelanguage') ? Response.json({ error: { message: 'quota' } }, { status: 429, headers: { 'retry-after': '3600' } })
+          : new Response(Buffer.from('ID3audio'), { headers: { 'content-type': 'audio/mpeg' } });
+      } });
+    await speakJarvisVoice(google(), 'Primeiro', signal(), routing('gemini-first'));
+    await speakJarvisVoice(google(), 'Segundo', signal(), routing('gemini-first'));
+    expect(seen).toEqual(['https://generativelanguage.googleapis.com', 'https://g4f-test.example', 'https://g4f-test.example']);
+  });
   it('prevents prefetch concurrency from selecting different providers for one answer', async () => {
     const id = crypto.randomUUID();
     const seen: string[] = [];

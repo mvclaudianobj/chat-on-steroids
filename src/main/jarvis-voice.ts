@@ -76,7 +76,7 @@ function ffmpegToWav(bytes: Uint8Array, signal: AbortSignal): Promise<Uint8Array
 
 const defaults: Dependencies = { credential: vaultCredential, ffmpeg: ffmpegAvailable, toWav: ffmpegToWav, fetch: (...args) => fetch(...args) };
 let deps: Dependencies = defaults;
-export function configureJarvisVoiceForTests(override: Partial<Dependencies> | null): void { deps = override ? { ...defaults, ...override } : defaults; }
+export function configureJarvisVoiceForTests(override: Partial<Dependencies> | null): void { deps = override ? { ...defaults, ...override } : defaults; routeCooldown.clear(); routeFailureReason.clear(); routePinned.clear(); routeSelectionInFlight.clear(); }
 
 function authorization(credential: VoiceCredential | null): Record<string, string> {
   if (!credential) return {};
@@ -298,7 +298,7 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
         type: 'text', text: input, annotations: [{ type: 'speech_metadata', style: 'Natural Brazilian Portuguese, warm conversational delivery, medium pace.' }]
       }] }], response_format: { type: 'audio' }, generation_config: { speech_config: [{ voice: config.voice }] } })
     }), signal, slot);
-    if (!response.ok) throw await failure(response, 'Gemini speech');
+    if (!response.ok) { const retryAfterMs = retryAfterDelay(response); const error = await failure(response, 'Gemini speech'); throw new ProviderUnavailable(response.status, retryAfterMs, error.message); }
     const payload = JSON.parse((await readBounded(response, MAX_AUDIO * 2)).toString()) as {
       steps?: { type?: string; content?: { type?: string; data?: string }[] }[]
     };
@@ -313,7 +313,7 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
     method: 'POST', headers: { 'content-type': 'application/json', accept: 'audio/mpeg,audio/*;q=0.9' },
     body: JSON.stringify({ model: config.ttsModel, input, voice: config.voice, response_format: 'mp3' })
   }), signal, slot);
-  if (!response.ok) throw await failure(response, 'speech');
+  if (!response.ok) { const retryAfterMs = retryAfterDelay(response); const error = await failure(response, 'speech'); throw new ProviderUnavailable(response.status, retryAfterMs, error.message); }
   const type = (response.headers.get('content-type') ?? '').split(';')[0]!.trim().toLowerCase();
   if (!/^audio\/|^application\/(ogg|octet-stream)$/.test(type)) {
     await response.body?.cancel().catch(() => undefined);
@@ -326,8 +326,21 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
 type RoutedVoice = { config: JarvisVoiceConfig; slot: JarvisVoiceKeySlot; id: string };
 const routePinned = new Map<string, { route: RoutedVoice; until: number }>();
 const routeCooldown = new Map<string, number>();
+const routeFailureReason = new Map<string, string>();
 const routeSelectionInFlight = new Map<string, Promise<void>>();
 const FAILURE_COOLDOWN_MS = 30_000;
+const MAX_RETRY_AFTER_MS = 24 * 60 * 60 * 1000;
+function retryAfterDelay(response: Response): number | null {
+  const raw = response.headers.get('retry-after');
+  if (!raw) return null;
+  const seconds = Number(raw.trim());
+  const milliseconds = Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : Date.parse(raw) - Date.now();
+  return Number.isFinite(milliseconds) && milliseconds >= 0 ? Math.min(MAX_RETRY_AFTER_MS, Math.max(1000, milliseconds)) : null;
+}
+class ProviderUnavailable extends Error {
+  constructor(readonly code: number, readonly retryAfterMs: number | null, message: string) { super(message); }
+}
+
 const GROUP_TTL_MS = 120_000;
 function voiceCandidates(config: JarvisVoiceConfig, routing: JarvisVoiceRouting): RoutedVoice[] {
   const google = config.baseUrl.startsWith('https://generativelanguage.googleapis.com/') ?
@@ -393,7 +406,8 @@ async function selectSpeechResponse(config: JarvisVoiceConfig, text: string, sig
       lastError = error;
       // Quota failure is shared among keys within one project. Never retry another Gemini key.
       if (/HTTP (429|500|502|503|504)|fetch failed|ECONNRESET|ETIMEDOUT/.test(String(error))) {
-        routeCooldown.set(candidate.id, Date.now() + FAILURE_COOLDOWN_MS);
+        routeCooldown.set(candidate.id, Date.now() + (error instanceof ProviderUnavailable && error.retryAfterMs !== null ? error.retryAfterMs : FAILURE_COOLDOWN_MS));
+        routeFailureReason.set(candidate.id, error instanceof ProviderUnavailable ? `HTTP ${error.code}` : 'network');
       } else if (!/HTTP (401|403)/.test(String(error))) throw error;
       if (pinned) throw error; // Never change a speaker in the middle of the same answer.
     }
