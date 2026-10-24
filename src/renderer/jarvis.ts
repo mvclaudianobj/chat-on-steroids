@@ -714,6 +714,24 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       refreshProvider();
     })().catch(() => say(t('The keys could not be saved.')));
   });
+  maybe<HTMLButtonElement>('jarvisTestProviderVoice')?.addEventListener('click', () => {
+    const button = maybe<HTMLButtonElement>('jarvisTestProviderVoice');
+    if (!button || !api.jarvisSpeak) return;
+    persist();
+    if (!jarvisVoiceTtsReady(preferences.provider)) { if (providerStatus) providerStatus.textContent = 'Configure a voice and TTS model first.'; return; }
+    const config = { ...preferences.provider };
+    button.disabled = true;
+    if (providerStatus) providerStatus.textContent = 'Generating a PT-BR audio sample…';
+    void api.jarvisSpeak(config, 'Olá! Aqui é o Jarvis do Chat Marks. Estou testando minha voz natural em português brasileiro.')
+      .then(async reply => {
+        if (!reply.ok) throw new Error(reply.error);
+        const audio = new Audio(URL.createObjectURL(new Blob([new Uint8Array(reply.data.bytes)], { type: reply.data.mime })));
+        try { await audio.play(); await new Promise<void>((resolve, reject) => { audio.onended = () => resolve(); audio.onerror = () => reject(new Error('Audio playback failed.')); });
+          if (providerStatus) providerStatus.textContent = 'Voice test completed.';
+        } finally { URL.revokeObjectURL(audio.src); }
+      }).catch(error => { if (providerStatus) providerStatus.textContent = error instanceof Error ? error.message.slice(0, 240) : 'Voice test failed.'; })
+      .finally(() => { button.disabled = false; });
+  });
   consent.addEventListener('change', () => { consented = consent.checked; if (!consented) cancel(); paint(); });
   const fillVoices = (): void => {
     if (!systemSpeech()) return;

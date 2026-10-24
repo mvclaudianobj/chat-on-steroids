@@ -74,6 +74,30 @@ function keys(origin = base, both = true): void {
 }
 const signal = () => new AbortController().signal;
 
+describe('Google Gemini TTS provider contract', () => {
+  const google = (): JarvisVoiceConfig => ({ baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: '', ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' });
+  it('requires an origin-bound vault credential', async () => {
+    await expect(speakJarvisVoice(google(), 'Olá.', signal())).rejects.toThrow('Save your Google AI Studio key');
+  });
+  it('sends the Google API key header and decodes the WAV from Interactions', async () => {
+    configureJarvisVoiceForTests({
+      credential: async (_slot, origin) => origin === 'https://generativelanguage.googleapis.com' ? { header: 'x-goog-api-key', value: PRIMARY } : null,
+      fetch: async (url, options) => {
+        expect(String(url)).toBe('https://generativelanguage.googleapis.com/v1beta/interactions');
+        expect((options?.headers as Record<string, string>)['x-goog-api-key']).toBe(PRIMARY);
+        const request = JSON.parse(String(options?.body));
+        expect(request.model).toBe('gemini-3.8-flash-tts');
+        expect(request.generation_config.speech_config[0].voice).toBe('Charon');
+        expect(request.input[0].content[0].text).toBe('Olá.');
+        return Response.json({ steps: [{ type: 'model_output', content: [{ type: 'audio', data: Buffer.from('RIFF-synthetic-WAV').toString('base64') }] }] });
+      }
+    });
+    const audio = await speakJarvisVoice(google(), 'Olá.', signal());
+    expect(audio.mime).toBe('audio/wav');
+    expect(Buffer.from(audio.bytes).toString()).toBe('RIFF-synthetic-WAV');
+  });
+});
+
 describe('Jarvis voice provider (fake OpenAI-compatible server)', () => {
   it('lists models with the vault key and ranks speech models first, without returning the key', async () => {
     keys();

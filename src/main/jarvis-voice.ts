@@ -147,6 +147,12 @@ export async function jarvisVoiceStatus(config: JarvisVoiceConfig, signal = new 
     const origin = parseJarvisVoiceBaseUrl(config.baseUrl).origin;
     result.primary = !!(await deps.credential('primary', origin));
     result.fallback = !!(await deps.credential('fallback', origin));
+    if (origin === 'https://generativelanguage.googleapis.com') {
+      result.models = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
+      result.tts = result.models;
+      if (!result.primary && !result.fallback) result.error = 'Save your Google AI Studio key to enable Gemini speech.';
+      return result;
+    }
     const response = await voiceRequest(config, '/models', () => ({ method: 'GET', headers: { accept: 'application/json' } }), timeout(signal, 15_000));
     if (!response.ok) throw await failure(response, 'model list');
     const parsed = JSON.parse((await readBounded(response, MAX_JSON)).toString()) as { data?: unknown } | unknown[];
@@ -163,7 +169,7 @@ export async function storeJarvisVoiceKey(slot: JarvisVoiceKeySlot, baseUrl: str
   const url = parseJarvisVoiceBaseUrl(baseUrl);
   const value = raw.trim().replace(/^Bearer\s+/i, '');
   if (!value || /\s/.test(value)) throw new Error('The key must be one token without spaces.');
-  await putVault({ name: JARVIS_VOICE_VAULT[slot], value, origin: url.origin, header: 'Authorization', ...(url.protocol === 'http:' ? { insecureHttp: true } : {}) }, password);
+  await putVault({ name: JARVIS_VOICE_VAULT[slot], value, origin: url.origin, header: url.origin === 'https://generativelanguage.googleapis.com' ? 'x-goog-api-key' : 'Authorization', ...(url.protocol === 'http:' ? { insecureHttp: true } : {}) }, password);
   logInfo(`jarvis: stored the ${slot} voice provider key in the vault for ${url.origin}`);
 }
 
@@ -237,6 +243,26 @@ async function speechResponse(config: JarvisVoiceConfig, text: string, signal: A
   if (!config.baseUrl || !config.ttsModel || !config.voice) throw new Error('Configure the voice provider URL, speech model and voice.');
   const input = text.trim().slice(0, 4000);
   if (!input) throw new Error('Nothing to speak.');
+  if (parseJarvisVoiceBaseUrl(config.baseUrl).origin === 'https://generativelanguage.googleapis.com') {
+    const googleKey = await deps.credential('primary', 'https://generativelanguage.googleapis.com') ?? await deps.credential('fallback', 'https://generativelanguage.googleapis.com');
+    if (!googleKey) throw new Error('Save your Google AI Studio key in the vault before testing speech.');
+    const response = await voiceRequest(config, '/interactions', () => ({
+      method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: JSON.stringify({ model: config.ttsModel, input: [{ type: 'user_input', content: [{
+        type: 'text', text: input, annotations: [{ type: 'speech_metadata', style: 'Natural Brazilian Portuguese, warm conversational delivery, medium pace.' }]
+      }] }], response_format: { type: 'audio' }, generation_config: { speech_config: [{ voice: config.voice }] } })
+    }), signal);
+    if (!response.ok) throw await failure(response, 'Gemini speech');
+    const payload = JSON.parse((await readBounded(response, MAX_AUDIO * 2)).toString()) as {
+      steps?: { type?: string; content?: { type?: string; data?: string }[] }[]
+    };
+    const encoded = payload.steps?.flatMap(step => step.type === 'model_output' ? step.content ?? [] : [])
+      .filter(part => part.type === 'audio' && typeof part.data === 'string').at(-1)?.data;
+    if (!encoded || encoded.length > MAX_AUDIO * 2) throw new Error('Gemini returned no usable audio.');
+    const bytes = Buffer.from(encoded, 'base64');
+    if (!bytes.length || bytes.length > MAX_AUDIO || bytes.subarray(0, 4).toString() !== 'RIFF') throw new Error('Gemini returned invalid WAV audio.');
+    return { mime: 'audio/wav', response: new Response(bytes, { headers: { 'content-type': 'audio/wav' } }) };
+  }
   const response = await voiceRequest(config, '/audio/speech', () => ({
     method: 'POST', headers: { 'content-type': 'application/json', accept: 'audio/mpeg,audio/*;q=0.9' },
     body: JSON.stringify({ model: config.ttsModel, input, voice: config.voice, response_format: 'mp3' })

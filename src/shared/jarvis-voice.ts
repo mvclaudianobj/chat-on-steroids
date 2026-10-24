@@ -76,6 +76,10 @@ export const jarvisVoiceTtsReady = (config: JarvisVoiceConfig): boolean => !!con
 
 /** Presets fill only public settings; keys are still entered by the user. */
 export const JARVIS_VOICE_PRESETS = {
+  'Google Gemini TTS': {
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: '',
+    ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon'
+  },
   'g4f.space': {
     baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_mrgy0nmbc8a86c407f17:models/gemini-3.5-flash-lite',
     ttsModel: 'gpt-4o-mini-tts', voice: 'alloy'
@@ -83,7 +87,7 @@ export const JARVIS_VOICE_PRESETS = {
 } as const satisfies Record<string, JarvisVoiceConfig>;
 
 /** OpenAI voices plus the ones g4f.space accepted for MarksCode (`packages/tui/src/markscode/tts.ts`). */
-export const JARVIS_VOICE_SUGGESTIONS = ['alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'] as const;
+export const JARVIS_VOICE_SUGGESTIONS = ['Charon', 'Puck', 'Kore', 'Fenrir', 'Aoede', 'Leda', 'Orus', 'Schedar', 'Zubenelgenubi', 'alloy', 'ash', 'ballad', 'coral', 'echo', 'fable', 'nova', 'onyx', 'sage', 'shimmer', 'verse', 'marin', 'cedar'] as const;
 
 /** A rejected or failing primary key (401/403/429/5xx) is retried once with the fallback key. */
 export const jarvisVoiceUsesFallback = (status: number): boolean => status === 401 || status === 403 || status === 429 || status >= 500;
