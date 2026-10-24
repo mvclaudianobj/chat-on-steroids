@@ -15,10 +15,18 @@ const fixture = `(() => {
   try { localStorage.setItem('cos.ui.language','en'); } catch {}
   const original=window.api,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
   let company=null,demoBackup=null;
+  let localGrant={id:'33333333-3333-4333-8333-333333333333',subject:{kind:'worker',ownerId:'11111111-1111-4111-8111-111111111111',runId:'22222222-2222-4222-8222-222222222222',workerId:'worker-1',conversationId:'synthetic-worker'},scope:'company-local-read',epoch:4,at:Date.now()-10000};
+  let localEpoch=4;
   const methods={
     markWhatsNewSeen:()=>ok(null),
     getState:async()=>{const reply=await original.getState();reply.data.config=fixtureMerge(fixtureDefaults,reply.data.config);reply.data.config.ui={...reply.data.config.ui,language:'en',theme:'dark'};return reply;},
+    companyLocalGrants:async()=>ok({version:1,epoch:localEpoch,grants:localGrant?[localGrant]:[],audit:[],requests:[],authority:{verified:false,subject:null,reason:'External broker identity is not locally attested. Local grants are disabled.'}}),
+    requestCompanyLocalGrant:async()=>({ok:false,error:'No locally attested Company identity'}),
+    revokeCompanyLocalGrant:async id=>{if(localGrant?.id!==id)return ok(false);localGrant=null;localEpoch++;return ok(true);},
     company:async request=>{
+      if(request.action==='localGrants')return ok({version:1,epoch:0,grants:[],audit:[],requests:[]});
+      if(request.action==='localGrantRequest')return {ok:false,error:'Local Company identity has no independent attestation; grant refused'};
+      if(request.action==='localGrantRevoke')return ok(false);
       if(request.action==='get')return ok(company??{version:1,company:{name:'Marks Studio',seatCount:5,roles:['marks-coo','marks-cto','marks-cio','marks-cpo','marks-cko','marks-cqo','marks-cco'],seats:['marks1','marks2','marks3','marks4','marks5']},requests:[],meetings:[],activities:[],demo:false});
       if(request.action==='demo'){
         const now=Date.now();
@@ -77,6 +85,26 @@ app.whenReady().then(async()=>{
   assert.equal(await js("document.querySelectorAll('.company-column').length"),6);
   assert.equal(await js("document.querySelectorAll('.company-ticket').length"),8);
   await screenshot('company-board-dark.png');
+  // Fail-first integration gate: a Company card is visible and explicitly unavailable when
+  // an external broker cannot attest a local principal. It must not imply ChatGPT/Plugin consent.
+  await js("document.getElementById('companySettings').click()");
+  await until("document.getElementById('companyDialog').open");
+  await until("document.getElementById('companyDialogContent').textContent.includes('ChatGPT')");
+  await until("document.querySelector('#companyLocalGrants [data-grants-authority=blocked]')!==null");
+  const permissionCard = await js("({text:document.getElementById('companyLocalGrants').textContent,controls:[...document.querySelectorAll('#companyLocalGrants div[aria-label] button')].map(b=>({text:b.textContent,disabled:b.disabled}))})");
+  assert.match(permissionCard.text,/ChatGPT/i);
+  assert.match(permissionCard.text,/operating-system/i);
+  assert.equal(permissionCard.controls.length,3,'Three local consent modes must be visible');
+  assert.ok(permissionCard.controls.every(control=>control.disabled), 'Unattested grants must remain disabled');
+  assert.equal(await js("document.querySelectorAll('#companyLocalGrants li[data-grant-id]').length"),1);
+  await js("document.querySelector('#companyLocalGrants li[data-grant-id] button').click()");
+  await until("document.querySelectorAll('#companyLocalGrants li[data-grant-id]').length===0");
+  assert.ok((await js("document.getElementById('companyLocalGrants').textContent")).includes('No active local grants'));
+  await screenshot('company-permissions-disabled.png');
+  await js("document.getElementById('companyClose').click()");
+  await js("document.getElementById('companySettings').click()");
+  await until("document.getElementById('companyLocalGrants').textContent.includes('Epoch: 5')");
+  await js("document.getElementById('companyClose').click()");
   await js("document.getElementById('companyOfficeTab').click()");
   await until("!document.getElementById('companyOffice').hidden");
   assert.equal(await js("document.querySelectorAll('.company-room').length"),9);
