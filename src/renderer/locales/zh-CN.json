@@ -4104,5 +4104,8 @@
   "A locally attested broker identity is required.": "需要本地验证的代理身份。",
   "Local grant audit": "本地授权审计",
   "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "发现三次相同请求。扩大范围不会自动批准。",
-  "Selected local scope": "所选本地范围"
+  "Selected local scope": "所选本地范围",
+"Credential saved": "凭据已保存",
+  "No saved credential": "没有已保存的凭据",
+  "Credential status unavailable": "凭据状态不可用"
 }

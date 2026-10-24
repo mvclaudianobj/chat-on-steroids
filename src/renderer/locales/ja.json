@@ -4104,5 +4104,8 @@
   "A locally attested broker identity is required.": "ローカルで認証されたブローカーIDが必要です。",
   "Local grant audit": "ローカル権限の監査",
   "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "同じ依頼が3件あります。拡大は別途承認が必要です。",
-  "Selected local scope": "選択したローカル範囲"
+  "Selected local scope": "選択したローカル範囲",
+"Credential saved": "認証情報を保存済み",
+  "No saved credential": "保存された認証情報なし",
+  "Credential status unavailable": "認証情報の状態を取得できません"
 }

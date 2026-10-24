@@ -4200,5 +4200,8 @@
   "A locally attested broker identity is required.": "Se requiere una identidad local verificada del intermediario.",
   "Local grant audit": "Auditoría de permisos locales",
   "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Tres solicitudes equivalentes. Puede solicitar ampliación; nunca se aprueba automáticamente.",
-  "Selected local scope": "Ámbito local seleccionado"
+  "Selected local scope": "Ámbito local seleccionado",
+"Credential saved": "Credencial guardada",
+  "No saved credential": "No hay credencial guardada",
+  "Credential status unavailable": "Estado de credencial no disponible"
 }

@@ -61,6 +61,8 @@ export interface PluginView {
   config: Record<string, string>;
   longestCallSeconds: number;
   credentialKeys: string[];
+  /** Actual secure-storage presence; keys listed in metadata are not evidence of saved secrets. */
+  credentialPresence?: Record<string, boolean>;
   fields?: PluginField[];
   version: string;
   license: string;

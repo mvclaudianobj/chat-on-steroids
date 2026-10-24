@@ -4152,5 +4152,8 @@
   "A locally attested broker identity is required.": "Yerel doğrulanmış aracı kimliği gereklidir.",
   "Local grant audit": "Yerel izin denetimi",
   "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Üç eşdeğer istek. Genişletme otomatik onaylanmaz.",
-  "Selected local scope": "Seçilen yerel kapsam"
+  "Selected local scope": "Seçilen yerel kapsam",
+"Credential saved": "Kimlik bilgisi kaydedildi",
+  "No saved credential": "Kayıtlı kimlik bilgisi yok",
+  "Credential status unavailable": "Kimlik bilgisi durumu kullanılamıyor"
 }

@@ -4248,5 +4248,8 @@
   "A locally attested broker identity is required.": "Требуется локально подтверждённая личность брокера.",
   "Local grant audit": "Аудит локальных разрешений",
   "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Три одинаковых запроса. Расширение требует отдельного согласия.",
-  "Selected local scope": "Выбранная локальная область"
+  "Selected local scope": "Выбранная локальная область",
+"Credential saved": "Учётные данные сохранены",
+  "No saved credential": "Нет сохранённых учётных данных",
+  "Credential status unavailable": "Статус учётных данных недоступен"
 }

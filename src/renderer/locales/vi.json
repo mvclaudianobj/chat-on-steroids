@@ -4104,5 +4104,8 @@
   "A locally attested broker identity is required.": "Cần danh tính môi giới được xác thực cục bộ.",
   "Local grant audit": "Nhật ký quyền cục bộ",
   "Three equivalent requests detected. You may request broader consent; nothing is approved automatically.": "Ba yêu cầu tương đương. Mở rộng không được tự động phê duyệt.",
-  "Selected local scope": "Phạm vi cục bộ đã chọn"
+  "Selected local scope": "Phạm vi cục bộ đã chọn",
+"Credential saved": "Đã lưu thông tin đăng nhập",
+  "No saved credential": "Chưa lưu thông tin đăng nhập",
+  "Credential status unavailable": "Không có trạng thái thông tin đăng nhập"
 }

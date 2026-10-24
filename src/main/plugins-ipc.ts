@@ -2,10 +2,23 @@ import { app, dialog, shell, type BrowserWindow } from 'electron';
 import path from 'node:path';
 import { z } from 'zod';
 import { pluginManager } from './plugins/manager.js';
+import { hasSecret, secureStorageStatus, storedSecretsUnreadable } from './secrets.js';
 import { refreshPluginPublication } from './connection.js';
 import { rearmPluginRefresh } from './plugin-refresh.js';
 import { dialogLabel, mainText } from './main-texts.js';
 import { MAX_PLUGIN_LONGEST_CALL_SECONDS } from '../shared/plugins.js';
+import type { PluginSnapshot } from '../shared/plugins.js';
+
+async function credentialSnapshot(): Promise<PluginSnapshot> {
+  const state = pluginManager.snapshot();
+  if (!(await secureStorageStatus()).available || storedSecretsUnreadable()) return state;
+  await Promise.all(state.plugins.map(async plugin => {
+    const keys = new Set([...plugin.credentialKeys, ...(plugin.fields ?? []).filter(field => field.secret).map(field => field.key)]);
+    const entries = await Promise.all([...keys].map(async key => [key, await hasSecret(`plugin:${plugin.id}:${key}`)] as const));
+    plugin.credentialPresence = Object.fromEntries(entries);
+  }));
+  return state;
+}
 
 const values = z.record(z.string().min(1).max(128), z.string().max(16_384)).refine(value => Object.keys(value).length <= 64, 'At most 64 configuration fields');
 const source = z.object({
@@ -30,24 +43,24 @@ export function registerPluginIpc(
     const error = await shell.openPath(path.join(app.isPackaged ? process.resourcesPath : app.getAppPath(), 'THIRD-PARTY-NOTICES.txt'));
     if (error) throw new Error('Could not open the bundled Third-party Notices file.');
   });
-  handle('plugins:snapshot', async () => pluginManager.snapshot());
-  handle('plugins:install', async payload => { await pluginManager.install(install.parse(payload)); return pluginManager.snapshot(); });
+  handle('plugins:snapshot', credentialSnapshot);
+  handle('plugins:install', async payload => { await pluginManager.install(install.parse(payload)); return credentialSnapshot(); });
   handle('plugins:configure', async payload => {
     const input = identity.extend({ patch }).strict().parse(payload);
-    await pluginManager.configure(input.id, input.patch); return pluginManager.snapshot();
+    await pluginManager.configure(input.id, input.patch); return credentialSnapshot();
   });
   for (const action of ['restart', 'update', 'uninstall', 'authenticate', 'cancelAuthentication'] as const) handle(`plugins:${action}`, async payload => {
     await pluginManager[action](identity.strict().parse(payload).id);
     if (action === 'restart') await rearmPluginRefresh('plugins');
-    return pluginManager.snapshot();
+    return credentialSnapshot();
   });
   handle('plugins:enabled', async payload => {
     const input = identity.extend({ enabled: z.boolean() }).strict().parse(payload);
-    await pluginManager.setEnabled(input.id, input.enabled); return pluginManager.snapshot();
+    await pluginManager.setEnabled(input.id, input.enabled); return credentialSnapshot();
   });
   handle('plugins:tool', async payload => {
     const input = identity.extend({ name: z.string().min(1).max(256), enabled: z.boolean() }).strict().parse(payload);
-    await pluginManager.setToolEnabled(input.id, input.name, input.enabled); return pluginManager.snapshot();
+    await pluginManager.setToolEnabled(input.id, input.name, input.enabled); return credentialSnapshot();
   });
   handle('plugins:importBundle', async () => {
     const result = await dialog.showOpenDialog({ ...dialogLabel('Import MCP bundle'), properties: ['openFile'], filters: [{ name: mainText('MCP bundles'), extensions: ['mcpb'] }] });
@@ -56,7 +69,9 @@ export function registerPluginIpc(
   pluginManager.onChanged(() => {
     refreshPluginPublication('plugins');
     const window = getWindow();
-    if (window && !window.isDestroyed()) window.webContents.send('plugins:changed', pluginManager.snapshot());
+    if (window && !window.isDestroyed()) void credentialSnapshot().then(state => {
+      if (!window.isDestroyed()) window.webContents.send('plugins:changed', state);
+    }).catch(() => undefined);
     // The plugin snapshot repaints the Plugins panel, while AppState carries the exact
     // connector schema fingerprint used by the global ChatGPT-refresh reminder.
     publishStateChange();

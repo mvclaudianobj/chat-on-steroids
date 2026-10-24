@@ -306,6 +306,7 @@ function providerPanel(api: AppApi, changed: () => void): { paint: (settings: Br
   const host = element('brainProviders');
   const stateNodes = new Map<string, HTMLElement>();
   const keyNodes = new Map<string, HTMLElement>();
+  const keyInputs = new Map<string, HTMLInputElement>();
   let painted = false;
   const save = async (id: BrainProviderId, patch: Record<string, unknown>): Promise<boolean> => {
     try { await request(api, 'settings.set', { providers: { [id]: patch } }); changed(); return true; }
@@ -355,6 +356,7 @@ function providerPanel(api: AppApi, changed: () => void): { paint: (settings: Br
     const key = document.createElement('p'); key.className = 'brain-provider-state'; keyNodes.set(id, key);
     const password = field('Vault master password', '', 'password');
     const value = field('Key or token', '', 'password');
+    keyInputs.set(id, value.input);
     const actions = document.createElement('div'); actions.className = 'brain-provider-row';
     const run = async (action: string, payload: Record<string, unknown>, done: string): Promise<void> => {
       if (!password.input.value) { toast(t('Enter the vault master password first.')); password.input.focus(); return; }
@@ -375,6 +377,11 @@ function providerPanel(api: AppApi, changed: () => void): { paint: (settings: Br
     const state = stateNodes.get(row.id); const key = keyNodes.get(row.id);
     if (state) { state.dataset.state = row.state; state.textContent = `${providerStateText(row)}${row.detail ? ` · ${row.detail}` : ''}`; }
     if (key) key.textContent = row.hasKey ? t('Key in vault') : t('No key');
+    const input = keyInputs.get(row.id);
+    if (input) {
+      input.placeholder = row.hasKey ? '••••••••' : '';
+      input.setAttribute('aria-description', t(row.hasKey ? 'Key in vault' : 'No key'));
+    }
   }
   return {
     paint(settings) {

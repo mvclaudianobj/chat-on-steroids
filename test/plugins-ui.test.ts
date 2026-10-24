@@ -45,6 +45,23 @@ it('keeps credential edits private and stable while status updates arrive', asyn
   expect(document.body.textContent).not.toContain('never-show-this');
 });
 
+it('shows a saved credential only from secure-storage presence and never submits the mask', async () => {
+  state.plugins[0]!.credentialPresence = { TOKEN: true };
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  const password = document.querySelector<HTMLInputElement>('#pluginDialog input[type=password]')!;
+  expect(password.value).toBe('');
+  expect(password.placeholder).toBe('••••••••');
+  expect(password.getAttribute('aria-description')).toBe('Credential saved');
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click();
+  await tick();
+  expect(api.pluginsConfigure).toHaveBeenCalledWith('one', expect.objectContaining({ credentials: {} }));
+  state.plugins[0]!.credentialPresence = { TOKEN: false };
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  expect(document.querySelector<HTMLInputElement>('#pluginDialog input[type=password]')!.placeholder).toBe('');
+});
+
 it('saves a changed longest-call limit alone without a reconnect or connector-refresh reminder', async () => {
   state.plugins[0]!.longestCallSeconds = 120;
   state.plugins[0]!.fields = [{ key: 'REGION', label: 'Region' }];
