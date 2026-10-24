@@ -4,7 +4,7 @@
  * barge-in, optional continuous conversation and a visible turn state.
  */
 import { isApiConversationId } from '../shared/api-chat.js';
-import { responseTurnId } from '../shared/chronology.js';
+import { responseTurnId, type TimelineTurns } from '../shared/chronology.js';
 import type { DictationEvent } from '../shared/dictation.js';
 import type { SessionEvent } from '../shared/session.js';
 import {
@@ -136,6 +136,28 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   let phase: JarvisPhase = 'idle';
   let speechVoice = preferences.voice;
   let answer: { sessionId: string; turnId: string; splitter: JarvisSentenceSplitter; spoken: number } | null = null;
+  // The recorded question -> response relation also covers ordinary typed messages.
+  // Each selection/voice opt-in gets a new baseline so historical answers stay silent.
+  let typedWatch: {
+    sessionId: string; conversationId: string; ready: boolean; questions: Set<string>;
+    pending: Set<string>; spoken: Set<string>;
+  } | null = null;
+  let typedEpoch = 0;
+  const resetTypedWatch = (): void => { typedWatch = null; typedEpoch++; };
+  const typedSelection = () => {
+    const chat = selected();
+    return preferences.enabled && preferences.tts && consented && chat?.conversationId && eligible() === chat.id
+      ? { sessionId: chat.id, conversationId: chat.conversationId } : null;
+  };
+  const activeTypedWatch = () => {
+    const target = typedSelection();
+    if (!target) return null;
+    if (!typedWatch || typedWatch.sessionId !== target.sessionId || typedWatch.conversationId !== target.conversationId) {
+      resetTypedWatch();
+      typedWatch = { ...target, ready: false, questions: new Set(), pending: new Set(), spoken: new Set() };
+    }
+    return typedWatch;
+  };
   // A native outbox acceptance is NOT a ChatGPT turn. Only the browser's recorded
   // user_message with this exact inputId can bind the resulting assistant turn.
   let nativePending: { sessionId: string; inputId: string; generation: number } | null = null;
@@ -405,6 +427,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   }
   function cancel(): void {
     attempt++;
+    resetTypedWatch();
     owner = null;
     committed = '';
     finished = false;
@@ -461,6 +484,8 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     if (running || !preferences.enabled || !consented || !mode()) { paint(); return; }
     const target = eligible();
     if (!target) { paint(); return; }
+    // A new microphone turn supersedes any unfinished typed-reply watch.
+    resetTypedWatch();
     const id = ++attempt;
     owner = target;
     running = true;
@@ -598,6 +623,64 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   }
   let reading = false;
   let readAgain = false;
+  /** Only a newly observed, user-authored question with one *completed* linked response may speak. */
+  function readTypedFinal(
+    watch: NonNullable<typeof typedWatch>, events: SessionEvent[], turns: TimelineTurns | undefined
+  ): void {
+    const questions = events.filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+      event.kind === 'user_message' && !!event.messageId && event.inputDelivery !== 'offered');
+    if (!watch.ready) {
+      for (const event of questions) watch.questions.add(event.messageId!);
+      watch.ready = true;
+      return;
+    }
+    let newQuestion = false;
+    for (const event of questions) {
+      const id = event.messageId!;
+      if (watch.questions.has(id)) continue;
+      watch.questions.add(id);
+      if (!event.automatic && (!event.inputId || event.inputId !== nativePending?.inputId)) {
+        watch.pending.add(id);
+        newQuestion = true;
+      }
+    }
+    // A new typed question interrupts the last response rather than mixing both audios.
+    if (newQuestion && !answer && !nativePending && !running && (speech.speaking || speech.queued)) silence();
+    if (!turns || answer || nativePending || running || stopping) return;
+    for (const questionId of watch.pending) {
+      const linked = [...new Set(Object.entries(turns)
+        .filter(([, turn]) => turn.questionId === questionId)
+        .map(([id]) => responseTurnId(turns, id)))];
+      if (linked.length !== 1) continue;
+      const turnId = linked[0]!;
+      const key = `${questionId}:${turnId}`;
+      if (watch.spoken.has(key)) { watch.pending.delete(questionId); continue; }
+      const completed = events.some(event => event.kind === 'turn_end' && event.outcome === 'completed' &&
+        !!event.turnId && responseTurnId(turns, event.turnId) === turnId);
+      if (!completed) continue;
+      const messages = new Map<string, Extract<SessionEvent, { kind: 'assistant_message' }>>();
+      for (const event of events) {
+        if (event.kind === 'assistant_message' && event.final && event.turnId &&
+            responseTurnId(turns, event.turnId) === turnId) messages.set(event.messageId ?? String(event.seq), event);
+      }
+      const text = [...messages.values()].map(event => event.message.text).join('\n\n');
+      if (!text.trim()) continue;
+      watch.spoken.add(key);
+      watch.pending.delete(questionId);
+      if (speaks()) {
+        const sentences = new JarvisSentenceSplitter().finish(text);
+        let spoken = 0;
+        const bounded = sentences.filter(sentence => { spoken += sentence.length; return spoken <= MAX_SPOKEN; });
+        if (bounded.length) {
+          if (speech.speaking || speech.queued) silence();
+          speech.enqueue(bounded);
+        }
+      }
+    }
+    // Session reads are bounded, so keep only identities that can still be observed.
+    while (watch.questions.size > 160) watch.questions.delete(watch.questions.values().next().value!);
+    while (watch.spoken.size > 160) watch.spoken.delete(watch.spoken.values().next().value!);
+  }
   /** Streamed answer text becomes speech sentence by sentence while the chat is still writing. */
   async function readAnswer(): Promise<void> {
     if (reading) { readAgain = true; return; }
@@ -607,12 +690,18 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         readAgain = false;
         let current = answer;
         const pending = nativePending;
-        if (!current && !pending) return;
+        const typed = activeTypedWatch();
+        const epoch = typedEpoch;
+        if (!current && !pending && !typed) return;
         if (!api.getSession) return;
-        const sessionId = (current ?? pending)!.sessionId;
+        const sessionId = (current ?? pending ?? typed)!.sessionId;
         const reply = await api.getSession(sessionId, { limit: 80 });
         if (!reply.ok || answer !== current || nativePending !== pending) continue;
+        if (typed && (typed !== typedWatch || epoch !== typedEpoch)) continue;
         if (selected()?.id !== sessionId || !consented || !preferences.enabled) { cancel(); return; }
+        if (typed && typedSelection()?.conversationId === typed.conversationId) {
+          readTypedFinal(typed, reply.data.events, reply.data.summary?.timelineTurns);
+        }
         if (pending) {
           if (pending.generation !== attempt || phase !== 'thinking') { nativePending = null; return; }
           const submitted = reply.data.events.filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
@@ -663,7 +752,9 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   }
   api.onSessionChanged(change => {
     const expected = answer ?? nativePending;
-    if (!expected || (change?.sessionIds && !change.sessionIds.includes(expected.sessionId))) return;
+    const watch = typedSelection();
+    if (!expected && !watch) return;
+    if (change?.sessionIds && !change.sessionIds.includes((expected ?? watch)!.sessionId)) return;
     void readAnswer();
   });
 
@@ -674,6 +765,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   });
   function persist(): void {
     if (running || stopping || nativePending || answer || phase === 'thinking' || speech.speaking) cancel();
+    resetTypedWatch();
     const before = JSON.stringify(preferences.provider);
     preferences = parseJarvisPreferences({
       enabled: enable.checked, key: key.value, language: language.value, tts: tts.checked, voice: voice.value, engine: engine?.value ?? preferences.engine,
@@ -686,6 +778,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     else if (preferences.enabled) refresh();
     paintProvider();
     paint();
+    void readAnswer();
   }
   for (const element of [enable, key, language, tts, voice, engine, audioModel, ttsEngine, continuous, earcons, providerUrl, sttMode, sttModel, ttsModel, providerVoice]) element?.addEventListener('change', persist);
   preset?.addEventListener('change', () => {
@@ -737,7 +830,13 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       }).catch(error => { if (providerStatus) providerStatus.textContent = error instanceof Error ? error.message.slice(0, 240) : 'Voice test failed.'; })
       .finally(() => { button.disabled = false; });
   });
-  consent.addEventListener('change', () => { consented = consent.checked; if (!consented) cancel(); paint(); });
+  consent.addEventListener('change', () => {
+    consented = consent.checked;
+    if (!consented) cancel();
+    resetTypedWatch();
+    paint();
+    if (consented) void readAnswer();
+  });
   const fillVoices = (): void => {
     if (!systemSpeech()) return;
     const voices = speechSynthesis.getVoices();
@@ -759,7 +858,12 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   });
   window.addEventListener('keyup', event => { if (held && event.code === preferences.key) { held = false; stop(); } }, true);
   window.addEventListener('blur', () => { held = false; cancel(); });
-  window.addEventListener('jarvis:selection', () => { if (running || stopping || nativePending || answer || phase === 'thinking' || speech.speaking) cancel(); paint(); });
+  window.addEventListener('jarvis:selection', () => {
+    if (running || stopping || nativePending || answer || phase === 'thinking' || speech.speaking) cancel();
+    resetTypedWatch();
+    paint();
+    void readAnswer();
+  });
   document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });
   window.addEventListener('beforeunload', cancel, { once: true });
   onLanguageChange(paint);

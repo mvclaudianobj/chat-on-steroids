@@ -22,7 +22,8 @@ afterEach(() => { page?.window.close(); page = null; vi.unstubAllGlobals(); vi.r
 
 async function fixture(options: { tts?: boolean; continuous?: boolean; providerTranscribe?: 'ok' | 'fail';
   selected?: { id: string; conversationId: string | null; engine?: string } | null; consent?: boolean; noAudioEngines?: boolean;
-  g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; microphoneDenied?: boolean } = {}) {
+  g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; microphoneDenied?: boolean;
+  initialEvents?: unknown[]; initialTurns?: Record<string, { origin: number; time: number; questionId: string }> } = {}) {
   page = new JSDOM(skeleton, { url: 'https://local.test/' });
   const window = page.window;
   window.localStorage.setItem('chat-marks.jarvis.settings.v1', JSON.stringify({ enabled: options.enabled !== false, tts: options.tts ?? true, continuous: options.continuous ?? false, earcons: false,
@@ -59,8 +60,9 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   vi.spyOn(URL, 'createObjectURL').mockImplementation(() => `blob:jarvis-${++urls}`);
   vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
   let changed: (change?: { sessionIds?: string[] }) => void = () => undefined;
-  let events: unknown[] = [];
-  let sessionSummary: { timelineTurns: Record<string, { origin: number; time: number; questionId: string }> } | null = null;
+  let events: unknown[] = options.initialEvents ?? [];
+  let sessionSummary: { timelineTurns: Record<string, { origin: number; time: number; questionId: string }> } | null =
+    options.initialTurns ? { timelineTurns: options.initialTurns } : null;
   const transcribe = vi.fn(async (engine: string, ..._rest: unknown[]) => engine === 'provider' && options.providerTranscribe === 'fail'
     ? { ok: false as const, error: 'provider down' } : { ok: true as const, data: `text from ${engine}` });
   const speak = vi.fn(async (_voice: unknown, text: string) => ({ ok: true as const, data: { mime: 'audio/mpeg', bytes: new TextEncoder().encode(text) } }));
@@ -114,8 +116,83 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
     changed({ sessionIds: [selected?.id ?? ''] });
     await flush();
   };
-  return { element, hold, release, flush, stream, nativeEvents, transcribe, speak, speakCancel, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat, openSettings, openChat };
+  const switchTo = (target: { id: string; conversationId: string | null; engine?: string }) => {
+    selected = target;
+    window.dispatchEvent(new window.Event('jarvis:selection'));
+  };
+  return { element, hold, release, flush, stream, nativeEvents, switchTo, transcribe, speak, speakCancel, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat, openSettings, openChat };
 }
+
+describe('Jarvis automatic voice for typed ChatGPT messages', () => {
+  const chatA = { id: 'typed-chat-A', conversationId: 'conversation-A', engine: 'chatgpt' };
+  const chatB = { id: 'typed-chat-B', conversationId: 'conversation-B', engine: 'chatgpt' };
+  const question = (id: string, seq: number, extra: Record<string, unknown> = {}) => ({
+    kind: 'user_message', messageId: id, turnId: `user-${id}`, seq,
+    message: { text: 'Typed message', chars: 13, truncated: false }, ...extra
+  });
+  const answer = (id: string, turnId: string, text: string, seq: number) => ({
+    kind: 'assistant_message', messageId: id, turnId, seq, final: true,
+    message: { text, chars: text.length, truncated: false }
+  });
+  const completed = (turnId: string, seq: number, outcome = 'completed') => ({ kind: 'turn_end', turnId, seq, outcome });
+  const turns = (questionId: string, turnId: string, origin: number) => ({
+    [turnId]: { questionId, origin, time: origin * 100 }
+  });
+
+  it('speaks one new typed final once, while ignoring historical final and interim messages', async () => {
+    const old = [question('old-q', 1), answer('old-a', 'old-turn', 'Historico nunca deve falar.', 2), completed('old-turn', 3)];
+    const f = await fixture({ selected: chatA, initialEvents: old, initialTurns: turns('old-q', 'old-turn', 1) });
+    expect(f.speak).not.toHaveBeenCalled();
+    const newQuestion = question('new-q', 4);
+    await f.nativeEvents([...old, newQuestion], { ...turns('old-q', 'old-turn', 1), ...turns('new-q', 'new-turn', 5) });
+    await f.nativeEvents([...old, newQuestion, answer('new-a', 'new-turn', 'A resposta digitada chegou. Proxima parte.', 6)],
+      { ...turns('old-q', 'old-turn', 1), ...turns('new-q', 'new-turn', 5) });
+    expect(f.speak).not.toHaveBeenCalled();
+    const finished = [...old, newQuestion, answer('new-a', 'new-turn', 'A resposta digitada chegou. Proxima parte.', 6), completed('new-turn', 7)];
+    await f.nativeEvents(finished, { ...turns('old-q', 'old-turn', 1), ...turns('new-q', 'new-turn', 5) });
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['A resposta digitada chegou.', 'Proxima parte.']);
+    await f.nativeEvents(finished, { ...turns('old-q', 'old-turn', 1), ...turns('new-q', 'new-turn', 5) });
+    expect(f.speak).toHaveBeenCalledTimes(2);
+    expect(f.sendInput).not.toHaveBeenCalled();
+    expect(f.transcribe).not.toHaveBeenCalled();
+  });
+
+  it('rejects ambiguous question links, failed turns and automatic follow-up messages', async () => {
+    const f = await fixture({ selected: chatA });
+    await f.nativeEvents([
+      question('ambiguous-q', 1), question('auto-q', 2, { automatic: true }), question('failed-q', 3),
+      answer('amb-a', 'amb-1', 'Nunca falar ambiguo.', 4), completed('amb-1', 5),
+      answer('auto-a', 'auto-turn', 'Nunca falar automático.', 6), completed('auto-turn', 7),
+      answer('fail-a', 'failed-turn', 'Falha não deve falar.', 8), completed('failed-turn', 9, 'stopped')
+    ], { ...turns('ambiguous-q', 'amb-1', 4), ...turns('ambiguous-q', 'amb-2', 6),
+      ...turns('auto-q', 'auto-turn', 7), ...turns('failed-q', 'failed-turn', 8) });
+    expect(f.speak).not.toHaveBeenCalled();
+  });
+
+  it('interrupts stale playback on a new typed question and on chat switch or voice toggle', async () => {
+    const f = await fixture({ selected: chatA });
+    await f.nativeEvents([question('one', 1), answer('a1', 'turn1', 'Primeira resposta antiga.', 2), completed('turn1', 3)], turns('one', 'turn1', 2));
+    expect(f.players[0]?.paused).toBe(false);
+    await f.nativeEvents([question('one', 1), answer('a1', 'turn1', 'Primeira resposta antiga.', 2), completed('turn1', 3), question('two', 4)],
+      { ...turns('one', 'turn1', 2), ...turns('two', 'turn2', 5) });
+    expect(f.players[0]?.paused).toBe(true);
+    await f.nativeEvents([question('two', 4), answer('a2', 'turn2', 'Segunda resposta atual.', 5), completed('turn2', 6)], turns('two', 'turn2', 5));
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Primeira resposta antiga.', 'Segunda resposta atual.']);
+    f.switchTo(chatB); await f.flush();
+    expect(f.players[1]?.paused).toBe(true);
+    // The new selection baselines its already-recorded history; no old reply is replayed.
+    f.switchTo(chatA); f.switchTo(chatB); await f.flush();
+    expect(f.speak).toHaveBeenCalledTimes(2);
+    f.switchTo(chatA); await f.flush();
+    await f.nativeEvents([question('third', 10), answer('a3', 'third-turn', 'Terceira fala antes de desligar.', 11), completed('third-turn', 12)], turns('third', 'third-turn', 11));
+    expect(f.speak).toHaveBeenCalledTimes(3);
+    const tts = f.element<HTMLInputElement>('jarvisTts'); tts.checked = false; tts.dispatchEvent(new page!.window.Event('change'));
+    await f.flush();
+    expect(f.players[2]?.paused).toBe(true);
+    await f.nativeEvents([question('fourth', 13), answer('a4', 'fourth-turn', 'Nunca falar desligado.', 14), completed('fourth-turn', 15)], turns('fourth', 'fourth-turn', 14));
+    expect(f.speak).toHaveBeenCalledTimes(3);
+  });
+});
 
 describe('Jarvis native GPT discovery and setup', () => {
   const normal = { id: 'native-chat-01', conversationId: 'chatgpt-realistic', engine: 'chatgpt' };
