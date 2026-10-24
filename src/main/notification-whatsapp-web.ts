@@ -123,7 +123,9 @@ async function connect(): Promise<void> {
   });
   active.ev.on('connection.update', update => {
     if (epoch !== generation) return;
-    if (update.qr) {
+    // A delayed pairing update must not replace an already authenticated socket
+    // with an expiring QR or close that live connection on its expiry timer.
+    if (update.qr && status.state !== 'connected') {
       if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
       if (qrRefreshDeadline) { clearTimeout(qrRefreshDeadline); qrRefreshDeadline = null; }
       const validity = status.state === 'qr' ? REFRESH_QR_VALIDITY_MS : FIRST_QR_VALIDITY_MS;

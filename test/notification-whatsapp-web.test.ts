@@ -112,6 +112,23 @@ it('connects, emits pairing QR without real network and sends to a validated JID
   expect(sock.sendMessage).toHaveBeenCalledWith('5511999999999@s.whatsapp.net', { text: 'synthetic notice' });
   await expect(web.sendWhatsAppWeb('../bad', 'no')).rejects.toThrow('Invalid WhatsApp number');
 });
+it('does not replace an authenticated connection with a late pairing QR', async () => {
+  await web.startWhatsAppWeb();
+  const active = mocks.sockets.at(-1)!;
+  active.ev.emit('connection.update', { connection: 'open' });
+  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected', stage: 'ready' });
+  vi.useFakeTimers();
+  try {
+    // A delayed QR from the same socket cannot regress an authenticated session
+    // or arm the QR expiry timeout that would close the already connected socket.
+    active.ev.emit('connection.update', { qr: 'STALE-SYNTHETIC-QR' });
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected', stage: 'ready' });
+    expect(await web.getWhatsAppWebStatus()).not.toHaveProperty('qr');
+    await vi.advanceTimersByTimeAsync(65_100);
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected', stage: 'ready' });
+    expect(active.ws.close).not.toHaveBeenCalled();
+  } finally { vi.useRealTimers(); }
+});
 it('disconnect closes socket, removes local credentials, and prevents auto reconnect', async () => {
   await web.startWhatsAppWeb();
   const sock = mocks.sockets.at(-1)!;
