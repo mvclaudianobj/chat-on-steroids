@@ -33,7 +33,7 @@ const fakeBaileys = {
   __esModule: true,
   DisconnectReason: { loggedOut: 401 },
   useMultiFileAuthState: async () => ({ state: { creds: { registered: false } }, saveCreds: async () => undefined }),
-  default: () => {
+  makeWASocket: () => {
     const attempt = sockets.length + 1;
     attempts.push({ attempt, startedAt: Date.now(), closes: 0 });
     const socket = { ev: new EventEmitter(), ws: { close: async () => { attempts[attempt - 1].closes++; } }, logout: async () => undefined };
