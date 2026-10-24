@@ -5,6 +5,7 @@ const fixture = vi.hoisted(() => ({
   agent: null as Record<string, unknown> | null,
   waiting: [] as string[],
   inputs: [] as Array<Record<string, unknown>>,
+  company: { demo: true, delegation: { binding: null as null | { conversationId: string } }, requests: [] as Array<Record<string, unknown>> },
   active: false,
   activityExpiresAt: null as number | null
 }));
@@ -14,6 +15,9 @@ vi.mock('../src/main/agents.js', () => ({
 }));
 vi.mock('../src/main/approval-wait.js', () => ({
   approvalWaitingChats: () => fixture.waiting
+}));
+vi.mock('../src/main/company-store.js', () => ({
+  getCompany: async () => fixture.company
 }));
 vi.mock('../src/main/bridge.js', () => ({
   sessionInputActivity: () => ({ possible: fixture.active }),
@@ -39,6 +43,9 @@ beforeEach(() => {
   fixture.agent = null;
   fixture.waiting = [];
   fixture.inputs = [];
+  fixture.company.demo = true;
+  fixture.company.delegation.binding = null;
+  fixture.company.requests = [];
   fixture.active = false;
   fixture.activityExpiresAt = null;
 });
@@ -79,6 +86,13 @@ describe('local archive permission boundary', () => {
     fixture.agent.awaitingAck = 1;
     await expect(archiveSessionLocally('local-session', true)).rejects.toThrow('verified completed');
     fixture.agent.awaitingAck = 0;
+    expect((await archiveSessionLocally('local-session', true)).archivedAt).toBe(123);
+  });
+  it('keeps a live Company-bound chat visible until the trusted binding is released', async () => {
+    fixture.company.demo = false;
+    fixture.company.delegation.binding = { conversationId: 'normal-chat' };
+    await expect(archiveSessionLocally('local-session', true)).rejects.toThrow('Company owner');
+    fixture.company.delegation.binding = { conversationId: 'different-chat' };
     expect((await archiveSessionLocally('local-session', true)).archivedAt).toBe(123);
   });
 });
