@@ -93,6 +93,9 @@ async function failure(response: Response, what: string): Promise<Error> {
     if (typeof message === 'string') detail = message;
   } catch { /* not JSON */ }
   detail = redact(detail.replace(/\s+/g, ' ').trim()).slice(0, 160);
+  // A status-only log allows support to distinguish model, quota, and request
+  // failures without logging credentials, transcripts, or captured audio.
+  logWarn(`jarvis: ${what} returned HTTP ${response.status}`);
   return new Error(`Voice provider ${what} returned HTTP ${response.status}${detail ? `: ${detail}` : '.'}`);
 }
 
@@ -152,7 +155,7 @@ export async function jarvisVoiceStatus(config: JarvisVoiceConfig, signal = new 
     result.primary = !!(await deps.credential('primary', origin));
     result.fallback = !!(await deps.credential('fallback', origin));
     if (origin === 'https://generativelanguage.googleapis.com') {
-      result.stt = ['gemini-3.8-flash', 'gemini-3.8-flash-lite'];
+      result.stt = ['gemini-3.5-transcribe'];
       result.tts = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
       result.models = [...result.stt, ...result.tts];
       if (!result.primary && !result.fallback) result.error = 'Save your Google AI Studio key to enable Gemini speech.';
@@ -193,14 +196,13 @@ async function viaGeminiTranscription(
   if (!/^gemini-[a-zA-Z0-9.-]+$/.test(config.sttModel) || /-tts$/.test(config.sttModel)) {
     throw new Error('Select a Gemini audio-understanding model for transcription.');
   }
-  const hint = language && /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/.test(language) ? ` The expected language is ${language}.` : '';
+  const codes = language && /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/.test(language) ? [language] : [];
   const response = await voiceRequest(config, `/models/${config.sttModel}:generateContent`, () => ({
     method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
     body: JSON.stringify({ contents: [{ role: 'user', parts: [
-      { text: `Transcribe the speech in this recording verbatim in its original language.${hint} Output the spoken words only, without quotes, translation, descriptions or commentary. If there is no speech, output nothing.` },
       { inlineData: { mimeType: mime, data: Buffer.from(bytes).toString('base64') } }
-    ] }], generationConfig: { temperature: 0 } })
-  }), signal);
+    ] }], generationConfig: { audioTranscriptionConfig: { languageCodes: codes, mode: 'VERBATIM' } } })
+  }), timeout(signal, 45_000));
   if (!response.ok) throw await failure(response, 'Gemini transcription');
   const parsed = JSON.parse((await readBounded(response, MAX_JSON)).toString()) as {
     candidates?: { content?: { parts?: { text?: unknown }[] } }[]

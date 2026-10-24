@@ -111,7 +111,12 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   const showProvider = (): void => {
     const config = preferences.provider;
     if (providerUrl) providerUrl.value = config.baseUrl;
-    if (sttMode) sttMode.value = config.sttMode;
+    if (sttMode) {
+      sttMode.value = config.sttMode;
+      // Google's transcription endpoint is not OpenAI's /audio/transcriptions
+      // or /chat/completions. Both choices would otherwise imply a fake switch.
+      sttMode.disabled = config.baseUrl === 'https://generativelanguage.googleapis.com/v1beta';
+    }
     if (sttModel) sttModel.value = config.sttModel;
     if (ttsModel) ttsModel.value = config.ttsModel;
     if (providerVoice) providerVoice.value = config.voice;

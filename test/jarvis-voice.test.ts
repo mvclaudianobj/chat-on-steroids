@@ -98,25 +98,25 @@ describe('Google Gemini TTS provider contract', () => {
   });
   it('transcribes microphone WebM in PT-BR through Google generateContent with a vault-scoped key', async () => {
     const fetchStub = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
-      expect(String(url)).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent');
+      expect(String(url)).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent');
       expect((options?.headers as Record<string, string>)['x-goog-api-key']).toBe(PRIMARY);
       expect((options?.headers as Record<string, string>).Authorization).toBeUndefined();
       const request = JSON.parse(String(options?.body));
-      expect(request.contents[0].parts[0].text).toContain('pt-BR');
-      expect(request.contents[0].parts[1].inlineData).toEqual({ mimeType: 'audio/webm', data: 'AQID' });
+      expect(request.contents[0].parts).toEqual([{ inlineData: { mimeType: 'audio/webm', data: 'AQID' } }]);
+      expect(request.generationConfig).toEqual({ audioTranscriptionConfig: { languageCodes: ['pt-BR'], mode: 'VERBATIM' } });
       return Response.json({ candidates: [{ content: { parts: [{ text: '  "Olá, Jarvis!"  ' }] } }] });
     });
     configureJarvisVoiceForTests({
       credential: async (_slot, origin) => origin === 'https://generativelanguage.googleapis.com' ? { header: 'x-goog-api-key', value: PRIMARY } : null,
       fetch: fetchStub as typeof fetch
     });
-    expect(await transcribeJarvisVoice({ ...google(), sttModel: 'gemini-3.8-flash' }, 'audio/webm', new Uint8Array([1, 2, 3]), 'pt-BR', signal())).toBe('Olá, Jarvis!');
+    expect(await transcribeJarvisVoice({ ...google(), sttModel: 'gemini-3.5-transcribe' }, 'audio/webm', new Uint8Array([1, 2, 3]), 'pt-BR', signal())).toBe('Olá, Jarvis!');
     expect(fetchStub).toHaveBeenCalledOnce();
   });
   it('rejects missing Google keys without uploading recorded speech', async () => {
     const fetchStub = vi.fn();
     configureJarvisVoiceForTests({ credential: async () => null, fetch: fetchStub });
-    await expect(transcribeJarvisVoice({ ...google(), sttModel: 'gemini-3.8-flash' }, 'audio/wav', new Uint8Array([1]), 'pt-BR', signal()))
+    await expect(transcribeJarvisVoice({ ...google(), sttModel: 'gemini-3.5-transcribe' }, 'audio/wav', new Uint8Array([1]), 'pt-BR', signal()))
       .rejects.toThrow('Save your Google AI Studio key');
     expect(fetchStub).not.toHaveBeenCalled();
   });

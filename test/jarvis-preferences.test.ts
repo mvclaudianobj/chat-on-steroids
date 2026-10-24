@@ -33,11 +33,14 @@ describe('Jarvis preference admission', () => {
       provider: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: '', ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' },
       version: 2
     });
-    expect(fromRevisionSeven.provider.sttModel).toBe('gemini-3.8-flash');
+    expect(fromRevisionSeven.provider.sttModel).toBe('gemini-3.5-transcribe');
     expect(jarvisVoiceSttReady(fromRevisionSeven.provider)).toBe(true);
     expect(fromRevisionSeven.provider.ttsModel).toBe('gemini-3.8-flash-tts');
     expect(fromRevisionSeven.ttsEngine).toBe('provider');
-    expect(JARVIS_VOICE_PRESETS['Google Gemini TTS'].sttModel).toBe('gemini-3.8-flash');
+    expect(JARVIS_VOICE_PRESETS['Google Gemini TTS'].sttModel).toBe('gemini-3.5-transcribe');
+    expect(parseJarvisPreferences({ provider: { ...fromRevisionSeven.provider, sttModel: 'gemini-3.8-flash' } }).provider.sttModel).toBe('gemini-3.5-transcribe');
+    expect(parseJarvisPreferences({ provider: { ...fromRevisionSeven.provider, sttModel: 'gemini-3.8-flash-lite' } }).provider.sttModel).toBe('gemini-3.5-transcribe');
+    expect(parseJarvisPreferences({ provider: { ...fromRevisionSeven.provider, sttModel: 'gemini-custom-audio' } }).provider.sttModel).toBe('gemini-custom-audio');
     expect(parseJarvisPreferences({ provider: { baseUrl: 'https://g4f.space/v1', sttModel: '' } }).provider.sttModel).toBe('');
   });
 });

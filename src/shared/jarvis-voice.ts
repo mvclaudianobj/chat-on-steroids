@@ -64,9 +64,11 @@ export function parseJarvisVoiceConfig(value: unknown): JarvisVoiceConfig {
   return {
     baseUrl,
     sttMode: data.sttMode === 'chat-audio' ? 'chat-audio' : 'transcriptions',
-    // Revision -7 shipped Gemini TTS with an empty STT model. Upgrade those saved
-    // settings without ever touching the saved provider keys or selected voice.
-    sttModel: model(text('sttModel', 200)) || (baseUrl === 'https://generativelanguage.googleapis.com/v1beta' ? 'gemini-3.8-flash' : ''),
+    // Revisions -7/-8 shipped absent/generic Gemini STT models. Migrate only
+    // those known defaults; preserve explicit custom choices and Vault entries.
+    sttModel: baseUrl === 'https://generativelanguage.googleapis.com/v1beta' &&
+      (!model(text('sttModel', 200)) || ['gemini-3.8-flash', 'gemini-3.8-flash-lite'].includes(model(text('sttModel', 200))))
+      ? 'gemini-3.5-transcribe' : model(text('sttModel', 200)),
     ttsModel: model(text('ttsModel', 200)),
     voice: VOICE.test(text('voice', 64)) ? text('voice', 64) : ''
   };
@@ -79,7 +81,7 @@ export const jarvisVoiceTtsReady = (config: JarvisVoiceConfig): boolean => !!con
 /** Presets fill only public settings; keys are still entered by the user. */
 export const JARVIS_VOICE_PRESETS = {
   'Google Gemini TTS': {
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: 'gemini-3.8-flash',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: 'gemini-3.5-transcribe',
     ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon'
   },
   'g4f.space': {
