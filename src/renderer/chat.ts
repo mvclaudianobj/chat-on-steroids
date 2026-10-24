@@ -165,6 +165,11 @@ let initialized = false;
 let visible = false;
 
 let sessions: SessionSummary[] = [];
+let archivedSessions: SessionSummary[] = [];
+let archivedTotal = 0;
+let archiveCursor: { updatedAt: number; id: string } | null = null;
+let archiveQuery = '';
+let archiveLoadGeneration = 0;
 let pressure = new Map<string, TokenPressure>();
 let sessionTotal = 0;
 let sessionPageCursor: { updatedAt: number; id: string } | null = null;
@@ -1179,6 +1184,12 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     title: () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."),
     run: () => void deleteSession(summary.id)
   };
+  items.push({
+    action: summary.archivedAt ? 'restore' : 'archive', icon: 'i-folder',
+    label: () => summary.archivedAt ? t('Restore') : t('Archive'),
+    title: () => summary.archivedAt ? t('Restore chat to the main list') : t('Move chat to Archived without deleting its history'),
+    run: () => void changeArchiveStatus(summary.id, !summary.archivedAt)
+  });
   if (isUnattributedSession(summary)) {
     // Strict mode cannot trust an unattributed stream by definition. Do not offer an "Allow"
     // that the kernel will intentionally ignore; the Settings checkbox explains that
@@ -1560,6 +1571,53 @@ async function deleteSession(id: string): Promise<void> {
   await loadSessions();
 }
 
+async function changeArchiveStatus(id: string, archived: boolean): Promise<void> {
+  const result = await run(api.archiveSession(id, archived));
+  if (!result) return;
+  if (archived) {
+    sessions = sessions.filter(row => row.id !== id);
+    sessionTotal = Math.max(0, sessionTotal - 1);
+    if (selectedId === id) selectedId = null;
+  } else {
+    archivedSessions = archivedSessions.filter(row => row.id !== id);
+    mergeSessionRows([result]);
+  }
+  if (archived) toast(t('Chat archived'));
+  else toast(t('Chat restored'));
+  await Promise.all([loadSessions('changed'), loadArchivedSessions()]);
+}
+
+async function loadArchivedSessions(append = false): Promise<void> {
+  const generation = ++archiveLoadGeneration;
+  const page = await run(api.listSessions({
+    archived: true, limit: SESSION_PAGE_SIZE,
+    ...(archiveQuery ? { search: archiveQuery } : {}),
+    ...(append && archiveCursor ? { cursor: archiveCursor } : {})
+  }));
+  if (!page || generation !== archiveLoadGeneration) return;
+  archivedSessions = append ? [...archivedSessions, ...page.sessions.filter(row => !archivedSessions.some(old => old.id === row.id))] : page.sessions;
+  archiveCursor = page.nextCursor;
+  archivedTotal = page.total;
+  paintArchivedSessions();
+}
+
+function paintArchivedSessions(): void {
+  const list = $('archivesList');
+  const section = $('archivesSection');
+  const count = $('archivesCount');
+  count.textContent = String(archivedTotal);
+  const rows = archivedSessions.map(summary => {
+    const row = sessionRow(summary);
+    row.classList.add('archived-session-row');
+    return row;
+  });
+  list.replaceChildren(...rows);
+  if (!rows.length) list.append(el('p', 'empty', () => t('No archived chats')));
+  const more = $<HTMLButtonElement>('archivesMore');
+  more.hidden = !archiveCursor;
+  section.querySelector('summary')?.setAttribute('aria-label', t('Archived'));
+}
+
 function sortSessionRows(rows: SessionSummary[]): SessionSummary[] {
   return rows.sort((left, right) => {
     if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
@@ -1618,9 +1676,11 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     pressure = new Map(list.pressure.map((entry) => [entry.id, entry]));
   }
   if (selectedId !== null && !sessions.some((s) => s.id === selectedId)) {
-    selectedId = null;
-    detailFor = null;
-    detailCursor = null;
+    if (!archivedSessions.some(s => s.id === selectedId)) {
+      selectedId = null;
+      detailFor = null;
+      detailCursor = null;
+    }
   }
   paintSessions();
   chatSearch?.refresh();
@@ -1962,9 +2022,9 @@ function paintInbox(): void {
   const inProject = (entry: SessionSummary) => !inboxProject || projectGroup(entry.projectId) === inboxProject;
   // Everything but the unattributed bucket is a chat, a new one still waiting for its conversation too (#1759).
   const attributed = (entry: SessionSummary) => !isUnattributedSession(entry);
-  const shown = sessions.filter(entry => entry.origin?.kind !== 'worker' && attributed(entry) && inProject(entry));
+  const shown = sessions.filter(entry => !entry.archivedAt && entry.origin?.kind !== 'worker' && attributed(entry) && inProject(entry));
   // What the tree puts under "Unattributed activity", under the same disclosure here.
-  const diagnostics = sessions.filter(entry => entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
+  const diagnostics = sessions.filter(entry => !entry.archivedAt && entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
   const settles = new Set(shown.filter(entry => inboxSettled(entry, busy.get(entry.id))));
   // A settled chat ranks with the rest: one that failed long ago orders by recency and pages like any quiet chat.
   const rank = new Map(shown.map(entry => [entry.id, settles.has(entry) ? INBOX_REST : inboxRank(entry, busy.get(entry.id))]));
@@ -2116,7 +2176,7 @@ function inboxEmpty(id: string | null): HTMLElement {
 
 function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<{ id: string; scope: string }> {
   const ids = new Set(projects.filter(project => !project.ungrouped).map(project => project.id));
-  for (const entry of sessions) {
+  for (const entry of sessions.filter(row => !row.archivedAt)) {
     if (entry.origin?.kind === 'worker' || isUnattributedSession(entry)) continue;
     const id = groupOf(entry.projectId);
     if (id) ids.add(id);
@@ -2164,7 +2224,7 @@ function sidebarFocus(list: HTMLElement, owner: string, controls: string[]): () 
 function workerChildren(): Map<string, SessionSummary[]> {
   const children = new Map<string, SessionSummary[]>();
   const ids = new Set(sessions.map((entry) => entry.id));
-  for (const entry of sessions) {
+  for (const entry of sessions.filter(row => !row.archivedAt)) {
     if (entry.origin?.kind !== 'worker') continue;
     const parent = entry.origin.fromSessionId;
     const key = parent && ids.has(parent) && parent !== entry.id ? parent : 'other-workers';
@@ -2300,6 +2360,7 @@ function unattributedActivity(entries: SessionSummary[]): HTMLElement | null {
 }
 
 function paintSessions(): void {
+  paintArchivedSessions();
   paintApprovalNotice();
   // Keep the pointer's elected rows alive while asynchronous activity snapshots arrive.
   if (sidebarOrder?.interacting) return;
@@ -7950,6 +8011,7 @@ function scheduleReload(change?: SessionChange): void {
   if (!visible) { scheduleApprovalRead(); return; }
   if (change?.allTranscripts) changedTranscripts.all = true;
   for (const id of change?.sessionIds ?? []) changedTranscripts.ids.add(id);
+  if (($('archivesSection') as HTMLDetailsElement).open) void loadArchivedSessions();
   // One refresh owns the timer until its asynchronous read completes. Starting a
   // newer read every 400 ms can invalidate every result on a busy/slower store.
   if (listTimer !== undefined) { listRefreshDirty = true; return; }
@@ -8592,6 +8654,11 @@ export async function selectChatSession(id: string): Promise<void> {
 }
 
 function selectSession(id: string): void {
+  // An archived chat is still readable; selecting its row is never a restoration.
+  if (archivedSessions.some(row => row.id === id) && !sessions.some(row => row.id === id)) {
+    const archived = archivedSessions.find(row => row.id === id)!;
+    sessions = [...sessions, archived];
+  }
   newChatBranch = null;
   // An edit belongs to its chat: leaving it gives the composer back the draft it held before.
   if (editingQuestion) endEditing(true);
@@ -9342,6 +9409,15 @@ export function initChat(next: Deps): void {
   });
 
   $('chatRefresh').addEventListener('click', event => { event.preventDefault(); void refreshAll(); });
+  $('archivesSection').addEventListener('toggle', () => {
+    if (($('archivesSection') as HTMLDetailsElement).open) void loadArchivedSessions();
+  });
+  $<HTMLInputElement>('archivesSearch').addEventListener('input', event => {
+    archiveQuery = (event.target as HTMLInputElement).value.trim();
+    archiveCursor = null;
+    void loadArchivedSessions();
+  });
+  $('archivesMore').addEventListener('click', () => void loadArchivedSessions(true));
   $('markAllSeen').addEventListener('click', () => markAllSeen());
 
   $('copyHandoff').addEventListener('click', async () => {

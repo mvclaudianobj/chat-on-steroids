@@ -80,6 +80,16 @@
                 <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
                 <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
               </details>
+            </div>
+              <details class="sidebar-session-section" id="archivesSection">
+                <summary class="sidebar-session-heading"><span class="sidebar-session-label"><i class="ico ph ph-archive" aria-hidden="true"></i>Archived</span><span id="archivesCount" class="inbox-count" aria-label="Archived chats count">0</span></summary>
+                <div class="archived-browser">
+                  <input type="search" id="archivesSearch" placeholder="Search archived chats" aria-label="Search archived chats" autocomplete="off" />
+                  <div id="archivesList" aria-live="polite"></div>
+                  <button class="btn" id="archivesMore" type="button" hidden>Show more</button>
+                </div>
+              </details>
+            <div id="sessionListExtra">
               <details class="sidebar-session-section" id="cliModuleChats" open>
                 <summary class="sidebar-session-heading" id="cliModuleChatsHeading">
                   <span class="sidebar-session-label"><svg class="disclosure-chevron sidebar-section-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Terminals</span>

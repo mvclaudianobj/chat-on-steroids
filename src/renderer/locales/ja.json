@@ -4073,5 +4073,14 @@
   "Company operating mode": "会社の運用モード",
   "For other approval options, continue in ChatGPT if they are available there.": "他の承認オプションがある場合は、ChatGPT 上で続行してください。",
   "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "ChatGPT のボタンは押されましたが、承認カードはまだ表示されています。消えない場合はブラウザで確認してください。",
-  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "アプリでは ChatGPT の回答確認ができませんでした。ブラウザでこのチャットを開いて承認を完了してください。"
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "アプリでは ChatGPT の回答確認ができませんでした。ブラウザでこのチャットを開いて承認を完了してください。",
+  "Archive": "アーカイブ",
+  "Restore": "復元",
+  "Archived": "アーカイブ済み",
+  "Chat archived": "チャットをアーカイブしました",
+  "Chat restored": "チャットを復元しました",
+  "No archived chats": "アーカイブ済みチャットはありません",
+  "Search archived chats": "アーカイブ済みチャットを検索",
+  "Restore chat to the main list": "チャットをメイン一覧に復元",
+  "Move chat to Archived without deleting its history": "履歴を削除せずアーカイブに移動"
 }

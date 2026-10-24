@@ -4217,5 +4217,14 @@
   "Company operating mode": "Режим работы компании",
   "For other approval options, continue in ChatGPT if they are available there.": "Для других вариантов разрешения продолжите в ChatGPT, если они там доступны.",
   "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "Кнопка ChatGPT нажата, но запрос разрешения всё ещё виден. Если он не исчезнет, подтвердите в браузере.",
-  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT не подтвердил ответ в приложении. Откройте этот чат в браузере, чтобы завершить разрешение."
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT не подтвердил ответ в приложении. Откройте этот чат в браузере, чтобы завершить разрешение.",
+  "Archive": "Архивировать",
+  "Restore": "Восстановить",
+  "Archived": "Архив",
+  "Chat archived": "Чат архивирован",
+  "Chat restored": "Чат восстановлен",
+  "No archived chats": "Нет архивных чатов",
+  "Search archived chats": "Поиск архивных чатов",
+  "Restore chat to the main list": "Вернуть чат в основной список",
+  "Move chat to Archived without deleting its history": "Переместить чат в архив без удаления истории"
 }

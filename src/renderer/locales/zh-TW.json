@@ -4073,5 +4073,14 @@
   "Company operating mode": "公司運作模式",
   "For other approval options, continue in ChatGPT if they are available there.": "如需其他核准選項，請在 ChatGPT 中繼續操作（如果有提供）。",
   "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "已點擊 ChatGPT 按鈕，但授權卡片仍顯示。如果未消失，請在瀏覽器中確認。",
-  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT 未在應用程式中確認回覆。請在瀏覽器中開啟此對話以完成授權。"
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT 未在應用程式中確認回覆。請在瀏覽器中開啟此對話以完成授權。",
+  "Archive": "封存",
+  "Restore": "還原",
+  "Archived": "已封存",
+  "Chat archived": "聊天已封存",
+  "Chat restored": "聊天已還原",
+  "No archived chats": "沒有封存的聊天",
+  "Search archived chats": "搜尋封存的聊天",
+  "Restore chat to the main list": "將聊天還原至主要清單",
+  "Move chat to Archived without deleting its history": "將聊天移至封存而不刪除歷史紀錄"
 }

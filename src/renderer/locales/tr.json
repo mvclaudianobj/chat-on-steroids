@@ -4121,5 +4121,14 @@
   "Company operating mode": "Şirket çalışma modu",
   "For other approval options, continue in ChatGPT if they are available there.": "Diğer onay seçenekleri mevcutsa ChatGPT üzerinden devam edin.",
   "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "ChatGPT düğmesine basıldı ancak izin kartı hâlâ görünüyor. Kaybolmazsa tarayıcıda onaylayın.",
-  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT uygulamada yanıtı doğrulamadı. İzni tamamlamak için bu sohbeti tarayıcıda açın."
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT uygulamada yanıtı doğrulamadı. İzni tamamlamak için bu sohbeti tarayıcıda açın.",
+  "Archive": "Arşivle",
+  "Restore": "Geri yükle",
+  "Archived": "Arşivlenenler",
+  "Chat archived": "Sohbet arşivlendi",
+  "Chat restored": "Sohbet geri yüklendi",
+  "No archived chats": "Arşivlenen sohbet yok",
+  "Search archived chats": "Arşivlenen sohbetleri ara",
+  "Restore chat to the main list": "Sohbeti ana listeye geri yükle",
+  "Move chat to Archived without deleting its history": "Geçmişi silmeden sohbeti arşive taşı"
 }

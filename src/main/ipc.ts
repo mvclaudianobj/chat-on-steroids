@@ -158,6 +158,7 @@ import {
   readToolEditReview,
   withSessionMutationFence
 } from './session/store.js';
+import { archiveSessionLocally } from './session/local-archive.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
@@ -1499,16 +1500,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // ------------------------------------------------------------- sessions
 
   handle('sessions:list', async (payload) => {
-    const { cursor, limit, projectId } = z
+    const { cursor, limit, projectId, archived, search } = z
       .object({
         cursor: sessionListCursorSchema.optional(),
         // Keep one renderer payload small even when the store can index much more history.
         limit: z.number().int().min(1).max(60).optional(),
         // One project's own pages: expanding a project must not page the whole history (#1190).
         projectId: z.string().regex(/^[a-f0-9-]{36}$/i).optional()
+        ,archived: z.boolean().optional(),
+        search: z.string().trim().max(150).optional()
       })
       .parse(payload ?? {});
-    const list = await readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
+    const list = await readSessionList({ cursor, limit: limit ?? 60, archived, search, ...(projectId ? { projectId } : {}) });
     // Chat Marks: each API chat names its engine, for the sidebar's chat type icon.
     return { ...list, sessions: await withChatEngines(list.sessions) };
   });
@@ -1840,6 +1843,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     else await clearSessionName(id);
     notifyChanged(id);
     return true;
+  });
+  handle('sessions:archive', async (payload) => {
+    const { id, archived } = sessionIdArg.extend({ archived: z.boolean() }).parse(payload);
+    const summary = await archiveSessionLocally(id, archived);
+    notifyChanged(id);
+    return summary;
   });
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);

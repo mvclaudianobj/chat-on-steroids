@@ -4169,5 +4169,14 @@
   "Company operating mode": "Modo de operación de la empresa",
   "For other approval options, continue in ChatGPT if they are available there.": "Para otras opciones de aprobación, continúa en ChatGPT si están disponibles allí.",
   "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "Se pulsó el botón de ChatGPT, pero la solicitud de autorización sigue visible. Confirma en el navegador si no desaparece.",
-  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT no confirmó la respuesta en la aplicación. Abre este chat en el navegador para finalizar la autorización."
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT no confirmó la respuesta en la aplicación. Abre este chat en el navegador para finalizar la autorización.",
+  "Archive": "Archivar",
+  "Restore": "Restaurar",
+  "Archived": "Archivados",
+  "Chat archived": "Chat archivado",
+  "Chat restored": "Chat restaurado",
+  "No archived chats": "No hay chats archivados",
+  "Search archived chats": "Buscar chats archivados",
+  "Restore chat to the main list": "Restaurar chat a la lista principal",
+  "Move chat to Archived without deleting its history": "Mover el chat a Archivados sin borrar su historial"
 }

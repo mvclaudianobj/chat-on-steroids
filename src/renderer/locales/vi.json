@@ -4073,5 +4073,14 @@
   "Company operating mode": "Chế độ hoạt động của công ty",
   "For other approval options, continue in ChatGPT if they are available there.": "Để xem các lựa chọn phê duyệt khác, hãy tiếp tục trong ChatGPT nếu có.",
   "ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.": "Đã nhấn nút ChatGPT nhưng thẻ phê duyệt vẫn hiển thị. Hãy xác nhận trong trình duyệt nếu thẻ không biến mất.",
-  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT chưa xác nhận câu trả lời trong ứng dụng. Mở cuộc trò chuyện này trong trình duyệt để hoàn tất phê duyệt."
+  "ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.": "ChatGPT chưa xác nhận câu trả lời trong ứng dụng. Mở cuộc trò chuyện này trong trình duyệt để hoàn tất phê duyệt.",
+  "Archive": "Lưu trữ",
+  "Restore": "Khôi phục",
+  "Archived": "Đã lưu trữ",
+  "Chat archived": "Đã lưu trữ cuộc trò chuyện",
+  "Chat restored": "Đã khôi phục cuộc trò chuyện",
+  "No archived chats": "Không có cuộc trò chuyện đã lưu trữ",
+  "Search archived chats": "Tìm cuộc trò chuyện đã lưu trữ",
+  "Restore chat to the main list": "Khôi phục cuộc trò chuyện về danh sách chính",
+  "Move chat to Archived without deleting its history": "Chuyển cuộc trò chuyện vào lưu trữ mà không xóa lịch sử"
 }

@@ -659,6 +659,8 @@ export function originTitle(origin: SessionOrigin, source: string | null): strin
 }
 
 export interface SessionSummary {
+  /** Explicit local Chat Marks archive; absent means visible. It never changes ChatGPT's archive. */
+  archivedAt?: number;
   /** Rebuildable transcript boundaries; no message bodies or execution authority. */
   timelineTurns?: import('./chronology.js').TimelineTurns;
   /** Rebuildable request-to-turn proof from recorded MCP calls, never a caller permission. */
