@@ -18,11 +18,11 @@ export interface ApprovalCardView {
   id: string;
   lines: string[];
   allow: boolean;
-  answer: { choice: 'allow' | 'deny'; outcome: 'clicked' | 'card_changed' | 'unavailable' | 'expired' | null } | null;
+  answer: { choice: 'allow' | 'deny'; outcome: 'clicked' | 'dismissed' | 'not_confirmed' | 'card_changed' | 'unavailable' | 'expired' | null } | null;
 }
 
 /** A click acknowledgement is not a host acceptance receipt. Keep watching that card. */
 export function hostApprovalAttemptFailed(view: ApprovalCardView | null): boolean {
-  return view?.answer?.outcome === 'card_changed' || view?.answer?.outcome === 'unavailable'
+  return view?.answer?.outcome === 'not_confirmed' || view?.answer?.outcome === 'card_changed' || view?.answer?.outcome === 'unavailable'
     || view?.answer?.outcome === 'expired';
 }

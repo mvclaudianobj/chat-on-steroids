@@ -4397,6 +4397,7 @@ function approvalCardPanel(sessionId: string): HTMLElement {
     if (pending) say(() => t('Sending your answer to ChatGPT…'));
     else if (outcome === 'card_changed') say(() => t('ChatGPT showed a different card by then. Nothing was pressed; answer the new one.'));
     else if (outcome === 'unavailable') say(() => t('ChatGPT no longer offered that choice. Nothing was pressed.'));
+    else if (outcome === 'not_confirmed') say(() => t('ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.'));
     else if (outcome === 'expired') say(() => t('The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.'));
     else if (!next.allow) say(() => t('ChatGPT does not allow it in this chat. You can only deny it.'));
     else status.hidden = true;

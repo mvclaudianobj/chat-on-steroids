@@ -36,7 +36,7 @@ export const APPROVAL_GONE_MS = 4_000;
 /** What the page reports about the card it shows. */
 export interface ApprovalCardFacts { id: string; lines: string[]; allow: boolean }
 export type ApprovalChoice = 'allow' | 'deny';
-export type ApprovalOutcome = 'clicked' | 'card_changed' | 'unavailable' | 'expired';
+export type ApprovalOutcome = 'clicked' | 'dismissed' | 'not_confirmed' | 'card_changed' | 'unavailable' | 'expired';
 interface ApprovalAnswer { token: string; cardId: string; choice: ApprovalChoice; at: number; outcome: ApprovalOutcome | null }
 
 export interface ApprovalWaitDeps {
@@ -248,7 +248,7 @@ export function parseApprovalResult(raw: string | null): { token: string; outcom
   try {
     const value = JSON.parse(raw) as { token?: unknown; outcome?: unknown };
     if (typeof value?.token !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(value.token)) return null;
-    return value.outcome === 'clicked' || value.outcome === 'card_changed' || value.outcome === 'unavailable'
+    return value.outcome === 'clicked' || value.outcome === 'dismissed' || value.outcome === 'not_confirmed' || value.outcome === 'card_changed' || value.outcome === 'unavailable'
       ? { token: value.token, outcome: value.outcome } : null;
   } catch { return null; }
 }

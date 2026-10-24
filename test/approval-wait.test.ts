@@ -297,7 +297,7 @@ describe('answering the card from the app', () => {
 describe('the page detector', () => {
   const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
   let dom: JSDOM;
-  let api: { approvalWaiting(): boolean; approvalCard(): null | { node: Element; lines: string[]; allow: boolean }; answerApprovalCard(node: Element, choice: string): string };
+  let api: { approvalWaiting(): boolean; approvalCard(): null | { node: Element; lines: string[]; allow: boolean }; answerApprovalCard(node: Element, choice: string): string | Promise<string> };
   beforeEach(() => {
     dom = new JSDOM('<main></main>', { url: 'https://chatgpt.com/c/chat', runScripts: 'outside-only', pretendToBeVisual: true });
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', {
@@ -336,25 +336,66 @@ describe('the page detector', () => {
     expect(api.approvalCard()).toBeNull();
   });
 
-  it('presses Deny or Allow once by their key hints, never the options menu, and only on that card', () => {
+  it('presses Deny or Allow once by their key hints, never the options menu, and only on that card', async () => {
+    vi.useFakeTimers();
+    try {
     const main = dom.window.document.querySelector('main')!;
     main.innerHTML = liveCard();
     const clicks: string[] = [];
     for (const button of main.querySelectorAll('button')) button.addEventListener('click', () => clicks.push(button.textContent!.replace(/\s+/g, ' ').trim() || button.getAttribute('aria-label')!));
     const found = api.approvalCard()!;
-    expect(api.answerApprovalCard(found.node, 'deny')).toBe('clicked');
-    expect(api.answerApprovalCard(found.node, 'allow')).toBe('clicked');
+    const deny = api.answerApprovalCard(found.node, 'deny');
+    const allow = api.answerApprovalCard(found.node, 'allow');
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(await deny).toBe('not_confirmed');
+    expect(await allow).toBe('not_confirmed');
     expect(clicks).toEqual(['AblehnenEsc', 'Einmal zulassen⏎']);
-    expect(api.answerApprovalCard(found.node, 'always')).toBe('unavailable');
+    expect(await api.answerApprovalCard(found.node, 'always')).toBe('unavailable');
     main.innerHTML = liveCard(true);
-    expect(api.answerApprovalCard(api.approvalCard()!.node, 'allow')).toBe('unavailable');
+    expect(await api.answerApprovalCard(api.approvalCard()!.node, 'allow')).toBe('unavailable');
     // A card that is gone, or another one, is never answered by the old reference.
     const old = api.approvalCard()!.node;
     main.innerHTML = liveCard();
-    expect(api.answerApprovalCard(old, 'deny')).toBe('card_changed');
+    expect(await api.answerApprovalCard(old, 'deny')).toBe('card_changed');
+    } finally { vi.useRealTimers(); }
   });
 
-  it('does not invent a persistent action when a native options menu is present but its choices are not exposed', () => {
+  it('does not confuse an ignored React click with host acceptance', async () => {
+    vi.useFakeTimers();
+    try {
+      const main = dom.window.document.querySelector('main')!;
+      main.innerHTML = liveCard();
+      let clicks = 0;
+      main.querySelectorAll('button')[2]!.addEventListener('click', () => { clicks++; });
+      const attempt = api.answerApprovalCard(api.approvalCard()!.node, 'allow');
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(await attempt).toBe('not_confirmed');
+      expect(clicks).toBe(1);
+      expect(api.approvalWaiting()).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('reports only an observed stable removal, and refuses transient redraws', async () => {
+    try {
+      const main = dom.window.document.querySelector('main')!;
+      main.innerHTML = liveCard();
+      const first = [...main.querySelectorAll('button')].find(b => b.textContent.includes('Esc'))!;
+      first.addEventListener('click', () => { main.innerHTML = ''; });
+      const attempt = api.answerApprovalCard(api.approvalCard()!.node, 'deny');
+      expect(await attempt).toBe('dismissed');
+      expect(api.approvalWaiting()).toBe(false);
+      main.innerHTML = liveCard();
+      [...main.querySelectorAll('button')].find(b => b.textContent.includes('Esc'))!.addEventListener('click', () => {
+        main.innerHTML = '';
+        setTimeout(() => { main.innerHTML = liveCard(); }, 1_200);
+      });
+      const redrawn = api.answerApprovalCard(api.approvalCard()!.node, 'deny');
+      expect(await redrawn).toBe('not_confirmed');
+      expect(api.approvalWaiting()).toBe(true);
+    } finally { vi.useRealTimers(); }
+  }, 20_000);
+
+  it('does not invent a persistent action when a native options menu is present but its choices are not exposed', async () => {
     const main = dom.window.document.querySelector('main')!;
     main.innerHTML = liveCard();
     const menu = main.querySelector('button[aria-haspopup="menu"]')!;
@@ -362,10 +403,10 @@ describe('the page detector', () => {
     menu.addEventListener('click', () => { menuClicks++; });
     const found = api.approvalCard()!;
     expect(found).toMatchObject({ allow: true });
-    expect(api.answerApprovalCard(found.node, 'always')).toBe('unavailable');
+    expect(await api.answerApprovalCard(found.node, 'always')).toBe('unavailable');
     expect(menuClicks).toBe(0);
     main.innerHTML = liveCard(true);
-    expect(api.answerApprovalCard(api.approvalCard()!.node, 'always')).toBe('unavailable');
+    expect(await api.answerApprovalCard(api.approvalCard()!.node, 'always')).toBe('unavailable');
     expect(menuClicks).toBe(0);
   });
 
