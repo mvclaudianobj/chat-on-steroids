@@ -200,7 +200,8 @@ export async function disconnectWhatsAppWeb(): Promise<WhatsAppWebStatus> {
   return getWhatsAppWebStatus();
 }
 export async function sendWhatsAppWeb(number: string, message: string): Promise<void> {
-  if (!socket || status.state !== 'connected') throw new Error('WhatsApp Web disconnected');
+  // Disconnect revokes send authority synchronously, before Baileys logout settles.
+  if (!wantConnection || !socket || status.state !== 'connected') throw new Error('WhatsApp Web disconnected');
   if (!/^\d{8,15}$/.test(number)) throw new Error('Invalid WhatsApp number');
   await socket.sendMessage(`${number}@s.whatsapp.net`, { text: message });
 }

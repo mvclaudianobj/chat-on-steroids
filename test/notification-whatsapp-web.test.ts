@@ -155,6 +155,22 @@ it('keeps a new manual connect requested during an unfinished disconnect', async
   expect(mocks.sockets).toHaveLength(2);
   expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connecting' });
 });
+it('revokes notification sends immediately when disconnect begins, even while logout is pending', async () => {
+  await web.startWhatsAppWeb();
+  const old = mocks.sockets[0]!;
+  old.ev.emit('connection.update', { connection: 'open' });
+  let finishLogout!: () => void;
+  old.logout.mockImplementation(() => new Promise<void>(resolve => { finishLogout = resolve; }));
+  const disconnect = web.disconnectWhatsAppWeb();
+  try {
+    await expect(web.sendWhatsAppWeb('5511999999999', 'must-not-send')).rejects.toThrow('disconnected');
+    expect(old.sendMessage).not.toHaveBeenCalled();
+  } finally {
+    finishLogout();
+    await disconnect;
+  }
+  expect(await web.getWhatsAppWebStatus()).toEqual({ state: 'disconnected' });
+});
 it('only resumes with stored auth files', async () => {
   await web.resumeWhatsAppWeb();
   expect(mocks.sockets).toHaveLength(0);
