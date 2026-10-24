@@ -588,8 +588,8 @@ describe('Jarvis voice provider in the conversation', () => {
     expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Olá, eu sou o Jarvis.']);
     expect(f.element('jarvisTalk').dataset.state).toBe('speaking');
     await f.stream('Olá, eu sou o Jarvis. Estou pronto para ajudar. Fim', true, true);
-    // One sentence is synthesized ahead of the one playing; the rest waits in order.
-    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Olá, eu sou o Jarvis.', 'Estou pronto para ajudar.']);
+    // Two sentences may be synthesized ahead while the first still plays.
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Olá, eu sou o Jarvis.', 'Estou pronto para ajudar.', 'Fim']);
     f.players[0]!.finish(); await f.flush();
     expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Olá, eu sou o Jarvis.', 'Estou pronto para ajudar.', 'Fim']);
     for (let i = 1; i < 3; i++) { f.players[i]!.finish(); await f.flush(); }

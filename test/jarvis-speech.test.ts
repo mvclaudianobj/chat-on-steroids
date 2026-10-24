@@ -32,6 +32,66 @@ describe('Jarvis sentence splitting for streamed answers', () => {
 });
 
 describe('Jarvis speech queue', () => {
+  it('primes two future TTS segments during the first playback to avoid a synthesis gap before the third', async () => {
+    const timeline: string[] = [];
+    const playing = new Map<string, ReturnType<typeof deferred>>();
+    const thirdReady = deferred();
+    const queue = new JarvisSpeechQueue<string>({
+      synthesize: async text => {
+        timeline.push(`synth:${text}`);
+        if (text === 'C.') await thirdReady.promise;
+        return text;
+      },
+      play: async text => {
+        timeline.push(`play:${text}`);
+        const gate = deferred(); playing.set(text, gate); await gate.promise;
+      }
+    });
+    queue.enqueue(['A.', 'B.', 'C.', 'D.']);
+    await tick();
+    // A is still audible. B and C must already have started network synthesis.
+    expect(timeline).toEqual(['synth:A.', 'synth:B.', 'synth:C.', 'play:A.']);
+    expect(timeline).not.toContain('synth:D.'); // Bound requests to current + 2.
+    thirdReady.resolve(); await tick();
+    playing.get('A.')!.resolve(); await tick();
+    expect(timeline).toContain('play:B.');
+    expect(timeline).toContain('synth:D.');
+    playing.get('B.')!.resolve(); await tick();
+    // C already has audio; advancing from B must not wait for another provider round trip.
+    expect(timeline).toContain('play:C.');
+    playing.get('C.')!.resolve(); await tick();
+    playing.get('D.')!.resolve(); await tick();
+    expect(queue.speaking).toBe(false);
+  });
+
+  it('drops both speculative segments on interruption without replay or drain', async () => {
+    const pending = [deferred(), deferred()];
+    const started: string[] = [];
+    const played: string[] = [];
+    const drained = vi.fn();
+    const queue = new JarvisSpeechQueue<string>({
+      synthesize: async text => {
+        started.push(text);
+        if (text === 'B.') await pending[0]!.promise;
+        if (text === 'C.') await pending[1]!.promise;
+        return text;
+      },
+      play: (text, signal) => new Promise(resolve => {
+        played.push(text);
+        signal.addEventListener('abort', () => resolve(), { once: true });
+      })
+    }, { drained });
+    queue.enqueue(['A.', 'B.', 'C.']); await tick();
+    expect(started).toEqual(['A.', 'B.', 'C.']);
+    queue.stop();
+    pending.forEach(gate => gate.resolve()); await tick();
+    expect(played).toEqual(['A.']);
+    expect(drained).not.toHaveBeenCalled();
+    queue.enqueue(['fresh.']); await tick();
+    expect(played).toEqual(['A.', 'fresh.']);
+    queue.stop();
+  });
+
   it('speaks in order and synthesizes the next sentence while the current one plays', async () => {
     const order: string[] = [];
     const playing = new Map<string, ReturnType<typeof deferred>>();

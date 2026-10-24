@@ -11,14 +11,18 @@ const send = (event: JarvisProgressEvent) => listener?.(event);
 
 class FakeAudio {
   src = '';
+  preload = '';
   paused = true;
   onplaying: (() => void) | null = null;
   onended: (() => void) | null = null;
   onerror: (() => void) | null = null;
   static played = 0;
+  static created: FakeAudio[] = [];
+  static loaded = 0;
+  constructor() { FakeAudio.created.push(this); }
   play(): Promise<void> { this.paused = false; FakeAudio.played++; this.onplaying?.(); return Promise.resolve(); }
   pause(): void { this.paused = true; }
-  load(): void {}
+  load(): void { FakeAudio.loaded++; }
   removeAttribute(): void { this.src = ''; }
   finish(): void { this.onended?.(); }
 }
@@ -55,6 +59,8 @@ afterEach(() => {
   listener = null;
   disposed = 0;
   FakeAudio.played = 0;
+  FakeAudio.created = [];
+  FakeAudio.loaded = 0;
   FakeBuffer.appended = [];
   FakeMediaSource.ended = 0;
   FakeMediaSource.last = null;
@@ -111,5 +117,24 @@ describe('Jarvis incremental audio playback', () => {
     expect(FakeAudio.played).toBe(1);
     player.cancel();
     await playing;
+  });
+
+  it('preloads completed Gemini WAV ahead of its turn without starting it before the prior sentence ends', async () => {
+    const player = prepare();
+    send({ requestId: 'turn-a', type: 'start', mime: 'audio/wav' });
+    send({ requestId: 'turn-a', type: 'chunk', bytes: new Uint8Array([82, 73, 70, 70]) });
+    send({ requestId: 'turn-a', type: 'end' });
+    expect(FakeAudio.created).toHaveLength(1);
+    expect(FakeAudio.created[0]?.preload).toBe('auto');
+    expect(FakeAudio.created[0]?.src).toBe('blob:synthetic');
+    expect(FakeAudio.loaded).toBe(1);
+    expect(FakeAudio.played).toBe(0); // The previous sentence still owns the speaker.
+    const playing = player.play(new AbortController().signal);
+    expect(FakeAudio.created).toHaveLength(1);
+    expect(FakeAudio.played).toBe(1);
+    player.cancel(); await playing;
+    expect(disposed).toBe(1);
+    send({ requestId: 'turn-a', type: 'chunk', bytes: new Uint8Array([5]) });
+    expect(FakeAudio.played).toBe(1);
   });
 });

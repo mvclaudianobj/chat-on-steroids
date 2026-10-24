@@ -19,21 +19,22 @@ export interface SpeechQueueEvents {
 }
 
 /**
- * Speaks sentences in order while the next one is already being synthesized, so a streamed
- * answer starts after its first sentence and plays without gaps. `stop` (barge-in) invalidates
+ * Speaks sentences in order while up to two following sentences are synthesized early.
+ * The current sentence plus these two requests fits the main process's 3-stream limit.
+ * This reduces gaps when synthesis takes longer than one spoken sentence. `stop` invalidates
  * everything in flight at once: a late synthesis or playback of an older generation is ignored.
  */
 export class JarvisSpeechQueue<T> {
   private generation = 0;
   private pending: string[] = [];
-  private prefetched: { text: string; audio: Promise<T | null> } | null = null;
+  private prefetched: { text: string; audio: Promise<T | null> }[] = [];
   private controller = new AbortController();
   private active = false;
 
   constructor(private readonly backend: SpeechBackend<T>, private readonly events: SpeechQueueEvents = {}) {}
 
   get speaking(): boolean { return this.active; }
-  get queued(): number { return this.pending.length + (this.prefetched ? 1 : 0); }
+  get queued(): number { return this.pending.length + this.prefetched.length; }
 
   enqueue(sentences: readonly string[]): void {
     const clean = sentences.map(sentence => sentence.trim()).filter(Boolean);
@@ -46,7 +47,7 @@ export class JarvisSpeechQueue<T> {
   stop(): void {
     this.generation++;
     this.pending = [];
-    this.prefetched = null;
+    this.prefetched = [];
     this.controller.abort();
     this.controller = new AbortController();
     if (this.active) { this.active = false; this.events.speaking?.(false); }
@@ -60,9 +61,10 @@ export class JarvisSpeechQueue<T> {
   }
 
   private topUp(): void {
-    if (this.prefetched || !this.pending.length) return;
-    const text = this.pending.shift()!;
-    this.prefetched = { text, audio: this.synth(text, this.generation, this.controller.signal) };
+    while (this.prefetched.length < 2 && this.pending.length) {
+      const text = this.pending.shift()!;
+      this.prefetched.push({ text, audio: this.synth(text, this.generation, this.controller.signal) });
+    }
   }
 
   private async run(): Promise<void> {
@@ -71,10 +73,9 @@ export class JarvisSpeechQueue<T> {
     this.active = true;
     this.events.speaking?.(true);
     while (generation === this.generation) {
-      if (!this.prefetched) this.topUp();
-      const item = this.prefetched;
+      if (!this.prefetched.length) this.topUp();
+      const item = this.prefetched.shift();
       if (!item) break;
-      this.prefetched = null;
       const audio = await item.audio;
       if (generation !== this.generation) return;
       this.topUp();

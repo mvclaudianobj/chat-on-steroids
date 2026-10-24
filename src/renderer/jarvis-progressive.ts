@@ -132,15 +132,20 @@ export class JarvisProgressiveAudio {
       } else if (this.finished && this.source.readyState === 'open') {
         try { this.source.endOfStream(); } catch (reason) { this.fail(reason); }
       }
-    } else if (this.finished && this.playbackRequested && !this.audio) {
+    } else if (this.finished && !this.audio) {
+      // Gemini WAV and other formats unsupported by MediaSource arrive complete.
+      // Create/load the next sentence's audio while the previous one still plays.
+      // Starting playback remains the queue's exclusive, ordered decision.
       const parts = this.received.map(bytes => new Uint8Array(bytes));
       this.received.length = 0;
       this.audio = new Audio();
+      this.audio.preload = 'auto';
       this.url = URL.createObjectURL(new Blob(parts, { type: this.mime }));
       this.audio.src = this.url;
       this.installAudioEvents();
-      this.startPlayback();
-    } else if (this.audio && this.playbackRequested) this.startPlayback();
+      this.audio.load();
+    }
+    if (this.audio && this.playbackRequested) this.startPlayback();
   }
 
   private startPlayback(): void {
