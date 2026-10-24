@@ -393,13 +393,18 @@ async function selectSpeechResponse(config: JarvisVoiceConfig, text: string, sig
   const pinned = groupId && routePinned.get(groupId)?.route;
   const ordered = pinned ? [pinned] : candidates;
   let lastError: unknown;
+  const routeStarted = performance.now();
   for (const candidate of ordered) {
     signal.throwIfAborted();
-    if (!pinned && (routeCooldown.get(candidate.id) ?? 0) > now) continue;
+    if (!pinned && (routeCooldown.get(candidate.id) ?? 0) > now) {
+      logInfo(`jarvis: skipping ${candidate.id} TTS (${routeFailureReason.get(candidate.id) ?? 'unavailable'}, cooldown)`);
+      continue;
+    }
     if (candidate.slot !== 'primary' && !await deps.credential(candidate.slot, parseJarvisVoiceBaseUrl(candidate.config.baseUrl).origin)) continue;
     try {
       const result = await speechResponse(candidate.config, text, signal, candidate.slot);
       if (groupId && !pinned) routePinned.set(groupId, { route: candidate, until: Date.now() + GROUP_TTL_MS });
+      logInfo(`jarvis: voice route ${candidate.id} ready in ${Math.round(performance.now() - routeStarted)} ms${pinned ? ' (pinned)' : ''}`);
       return result;
     } catch (error) {
       if (signal.aborted) throw error;
@@ -409,6 +414,7 @@ async function selectSpeechResponse(config: JarvisVoiceConfig, text: string, sig
         routeCooldown.set(candidate.id, Date.now() + (error instanceof ProviderUnavailable && error.retryAfterMs !== null ? error.retryAfterMs : FAILURE_COOLDOWN_MS));
         routeFailureReason.set(candidate.id, error instanceof ProviderUnavailable ? `HTTP ${error.code}` : 'network');
       } else if (!/HTTP (401|403)/.test(String(error))) throw error;
+      logWarn(`jarvis: voice route ${candidate.id} unavailable, ${error instanceof ProviderUnavailable ? `HTTP ${error.code}` : 'provider/network error'}`);
       if (pinned) throw error; // Never change a speaker in the middle of the same answer.
     }
   }
