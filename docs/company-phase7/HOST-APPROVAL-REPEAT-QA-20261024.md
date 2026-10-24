@@ -50,3 +50,9 @@ HOME="$PWD/.qa-home" XDG_CONFIG_HOME="$PWD/.qa-config" XDG_CACHE_HOME="$PWD/.qa-
 ```
 
 The baseline suite is intentionally red until its approval-episode defect is fixed. A green test-only run with that one test excluded is not evidence that durable internal grants have been implemented. E2E Electron main/preload/renderer, persist/restart, host delivery and revocation need to be reverified once the workers' implementation patches are actually integrated.
+
+## Author correction built from 51e7f590
+
+The dedicated child branch `fix/marks-host-approval-dismissed-worker13-20261024` repairs the failing distinction. `approval-wait.ts` treats a **reported and token-matched** `dismissed` outcome as an episode boundary, so an identical new host card receives a fresh `progressId`. A `clicked`, `not_confirmed`, or unanswered card still benefits from the 4-second redraw tolerance. A host result arriving just after the disappearance poll is settled against the **previous exact token** for that short window; it cannot authorize a newly shown card. When the previous waiting row remains visible during the next poll, the new episode does not reuse its ID.
+
+Verification on the child branch: `42/42` focused Vitest tests (two files, including 12 locales), TypeScript typecheck, privacy, notices, and production build all succeeded. `scripts/verify-host-approval-electron.cjs` also passed with real Electron Chromium, the production compiled preload, synthetic main IPC and the real approval-wait module, checking a second episode and rejecting token replay and `always`. This does **not** authorize persistent ChatGPT host policy or establish that the provider accepted any real tool call. The real ChatGPT account/browser and internal durable-grant UI remain outside this synthetic verification.

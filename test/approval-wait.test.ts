@@ -112,6 +112,57 @@ describe('approval card episodes', () => {
     expect(requestApprovalAnswer('chat', 'card-second', 'allow', 2_600).ok).toBe(true);
   });
 
+  it('accepts the host dismissal only for the old token after its card vanished, without replaying it', async () => {
+    const card = { id:'first-card', lines:['Allow ChatGPT to use Chat Marks Core?', 'Write a file.'], allow:true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card);
+    const first = requestApprovalAnswer('chat', card.id, 'allow', 1_100);
+    if (!first.ok) throw new Error('Synthetic card was not presented');
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    // The DOM detector waits until the card is stably gone before it can report dismissed.
+    expect(settleApprovalAnswer('chat', first.token, 'dismissed')).toBe(true);
+    expect(settleApprovalAnswer('chat', first.token, 'dismissed')).toBe(false);
+    const second = { ...card, id:'second-card' };
+    await noteApprovalCard('chat', true, 'session', deps, 2_500, second);
+    expect(approvalCardView('chat', 2_500)).toMatchObject({ id:'second-card', answer:null });
+    expect(new Set(deps.rows.filter(row=>row[2]===APPROVAL_WAITING_TEXT).map(row=>row[1])).size).toBe(2);
+    expect(settleApprovalAnswer('chat', first.token, 'dismissed')).toBe(false);
+    expect(approvalAnswerFor('chat', 2_500)).toBeNull();
+    expect(requestApprovalAnswer('chat', 'first-card', 'allow', 2_600)).toEqual({ ok:false, error:'card_changed' });
+  });
+
+  it('never restores the prior waiting progress row when a confirmed dismissal precedes a new request', async () => {
+    const card = { id:'first-card', lines:['Allow ChatGPT to use Chat Marks Core?'], allow:true };
+    let reads = 0;
+    deps.previous = async () => {
+      reads++;
+      return reads === 1 ? null : { progressId:deps.rows[0]![1], anchor:{ seq:7, time:1 } };
+    };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card);
+    const first = requestApprovalAnswer('chat', card.id, 'deny', 1_100);
+    if (!first.ok) throw new Error('Synthetic card was not presented');
+    expect(settleApprovalAnswer('chat', first.token, 'dismissed')).toBe(true);
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    await noteApprovalCard('chat', true, 'session', deps, 2_500, { ...card, id:'second-card' });
+    const waitingRows = deps.rows.filter(row=>row[2]===APPROVAL_WAITING_TEXT);
+    expect(waitingRows).toHaveLength(2);
+    expect(waitingRows[1]![1]).not.toBe(waitingRows[0]![1]);
+    expect(reads).toBe(2);
+  });
+
+  it('continues the one unresolved approval through a brief card redraw after a click was not confirmed', async () => {
+    const card = { id:'unresolved-first', lines:['Allow ChatGPT to use Chat Marks Core?'], allow:true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card);
+    const answer = requestApprovalAnswer('chat', card.id, 'allow', 1_100);
+    if (!answer.ok) throw new Error('Synthetic card was not presented');
+    expect(settleApprovalAnswer('chat', answer.token, 'not_confirmed')).toBe(true);
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    await noteApprovalCard('chat', true, 'session', deps, 3_200, { ...card, id:'unresolved-redraw' });
+    expect(new Set(deps.rows.map(row=>row[1]).filter(Boolean)).size).toBe(1);
+    expect(approvalCardView('chat', 3_200)).toMatchObject({ id:'unresolved-redraw', answer:null });
+    expect(approvalAnswerFor('chat', 3_200)).toBeNull();
+    expect(settleApprovalAnswer('chat', answer.token, 'dismissed')).toBe(false);
+  });
+
   it('keeps an answer when a different card follows it, or the same one only after a while', async () => {
     const first = { id: 'a', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Run one command.'], allow: true };
     const second = { id: 'b', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Write one file.'], allow: true };

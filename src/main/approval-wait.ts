@@ -69,7 +69,7 @@ interface Wait {
 }
 
 const waits = new Map<string, Wait>();
-/** The episode a page last reported answered, kept for `APPROVAL_GONE_MS` in case the card was only redrawn. */
+/** The previous episode, kept briefly to distinguish a redraw from a separately dismissed request. */
 const answered = new Map<string, { wait: Wait; at: number; anchor: { seq: number; time: number } | null }>();
 
 function sameWords(a: ApprovalCardFacts | null, b: ApprovalCardFacts | null | undefined): boolean {
@@ -125,8 +125,10 @@ export async function noteApprovalCard(
   if (!waiting) return;
   const before = answered.get(conversationId);
   answered.delete(conversationId);
-  if (!wait && before && now - before.at < APPROVAL_GONE_MS && sameWords(before.wait.card, card) && !waits.has(conversationId)) {
-    // Only redrawn: the same episode goes on, its row says waiting again and no second notice comes.
+  if (!wait && before && now - before.at < APPROVAL_GONE_MS && before.wait.answer?.outcome !== 'dismissed' &&
+    sameWords(before.wait.card, card) && !waits.has(conversationId)) {
+    // Only an unresolved card can be redrawn. An observed host dismissal closes
+    // this consent episode even if the next separate request has identical words.
     wait = before.wait;
     wait.seenAt = now;
     waits.set(conversationId, wait);
@@ -168,10 +170,11 @@ export async function noteApprovalCard(
     wait.sessionId = sessionId;
     const current = wait;
     const own = `${APPROVAL_PROGRESS_PREFIX}${conversationId}:`;
+    const dismissedId = before?.wait.answer?.outcome === 'dismissed' ? before.wait.progressId : null;
     current.row = (async () => {
       // Only this chat's row: after Compact & Resume the session's earlier rows belong to the chat it left.
       const earlier = deps.previous ? await deps.previous(sessionId).catch(() => null) : null;
-      if (earlier?.progressId.startsWith(own)) {
+      if (earlier?.progressId.startsWith(own) && earlier.progressId !== dismissedId) {
         current.progressId = earlier.progressId;
         return earlier.anchor;
       }
@@ -224,7 +227,10 @@ export function approvalAnswerFor(conversationId: string, now = Date.now()): { t
 
 /** The page's report on an answer it was given: pressed, or why not. Unknown tokens are ignored. */
 export function settleApprovalAnswer(conversationId: string, token: string, outcome: Exclude<ApprovalOutcome, 'expired'>): boolean {
-  const answer = waits.get(conversationId)?.answer;
+  // The page can report stable dismissal after its earlier activity poll has
+  // already told us the card is gone. Retain that exact token for the short
+  // redraw window without ever applying it to a subsequent card/episode.
+  const answer = waits.get(conversationId)?.answer ?? answered.get(conversationId)?.wait.answer;
   if (!answer || answer.token !== token || answer.outcome !== null) return false;
   answer.outcome = outcome;
   return true;
