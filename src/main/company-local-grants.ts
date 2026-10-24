@@ -13,7 +13,8 @@ const scope = z.enum(['company-local-read', 'company-local-triage', 'company-loc
 const grant = z.object({ id: z.string().uuid(), subject, scope, epoch: z.number().int().nonnegative(), at: z.number().int().nonnegative() }).strict();
 const audit = z.object({ id: z.string().uuid(), at: z.number().int().nonnegative(), action: z.enum(['authorize', 'revoke', 'deny']),
   subject, scope, epoch: z.number().int().nonnegative(), reason: z.string().max(120) }).strict();
-const request = z.object({ requestId: z.string().uuid(), at: z.number().int().nonnegative(), subject, scope }).strict();
+const request = z.object({ requestId: z.string().uuid(), at: z.number().int().nonnegative(),
+  subject, scope, epoch: z.number().int().nonnegative().optional() }).strict();
 const ledgerSchema = z.object({ version: z.literal(1), epoch: z.number().int().nonnegative(),
   grants: z.array(grant).max(500), audit: z.array(audit).max(2000),
   requests: z.array(request).max(1000).default([]) }).strict();
@@ -73,36 +74,50 @@ export function companyLocalConsentCopy(mode: 'task' | 'agent' | 'coo', selected
   };
 }
 /** Requests are durable and unique; merely asking never changes a grant. */
-export async function recordLocalCompanyRequest(input: { subject: Subject; scope: Scope; requestId: string }): Promise<{ equivalent: number; suggestExpansion: boolean }> {
+export async function recordLocalCompanyRequest(input: { subject: Subject; scope: Scope; requestId: string }): Promise<{ equivalent: number; suggestExpansion: boolean; epoch: number }> {
   const who = subject.parse(input.subject), selected = scope.parse(input.scope);
   const requestId = z.string().uuid().parse(input.requestId);
   return serialize(async () => {
     const ledger = await read();
-    if (!ledger.requests.some(item => item.requestId === requestId)) {
-      ledger.requests.push({ requestId, subject: who, scope: selected, at: Date.now() });
+    let pending = ledger.requests.find(item => item.requestId === requestId);
+    if (pending && (!same(pending.subject, who) || pending.scope !== selected))
+      throw new Error('Company consent request identity changed');
+    // Older records did not pin the revocation epoch. They cannot be reused as
+    // authorization for a fresh native dialog after an intervening revoke.
+    if (pending && pending.epoch === undefined)
+      throw new Error('Legacy Company consent request cannot be replayed');
+    if (!pending) {
+      pending = { requestId, subject: who, scope: selected, at: Date.now(), epoch: ledger.epoch };
+      ledger.requests.push(pending);
       ledger.requests = ledger.requests.slice(-1000);
       await write(ledger);
     }
     const equivalent = ledger.requests.filter(item => same(item.subject, who) && item.scope === selected).length;
-    return { equivalent, suggestExpansion: equivalent >= 3 };
+    return { equivalent, suggestExpansion: equivalent >= 3, epoch: pending.epoch! };
   });
 }
 export async function localGrantDecision(input: { mode: 'task' | 'agent' | 'coo'; subject: Subject; scope: Scope;
-  attestation: Attestation | null; consent: boolean; requestId: string }): Promise<{ authorized: boolean; epoch: number; id: string | null }> {
+  attestation: Attestation | null; consent: boolean; requestId: string; expectedEpoch: number }): Promise<{ authorized: boolean; epoch: number; id: string | null }> {
   const chosen = subject.parse(input.subject), selected = scope.parse(input.scope);
   if (!z.string().uuid().safeParse(input.requestId).success) throw new Error('Invalid consent request');
   return serialize(async () => {
     const ledger = await read();
+    const pending = ledger.requests.find(item => item.requestId === input.requestId);
     if (!input.consent || !asserted(input.attestation, chosen) ||
-      (input.mode === 'coo' && chosen.kind !== 'coo')) {
+      (input.mode === 'coo' && chosen.kind !== 'coo') ||
+      !pending || pending.epoch !== input.expectedEpoch ||
+      !same(pending.subject, chosen) || pending.scope !== selected) {
       return { authorized: false, epoch: ledger.epoch, id: null };
     }
-    if (input.mode === 'task') return { authorized: true, epoch: ledger.epoch, id: null };
+    if (input.mode === 'task') return { authorized: ledger.epoch === input.expectedEpoch, epoch: ledger.epoch, id: null };
     const scopes: Scope[] = input.mode === 'coo' ? scope.options : [selected];
-    const existing = ledger.grants.find(g => same(g.subject, chosen) && scopes.includes(g.scope));
+    const existing = ledger.grants.find(g => same(g.subject, chosen) && g.scope === selected);
+    // Replaying an already-accepted consent may return its existing active grant.
+    // A revoked grant cannot be recreated by replaying its stale dialog.
     if (existing && input.mode !== 'coo') return { authorized: true, epoch: ledger.epoch, id: existing.id };
     if (scopes.every(item => ledger.grants.some(g => same(g.subject, chosen) && g.scope === item)))
       return { authorized: true, epoch: ledger.epoch, id: ledger.grants.find(g => same(g.subject, chosen) && g.scope === selected)?.id ?? null };
+    if (ledger.epoch !== input.expectedEpoch) return { authorized: false, epoch: ledger.epoch, id: null };
     ledger.epoch++;
     for (const item of scopes) {
       if (ledger.grants.some(g => same(g.subject, chosen) && g.scope === item)) continue;

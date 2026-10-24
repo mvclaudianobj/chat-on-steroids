@@ -93,9 +93,11 @@ export function registerCompanyIpc(
         const stillVerified = await resolveLocalAttestation();
         const result = await localGrantDecision({ ...request.payload,
           attestation: stillVerified && JSON.stringify(stillVerified.subject) === JSON.stringify(proof.subject) ? stillVerified : null,
-          consent: true });
+          consent: true, expectedEpoch: frequency.epoch });
         return result.authorized ? { ok: true, data: result } :
-          { ok: false, error: 'No locally attested Company identity; persistent grant refused' };
+          { ok: false, error: result.epoch !== frequency.epoch ?
+            'Local Company authorization changed during consent; approval refused' :
+            'No locally attested Company identity; persistent grant refused' };
       }
       if (request.action === 'dispatch' || request.action === 'sendInvitations' || request.action === 'reviewBroker' || request.action === 'delegationGrant' || request.action === 'delegationRevoke' || request.action === 'activateReal' || request.action === 'restoreDemo') {
         const decision = await dialog.showMessageBox(window, {

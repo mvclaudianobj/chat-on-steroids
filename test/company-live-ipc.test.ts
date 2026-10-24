@@ -10,12 +10,15 @@ const native = vi.hoisted(() => ({
   handler: null as null | ((event: unknown, payload: unknown) => Promise<{ok:boolean;data?:unknown;error?:string}>),
   response: 0,
   prompts: [] as string[],
-  dispatches: 0
+  dispatches: 0,
+  dialogGate: null as Promise<{response:number}> | null,
+  dialogEntered: null as (() => void) | null
 }));
 vi.mock('electron',()=>({
   ipcMain:{handle:(_name:string,fn:typeof native.handler)=>{native.handler=fn;}},
   dialog:{showMessageBox:async(_window:unknown,options:{message:string})=>{
-    native.prompts.push(options.message);return {response:native.response};
+    native.prompts.push(options.message);native.dialogEntered?.();
+    return native.dialogGate ?? {response:native.response};
   }}
 }));
 vi.mock('../src/main/company-broker.js',()=>({
@@ -45,6 +48,7 @@ beforeEach(async()=>{
   initCompanyLocalGrants(home);
   contents.mainFrame=frame;
   native.response=0;native.prompts=[];native.dispatches=0;
+  native.dialogGate=null;native.dialogEntered=null;
 });
 afterEach(async()=>{resetCompanyStoreForTests();resetCompanyLocalGrantsForTests();await rm(home,{recursive:true,force:true});});
 
@@ -62,6 +66,41 @@ it('asks explicit native consent for durable grants but denies unproven broker c
   expect((await readLocalCompanyGrants()).grants).toEqual([]);
   expect((await invoke({ action: 'localGrants' })).ok).toBe(true);
   expect((await invoke({ action: 'localGrantRevoke', payload: { id: request.payload.requestId } })).data).toBe(false);
+});
+
+it('does not restore a revoked worker grant from consent already pending in a native dialog', async () => {
+  // Main-only attestation is synthetic here; production has no external attestation.
+  const subject = { kind:'worker' as const, ownerId:'11111111-1111-4111-8111-111111111111',
+    runId:'22222222-2222-4222-8222-222222222222',workerId:'worker-1',conversationId:'synthetic-chat' };
+  const proof = { local:true as const, verified:true as const, subject };
+  const payload = { mode:'agent' as const, scope:'company-local-read' as const, subject,
+    requestId:'33333333-3333-4333-8333-333333333333' };
+  registerCompanyIpc(()=>window as never,async()=>proof);
+  try {
+    native.response=1;
+    const first=await invoke({action:'localGrantRequest',payload});
+    expect(first.ok).toBe(true);
+    const id=(first.data as {id:string}).id;
+    expect((await readLocalCompanyGrants()).grants).toHaveLength(1);
+    let release!: (value:{response:number})=>void;
+    native.dialogGate=new Promise(resolve=>{release=resolve;});
+    let arrived!:()=>void;
+    const opened=new Promise<void>(resolve=>{arrived=resolve;});
+    native.dialogEntered=arrived;
+    const pending=invoke({action:'localGrantRequest',payload:{...payload,
+      requestId:'44444444-4444-4444-8444-444444444444'}});
+    await opened;
+    expect(await invoke({action:'localGrantRevoke',payload:{id}})).toMatchObject({ok:true,data:true});
+    expect((await readLocalCompanyGrants()).grants).toHaveLength(0);
+    release({response:1});
+    const stale=await pending;
+    expect(stale.ok).toBe(false);
+    expect(stale.error).toMatch(/authorization changed/i);
+    expect((await readLocalCompanyGrants()).grants).toHaveLength(0);
+  } finally {
+    native.dialogGate=null;native.dialogEntered=null;
+    registerCompanyIpc(()=>window as never);
+  }
 });
 
 describe('Company activation through the actual main IPC boundary with synthetic broker',()=>{
