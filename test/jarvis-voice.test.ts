@@ -96,6 +96,37 @@ describe('Google Gemini TTS provider contract', () => {
     expect(audio.mime).toBe('audio/wav');
     expect(Buffer.from(audio.bytes).toString()).toBe('RIFF-synthetic-WAV');
   });
+  it('transcribes microphone WebM in PT-BR through Google generateContent with a vault-scoped key', async () => {
+    const fetchStub = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+      expect(String(url)).toBe('https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent');
+      expect((options?.headers as Record<string, string>)['x-goog-api-key']).toBe(PRIMARY);
+      expect((options?.headers as Record<string, string>).Authorization).toBeUndefined();
+      const request = JSON.parse(String(options?.body));
+      expect(request.contents[0].parts[0].text).toContain('pt-BR');
+      expect(request.contents[0].parts[1].inlineData).toEqual({ mimeType: 'audio/webm', data: 'AQID' });
+      return Response.json({ candidates: [{ content: { parts: [{ text: '  "Olá, Jarvis!"  ' }] } }] });
+    });
+    configureJarvisVoiceForTests({
+      credential: async (_slot, origin) => origin === 'https://generativelanguage.googleapis.com' ? { header: 'x-goog-api-key', value: PRIMARY } : null,
+      fetch: fetchStub as typeof fetch
+    });
+    expect(await transcribeJarvisVoice({ ...google(), sttModel: 'gemini-3.8-flash' }, 'audio/webm', new Uint8Array([1, 2, 3]), 'pt-BR', signal())).toBe('Olá, Jarvis!');
+    expect(fetchStub).toHaveBeenCalledOnce();
+  });
+  it('rejects missing Google keys without uploading recorded speech', async () => {
+    const fetchStub = vi.fn();
+    configureJarvisVoiceForTests({ credential: async () => null, fetch: fetchStub });
+    await expect(transcribeJarvisVoice({ ...google(), sttModel: 'gemini-3.8-flash' }, 'audio/wav', new Uint8Array([1]), 'pt-BR', signal()))
+      .rejects.toThrow('Save your Google AI Studio key');
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
+  it('does not mistake a TTS model for Gemini microphone transcription', async () => {
+    const fetchStub = vi.fn();
+    configureJarvisVoiceForTests({ credential: async () => ({ header: 'x-goog-api-key', value: PRIMARY }), fetch: fetchStub });
+    await expect(transcribeJarvisVoice({ ...google(), sttModel: 'gemini-3.8-flash-tts' }, 'audio/wav', new Uint8Array([1]), 'pt-BR', signal()))
+      .rejects.toThrow('audio-understanding model');
+    expect(fetchStub).not.toHaveBeenCalled();
+  });
 });
 
 describe('Jarvis voice provider (fake OpenAI-compatible server)', () => {

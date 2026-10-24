@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseJarvisPreferences } from '../src/renderer/jarvis.js';
+import { jarvisVoiceSttReady, JARVIS_VOICE_PRESETS } from '../src/shared/jarvis-voice.js';
 
 const provider = { baseUrl: '', sttMode: 'transcriptions', sttModel: '', ttsModel: '', voice: '' };
 const base = { enabled: false, key: 'F8', language: '', tts: false, voice: '', engine: 'auto', audioModel: '', ttsEngine: 'auto', continuous: false, earcons: true, provider, version: 2 };
@@ -25,5 +26,18 @@ describe('Jarvis preference admission', () => {
     expect(ok.provider).toEqual({ baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_abc:models/gemini-flash-latest', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' });
     expect(parseJarvisPreferences({ provider: { baseUrl: 'http://g4f.space/v1', sttModel: 'a b', voice: '<x>' } }).provider).toEqual(provider);
     expect(parseJarvisPreferences({ provider: { baseUrl: 'http://127.0.0.1:8080/v1' } }).provider.baseUrl).toBe('http://127.0.0.1:8080/v1');
+  });
+  it('upgrades the existing Gemini TTS-only configuration to provide microphone transcription', () => {
+    const fromRevisionSeven = parseJarvisPreferences({
+      enabled: true, tts: true, engine: 'auto', ttsEngine: 'provider',
+      provider: { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: '', ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' },
+      version: 2
+    });
+    expect(fromRevisionSeven.provider.sttModel).toBe('gemini-3.8-flash');
+    expect(jarvisVoiceSttReady(fromRevisionSeven.provider)).toBe(true);
+    expect(fromRevisionSeven.provider.ttsModel).toBe('gemini-3.8-flash-tts');
+    expect(fromRevisionSeven.ttsEngine).toBe('provider');
+    expect(JARVIS_VOICE_PRESETS['Google Gemini TTS'].sttModel).toBe('gemini-3.8-flash');
+    expect(parseJarvisPreferences({ provider: { baseUrl: 'https://g4f.space/v1', sttModel: '' } }).provider.sttModel).toBe('');
   });
 });

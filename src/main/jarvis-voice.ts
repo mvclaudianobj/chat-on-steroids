@@ -124,6 +124,10 @@ async function voiceRequest(config: JarvisVoiceConfig, path: string, init: () =>
   const primary = await deps.credential('primary', base.origin);
   const fallback = await deps.credential('fallback', base.origin);
   const keys = [primary, fallback].filter((key): key is VoiceCredential => !!key);
+  // Never upload captured microphone audio to Google without an origin-bound key.
+  if (base.origin === 'https://generativelanguage.googleapis.com' && !keys.length) {
+    throw new Error('Save your Google AI Studio key in the vault before using Gemini speech.');
+  }
   const attempts: (VoiceCredential | null)[] = keys.length ? keys : [null];
   for (let index = 0; index < attempts.length; index++) {
     const request = init();
@@ -148,8 +152,9 @@ export async function jarvisVoiceStatus(config: JarvisVoiceConfig, signal = new 
     result.primary = !!(await deps.credential('primary', origin));
     result.fallback = !!(await deps.credential('fallback', origin));
     if (origin === 'https://generativelanguage.googleapis.com') {
-      result.models = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
-      result.tts = result.models;
+      result.stt = ['gemini-3.8-flash', 'gemini-3.8-flash-lite'];
+      result.tts = ['gemini-3.8-flash-tts', 'gemini-3.8-flash-lite-tts'];
+      result.models = [...result.stt, ...result.tts];
       if (!result.primary && !result.fallback) result.error = 'Save your Google AI Studio key to enable Gemini speech.';
       return result;
     }
@@ -175,6 +180,35 @@ export async function storeJarvisVoiceKey(slot: JarvisVoiceKeySlot, baseUrl: str
 
 const fileName = (mime: JarvisAudioMime): string => mime === 'audio/wav' ? 'jarvis.wav' : mime === 'audio/mp4' ? 'jarvis.m4a' : mime === 'audio/ogg' ? 'jarvis.ogg' : 'jarvis.webm';
 const cleanTranscript = (text: string): string => text.trim().replace(/^["“'«]+|["”'»]+$/g, '').trim().slice(0, MAX_TEXT);
+
+/** Gemini text generation accepts short microphone recordings as inline audio.
+ * This is a different protocol from OpenAI's /audio/transcriptions and cannot
+ * be driven by merely setting an STT model in the Gemini TTS preset.
+ */
+async function viaGeminiTranscription(
+  config: JarvisVoiceConfig, mime: JarvisAudioMime, bytes: Uint8Array, language: string, signal: AbortSignal
+): Promise<string> {
+  if (bytes.byteLength > 12_000_000) throw new Error('Microphone recording exceeds the Gemini inline audio limit.');
+  if (!bytes.byteLength) throw new Error('Microphone recording is empty.');
+  if (!/^gemini-[a-zA-Z0-9.-]+$/.test(config.sttModel) || /-tts$/.test(config.sttModel)) {
+    throw new Error('Select a Gemini audio-understanding model for transcription.');
+  }
+  const hint = language && /^[a-z]{2,3}(?:-[A-Za-z]{2,4})?$/.test(language) ? ` The expected language is ${language}.` : '';
+  const response = await voiceRequest(config, `/models/${config.sttModel}:generateContent`, () => ({
+    method: 'POST', headers: { 'content-type': 'application/json', accept: 'application/json' },
+    body: JSON.stringify({ contents: [{ role: 'user', parts: [
+      { text: `Transcribe the speech in this recording verbatim in its original language.${hint} Output the spoken words only, without quotes, translation, descriptions or commentary. If there is no speech, output nothing.` },
+      { inlineData: { mimeType: mime, data: Buffer.from(bytes).toString('base64') } }
+    ] }], generationConfig: { temperature: 0 } })
+  }), signal);
+  if (!response.ok) throw await failure(response, 'Gemini transcription');
+  const parsed = JSON.parse((await readBounded(response, MAX_JSON)).toString()) as {
+    candidates?: { content?: { parts?: { text?: unknown }[] } }[]
+  };
+  const text = parsed.candidates?.[0]?.content?.parts
+    ?.map(part => typeof part.text === 'string' ? part.text : '').join('') ?? '';
+  return cleanTranscript(text);
+}
 
 async function viaTranscriptions(config: JarvisVoiceConfig, mime: JarvisAudioMime, bytes: Uint8Array, language: string, signal: AbortSignal): Promise<{ status: number; text: string | null; response?: Response }> {
   const response = await voiceRequest(config, '/audio/transcriptions', () => {
@@ -220,7 +254,9 @@ export async function transcribeJarvisVoice(config: JarvisVoiceConfig, mime: Jar
   if (!config.baseUrl || !config.sttModel) throw new Error('Configure the voice provider URL and speech-to-text model.');
   const started = Date.now();
   let text: string;
-  if (config.sttMode === 'chat-audio') {
+  if (parseJarvisVoiceBaseUrl(config.baseUrl).origin === 'https://generativelanguage.googleapis.com') {
+    text = await viaGeminiTranscription(config, mime, bytes, language, signal);
+  } else if (config.sttMode === 'chat-audio') {
     if (mime !== 'audio/wav' && !(await deps.ffmpeg())) throw new Error('Chat-model transcription needs ffmpeg to convert the recording to WAV.');
     text = await viaChatAudio(config, mime === 'audio/wav' ? bytes : await deps.toWav(bytes, signal), language, signal);
   } else {
