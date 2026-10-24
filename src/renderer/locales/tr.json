@@ -1,4 +1,7 @@
 {
+  "Install with Chat Marks ({0})": "Chat Marks ile yükle ({0})",
+  "Install {0} {1} in Chat Marks? Your existing external installation stays unchanged; the new version is used after current turns finish.": "{0} {1} Chat Marks'a yüklensin mi? Harici kurulum değişmeyecek; yeni sürüm mevcut turlar bittiğinde kullanılacak.",
+  "This external CLI cannot be updated through npm. Install a managed copy in Chat Marks instead.": "Bu harici CLI npm ile güncellenemez. Chat Marks tarafından yönetilen bir kopya yükleyin.",
   "Hold to speak to Jarvis": "Jarvis ile konuşmak için basılı tutun",
   "Jarvis speech recognition currently requires Windows.": "Jarvis ses tanıma şu anda Windows gerektirir.",
   "Enable microphone consent to use Jarvis.": "Jarvis için mikrofon izni verin.",

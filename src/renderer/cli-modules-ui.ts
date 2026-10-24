@@ -286,15 +286,30 @@ export function createCliModulesUi(api: AppApi, hooks: {
       button.addEventListener('click', () => void (async () => {
         const state = current.get(id);
         if (!state?.latest) return;
-        const action = state.installed ? (state.external ? 'update-external' : 'update') : 'install';
+        // External standalone binaries are not npm packages. Keep them untouched and
+        // install a separately managed version; only a proven npm prefix can be updated in place.
+        const action = state.installed ? (state.external && state.externalNpmWritable ? 'update-external' : 'update') : 'install';
         if (action === 'update-external' && !window.confirm(t('Update the existing installation of {0} in place? This changes the CLI outside Chat Marks.', [NAMES[id]]))) return;
-        if (action !== 'update-external' && !window.confirm(t('Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.', [NAMES[id], state.latest]))) return;
+        if (action !== 'update-external' && !window.confirm(
+          state.external
+            ? t('Install {0} {1} in Chat Marks? Your existing external installation stays unchanged; the new version is used after current turns finish.', [NAMES[id], state.latest])
+            : t('Install {0} {1}? Running answers continue; the new CLI is used after the turn finishes.', [NAMES[id], state.latest]))) return;
         button.disabled = true;
-        const result = await api.cliAction(id, action, state.latest);
-        if (!result.ok) detail.textContent = result.error;
-        button.disabled = false;
-        await refresh();
-        if (result.ok) hooks.onEngineService?.();
+        try {
+          const result = await api.cliAction(id, action, state.latest);
+          if (!result.ok) {
+            detail.classList.add('modules-error');
+            detail.textContent = result.error === 'external_not_writable'
+              ? t('This external CLI cannot be updated through npm. Install a managed copy in Chat Marks instead.')
+              : result.error;
+            return;
+          }
+          await refresh();
+          hooks.onEngineService?.();
+        } catch (error) {
+          detail.classList.add('modules-error');
+          detail.textContent = error instanceof Error ? error.message : t('Update failed');
+        } finally { button.disabled = false; }
       })());
       const versions = document.createElement('div'); versions.className = 'cliproxy-versions upstream-versions';
       versions.append(installedLine, latestLine, badge, button); surface.append(versions);
@@ -412,7 +427,9 @@ export function createCliModulesUi(api: AppApi, hooks: {
           latest.textContent = `${t('Latest release')}: ${status.latest ?? '—'}`;
           badge.hidden = !status.updateAvailable;
           button.hidden = !status.latest || (status.installed && !status.updateAvailable);
-          button.textContent = status.installed ? t('Update to {0}', [status.latest ?? '']) : t('Install {0}', [status.latest ?? '']);
+          button.textContent = status.installed && status.external && !status.externalNpmWritable
+            ? t('Install with Chat Marks ({0})', [status.latest ?? ''])
+            : status.installed ? t('Update to {0}', [status.latest ?? '']) : t('Install {0}', [status.latest ?? '']);
           if (status.restartPending) row.detail.textContent += ` · ${t('Restarts with the new version when nothing is running')}`;
         }
         void row.manage?.refresh().then(() => { if (status.id === 'zeroclaw') paintZeroClawStatus(); });

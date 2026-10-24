@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { installPublishedCli, publishedLatest, publishedUpdateAvailable, externalNpmPrefix } from '../src/main/cli-source-install.js';
 
 const fixture = vi.hoisted(() => ({
   command: true,
@@ -86,6 +87,29 @@ import {
 } from '../src/main/cli-modules.js';
 
 beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.clients = ''; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
+
+describe('Codex standalone and Claude npm update routes (synthetic)', () => {
+  it('does not advertise npm in-place update for a standalone external Codex', async () => {
+    vi.mocked(publishedLatest).mockResolvedValue('1.2.3');
+    vi.mocked(publishedUpdateAvailable).mockReturnValue(true);
+    vi.mocked(externalNpmPrefix).mockResolvedValue(null);
+    const codex = (await cliStatus()).find(row => row.id === 'codex')!;
+    expect(codex).toMatchObject({ external: true, updateAvailable: true, externalNpmWritable: false });
+    await expect(cliAction('codex', 'update-external', '1.2.3')).rejects.toThrow('external_not_writable');
+    expect(installPublishedCli).not.toHaveBeenCalled();
+    await cliAction('codex', 'update', '1.2.3');
+    expect(installPublishedCli).toHaveBeenCalledWith('codex', '@openai/codex', '1.2.3', 'update', null, undefined);
+  });
+
+  it('advertises in-place npm only after verifying Claude package ownership', async () => {
+    vi.mocked(publishedLatest).mockResolvedValue('1.2.3');
+    vi.mocked(publishedUpdateAvailable).mockReturnValue(true);
+    vi.mocked(externalNpmPrefix).mockImplementation(async id => id === 'claude' ? '/home/test/.local' : null);
+    const results = await cliStatus();
+    expect(results.find(row => row.id === 'claude')).toMatchObject({ external: true, updateAvailable: true, externalNpmWritable: true });
+    expect(results.find(row => row.id === 'codex')?.externalNpmWritable).toBe(false);
+  });
+});
 
 describe('Persistent coding CLI terminal', () => {
   it('creates independent durable sessions and reopens each stable tmux identity', async () => {

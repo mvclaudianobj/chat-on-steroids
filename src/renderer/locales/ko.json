@@ -1,4 +1,7 @@
 {
+  "Install with Chat Marks ({0})": "Chat Marks로 설치 ({0})",
+  "Install {0} {1} in Chat Marks? Your existing external installation stays unchanged; the new version is used after current turns finish.": "Chat Marks에 {0} {1}을(를) 설치할까요? 기존 외부 설치는 변경되지 않으며, 진행 중인 턴이 끝나면 새 버전이 사용됩니다.",
+  "This external CLI cannot be updated through npm. Install a managed copy in Chat Marks instead.": "이 외부 CLI는 npm으로 업데이트할 수 없습니다. Chat Marks 관리 버전을 설치하세요.",
   "Hold to speak to Jarvis": "누르고 있는 동안 Jarvis에 말하기",
   "Jarvis speech recognition currently requires Windows.": "Jarvis 음성 인식은 현재 Windows가 필요합니다.",
   "Enable microphone consent to use Jarvis.": "Jarvis에 마이크 권한을 부여하세요.",

@@ -1,4 +1,7 @@
 {
+  "Install with Chat Marks ({0})": "透過 Chat Marks 安裝 ({0})",
+  "Install {0} {1} in Chat Marks? Your existing external installation stays unchanged; the new version is used after current turns finish.": "在 Chat Marks 中安裝 {0} {1}？現有外部安裝將保持不變；目前回合結束後使用新版本。",
+  "This external CLI cannot be updated through npm. Install a managed copy in Chat Marks instead.": "無法透過 npm 更新此外部 CLI。請安裝由 Chat Marks 管理的副本。",
   "Hold to speak to Jarvis": "按住與 Jarvis 對話",
   "Jarvis speech recognition currently requires Windows.": "Jarvis 語音辨識目前需要 Windows。",
   "Enable microphone consent to use Jarvis.": "允許麥克風權限以使用 Jarvis。",

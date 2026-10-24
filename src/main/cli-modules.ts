@@ -44,6 +44,8 @@ export type CliModuleStatus = {
   latest?: string | null;
   updateAvailable?: boolean;
   external?: boolean;
+  /** External binary belongs to an inspected, writable npm prefix; safe for explicit npm in-place update. */
+  externalNpmWritable?: boolean;
   restartPending?: boolean;
 };
 type Status = CliModuleStatus;
@@ -369,8 +371,12 @@ export async function cliStatus(): Promise<Status[]> {
     const v = bin ? await version(id) : null;
     const managed = await isManaged(id, bin);
     const latest = id === 'codex' || id === 'claude' ? await publishedLatest(id) : null;
+    const external = !!bin && !managed;
+    const externalNpmWritable = external && (id === 'codex' || id === 'claude') && !!bin
+      ? !!await externalNpmPrefix(id, bin, process.platform === 'win32' ? await wslHome() : app.getPath('home'))
+      : false;
     return { id, name: manifest[id].name, installed: v !== null, enabled: enabled.has(id), running: runningSessions.some(s => s.startsWith(`marks_${id}_`)), version: v, supported,
-      upstream: !!manifest[id].upstream, legacy, managed, latest, updateAvailable: (id === 'codex' || id === 'claude') && publishedUpdateAvailable(v, latest), external: !!bin && !managed,
+      upstream: !!manifest[id].upstream, legacy, managed, latest, updateAvailable: (id === 'codex' || id === 'claude') && publishedUpdateAvailable(v, latest), external, externalNpmWritable,
       restartPending: pendingRestarts.has(id),
       detail: legacy ? `${manifest[id].name} is retired; its data is left untouched. Stop its terminals, then disable it.`
         : !supported ? 'Persistent terminal requires tmux on Linux/macOS or WSL with tmux on Windows.'

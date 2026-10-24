@@ -1,4 +1,7 @@
 {
+  "Install with Chat Marks ({0})": "Installer avec Chat Marks ({0})",
+  "Install {0} {1} in Chat Marks? Your existing external installation stays unchanged; the new version is used after current turns finish.": "Installer {0} {1} dans Chat Marks ? L’installation externe reste inchangée ; la nouvelle version sera utilisée après la fin des tours en cours.",
+  "This external CLI cannot be updated through npm. Install a managed copy in Chat Marks instead.": "Cette CLI externe ne peut pas être mise à jour via npm. Installez une copie gérée par Chat Marks.",
   "Hold to speak to Jarvis": "Maintenir pour parler à Jarvis",
   "Jarvis speech recognition currently requires Windows.": "La reconnaissance vocale de Jarvis nécessite Windows pour le moment.",
   "Enable microphone consent to use Jarvis.": "Autorisez le microphone pour utiliser Jarvis.",

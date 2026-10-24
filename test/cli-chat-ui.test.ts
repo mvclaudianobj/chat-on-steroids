@@ -37,6 +37,35 @@ afterEach(() => {
   randomUuid.mockClear();
 });
 
+it('routes standalone Codex to managed copy and npm Claude to explicit external update', async () => {
+  const actions = vi.fn(async () => ({ ok: true, data: [] }));
+  const states = [
+    { id: 'codex', name: 'Codex', version: '1.0.0', latest: '1.2.3', installed: true, enabled: true, running: false,
+      supported: true, detail: 'ready', external: true, externalNpmWritable: false, updateAvailable: true },
+    { id: 'claude', name: 'Claude', version: '1.0.0', latest: '1.2.3', installed: true, enabled: true, running: false,
+      supported: true, detail: 'ready', external: true, externalNpmWritable: true, updateAvailable: true }
+  ];
+  const api = {
+    cliStatus: async () => ({ ok: true, data: states }),
+    cliSessions: async () => ({ ok: true, data: [] }),
+    listProjects: async () => ({ ok: true, data: [] }),
+    cliAction: actions
+  } as any;
+  const confirm = vi.spyOn(dom.window, 'confirm').mockReturnValue(true);
+  try {
+    createCliModulesUi(api, { showTab: () => undefined, openChatView: () => undefined, workspace: () => null });
+    await vi.waitFor(() => expect(dom.window.document.getElementById('codexInstall')?.hasAttribute('hidden')).toBe(false));
+    const codex = dom.window.document.getElementById('codexInstall') as HTMLButtonElement;
+    expect(codex.textContent).toContain('Chat Marks');
+    codex.click();
+    await vi.waitFor(() => expect(actions).toHaveBeenCalledWith('codex', 'update', '1.2.3'));
+    const claude = dom.window.document.getElementById('claudeInstall') as HTMLButtonElement;
+    claude.click();
+    await vi.waitFor(() => expect(actions).toHaveBeenCalledWith('claude', 'update-external', '1.2.3'));
+    expect(confirm).toHaveBeenCalledTimes(2);
+  } finally { confirm.mockRestore(); }
+});
+
 it('shows enabled modules in the terminal details section without a backend selector', async () => {
   const open = async () => ({ ok: true as const, data: { id: 'module', cwd: '/approved', session: 'marks_opencode' } });
   const api = {
