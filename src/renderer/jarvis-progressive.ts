@@ -26,6 +26,7 @@ export class JarvisProgressiveAudio {
   private reject: ((reason: unknown) => void) | null = null;
   private firstAudio: ((ms: number) => void) | null = null;
   private error: Error | null = null;
+  private detachAbort: (() => void) | null = null;
 
   constructor(readonly requestId: string, subscribe: (listener: (event: JarvisProgressEvent) => void) => () => void) {
     this.unsubscribe = subscribe(event => this.accept(event));
@@ -86,7 +87,9 @@ export class JarvisProgressiveAudio {
     return new Promise<void>((resolve, reject) => {
       this.resolve = resolve;
       this.reject = reject;
-      signal.addEventListener('abort', () => this.cancel(), { once: true });
+      const onAbort = () => this.cancel();
+      signal.addEventListener('abort', onAbort, { once: true });
+      this.detachAbort = () => signal.removeEventListener('abort', onAbort);
       this.pump();
     });
   }
@@ -95,6 +98,8 @@ export class JarvisProgressiveAudio {
   cancel(): void {
     if (this.stopped) return;
     this.stopped = true;
+    this.detachAbort?.();
+    this.detachAbort = null;
     this.playbackStarting = false;
     this.unsubscribe();
     this.received.length = 0;

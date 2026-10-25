@@ -260,11 +260,11 @@ describe('Jarvis automatic voice for typed ChatGPT messages', () => {
     expect(f.speak.mock.calls.map(call => call[1])).toEqual(['A resposta antiga começou agora.', 'Esta é a única resposta atual.']);
   });
 
-  it('handles twelve consecutive typed turns without cross-turn replay or voice-group reuse', async () => {
+  it('handles thirty consecutive typed turns without cross-turn replay or voice-group reuse', async () => {
     const f = await fixture({ selected: chatA, routingMode: 'gemini-first' });
     const events: unknown[] = [];
     const links: Record<string, { origin: number; time: number; questionId: string }> = {};
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 30; i++) {
       const qid = `q-sequence-${i}`;
       const tid = `answer-sequence-${i}`;
       links[tid] = { origin: i + 1, time: i * 100, questionId: qid };
@@ -273,11 +273,11 @@ describe('Jarvis automatic voice for typed ChatGPT messages', () => {
       expect(f.speak).toHaveBeenCalledTimes(i + 1);
     }
     expect(f.speak.mock.calls.map(call => call[1])).toEqual(
-      Array.from({ length: 12 }, (_, i) => `Esta é a resposta válida do turno ${i}.`)
+      Array.from({ length: 30 }, (_, i) => `Esta é a resposta válida do turno ${i}.`)
     );
-    expect(new Set(f.speak.mock.calls.map(call => call[3])).size).toBe(12);
+    expect(new Set(f.speak.mock.calls.map(call => call[3])).size).toBe(30);
     await f.nativeEvents(events, links);
-    expect(f.speak).toHaveBeenCalledTimes(12);
+    expect(f.speak).toHaveBeenCalledTimes(30);
   });
 
   it('silences partial typed speech after a stopped response and ignores the stale end', async () => {

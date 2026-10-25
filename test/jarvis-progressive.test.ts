@@ -86,6 +86,27 @@ describe('Jarvis incremental audio playback', () => {
     return new JarvisProgressiveAudio('turn-a', subscribe);
   }
 
+  it('releases each cancellation listener after 30 completed or interrupted speech segments', async () => {
+    for (let turn = 0; turn < 30; turn++) {
+      const player = prepare();
+      const controller = new AbortController();
+      const add = vi.spyOn(controller.signal, 'addEventListener');
+      const remove = vi.spyOn(controller.signal, 'removeEventListener');
+      const playing = player.play(controller.signal);
+      send({ requestId: 'turn-a', type: 'start', mime: 'audio/ogg' });
+      send({ requestId: 'turn-a', type: 'chunk', bytes: new Uint8Array([1, 2, 3]) });
+      if (turn % 5 === 0) controller.abort();
+      else {
+        send({ requestId: 'turn-a', type: 'end' });
+        FakeAudio.created.at(-1)?.finish();
+      }
+      await playing;
+      expect(add.mock.calls.filter(row => row[0] === 'abort')).toHaveLength(1);
+      expect(remove.mock.calls.filter(row => row[0] === 'abort')).toHaveLength(1);
+    }
+    expect(disposed).toBe(30);
+  });
+
   it('starts playback after the first audio chunk while the provider stream is still open', async () => {
     const player = prepare();
     const firstAudio = vi.fn();
