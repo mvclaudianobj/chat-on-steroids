@@ -47,6 +47,22 @@
 .company-rpg-agent,.company-observe-worker{border:0;background:transparent;color:var(--ink);cursor:pointer;font-size:12px}
 .company-rpg-agent:focus-visible,.company-observe-worker:focus-visible{outline:2px solid var(--accent);outline-offset:3px}
 .company-rpg-meeting{border-style:dashed}.company-rpg-attention{border-color:var(--red)}
+.company-rpg-room{position:relative;overflow:visible;transition:border-color .25s ease}
+.company-rpg-actors{min-height:68px;align-content:flex-start}
+.company-rpg-actor{min-width:108px;transition:background .2s,border-color .2s}
+.company-rpg-agent{display:grid;justify-items:center;gap:4px;min-width:98px;padding:4px 7px}
+.company-rpg-pixel{position:relative;width:26px;height:32px;display:block;background:linear-gradient(135deg,#d7c4aa 0 40%,#6286a6 41% 76%,#343c55 77%);clip-path:polygon(28% 0,72% 0,72% 12%,90% 12%,90% 72%,76% 72%,76% 100%,56% 100%,56% 74%,44% 74%,44% 100%,24% 100%,24% 72%,10% 72%,10% 12%,28% 12%);filter:drop-shadow(0 2px 1px #0005)}
+.company-rpg-actor:nth-child(3n+2) .company-rpg-pixel{filter:hue-rotate(82deg)}
+.company-rpg-actor:nth-child(3n+3) .company-rpg-pixel{filter:hue-rotate(190deg)}
+.company-rpg-name{font-size:11px;font-weight:750}
+.company-rpg-state{font-size:9px;color:var(--soft);max-width:110px;text-align:center}
+.company-rpg-actor[data-state=working] .company-rpg-pixel{animation:company-rpg-work 1.2s ease-in-out infinite}
+.company-rpg-actor[data-state='meeting-present'] .company-rpg-pixel{animation:company-rpg-talk .9s ease-in-out infinite alternate}
+.company-rpg-actor[data-state='available-confirmed'] .company-rpg-pixel{opacity:.72;transform:translateY(2px)}
+.company-rpg-actor[data-state='needs-ceo']{border-color:var(--red)}
+.company-rpg-actor[data-state=unverified]{opacity:.65}
+@keyframes company-rpg-work{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
+@keyframes company-rpg-talk{from{transform:rotate(-4deg)}to{transform:rotate(4deg)}}
 .company-observe-panel{margin-top:16px}.company-observe-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .company-observe-events{max-height:180px;overflow:auto;font-size:11px;color:var(--soft);padding-left:22px}
 @media(prefers-reduced-motion:reduce){.company-rpg *{transition:none!important;animation:none!important}}

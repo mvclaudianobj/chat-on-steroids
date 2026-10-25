@@ -3,6 +3,7 @@ import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, companyRestingSeats, comp
 import type { CompanyObservabilityView } from '../main/company-observability.js';
 import { t, onLanguageChange } from './i18n.js';
 import { mountCompanyLocalGrants } from './company-local-grants-ui.js';
+import { createCompanyRpgWorld } from './company-rpg-world.js';
 
 const names: Record<string, string> = { inbox: 'Inbox', assigned: 'Assigned', working: 'Working', review: 'Review', 'needs-ceo': 'Needs CEO', done: 'Done' };
 const roleNames = ['Operations', 'Engineering', 'Infrastructure', 'Product', 'Knowledge', 'Quality', 'Communications'];
@@ -29,6 +30,8 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   let observed: CompanyObservabilityView | null = null;
   let view: 'board' | 'office' | 'rpg' = (() => { try { const stored=localStorage.getItem('company:view'); return stored==='rpg'||stored==='office'?stored:'board'; } catch { return 'board'; } })();
   let loading = false;
+  let livePolling = false;
+  let rpgWorld: ReturnType<typeof createCompanyRpgWorld> | null = null;
   const dialog = $('companyDialog') as HTMLDialogElement;
   const content = $('companyDialogContent');
   const actions = $('companyDialogActions');
@@ -293,23 +296,9 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     panel.append(feed);
   }
   function paintRpg():void {
-    const scene=$('companyRpg');scene.replaceChildren();if(!snapshot)return;
-    const title=el('h2','company-rpg-heading',t('Company RPG · live states only'));scene.append(title);
-    const rooms=el('div','company-rpg-rooms');
-    const defs=[['desks','Work desks'],['meeting','Meeting room'],['rest','Rest room'],['attention','Needs CEO'],['offline','Unverified / disconnected']] as const;
-    const containers=new Map<string,HTMLElement>();
-    for(const [key,name] of defs){const room=el('section',`company-rpg-room company-rpg-${key}`);room.append(el('h3','',t(name)));const group=el('ul','company-rpg-actors');group.setAttribute('aria-label',t(name));room.append(group);containers.set(key,group);rooms.append(room);}
-    for(const seat of snapshot.company.seats.slice(0,10)){
-      const entry=observed?.seats.find(row=>row.seat===seat);
-      const state=entry?.state??'unverified';
-      const room=state==='meeting-present'?'meeting':state==='available-confirmed'?'rest':state==='needs-ceo'?'attention':state==='working'||state==='shell-wait'||state==='review'?'desks':'offline';
-      const li=el('li','company-rpg-actor');li.dataset.seat=seat;li.dataset.state=state;
-      const glyph=el('span','company-rpg-glyph','◆');glyph.setAttribute('aria-hidden','true');
-      li.append(button(`${seat} · ${t(state)}`,()=>workerInspector(seat),'company-rpg-agent'));li.prepend(glyph);
-      containers.get(room)?.append(li);
-    }
-    scene.append(rooms);
-    scene.append(el('p','company-muted',t('Only broker-confirmed transitions move workers; unknown states remain unverified.')));
+    if(!snapshot)return;
+    rpgWorld??=createCompanyRpgWorld($('companyRpg'),t,undefined,undefined,workerInspector);
+    rpgWorld.update(snapshot.company.seats,observed?.seats??[],snapshot.demo || observed?.demo===true);
   }
   async function loadObservation():Promise<void>{
     try{const result=await api.companyObserve();if(!result.ok)throw Error(result.error);observed=result.data;}
@@ -377,6 +366,26 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     }
     catch (error) { $('companyEmpty').hidden = false; $('companyEmpty').append(el('p', 'company-error', (error as Error).message)); }
   }
+  // Habblaud-style live view, backed only by authenticated READ-ONLY main IPC.
+  // A UI animation must never submit a ticket, claim completion or grant authority.
+  // Hidden panels, dialogs and concurrent requests have no background polling.
+  const liveTick=async():Promise<void>=>{
+    const panel=document.querySelector<HTMLElement>('.company-panel');
+    if(livePolling||loading||dialog.open||document.visibilityState==='hidden'||!panel?.classList.contains('is-active'))return;
+    livePolling=true;
+    try{
+      const result=await api.company({action:'get'});
+      if(!result.ok)throw Error(result.error);
+      if(!panel.classList.contains('is-active'))return;
+      snapshot=result.data;
+      paint();
+      await loadObservation();
+    }catch{
+      // Unknown transport or stale broker state cannot become a fictional worker.
+      observed=null;paintObservation();paintRpg();
+    }finally{livePolling=false;}
+  };
+  window.setInterval(()=>void liveTick(),6000);
   $('companyNewRequest').addEventListener('click', newRequest);
   $('companyMeetingCreate').addEventListener('click', newMeeting);
   $('companySettings').addEventListener('click', settings);
