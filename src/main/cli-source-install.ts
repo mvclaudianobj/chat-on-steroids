@@ -81,6 +81,22 @@ const safeEnv = (home: string): NodeJS.ProcessEnv => {
     LANG: 'C', TMPDIR: os.tmpdir(), NO_COLOR: '1', npm_config_update_notifier: 'false' };
 };
 
+/** Prepare only the pinned publisher's native Claude binary, never dependency lifecycle scripts. */
+async function prepareClaudeNative(prefix: string, expected: string, probeHome: string): Promise<void> {
+  const packageDir = path.join(prefix, 'node_modules', '@anthropic-ai', 'claude-code');
+  const meta = JSON.parse(await fs.readFile(path.join(packageDir, 'package.json'), 'utf8')) as {
+    name?: string; version?: string
+  };
+  if (meta.name !== PACKAGES.claude || meta.version !== expected) throw new Error('version_mismatch');
+  const script = path.join(packageDir, 'install.cjs');
+  const stat = await fs.lstat(script);
+  if (!stat.isFile() || stat.isSymbolicLink()) throw new Error('unsafe_executable');
+  await exec('node', [script], {
+    cwd: packageDir, env: safeEnv(probeHome),
+    timeout: 120_000, maxBuffer: 1024 * 1024, windowsHide: true
+  });
+}
+
 async function installLocal(id: PublishedId, expected: string, mode: InstallMode, archive: Buffer, externalPrefix: string | null,
   beforeExternalWrite?: () => Promise<void>): Promise<void> {
   const root = path.join(app.getPath('userData'), 'modules');
@@ -104,6 +120,7 @@ async function installLocal(id: PublishedId, expected: string, mode: InstallMode
     const binary = path.join(staged, 'node_modules', '.bin', id);
     const real = await fs.realpath(binary);
     if (!real.startsWith(`${staged}${path.sep}`)) throw new Error('unsafe_executable');
+    if (id === 'claude') await prepareClaudeNative(staged, expected, path.join(stage, 'probe'));
     const version = await verifiedVersion(id, binary, path.join(stage, 'probe'));
     if (version !== expected) throw new Error('version_mismatch');
     if (mode === 'update-external') {
