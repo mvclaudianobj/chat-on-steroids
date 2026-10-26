@@ -25,8 +25,8 @@ import { queueOutboundNotice } from './notification-center.js';
 export const APPROVAL_FRESH_MS = 75_000;
 /** Time for a person looking at the card to answer it before a desktop notice interrupts them. */
 export const APPROVAL_NOTICE_GRACE_MS = 30_000;
-/** How long an answer waits for the card's page to take it; a visible card's page polls every 2 s. */
-export const APPROVAL_ANSWER_MS = 30_000;
+/** Hidden pages poll every 30s: allow scheduler jitter without treating the click as acceptance. */
+export const APPROVAL_ANSWER_MS = 70_000;
 /**
  * ChatGPT sometimes redraws the card: gone for a poll, then back with the same words (VM,
  * 2026-10-20: 1.2 s). Back within this long, it is the same request, not an answer and a new one.

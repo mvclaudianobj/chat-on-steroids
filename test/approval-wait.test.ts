@@ -36,6 +36,18 @@ describe('approval card episodes', () => {
     };
   });
 
+  it('keeps a user-selected Allow once pending past one hidden-tab 30s poll, then expires safely', async () => {
+    const card = { id: 'card-hidden-tab-1', lines: ['Synthetic explicit host consent'], allow: true };
+    await noteApprovalCard('hidden-chat', true, 'session', deps, 1_000, card);
+    const answer = requestApprovalAnswer('hidden-chat', card.id, 'allow', 1_100);
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    // A hidden tab can take a full poll interval plus scheduling jitter. The
+    // original 30s timeout can expire an answer before that poll takes it.
+    expect(approvalAnswerFor('hidden-chat', 32_100)).toEqual({ token: answer.token, cardId: card.id, choice: 'allow' });
+    expect(approvalAnswerFor('hidden-chat', 1_100 + APPROVAL_ANSWER_MS)).toBeNull();
+  });
+
   it('writes the row at once, notices once after the grace, and rewrites the row when answered', async () => {
     await noteApprovalCard('chat', true, 'session', deps, 1_000);
     expect(approvalCardWaiting('chat', 1_000)).toBe(true);
