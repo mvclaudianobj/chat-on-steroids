@@ -12,7 +12,7 @@ function tally(reason: InboundReason): void { inboundCounts[reason] = Math.min(1
 /** Only direct chats. LID digits are opaque identifiers, NEVER phone numbers. */
 function inboundNumber(key: { remoteJid?: string | null; remoteJidAlt?: string | null; participant?: string | null; participantAlt?: string | null }): string | null {
   const primary = key.remoteJid ?? '';
-  if (key.participant || key.participantAlt || !/^(?:\d{8,15})@(?:lid|s\.whatsapp\.net)$/.test(primary)) { tally('nonDirect'); return null; }
+  if (key.participant || key.participantAlt || !/^(?:\d{1,32})@lid$|^(?:\d{8,15})@s\.whatsapp\.net$/.test(primary)) { tally('nonDirect'); return null; }
   const pn = primary.endsWith('@lid') ? key.remoteJidAlt ?? '' : primary;
   const match = /^(\d{8,15})@s\.whatsapp\.net$/.exec(pn);
   if (!match) { tally(primary.endsWith('@lid') ? 'lidWithoutPn' : 'invalidPn'); return null; }
@@ -62,6 +62,18 @@ function beginConnect(): Promise<void> {
   return task;
 }
 function directory(): string { return path.join(app.getPath('userData'), 'notifications', 'whatsapp-web'); }
+async function secureAuthMetadata(dir: string): Promise<void> {
+  // Baileys multi-file storage uses plain writeFile() and inherits legacy file
+  // permissions. Repair metadata before it reads keys, without inspecting contents.
+  for (const entry of await fs.readdir(dir, { withFileTypes: true })) {
+    if (!entry.name.endsWith('.json')) continue;
+    if (!entry.isFile() || entry.isSymbolicLink()) throw new WhatsAppPairingError('storage_unavailable');
+    const filename = path.join(dir, entry.name);
+    const stat = await fs.lstat(filename);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new WhatsAppPairingError('storage_unavailable');
+    if ((stat.mode & 0o077) !== 0) await fs.chmod(filename, 0o600);
+  }
+}
 export async function getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> { return status.state === 'connected' ? { ...status, inboundDiagnostics: { ...inboundCounts } } : { ...status }; }
 function closeSocket(): void {
   if (restart) { clearTimeout(restart); restart = null; }
@@ -98,6 +110,7 @@ async function connect(): Promise<void> {
     const directoryStat = await bounded(fs.lstat(dir), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
     if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) throw new WhatsAppPairingError('storage_unavailable');
     await bounded(fs.chmod(dir, 0o700), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
+    await bounded(secureAuthMetadata(dir), SETUP_IO_TIMEOUT_MS, 'storage_unavailable');
   } catch (error) { throw new WhatsAppPairingError(startupIssue(error, 'storage')); }
   // Baileys' multi-file auth reads creds.json here. A rapid retry can otherwise read a
   // partially-written session from the previous socket; never delete or overwrite it.

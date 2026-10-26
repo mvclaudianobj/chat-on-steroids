@@ -28,6 +28,28 @@ function setup(enabled = true) {
   return { duplex, sendText, send, answer, setLatest: (value: { id: string; text: string; seq: number }) => { latest = value; }, setDelivery: (value: number | null) => { deliverySeq = value; }, getState: () => state };
 }
 describe('WhatsApp bidirectional owner-only routing', () => {
+  it('does not complete a command after its sender loses authorization during asynchronous session enumeration', async () => {
+    let enabled = true;
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const sent = vi.fn(async (_number: string, _body: string) => undefined);
+    const duplex = createWhatsAppDuplex({
+      allowed: async () => enabled ? [sender] : [],
+      sessions: async () => { await pending; return sessions; },
+      active: async () => sessions[0]!.id,
+      sendText: sent,
+      send: vi.fn(async () => ({ id: 'never-queued', state: 'queued' })),
+      approvals: () => [], answer: () => ({ ok: false as const, error: 'denied' }),
+      latest: async () => null, delivered: async () => null,
+      load: async () => null, save: async () => undefined
+    });
+    const command = duplex.incoming(sender, 'revoked-1', '/chats');
+    await vi.waitFor(() => expect(sent).not.toHaveBeenCalled());
+    enabled = false;
+    release();
+    await command;
+    expect(sent).not.toHaveBeenCalled();
+  });
   it('rejects unauthorized sender without replying or exposing sessions', async () => {
     const app = setup();
     await app.duplex.incoming('5511888888888', 'message-1', '/chats');

@@ -86,7 +86,12 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
     const active = await deps.active();
     return sessions.find(session => session.id === active);
   };
-  const respond = (number: string, body: string): Promise<void> => deps.sendText(number, clip(body));
+  // Access may be revoked while awaiting sessions/host events. Check again at
+  // the irreversible send boundary, not only at command admission.
+  const respond = async (number: string, body: string): Promise<void> => {
+    if (!await authorized(number)) return;
+    await deps.sendText(number, clip(body));
+  };
   return {
     incoming(sender, messageId, text) {
       return serial(async () => {
@@ -100,6 +105,7 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
         await commit(state);
         const message = text.trim();
         const sessions = await available();
+        if (!await authorized(sender)) return;
         const [command, ...rest] = message.split(/\s+/u);
         const arg = rest.join(' ').trim();
         const normalized = command?.toLocaleLowerCase('pt-BR') ?? '';
@@ -154,6 +160,7 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
         }
         if (existing) { delete state.pending[sender]; await commit(state); }
         const before = await deps.latest(selected.id).catch(() => null);
+        if (!await authorized(sender)) return;
         const entry = await deps.send(selected.id, message);
         state.pending[sender] = { sessionId: selected.id, before: before?.id ?? null, queuedId: entry.id, at: Date.now() };
         await commit(state);

@@ -155,6 +155,43 @@ it('resolves a LID direct message via its Baileys PN alternate, never via the LI
   ] });
   expect(inbound).toHaveBeenCalledTimes(1);
 });
+it('accepts a modern long opaque LID without treating its digits as a phone number', async () => {
+  const inbound = vi.fn(async () => undefined);
+  web.setWhatsAppWebInbound(inbound);
+  await web.startWhatsAppWeb();
+  const sock = mocks.sockets.at(-1)!;
+  sock.ev.emit('connection.update', { connection: 'open' });
+  sock.ev.emit('messages.upsert', { type: 'notify', messages: [
+    { key: { id: 'modern-lid', remoteJid: '999988887777666655@lid', remoteJidAlt: '5511999999999@s.whatsapp.net', fromMe: false }, message: { extendedTextMessage: { text: '/menu' } } }
+  ] });
+  expect(inbound).toHaveBeenCalledOnce();
+  expect(inbound).toHaveBeenCalledWith('5511999999999', 'modern-lid', '/menu');
+});
+it('hardens legacy WhatsApp auth metadata before connecting without replacing file contents', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  const creds = path.join(dir, 'creds.json');
+  const legacy = path.join(dir, 'session-legacy.json');
+  await fs.writeFile(creds, '{"synthetic":true}');
+  await fs.writeFile(legacy, '{"synthetic":"legacy"}');
+  await fs.chmod(creds, 0o664);
+  await fs.chmod(legacy, 0o664);
+  await web.startWhatsAppWeb();
+  expect((await fs.stat(creds)).mode & 0o777).toBe(0o600);
+  expect((await fs.stat(legacy)).mode & 0o777).toBe(0o600);
+  expect(await fs.readFile(creds, 'utf8')).toBe('{"synthetic":true}');
+  expect(await fs.readFile(legacy, 'utf8')).toBe('{"synthetic":"legacy"}');
+});
+it('refuses symlinked auth JSON before Baileys can follow it', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  const external = path.join(mocks.directory, 'never-touch.json');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(external, '{"private":"synthetic"}');
+  await fs.symlink(external, path.join(dir, 'creds.json'));
+  await expect(web.startWhatsAppWeb()).rejects.toMatchObject({ issue: 'storage_unavailable' });
+  expect(mocks.authCalls).toBe(0);
+  expect(await fs.readFile(external, 'utf8')).toBe('{"private":"synthetic"}');
+});
 it('exposes only aggregate inbound diagnostics and distinguishes unreachable handler from LID without PN', async () => {
   await web.startWhatsAppWeb();
   const sock = mocks.sockets.at(-1)!;
