@@ -182,6 +182,73 @@ it('hardens legacy WhatsApp auth metadata before connecting without replacing fi
   expect(await fs.readFile(creds, 'utf8')).toBe('{"synthetic":true}');
   expect(await fs.readFile(legacy, 'utf8')).toBe('{"synthetic":"legacy"}');
 });
+it('tolerates a disappearing Baileys session key during startup permissions sweep', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  const deleted = path.join(dir, 'transient-session.json');
+  await fs.writeFile(deleted, '{"synthetic":true}');
+  const original = fs.lstat.bind(fs);
+  const missing = Object.assign(new Error('synthetic key vanished'), { code: 'ENOENT' });
+  const spy = vi.spyOn(fs, 'lstat').mockImplementation(async file => {
+    if (String(file) === deleted) throw missing;
+    return original(file);
+  });
+  await expect(web.startWhatsAppWeb()).resolves.toMatchObject({ state: 'connecting' });
+  expect(mocks.sockets).toHaveLength(1);
+  expect(spy).toHaveBeenCalledWith(deleted);
+});
+it('does not silently start a fresh pairing when the actual credentials file vanishes mid-scan', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  const creds = path.join(dir, 'creds.json');
+  await fs.writeFile(creds, '{"registered":true,"synthetic":true}');
+  const original = fs.lstat.bind(fs);
+  vi.spyOn(fs, 'lstat').mockImplementation(async file => {
+    if (String(file) === creds) throw Object.assign(new Error('synthetic missing credentials'), { code: 'ENOENT' });
+    return original(file);
+  });
+  await expect(web.startWhatsAppWeb()).rejects.toMatchObject({ issue: 'storage_unavailable' });
+  expect(mocks.sockets).toHaveLength(0);
+  expect(mocks.authCalls).toBe(0);
+});
+it('preserves genuine permissions errors instead of hiding them as Baileys deletion races', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  const key = path.join(dir, 'blocked-session.json');
+  await fs.writeFile(key, '{"synthetic":true}');
+  await fs.chmod(key, 0o664);
+  const original = fs.chmod.bind(fs);
+  vi.spyOn(fs, 'chmod').mockImplementation(async (file, mode) => {
+    if (String(file) === key) throw Object.assign(new Error('synthetic denied'), { code: 'EACCES' });
+    return original(file, mode);
+  });
+  await expect(web.startWhatsAppWeb()).rejects.toMatchObject({ issue: 'storage_unavailable' });
+  expect(mocks.authCalls).toBe(0);
+});
+it('does not mark a live WhatsApp socket as storage unavailable when a session key disappears while chmod runs', async () => {
+  await web.startWhatsAppWeb();
+  const sock = mocks.sockets.at(-1)!;
+  sock.ev.emit('connection.update', { connection: 'open' });
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  const transient = path.join(dir, 'transient-session.json');
+  await fs.writeFile(transient, '{"synthetic":true}');
+  const original = fs.chmod.bind(fs);
+  let vanished = false;
+  const spy = vi.spyOn(fs, 'chmod').mockImplementation(async (file, mode) => {
+    if (!vanished && String(file) === transient) {
+      vanished = true;
+      await fs.rm(transient);
+      throw Object.assign(new Error('synthetic deleted key'), { code: 'ENOENT' });
+    }
+    return original(file, mode);
+  });
+  sock.ev.emit('creds.update', {});
+  await vi.waitFor(() => expect(vanished).toBe(true));
+  await vi.waitFor(async () => expect((await fs.readFile(path.join(dir, 'creds.json'), 'utf8'))).toContain('synthetic'));
+  // No benign key removal can mask an already authenticated connection.
+  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected' });
+  expect(spy).toHaveBeenCalledWith(transient, 0o600);
+});
 it('refuses symlinked auth JSON before Baileys can follow it', async () => {
   const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
   const external = path.join(mocks.directory, 'never-touch.json');

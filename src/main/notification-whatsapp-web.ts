@@ -62,6 +62,10 @@ function beginConnect(): Promise<void> {
   return task;
 }
 function directory(): string { return path.join(app.getPath('userData'), 'notifications', 'whatsapp-web'); }
+/** Baileys may delete individual session keys as soon as another key rotates. */
+function isMissingAuthKey(error: unknown): boolean {
+  return !!error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT';
+}
 async function secureAuthMetadata(dir: string): Promise<void> {
   // Baileys multi-file storage uses plain writeFile() and inherits legacy file
   // permissions. Repair metadata before it reads keys, without inspecting contents.
@@ -69,9 +73,15 @@ async function secureAuthMetadata(dir: string): Promise<void> {
     if (!entry.name.endsWith('.json')) continue;
     if (!entry.isFile() || entry.isSymbolicLink()) throw new WhatsAppPairingError('storage_unavailable');
     const filename = path.join(dir, entry.name);
-    const stat = await fs.lstat(filename);
+    const stat = await fs.lstat(filename).catch((error: unknown) => {
+      if (isMissingAuthKey(error) && entry.name !== 'creds.json') return null;
+      throw error;
+    });
+    if (!stat) continue; // Baileys removed a rotated key after readdir.
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) throw new WhatsAppPairingError('storage_unavailable');
-    if ((stat.mode & 0o077) !== 0) await fs.chmod(filename, 0o600);
+    if ((stat.mode & 0o077) !== 0) await fs.chmod(filename, 0o600).catch((error: unknown) => {
+      if (!isMissingAuthKey(error) || entry.name === 'creds.json') throw error;
+    });
   }
 }
 export async function getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> { return status.state === 'connected' ? { ...status, inboundDiagnostics: { ...inboundCounts } } : { ...status }; }
@@ -165,7 +175,9 @@ async function connect(): Promise<void> {
       // graceful shutdown/reconnect revokes this socket before the microtask runs.
       // stop/disconnect both await "saving"; disconnect then deletes the folder.
       await saveCreds();
-      for (const file of await fs.readdir(dir)) if (file.endsWith('.json')) await fs.chmod(path.join(dir, file), 0o600);
+      // Use the same validated sweep on key rotations. Ignore only ENOENT
+      // races, never permission failures, disk I/O errors or symlinks.
+      await secureAuthMetadata(dir);
     }).catch(() => {
       if (epoch === generation) status = { state: 'error', reason: 'storage_unavailable', stage: 'storage' };
     });
