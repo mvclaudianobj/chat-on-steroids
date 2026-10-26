@@ -54,10 +54,11 @@ function checkSettings(value: unknown): NotificationCenterSettings {
     const { config, destinations } = settings.channels[channel];
     // Never accept arbitrary keys that could be mistaken for credentials in the durable settings.
     const names: Record<NotificationChannel, string[]> = {
-      smtp: ['host', 'port', 'username', 'from', 'security', 'tlsFingerprint'], telegram: ['apiBase'], 'whatsapp-web': [],
+      smtp: ['host', 'port', 'username', 'from', 'security', 'tlsFingerprint'], telegram: ['apiBase'], 'whatsapp-web': ['duplex'],
       'whatsapp-cloud': ['apiBase', 'phoneId', 'template', 'language', 'parameters'], 'whatsapp-evolution': ['baseUrl', 'instance']
     };
     for (const k of Object.keys(config)) if (!names[channel].includes(k)) throw new Error('Unsupported channel setting');
+    if (channel === 'whatsapp-web' && config.duplex && !['on', 'off'].includes(config.duplex)) throw new Error('Invalid two-way WhatsApp setting');
     if (channel === 'smtp' && config.security && !['tls', 'starttls'].includes(config.security)) throw new Error('SMTP requires TLS or STARTTLS');
     // A pinned certificate is public data, but only the exact SHA-256 form is ever accepted.
     if (channel === 'smtp' && config.tlsFingerprint && !CERTIFICATE_FINGERPRINT.test(config.tlsFingerprint)) throw new Error('Invalid pinned certificate fingerprint');

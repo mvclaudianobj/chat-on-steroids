@@ -31,6 +31,9 @@ let saving: Promise<void> = Promise.resolve();
 let retryCount = 0;
 let qrDeadline: ReturnType<typeof setTimeout> | null = null;
 let qrRefreshDeadline: ReturnType<typeof setTimeout> | null = null;
+let inbound: ((number: string, messageId: string, text: string) => Promise<void>) | null = null;
+/** The main process installs a single owner-gated handler; the socket itself grants no authority. */
+export function setWhatsAppWebInbound(handler: typeof inbound): void { inbound = handler; }
 const FIRST_QR_VALIDITY_MS = 65_000;
 const REFRESH_QR_VALIDITY_MS = 25_000;
 const SETUP_IO_TIMEOUT_MS = 12_000;
@@ -55,6 +58,7 @@ function closeSocket(): void {
   if (socket) {
     const previous = socket; socket = null;
     previous.ev.removeAllListeners('connection.update'); previous.ev.removeAllListeners('creds.update');
+    previous.ev.removeAllListeners('messages.upsert');
     // Baileys 7 closes asynchronously; never leave an unhandled rejection on a stale socket.
     try { void Promise.resolve(previous.ws.close()).catch(() => undefined); } catch { /* Socket already closed. */ }
   }
@@ -99,6 +103,19 @@ async function connect(): Promise<void> {
   catch (error) { throw new WhatsAppPairingError(startupIssue(error, 'runtime')); }
   socket = active;
   status = { state: 'connecting', stage: 'network' };
+  active.ev.on('messages.upsert', ({ type, messages }) => {
+    if (epoch !== generation || status.state !== 'connected' || type !== 'notify' || !inbound) return;
+    for (const item of messages) {
+      if (item.key.fromMe || !item.key.id) continue;
+      const jid = item.key.remoteJid ?? '';
+      const match = /^(\d{8,15})@s\.whatsapp\.net$/.exec(jid);
+      if (!match) continue; // Do not accept group, status, LID or unverified senders.
+      const content = item.message?.ephemeralMessage?.message ?? item.message;
+      const text = content?.conversation ?? content?.extendedTextMessage?.text ?? '';
+      if (!text.trim() || text.length > 5000) continue;
+      void inbound(match[1]!, item.key.id, text).catch(() => undefined);
+    }
+  });
   // A WebSocket can remain silent without emitting close. This occurs with both
   // new QR pairing and already-registered sessions; a status-only timeout leaves
   // the socket alive and prevents automatic recovery indefinitely.
@@ -207,6 +224,16 @@ export async function sendWhatsAppWeb(number: string, message: string): Promise<
   if (!/^\d{8,15}$/.test(number)) throw new Error('Invalid WhatsApp number');
   await socket.sendMessage(`${number}@s.whatsapp.net`, { text: message });
 }
+/** Reserved for Jarvis once an actual MP3 is produced; never synthesize/claim audio here. */
+export async function sendWhatsAppWebMp3(number: string, audio: Buffer): Promise<void> {
+  if (!wantConnection || !socket || status.state !== 'connected') throw new Error('WhatsApp Web disconnected');
+  if (!/^\d{8,15}$/.test(number)) throw new Error('Invalid WhatsApp number');
+  if (!Buffer.isBuffer(audio) || audio.length < 128 || audio.length > 8 * 1024 * 1024 ||
+      !(audio.subarray(0, 3).toString('ascii') === 'ID3' || (audio[0] === 0xff && (audio[1]! & 0xe0) === 0xe0))) {
+    throw new Error('Invalid MP3 audio');
+  }
+  await socket.sendMessage(`${number}@s.whatsapp.net`, { audio, mimetype: 'audio/mpeg', ptt: false });
+}
 export async function stopWhatsAppWeb(): Promise<void> {
   wantConnection = false; ++generation; closeSocket();
   if (connecting) await bounded(connecting.catch(() => undefined), SETUP_IO_TIMEOUT_MS, 'unknown').catch(() => undefined);
@@ -214,6 +241,7 @@ export async function stopWhatsAppWeb(): Promise<void> {
   status = { state: 'disconnected' };
 }
 export async function resumeWhatsAppWeb(): Promise<void> {
+  if (wantConnection || status.state === 'connected' || status.state === 'connecting' || status.state === 'qr') return;
   try {
     const files = await fs.readdir(directory());
     if (files.includes('creds.json')) {

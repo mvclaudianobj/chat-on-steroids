@@ -332,6 +332,13 @@ export function installNotificationCenter(api: Service): void {
       targets.addEventListener('input', () => { entry.destinations = destinations(targets.value); });
       controls.push(targets);
       fields.append(field(spec.destination, targets));
+      if (channel === 'whatsapp-web') {
+        const duplex = input('notificationWhatsappDuplex', 'checkbox');
+        duplex.checked = entry.config.duplex === 'on';
+        duplex.addEventListener('change', () => { entry.config.duplex = duplex.checked ? 'on' : 'off'; });
+        controls.push(duplex);
+        fields.append(settingLabel('Two-way chat and approvals', 'Allow commands and approval decisions only from the phone numbers listed above. Enable only for numbers you control.', duplex));
+      }
       const heading = input('notificationHeading-' + channel);
       heading.value = entry.titleTemplate;
       heading.addEventListener('input', () => { entry.titleTemplate = heading.value; });

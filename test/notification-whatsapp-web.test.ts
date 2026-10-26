@@ -112,6 +112,34 @@ it('connects, emits pairing QR without real network and sends to a validated JID
   expect(sock.sendMessage).toHaveBeenCalledWith('5511999999999@s.whatsapp.net', { text: 'synthetic notice' });
   await expect(web.sendWhatsAppWeb('../bad', 'no')).rejects.toThrow('Invalid WhatsApp number');
 });
+it('accepts only live direct text from other numbered users and never its own or group traffic', async () => {
+  const inbound = vi.fn(async () => undefined);
+  web.setWhatsAppWebInbound(inbound);
+  await web.startWhatsAppWeb();
+  const sock = mocks.sockets.at(-1)!;
+  const message = (remoteJid: string, fromMe = false) => ({ key: { id: 'exact-message-1', remoteJid, fromMe }, message: { conversation: '/menu' } });
+  sock.ev.emit('messages.upsert', { type: 'notify', messages: [message('5511999999999@s.whatsapp.net')] });
+  expect(inbound).not.toHaveBeenCalled(); // Only connected sockets accept text.
+  sock.ev.emit('connection.update', { connection: 'open' });
+  sock.ev.emit('messages.upsert', { type: 'append', messages: [message('5511999999999@s.whatsapp.net')] });
+  sock.ev.emit('messages.upsert', { type: 'notify', messages: [message('5511999999999@g.us'), message('5511999999999@lid'), message('5511999999999@s.whatsapp.net', true)] });
+  expect(inbound).not.toHaveBeenCalled();
+  sock.ev.emit('messages.upsert', { type: 'notify', messages: [message('5511999999999@s.whatsapp.net')] });
+  expect(inbound).toHaveBeenCalledTimes(1);
+  expect(inbound).toHaveBeenCalledWith('5511999999999', 'exact-message-1', '/menu');
+  await web.stopWhatsAppWeb();
+  sock.ev.emit('messages.upsert', { type: 'notify', messages: [message('5511999999999@s.whatsapp.net')] });
+  expect(inbound).toHaveBeenCalledTimes(1);
+});
+it('sends only verified in-memory MP3 bytes and never fabricated Jarvis audio', async () => {
+  await web.startWhatsAppWeb();
+  const sock = mocks.sockets.at(-1)!;
+  sock.ev.emit('connection.update', { connection: 'open' });
+  await expect(web.sendWhatsAppWebMp3('5511999999999', Buffer.from('fake'))).rejects.toThrow('Invalid MP3 audio');
+  const sample = Buffer.alloc(180); sample.write('ID3');
+  await web.sendWhatsAppWebMp3('5511999999999', sample);
+  expect(sock.sendMessage).toHaveBeenCalledWith('5511999999999@s.whatsapp.net', { audio: sample, mimetype: 'audio/mpeg', ptt: false });
+});
 it('does not replace an authenticated connection with a late pairing QR', async () => {
   await web.startWhatsAppWeb();
   const active = mocks.sockets.at(-1)!;

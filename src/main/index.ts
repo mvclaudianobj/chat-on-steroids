@@ -8,6 +8,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
@@ -46,10 +47,13 @@ import { pluginManager } from './plugins/manager.js';
 import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
+import { sendDesktopInput } from './session/start-input.js';
 import { createTurnNotifier } from './turn-notifications.js';
 import { createOutboundTurnWatcher } from './notification-events.js';
-import { resumeWhatsAppWeb, stopWhatsAppWeb } from './notification-whatsapp-web.js';
-import { queueOutboundNotice } from './notification-center.js';
+import { getWhatsAppWebStatus, resumeWhatsAppWeb, sendWhatsAppWeb, setWhatsAppWebInbound, stopWhatsAppWeb } from './notification-whatsapp-web.js';
+import { createWhatsAppDuplex } from './whatsapp-duplex.js';
+import { watchWhatsAppResumeOnGreen } from './whatsapp-resume-on-green.js';
+import { notificationSettings, queueOutboundNotice } from './notification-center.js';
 import { listProjects } from './projects.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
@@ -59,6 +63,7 @@ import { shutdownPetOverlay, startPetOverlay } from './pet-overlay.js';
 import { usageOverview } from './session/usage.js';
 import {
   flushRecorder,
+  activeSessionId,
   onSessionChange,
   queueDeterministicAttributionRepair,
   setAgentBinder,
@@ -751,7 +756,63 @@ void app.whenReady().then(async () => {
   // The same quit the tray's Quit performs. It has to go through `quitting` for the window's
   // close-to-tray handler to let go: without it, quitting to install would hide the window and
   // leave the app running, which is exactly the trap the Install button exists to end.
+  const whatsappDuplex = createWhatsAppDuplex({
+    // Notification recipients form an explicit owner whitelist. No sender is
+    // authorized by pairing alone, and the channel is completely off by default.
+    allowed: async () => {
+      const channel = (await notificationSettings()).channels['whatsapp-web'];
+      return channel.enabled && channel.config.duplex === 'on'
+        ? channel.destinations.filter(number => /^\d{8,15}$/.test(number)) : [];
+    },
+    sessions: async () => (await listSessions()).filter(item => !item.archivedAt && item.conversationId).map(item => ({
+      id: item.id, title: item.title, conversationId: item.conversationId, updatedAt: item.updatedAt
+    })),
+    active: async () => activeSessionId(),
+    sendText: sendWhatsAppWeb,
+    send: async (sessionId, text) => {
+      const entry = await sendDesktopInput({ id: randomUUID(), sessionId, text, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+      return { id: entry.id, state: entry.state };
+    },
+    approvals: () => approvalWaitingChats().flatMap(conversationId => {
+      const card = approvalCardView(conversationId);
+      return card ? [{ conversationId, cardId: card.id, title: 'Solicitação ChatGPT', allow: card.allow, outcome: card.answer?.outcome ?? null }] : [];
+    }),
+    answer: (conversationId, cardId, choice) => {
+      const result = requestApprovalAnswer(conversationId, cardId, choice);
+      return result.ok ? { ok: true } : { ok: false, error: result.error };
+    },
+    latest: async sessionId => {
+      const session = await getSession(sessionId);
+      // Streaming commentary or a different turn is not a response. Only a
+      // confirmed terminal ChatGPT turn may be relayed to a phone.
+      if (!session || session.activeTurnId || session.lastTurnOutcome !== 'completed' || !session.lastTurnEndAt) return null;
+      const [answer] = await readRecentEvents(sessionId, 1, { kinds: ['assistant_message'] });
+      return answer?.kind === 'assistant_message' && answer.final && answer.time <= session.lastTurnEndAt
+        ? { id: `${answer.seq}:${answer.messageId ?? ''}`, text: answer.message.text, seq: answer.seq } : null;
+    },
+    delivered: async (sessionId, inputId) => {
+      const events = await readRecentEvents(sessionId, 100, { kinds: ['user_message'] });
+      return events.find(event => event.kind === 'user_message' && event.inputId === inputId && event.inputDelivery !== 'offered')?.seq ?? null;
+    },
+    load: () => readDurable('whatsapp-duplex-control'),
+    save: state => writeDurableNow('whatsapp-duplex-control', state)
+  });
+  setWhatsAppWebInbound((number, messageId, text) => whatsappDuplex.incoming(number, messageId, text));
+  onSessionChange(change => {
+    if (change.sessionIds?.length) void whatsappDuplex.changed(change.sessionIds).catch(() => undefined);
+  });
+  // The green connector transition is an independent opportunity to restore
+  // registered Baileys credentials. Resume is idempotent; explicit logout deletes
+  // the saved auth and cannot be undone by this listener.
+  watchWhatsAppResumeOnGreen(getStatus, onStatusChange, resumeWhatsAppWeb, () => !quitting);
   void resumeWhatsAppWeb().catch(() => undefined);
+  setInterval(() => {
+    if (quitting) return;
+    void getWhatsAppWebStatus().then(status => {
+      if (status.state !== 'connected') return;
+      return whatsappDuplex.pollApprovals().then(() => whatsappDuplex.changed([]));
+    }).catch(() => undefined);
+  }, 8_000).unref();
   registerIpc(
     () => window,
     () => {

@@ -16,6 +16,15 @@ import { sendWhatsAppWeb } from '../src/main/notification-whatsapp-web.js';
 const event = { event: 'turn-completed' as const, title: 'Finished', project: 'Synthetic project', excerpt: 'Synthetic private conversation' };
 describe('notification center outbound channels', () => {
   beforeEach(() => { vi.clearAllMocks(); state.secret = 'synthetic-test-token'; state.snapshot = null; });
+  it('keeps two-way WhatsApp commands disabled unless the explicit validated flag is saved', async () => {
+    const settings = structuredClone(await notificationSettings());
+    expect(settings.channels['whatsapp-web'].config.duplex).toBeUndefined();
+    settings.channels['whatsapp-web'].config.duplex = 'on';
+    const saved = await saveNotificationSettings(settings);
+    expect(saved.settings.channels['whatsapp-web'].config.duplex).toBe('on');
+    settings.channels['whatsapp-web'].config.duplex = 'insecure';
+    expect(() => saveNotificationSettings(settings)).toThrow('Invalid two-way WhatsApp setting');
+  });
   it('migrates saved 2.1.45 settings by adding disabled WhatsApp Web', async () => {
     const settings = structuredClone(await notificationSettings());
     settings.channels.telegram.destinations = ['original-id'];
