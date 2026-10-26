@@ -5,7 +5,19 @@ import { promises as fs } from 'node:fs';
 import { makeWASocket, DisconnectReason, useMultiFileAuthState, type WASocket } from '@whiskeysockets/baileys';
 import type { WhatsAppSetupIssue } from '../shared/notification-center.js';
 
-export interface WhatsAppWebStatus { state: 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'; qr?: string; reason?: WhatsAppSetupIssue; stage?: 'storage' | 'auth' | 'socket' | 'network' | 'qr' | 'ready' }
+export interface WhatsAppWebStatus { state: 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'; qr?: string; reason?: WhatsAppSetupIssue; stage?: 'storage' | 'auth' | 'socket' | 'network' | 'qr' | 'ready'; inboundDiagnostics?: Readonly<Record<InboundReason, number>> }
+type InboundReason = 'batches' | 'notLive' | 'history' | 'noHandler' | 'own' | 'nonDirect' | 'lidWithoutPn' | 'invalidPn' | 'invalidText' | 'dispatched' | 'handlerFailed';
+const inboundCounts = Object.fromEntries((['batches', 'notLive', 'history', 'noHandler', 'own', 'nonDirect', 'lidWithoutPn', 'invalidPn', 'invalidText', 'dispatched', 'handlerFailed'] as InboundReason[]).map(k => [k, 0])) as Record<InboundReason, number>;
+function tally(reason: InboundReason): void { inboundCounts[reason] = Math.min(1_000_000, inboundCounts[reason] + 1); }
+/** Only direct chats. LID digits are opaque identifiers, NEVER phone numbers. */
+function inboundNumber(key: { remoteJid?: string | null; remoteJidAlt?: string | null; participant?: string | null; participantAlt?: string | null }): string | null {
+  const primary = key.remoteJid ?? '';
+  if (key.participant || key.participantAlt || !/^(?:\d{8,15})@(?:lid|s\.whatsapp\.net)$/.test(primary)) { tally('nonDirect'); return null; }
+  const pn = primary.endsWith('@lid') ? key.remoteJidAlt ?? '' : primary;
+  const match = /^(\d{8,15})@s\.whatsapp\.net$/.exec(pn);
+  if (!match) { tally(primary.endsWith('@lid') ? 'lidWithoutPn' : 'invalidPn'); return null; }
+  return match[1]!;
+}
 export class WhatsAppPairingError extends Error {
   constructor(readonly issue: WhatsAppSetupIssue) {
     super(`WhatsApp setup failed (${issue})`);
@@ -50,7 +62,7 @@ function beginConnect(): Promise<void> {
   return task;
 }
 function directory(): string { return path.join(app.getPath('userData'), 'notifications', 'whatsapp-web'); }
-export async function getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> { return { ...status }; }
+export async function getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> { return status.state === 'connected' ? { ...status, inboundDiagnostics: { ...inboundCounts } } : { ...status }; }
 function closeSocket(): void {
   if (restart) { clearTimeout(restart); restart = null; }
   if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
@@ -104,16 +116,21 @@ async function connect(): Promise<void> {
   socket = active;
   status = { state: 'connecting', stage: 'network' };
   active.ev.on('messages.upsert', ({ type, messages }) => {
-    if (epoch !== generation || status.state !== 'connected' || type !== 'notify' || !inbound) return;
+    if (epoch !== generation) return;
+    tally('batches');
+    if (status.state !== 'connected') { tally('notLive'); return; }
+    if (type !== 'notify') { tally('history'); return; }
+    if (!inbound) { tally('noHandler'); return; }
     for (const item of messages) {
-      if (item.key.fromMe || !item.key.id) continue;
-      const jid = item.key.remoteJid ?? '';
-      const match = /^(\d{8,15})@s\.whatsapp\.net$/.exec(jid);
-      if (!match) continue; // Do not accept group, status, LID or unverified senders.
+      if (item.key.fromMe) { tally('own'); continue; }
+      if (!item.key.id) { tally('invalidText'); continue; }
+      const number = inboundNumber(item.key);
+      if (!number) continue;
       const content = item.message?.ephemeralMessage?.message ?? item.message;
       const text = content?.conversation ?? content?.extendedTextMessage?.text ?? '';
-      if (!text.trim() || text.length > 5000) continue;
-      void inbound(match[1]!, item.key.id, text).catch(() => undefined);
+      if (!text.trim() || text.length > 5000) { tally('invalidText'); continue; }
+      tally('dispatched');
+      void inbound(number, item.key.id, text).catch(() => { tally('handlerFailed'); });
     }
   });
   // A WebSocket can remain silent without emitting close. This occurs with both

@@ -131,6 +131,50 @@ it('accepts only live direct text from other numbered users and never its own or
   sock.ev.emit('messages.upsert', { type: 'notify', messages: [message('5511999999999@s.whatsapp.net')] });
   expect(inbound).toHaveBeenCalledTimes(1);
 });
+it('resolves a LID direct message via its Baileys PN alternate, never via the LID digits or group participant', async () => {
+  const inbound = vi.fn(async () => undefined);
+  web.setWhatsAppWebInbound(inbound);
+  await web.startWhatsAppWeb();
+  const sock = mocks.sockets.at(-1)!;
+  sock.ev.emit('connection.update', { connection: 'open' });
+  const message = (remoteJid: string, remoteJidAlt?: string, fromMe = false, participantAlt?: string) => ({
+    key: { id: 'synthetic-lid-message', remoteJid, remoteJidAlt, fromMe, participantAlt },
+    message: { conversation: '/menu' }
+  });
+  sock.ev.emit('messages.upsert', { type: 'notify', messages: [message('9876543212345@lid', '5511999999999@s.whatsapp.net')] });
+  expect(inbound).toHaveBeenCalledOnce();
+  expect(inbound).toHaveBeenCalledWith('5511999999999', 'synthetic-lid-message', '/menu');
+  // Baileys group participant PN is not the direct chat origin; never honor it.
+  sock.ev.emit('messages.upsert', { type: 'notify', messages: [
+    message('5511888888888@g.us', '5511999999999@s.whatsapp.net'),
+    message('5511888888888@g.us', undefined, false, '5511999999999@s.whatsapp.net'),
+    message('9876543212345@lid'),
+    message('9876543212345@lid', '9876543212345@lid'),
+    message('9876543212345@lid', '5511999999999@s.whatsapp.net', true),
+    message('9876543212345@lid', '5511999999999@s.whatsapp.net', false, '5511999999999@s.whatsapp.net')
+  ] });
+  expect(inbound).toHaveBeenCalledTimes(1);
+});
+it('exposes only aggregate inbound diagnostics and distinguishes unreachable handler from LID without PN', async () => {
+  await web.startWhatsAppWeb();
+  const sock = mocks.sockets.at(-1)!;
+  sock.ev.emit('connection.update', { connection: 'open' });
+  sock.ev.emit('messages.upsert', { type: 'notify', messages: [
+    { key: { id: 'SENSITIVE-MSG-ID', remoteJid: '9876543212345@lid' }, message: { conversation: 'PRIVATE BODY' } }
+  ] });
+  const before = await web.getWhatsAppWebStatus();
+  expect(before.inboundDiagnostics).toMatchObject({ noHandler: 1 });
+  const inbound = vi.fn(async () => undefined);
+  web.setWhatsAppWebInbound(inbound);
+  sock.ev.emit('messages.upsert', { type: 'notify', messages: [
+    { key: { id: 'SENSITIVE-MSG-ID-2', remoteJid: '9876543212345@lid' }, message: { conversation: 'PRIVATE BODY' } }
+  ] });
+  const after = await web.getWhatsAppWebStatus();
+  expect(after.inboundDiagnostics).toMatchObject({ noHandler: 1, lidWithoutPn: 1 });
+  expect(JSON.stringify(after)).not.toContain('SENSITIVE-MSG-ID');
+  expect(JSON.stringify(after)).not.toContain('9876543212345');
+  expect(JSON.stringify(after)).not.toContain('PRIVATE BODY');
+});
 it('sends only verified in-memory MP3 bytes and never fabricated Jarvis audio', async () => {
   await web.startWhatsAppWeb();
   const sock = mocks.sockets.at(-1)!;

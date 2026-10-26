@@ -2,9 +2,9 @@ appId: com.chatonsteroids.app
 productName: Chat Marks
 copyright: MIT licensed
 # Product revision 2.1.45.3; this local QA rebuild bumps only Debian's package revision.
-# localQaRebuild: 31
+# localQaRebuild: 32
 buildVersion: 2.1.45.3
-buildNumber: '31'
+buildNumber: '32'
 extraMetadata:
   version: 2.1.45.3
 
