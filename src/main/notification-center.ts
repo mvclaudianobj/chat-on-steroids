@@ -93,7 +93,7 @@ export async function importNotificationSettings(value: unknown): Promise<Notifi
   return saveNotificationSettings(settings);
 }
 
-export interface OutboundNotice { event: NotificationEvent; title: string; project: string; excerpt?: string; }
+export interface OutboundNotice { event: NotificationEvent; title: string; project: string; excerpt?: string; dedupeKey?: string; }
 const lastSent = new Map<string, number>();
 const counts = new Map<string, { at: number; count: number }>();
 const inFlight = new Set<string>();
@@ -177,7 +177,9 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
     if (!options.test && !choice.enabled) { logInfo(`Notification ${channel}: skipped ${notice.event} (channel disabled)`); continue; }
     if (!options.test && !choice.events[notice.event]) { logInfo(`Notification ${channel}: skipped ${notice.event} (event unsubscribed)`); continue; }
     if (!choice.destinations.length) { logInfo(`Notification ${channel}: skipped ${notice.event} (no destinations)`); continue; }
-    const fingerprint = `${channel}:${notice.event}`;
+    // Do not suppress another conversation's completion merely because the
+    // first delivery has the same event type. Never log the conversation key.
+    const fingerprint = `${channel}:${notice.event}:${notice.dedupeKey ?? ''}`;
     if (!options.test && inFlight.has(fingerprint)) continue;
     const bucket = counts.get(channel);
     if (!options.test && bucket && now - bucket.at < 3600000 && bucket.count + choice.destinations.length > LIMIT_PER_HOUR) {

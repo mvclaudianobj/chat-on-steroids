@@ -64,6 +64,29 @@ describe('notification center outbound channels', () => {
     }
     expect(await Promise.all([first, second])).toEqual([1, 0]);
   });
+  it('delivers independent conversations of the same event type while one WhatsApp notice is pending', async () => {
+    const settings = structuredClone(await notificationSettings());
+    for (const channel of Object.values(settings.channels)) channel.enabled = false;
+    settings.channels['whatsapp-web'] = {
+      ...settings.channels['whatsapp-web'], enabled: true,
+      events: { ...settings.channels['whatsapp-web'].events, 'turn-completed': true },
+      destinations: ['5511999999999']
+    };
+    await saveNotificationSettings(settings);
+    let release: () => void = () => undefined;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    vi.mocked(sendWhatsAppWeb).mockImplementation(async () => pending);
+    const first = dispatchNotice({ ...event, dedupeKey: 'synthetic-conversation-A' }, { now: 9_100_000 });
+    await vi.waitFor(() => expect(sendWhatsAppWeb).toHaveBeenCalledTimes(1));
+    const second = dispatchNotice({ ...event, dedupeKey: 'synthetic-conversation-B' }, { now: 9_100_001 });
+    try {
+      await vi.waitFor(() => expect(sendWhatsAppWeb).toHaveBeenCalledTimes(2));
+    } finally {
+      release();
+      await Promise.allSettled([first, second]);
+    }
+    expect(await Promise.all([first, second])).toEqual([1, 1]);
+  });
   it('releases a failed WhatsApp delivery for another attempt', async () => {
     const settings = structuredClone(await notificationSettings());
     for (const channel of Object.values(settings.channels)) channel.enabled = false;

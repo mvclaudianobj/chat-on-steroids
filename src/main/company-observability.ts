@@ -36,7 +36,11 @@ export async function readObservationEvents(now=Date.now()):Promise<CompanyObser
 export async function setObservationRetention(days:number):Promise<void>{if(!Number.isInteger(days)||days<1||days>30)throw Error('Invalid retention');await lock(async()=>{const j=await read();j.retentionDays=days;j.events=j.events.filter(e=>e.at>=Date.now()-days*86_400_000);await persist(j);});}
 async function record(entries:Omit<CompanyObservationEvent,'id'>[],now:number):Promise<CompanyObservationEvent[]>{return lock(async()=>{
  const journal=await read();journal.events=journal.events.filter(item=>item.at>=now-journal.retentionDays*86_400_000);
- for(const entry of entries){const last=journal.events.findLast(e=>e.seat===entry.seat&&e.ticketId===entry.ticketId);if(last?.kind===entry.kind&&last?.source===entry.source&&last?.runId===entry.runId)continue;journal.events.push(eventSchema.parse({...entry,id:randomUUID()}));}
+ for(const entry of entries){const last=journal.events.findLast(e=>e.seat===entry.seat&&e.ticketId===entry.ticketId);
+  // A worker replacement within a run is a new identity event, even if both
+  // workers report the same state. Do not collapse worker transitions.
+  if(last?.kind===entry.kind&&last?.source===entry.source&&last?.runId===entry.runId&&last?.workerId===entry.workerId)continue;
+  journal.events.push(eventSchema.parse({...entry,id:randomUUID()}));}
  journal.events=journal.events.slice(-2000);await persist(journal);return journal.events;
 });}
 
@@ -72,7 +76,7 @@ export function createCompanyObserver(backend:CompanyWorkerBackend=localCompanyW
     else{state='disconnected';source='expired';}
    } else if(seatState.state==='busy'||seatState.state==='unverified'||seatState.state==='meeting-invited'||seatState.state==='meeting-accepted')state='unverified';
    const prior=previous.findLast(e=>e.seat===seat&&e.ticketId===(current?.id??null));
-   const statusSince=prior?.kind===state?prior.at:now;
+   const statusSince=prior?.kind===state&&prior.source===source&&prior.runId===(exec?.runId??null)&&prior.workerId===(exec?.workerId??null)?prior.at:now;
    records.push({seat,state,statusSince,observedAt,source,provenance:exec?.runId?'bound-owner-run-worker':'company-state',ticketId:current?.id??null,ownerId:exec?.ownerId??null,runId:exec?.runId??null,workerId:exec?.workerId??null,tokensUsed:current?.execution?.mode==='live'&&current.tokensUsed>0?current.tokensUsed:null,minutesUsed:current?.execution?.mode==='live'&&current.minutesUsed>0?current.minutesUsed:null,error});
    if(!company.demo)updates.push({at:now,seat,ticketId:current?.id??null,kind:state,source,runId:exec?.runId??null,workerId:exec?.workerId??null});
   }

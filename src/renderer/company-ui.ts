@@ -1,9 +1,10 @@
 import type { AppApi } from '../preload/index.js';
-import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, companyRestingSeats, companySeatView, type CompanyRequest, type CompanySeatState, type CompanySnapshot } from '../shared/company.js';
+import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, companyRestingSeats, type CompanyRequest, type CompanySeatState, type CompanySnapshot } from '../shared/company.js';
 import type { CompanyObservabilityView } from '../main/company-observability.js';
 import { t, onLanguageChange } from './i18n.js';
 import { mountCompanyLocalGrants } from './company-local-grants-ui.js';
 import { createCompanyRpgWorld } from './company-rpg-world.js';
+import { companyLiveSeatState } from './company-live-presentation.js';
 
 const names: Record<string, string> = { inbox: 'Inbox', assigned: 'Assigned', working: 'Working', review: 'Review', 'needs-ceo': 'Needs CEO', done: 'Done' };
 const roleNames = ['Operations', 'Engineering', 'Infrastructure', 'Product', 'Knowledge', 'Quality', 'Communications'];
@@ -31,6 +32,8 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   let view: 'board' | 'office' | 'rpg' = (() => { try { const stored=localStorage.getItem('company:view'); return stored==='rpg'||stored==='office'?stored:'board'; } catch { return 'board'; } })();
   let loading = false;
   let livePolling = false;
+  let snapshotGeneration = 0;
+  let observationGeneration = 0;
   let rpgWorld: ReturnType<typeof createCompanyRpgWorld> | null = null;
   const dialog = $('companyDialog') as HTMLDialogElement;
   const content = $('companyDialogContent');
@@ -40,9 +43,12 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   $('companyClose').addEventListener('click', close);
   function open(heading: string): void { title.textContent = t(heading); content.replaceChildren(); actions.replaceChildren(); dialog.showModal(); }
   async function send(request: Parameters<AppApi['company']>[0]): Promise<void> {
+    // Pending read-only refreshes must not restore a snapshot from before a mutation.
+    ++snapshotGeneration;
+    ++observationGeneration;
     const reply = await api.company(request);
     if (!reply.ok) throw new Error(reply.error);
-    snapshot = reply.data; paint();
+    snapshot = reply.data; observed = null; paint();
   }
   async function change(request: Parameters<AppApi['company']>[0]): Promise<void> {
     if (loading) return;
@@ -161,6 +167,14 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     const node = el('button', 'company-ticket'); node.type = 'button'; node.draggable = true; node.dataset.requestId = request.id;
     node.append(el('span', 'company-ticket-project', request.project), el('strong', '', request.title));
     const meta = el('div', 'company-ticket-meta'); meta.append(chip(request.origin.toUpperCase()), chip(request.seat ?? t('Queue'))); node.append(meta);
+    if (request.seat && !snapshot?.demo) {
+      const live = companyLiveSeatState(observed, request.seat, false);
+      if (live.state === 'working' && live.source === 'broker' && observed?.seats.some(row => row.seat === request.seat && row.ticketId === request.id)) {
+        meta.append(chip(`${t('Working')} · ${t('Source')}: broker`));
+      } else if (request.status === 'working') {
+        meta.append(chip(t('Unverified / disconnected')));
+      }
+    }
     const foot = el('div', 'company-ticket-foot'); foot.append(el('span', '', `${request.engine} · ${request.model}`), el('span', '', date(request.dueAt))); node.append(foot);
     const bar = el('div', 'company-progress'); const fill = el('span'); fill.style.width = `${Math.min(100, request.tokenBudget ? request.tokensUsed / request.tokenBudget * 100 : 0)}%`; bar.append(fill); node.append(bar);
     const cost = el('div', 'company-ticket-cost', `${fmt(request.tokensUsed)} / ${fmt(request.tokenBudget)} ${t('tokens')}`); node.append(cost);
@@ -209,7 +223,11 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   function paintOffice(): void {
     const office = $('companyOffice'); office.replaceChildren(); if (!snapshot) return;
     const current = Date.now();
-    const resting = companyRestingSeats(snapshot, current);
+    // A delayed local completion must never put a broker-observed active worker
+    // in the lounge while the same seat appears at the RPG work desks.
+    const resting = companyRestingSeats(snapshot, current).filter(entry =>
+      companyLiveSeatState(observed, entry.seat, snapshot!.demo, current).state !== 'working' &&
+      companyLiveSeatState(observed, entry.seat, snapshot!.demo, current).state !== 'meeting-present');
     const restIds = new Set(resting.map(entry => entry.seat));
     COMPANY_ROLES.forEach((role, index) => {
       const room = el('section', 'company-room');
@@ -218,7 +236,9 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
       const desks = el('div', 'company-desks');
       const managed = snapshot!.requests.filter(r => r.owner === role && r.status !== 'done');
       const manager = button(role, () => { if (managed[0]) detail(managed[0].id); }, 'company-desk manager');
-      manager.prepend(el('span', 'company-desk-avatar', role.slice(-3).toUpperCase())); manager.append(chip(managed.some(r => r.status === 'needs-ceo') ? t('Waiting for CEO') : managed.length ? t('Working') : t('Available'))); desks.append(manager);
+      manager.prepend(el('span', 'company-desk-avatar', role.slice(-3).toUpperCase()));
+      manager.append(chip(managed.some(r => r.status === 'needs-ceo') ? t('Waiting for CEO') : `${t('Open requests')}: ${managed.length}`));
+      desks.append(manager);
       for (const seat of snapshot!.company.seats.filter((seat, i) => {
         if (restIds.has(seat)) return false;
         const assigned = snapshot!.requests.filter(r => r.seat === seat && r.status !== 'done').sort((a, b) => priority(b.status) - priority(a.status))[0];
@@ -226,9 +246,11 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
       })) {
         const work = snapshot!.requests.filter(r => r.seat === seat && r.status !== 'done').sort((a, b) => priority(b.status) - priority(a.status))[0];
         const desk = button(seat, () => { if (work) detail(work.id); }, 'company-desk');
-        const state = companySeatView(snapshot!, seat, current).state;
-        const label = !snapshot!.demo && state === 'rest-free' ? t('Configured seat · no authenticated worker') : t(seatStateLabels[state]);
-        desk.dataset.seat = seat; desk.dataset.state = state;
+        const projection = companyLiveSeatState(observed, seat, snapshot!.demo, current);
+        const label = snapshot!.demo ? t('Synthetic example · not live worker status') :
+          projection.state === 'unverified' ? t('Configured seat · no authenticated worker') :
+          `${t(projection.state)} · ${t('Source')}: ${projection.source}`;
+        desk.dataset.seat = seat; desk.dataset.state = projection.state; desk.dataset.source = projection.source;
         desk.setAttribute('aria-label', `${seat}: ${label}`);
         desk.prepend(el('span', 'company-desk-avatar', seat.slice(5))); desk.append(chip(label));
         desk.addEventListener('dragover', event => event.preventDefault());
@@ -291,6 +313,20 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     const list=el('ul','company-observe-list');list.setAttribute('aria-label',t('Observed worker states'));
     for(const row of observed.seats){const item=el('li');const label=t(row.state);item.append(button(`${row.seat} · ${label} · ${row.source}`,()=>workerInspector(row.seat),'company-observe-worker'));list.append(item);}
     panel.append(list);
+    // Same read-only observation feed drives the other views and this relationship
+    // graph. No arrow implies a delegation or that an external worker is attested.
+    const graph=el('div','company-live-graph');
+    graph.setAttribute('role','list'); graph.setAttribute('aria-label',t('Worker observability'));
+    for(const row of observed.seats){
+      const safe=companyLiveSeatState(observed,row.seat,observed.demo);
+      const request=snapshot?.requests.find(item=>item.id===row.ticketId);
+      const edge=el('div','company-live-edge');
+      edge.setAttribute('role','listitem'); edge.dataset.seat=row.seat;edge.dataset.state=safe.state;
+      edge.append(el('strong','',row.seat),el('span','', '→'),el('span','',request?.title??t('Unassigned')),
+        chip(`${t(safe.state)} · ${t('Source')}: ${safe.source}`));
+      graph.append(edge);
+    }
+    panel.append(graph);
     const feed=el('ol','company-observe-events');feed.setAttribute('aria-label',t('Worker timeline'));
     for(const event of observed.events.slice(0,8))feed.append(el('li','',`${event.seat} · ${t(event.kind)} · ${new Date(event.at).toLocaleString()}`));
     panel.append(feed);
@@ -298,11 +334,21 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   function paintRpg():void {
     if(!snapshot)return;
     rpgWorld??=createCompanyRpgWorld($('companyRpg'),t,undefined,undefined,workerInspector);
-    rpgWorld.update(snapshot.company.seats,observed?.seats??[],snapshot.demo || observed?.demo===true);
+    const safeRows=(observed?.seats??[]).map(row=>{
+      const safe=companyLiveSeatState(observed,row.seat,snapshot!.demo);
+      return {...row,state:safe.state,source:safe.source,error:safe.state==='unverified'};
+    });
+    rpgWorld.update(snapshot.company.seats,safeRows,snapshot.demo || observed?.demo===true);
   }
   async function loadObservation():Promise<void>{
-    try{const result=await api.companyObserve();if(!result.ok)throw Error(result.error);observed=result.data;}
-    catch{observed=null;}paintObservation();paintRpg();
+    const generation=++observationGeneration;
+    try{
+      const result=await api.companyObserve();if(!result.ok)throw Error(result.error);
+      if(generation!==observationGeneration)return;
+      observed=result.data;
+    }catch{if(generation!==observationGeneration)return;observed=null;}
+    // Do not update only RPG; all three views must reflect the same observation.
+    if(snapshot)paint();
   }
   function switchView(next:'board'|'office'|'rpg'):void{view=next;try{localStorage.setItem('company:view',view);}catch{}paint();}
   function paint(): void {
@@ -348,23 +394,37 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     for (const item of requests) ceo.append(button(`◉ ${item.title}  →`, () => detail(item.id), 'company-ceo-action'));
     const spent = snapshot.requests.reduce((n,r) => n+r.tokensUsed,0); ceo.append(el('p', 'company-ceo-foot', `${fmt(spent)} ${t('tokens')} · ${snapshot.company.seatCount} ${t('employee seats')}`));
     const activity = $('companyActivity'); activity.replaceChildren();
+    if(observed && !observed.demo){
+      const timeline=el('ol','company-observe-events');
+      timeline.setAttribute('aria-label',t('Worker timeline'));
+      for(const event of observed.events.slice(0,10)){
+        const entry=el('li','');
+        entry.textContent=`${event.seat} · ${t(event.kind)} · ${t('Source')}: ${event.source} · ${new Date(event.at).toLocaleString()}`;
+        timeline.append(entry);
+      }
+      if(timeline.children.length)activity.append(timeline);
+    }
     for (const item of snapshot.activities.slice(0, 6)) { const row = el('div', 'company-event'); row.append(el('span', 'company-event-icon', '↗'), el('div')); row.lastElementChild!.append(el('strong', '', item.actor), el('p', '', item.message)); activity.append(row); }
     if (!snapshot.activities.length) activity.append(el('p', 'company-muted', t('No activity yet.')));
   }
   async function refresh(): Promise<void> {
+    const generation=++snapshotGeneration;
     try {
       const reply = await api.company({ action: 'get' }); if (!reply.ok) throw new Error(reply.error);
+      if(generation!==snapshotGeneration)return;
       snapshot = reply.data;
       // After an explicit CEO grant, consume trusted internal triage receipts at a normal
       // UI refresh boundary. No independent polling timer or service permission bypass.
       if (snapshot.delegation?.mode === 'delegated' && snapshot.delegation.binding &&
           snapshot.delegation.binding.expiresAt > Date.now()) {
         const synced = await api.company({ action: 'syncDelegatedTriage' });
+        if(generation!==snapshotGeneration)return;
         if (synced.ok) snapshot = synced.data;
       }
+      ++observationGeneration;observed=null;
       paint(); await loadObservation();
     }
-    catch (error) { $('companyEmpty').hidden = false; $('companyEmpty').append(el('p', 'company-error', (error as Error).message)); }
+    catch (error) { if(generation!==snapshotGeneration)return;$('companyEmpty').hidden = false; $('companyEmpty').append(el('p', 'company-error', (error as Error).message)); }
   }
   // Habblaud-style live view, backed only by authenticated READ-ONLY main IPC.
   // A UI animation must never submit a ticket, claim completion or grant authority.
@@ -373,16 +433,19 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     const panel=document.querySelector<HTMLElement>('.company-panel');
     if(livePolling||loading||dialog.open||document.visibilityState==='hidden'||!panel?.classList.contains('is-active'))return;
     livePolling=true;
+    const generation=++snapshotGeneration;
     try{
       const result=await api.company({action:'get'});
       if(!result.ok)throw Error(result.error);
-      if(!panel.classList.contains('is-active'))return;
+      if(generation!==snapshotGeneration||!panel.classList.contains('is-active'))return;
+      ++observationGeneration;observed=null;
       snapshot=result.data;
       paint();
       await loadObservation();
     }catch{
+      if(generation!==snapshotGeneration)return;
       // Unknown transport or stale broker state cannot become a fictional worker.
-      observed=null;paintObservation();paintRpg();
+      ++observationGeneration;observed=null;paint();
     }finally{livePolling=false;}
   };
   window.setInterval(()=>void liveTick(),6000);

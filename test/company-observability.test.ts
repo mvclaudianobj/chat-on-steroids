@@ -2,7 +2,7 @@ import {beforeEach,afterEach,describe,it,expect} from 'vitest';
 import {promises as fs} from 'node:fs';
 import path from 'node:path';
 import {tmpdir} from 'node:os';
-import {initCompanyStore,mutateCompany,resetCompanyStoreForTests,} from '../src/main/company-store.js';
+import {initCompanyStore,mutateCompany,getCompany,resetCompanyStoreForTests,} from '../src/main/company-store.js';
 import {createCompanyObserver,initializeCompanyObservability,resetCompanyObservabilityForTests,readObservationEvents,setObservationRetention} from '../src/main/company-observability.js';
 import type {CompanyWorkerBackend} from '../src/main/company-broker.js';
 import {demoCompany} from '../src/shared/company.js';
@@ -31,5 +31,22 @@ describe('Company O5 read-only observations',()=>{
     const view=await createCompanyObserver(backend).snapshot();
     expect(view.seats.find(s=>s.seat==='marks2')).toMatchObject({state:'disconnected',source:'error',error:true});
   }
+ });
+ it('keeps distinct event and status age when broker worker identity changes within the same run',async()=>{
+  const id=await bind();const now=Date.now();
+  const first=await createCompanyObserver(fake(id)).snapshot(now);
+  const prior=first.events.find(e=>e.seat==='marks2'&&e.kind==='working')!;
+  const original=await getCompany();
+  const changed={...original,requests:original.requests.map(ticket=>ticket.id===id?
+    {...ticket,execution:{...ticket.execution!,workerId:'worker-8'}}:ticket)};
+  const replacement:CompanyWorkerBackend={...fake(id),async status(){
+    return {runId,workers:[{id:'worker-8',runId,label:`marks2:${id}`,state:'active',conversationId:'observation-fixture-worker',result:null}]};
+  }};
+  const second=await createCompanyObserver(replacement).snapshot(now+2000,true,changed);
+  const events=second.events.filter(e=>e.seat==='marks2'&&e.kind==='working');
+  expect(events).toHaveLength(2);
+  expect(events.map(e=>e.workerId)).toEqual(['worker-8','worker-7']);
+  expect(second.seats.find(s=>s.seat==='marks2')?.statusSince).toBe(now+2000);
+  expect(events[1]!.id).toBe(prior.id);
  });
 });

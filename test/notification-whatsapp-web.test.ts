@@ -35,7 +35,7 @@ vi.mock('@whiskeysockets/baileys', async () => {
       state: { creds: { registered: mocks.registered } }, saveCreds: vi.fn(async () => {
         mocks.saveStarted = true;
         if (mocks.saveBarrier) await mocks.saveBarrier;
-        await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify({ synthetic: true }));
+        await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify({ synthetic: true, registered: mocks.registered }));
       })
       };
     })
@@ -179,6 +179,25 @@ it('only resumes with stored auth files', async () => {
   await fs.writeFile(path.join(dir, 'creds.json'), '{"registered":true}');
   await web.resumeWhatsAppWeb();
   expect(mocks.sockets).toHaveLength(1);
+});
+
+it('flushes a queued registered auth update on graceful shutdown and reconnects after process reinitialization', async () => {
+  await web.startWhatsAppWeb();
+  const oldSocket = mocks.sockets[0]!;
+  mocks.registered = true;
+  // Baileys emits creds.update immediately before the app closes; the disk write
+  // is scheduled in a promise, so stop must await it without cancelling the save.
+  oldSocket.ev.emit('creds.update', {});
+  await web.stopWhatsAppWeb();
+  const authFile = path.join(mocks.directory, 'notifications', 'whatsapp-web', 'creds.json');
+  expect(JSON.parse(await fs.readFile(authFile, 'utf8'))).toMatchObject({ registered: true });
+  vi.resetModules();
+  web = await import('../src/main/notification-whatsapp-web.js');
+  await web.resumeWhatsAppWeb();
+  expect(mocks.sockets).toHaveLength(2);
+  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connecting' });
+  mocks.sockets[1]!.ev.emit('connection.update', { connection: 'open' });
+  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected' });
 });
 
 it('allows an explicit retry while an automatic reconnect is pending, without waiting on the old delay', async () => {

@@ -114,7 +114,9 @@ async function connect(): Promise<void> {
   active.ev.on('creds.update', () => {
     if (epoch !== generation || !wantConnection) return;
     saving = saving.catch(() => undefined).then(async () => {
-      if (epoch !== generation || !wantConnection) return;
+      // Once Baileys emitted a valid auth update, it must be persisted even if
+      // graceful shutdown/reconnect revokes this socket before the microtask runs.
+      // stop/disconnect both await "saving"; disconnect then deletes the folder.
       await saveCreds();
       for (const file of await fs.readdir(dir)) if (file.endsWith('.json')) await fs.chmod(path.join(dir, file), 0o600);
     }).catch(() => {

@@ -26,7 +26,7 @@ export function createOutboundTurnWatcher(
         if (!event) continue;
         const prefs = await notificationSettings();
         const includeExcerpt = Object.values(prefs.channels).some(channel => channel.enabled && channel.events[event] && channel.includeExcerpt);
-        await send({ event, title: session.title || 'Chat Marks',
+        await send({ event, dedupeKey: session.id, title: session.title || 'Chat Marks',
           project: session.projectId ? (await options.projectName?.(session.projectId).catch(() => 'Chat Marks')) ?? 'Chat Marks' : 'Chat Marks',
           ...(includeExcerpt && event === 'turn-completed' ? { excerpt: (await options.excerpt?.(id).catch(() => null))?.slice(0, 160) ?? '' } : {})
         });
