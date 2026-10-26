@@ -88,6 +88,9 @@ import {
 import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { loadConnectorIdentity } from './connector-identity.js';
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
+import { startMobilePanel, type MobilePanelInstance } from './mobile-panel.js';
+import { getCompany } from './company-store.js';
+import { approvalCardView, approvalWaitingChats, requestApprovalAnswer } from './approval-wait.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
 import { restoreTrustedChats } from './session/trusted-chats.js';
@@ -147,6 +150,7 @@ const WINDOW_BOUNDS_STATE = 'window-bounds';
 const MAIN_TEXTS_STATE = 'main-texts';
 
 let window: BrowserWindow | null = null;
+let mobilePanel: MobilePanelInstance | null = null;
 let savedWindowBounds: unknown = null;
 let tray: Tray | null = null;
 let quitting = false;
@@ -793,6 +797,53 @@ void app.whenReady().then(async () => {
   if (getConfig().controlApi.enabled) {
     startControlApi().catch((error: Error) => logWarn(`control API did not start: ${error.message}`));
   }
+  // Off by default; never publish a LAN listener unless HTTPS was explicitly
+  // configured. The user's Markspanel login was verified before reaching here.
+  if (process.env.CHAT_MARKS_MOBILE_PANEL === '1') {
+    const host = process.env.CHAT_MARKS_MOBILE_HOST || '127.0.0.1';
+    const port = Number(process.env.CHAT_MARKS_MOBILE_PORT || '17893');
+    void startMobilePanel({
+      userData, host, port,
+      ...(process.env.CHAT_MARKS_MOBILE_TLS_CERT ? { tlsCert: process.env.CHAT_MARKS_MOBILE_TLS_CERT } : {}),
+      ...(process.env.CHAT_MARKS_MOBILE_TLS_KEY ? { tlsKey: process.env.CHAT_MARKS_MOBILE_TLS_KEY } : {})
+    }, {
+      snapshot: async () => {
+        const [sessions, company] = await Promise.all([listSessions(), getCompany()]);
+        const recent = sessions.slice(0, 30);
+        return {
+          sessions: recent.map(s => ({
+            id: s.id, title: s.title.slice(0, 160), updatedAt: s.updatedAt,
+            state: s.activeTurnId ? 'working' : s.endedAt ? 'finished' : 'idle',
+            conversationId: s.conversationId
+          })),
+          company: {
+            name: company.company.name, demo: company.demo,
+            seats: company.company.seats.slice(0, 20).map(seat => ({
+              seat, state: 'unverified', tickets: company.requests.filter(req => req.seat === seat && req.status !== 'done').length
+            })),
+            requests: company.requests.slice(-40).map(req => ({ title: req.title, status: req.status, seat: req.seat }))
+          },
+          approvals: approvalWaitingChats().slice(0, 40).flatMap(conversationId => {
+            const card = approvalCardView(conversationId);
+            const title = sessions.find(s => s.conversationId === conversationId)?.title ?? 'Aprovação ChatGPT';
+            return card ? [{
+              conversationId, cardId: card.id, title: title.slice(0, 160),
+              choiceEnabled: card.allow, outcome: card.answer?.outcome ?? null
+            }] : [];
+          })
+        };
+      },
+      answer: (conversationId, cardId, choice) => {
+        const result = requestApprovalAnswer(conversationId, cardId, choice);
+        return result.ok ? { ok: true } : { ok: false, error: result.error };
+      }
+    }).then(async panel => {
+      if (quitting || windowActivation.isDisabled()) { await panel.stop(); return; }
+      mobilePanel = panel;
+      logInfo('mobile panel started (opt-in, authenticated)');
+    })
+      .catch(() => logWarn('mobile panel unavailable; check opt-in listener or TLS settings'));
+  }
   if (getConfig().ui.autoConnect) void connect();
   void resumeUpdateRefresh().catch((error: Error) => logWarn(`update refresh did not resume: ${error.message}`));
 
@@ -867,7 +918,7 @@ app.on('will-quit', (event) => {
       {
         name: 'admission/drain',
         budgetMs: 40_000,
-        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), stopAgentRuntimeGc(), stopBrainEngineMcp()]
+        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), mobilePanel ? mobilePanel.stop() : Promise.resolve(), stopAgentRuntimeGc(), stopBrainEngineMcp()]
       },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {
