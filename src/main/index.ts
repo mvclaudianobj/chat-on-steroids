@@ -52,7 +52,7 @@ import { flushSessions, getSession, initSessionStore, listSessions, readRecentEv
 import { sendDesktopInput } from './session/start-input.js';
 import { createTurnNotifier } from './turn-notifications.js';
 import { createOutboundTurnWatcher } from './notification-events.js';
-import { getWhatsAppWebStatus, resumeWhatsAppWeb, sendWhatsAppWeb, setWhatsAppWebInbound, stopWhatsAppWeb } from './notification-whatsapp-web.js';
+import { getWhatsAppWebStatus, getWhatsAppWebDeliveryStatus, resumeWhatsAppWeb, sendWhatsAppWeb, setWhatsAppWebInbound, stopWhatsAppWeb } from './notification-whatsapp-web.js';
 import { createWhatsAppDuplex, lastRelayableWhatsAppAnswer, completedWhatsAppAnswers } from './whatsapp-duplex.js';
 import { redactSecretText } from './redaction.js';
 import { watchWhatsAppResumeOnGreen } from './whatsapp-resume-on-green.js';
@@ -805,6 +805,7 @@ void app.whenReady().then(async () => {
     })),
     active: async () => activeSessionId(),
     sendText: sendWhatsAppWeb,
+    deliveryStatus: getWhatsAppWebDeliveryStatus,
     send: async (sessionId, text) => {
       const entry = await sendDesktopInput({ id: randomUUID(), sessionId, text, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
       return { id: entry.id, state: entry.state };

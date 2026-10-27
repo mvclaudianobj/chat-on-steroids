@@ -5,7 +5,29 @@ import { promises as fs } from 'node:fs';
 import { makeWASocket, DisconnectReason, useMultiFileAuthState, type WASocket } from '@whiskeysockets/baileys';
 import type { WhatsAppSetupIssue } from '../shared/notification-center.js';
 
-export interface WhatsAppWebStatus { state: 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'; qr?: string; reason?: WhatsAppSetupIssue; stage?: 'storage' | 'auth' | 'socket' | 'network' | 'qr' | 'ready'; inboundDiagnostics?: Readonly<Record<InboundReason, number>> }
+export interface WhatsAppWebStatus { state: 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'; qr?: string; reason?: WhatsAppSetupIssue; stage?: 'storage' | 'auth' | 'socket' | 'network' | 'qr' | 'ready'; inboundDiagnostics?: Readonly<Record<InboundReason, number>>; outgoingDiagnostics?: Readonly<Record<DeliveryPhase, number>> }
+type DeliveryPhase = 'accepted' | 'server' | 'delivered' | 'read' | 'failed' | 'untracked';
+const deliveryCounts: Record<DeliveryPhase, number> = { accepted: 0, server: 0, delivered: 0, read: 0, failed: 0, untracked: 0 };
+const deliveryByMessage = new Map<string, { recipient: string; phase: DeliveryPhase }>();
+const latestByRecipient = new Map<string, DeliveryPhase>();
+const deliveryRank: Record<DeliveryPhase, number> = { failed: 0, untracked: 0, accepted: 1, server: 2, delivered: 3, read: 4 };
+function setDelivery(recipient: string, messageId: string | null, phase: DeliveryPhase): void {
+  if (messageId) {
+    const prior = deliveryByMessage.get(messageId);
+    if (prior && (prior.recipient !== recipient || deliveryRank[prior.phase] >= deliveryRank[phase])) return;
+    if (prior) deliveryCounts[prior.phase]--;
+    deliveryByMessage.set(messageId, { recipient, phase });
+    if (deliveryByMessage.size > 256) {
+      const oldest = deliveryByMessage.keys().next().value;
+      if (oldest) { const item = deliveryByMessage.get(oldest)!; deliveryCounts[item.phase]--; deliveryByMessage.delete(oldest); }
+    }
+  }
+  deliveryCounts[phase]++;
+  latestByRecipient.set(recipient, phase);
+}
+export function getWhatsAppWebDeliveryStatus(number: string): DeliveryPhase | null {
+  return /^\d{8,15}$/.test(number) ? latestByRecipient.get(number) ?? null : null;
+}
 type InboundReason = 'batches' | 'notLive' | 'history' | 'noHandler' | 'own' | 'nonDirect' | 'lidWithoutPn' | 'invalidPn' | 'invalidText' | 'dispatched' | 'handlerFailed';
 const inboundCounts = Object.fromEntries((['batches', 'notLive', 'history', 'noHandler', 'own', 'nonDirect', 'lidWithoutPn', 'invalidPn', 'invalidText', 'dispatched', 'handlerFailed'] as InboundReason[]).map(k => [k, 0])) as Record<InboundReason, number>;
 function tally(reason: InboundReason): void { inboundCounts[reason] = Math.min(1_000_000, inboundCounts[reason] + 1); }
@@ -84,7 +106,7 @@ async function secureAuthMetadata(dir: string): Promise<void> {
     });
   }
 }
-export async function getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> { return status.state === 'connected' ? { ...status, inboundDiagnostics: { ...inboundCounts } } : { ...status }; }
+export async function getWhatsAppWebStatus(): Promise<WhatsAppWebStatus> { return status.state === 'connected' ? { ...status, inboundDiagnostics: { ...inboundCounts }, outgoingDiagnostics: { ...deliveryCounts } } : { ...status }; }
 function closeSocket(): void {
   if (restart) { clearTimeout(restart); restart = null; }
   if (qrDeadline) { clearTimeout(qrDeadline); qrDeadline = null; }
@@ -93,9 +115,15 @@ function closeSocket(): void {
     const previous = socket; socket = null;
     previous.ev.removeAllListeners('connection.update'); previous.ev.removeAllListeners('creds.update');
     previous.ev.removeAllListeners('messages.upsert');
+    previous.ev.removeAllListeners('messages.update');
     // Baileys 7 closes asynchronously; never leave an unhandled rejection on a stale socket.
     try { void Promise.resolve(previous.ws.close()).catch(() => undefined); } catch { /* Socket already closed. */ }
   }
+  // A new Baileys socket cannot attest delivery for message IDs owned by
+  // the old socket. Do not preserve misleading delivery statuses across reconnects.
+  deliveryByMessage.clear();
+  latestByRecipient.clear();
+  for (const key of Object.keys(deliveryCounts) as DeliveryPhase[]) deliveryCounts[key] = 0;
 }
 function scheduleReconnect(): void {
   if (!wantConnection || restart) return;
@@ -156,6 +184,18 @@ async function connect(): Promise<void> {
       if (!text.trim() || text.length > 5000) { tally('invalidText'); continue; }
       tally('dispatched');
       void inbound(number, item.key.id, text).catch(() => { tally('handlerFailed'); });
+    }
+  });
+  active.ev.on('messages.update', updates => {
+    if (epoch !== generation) return;
+    for (const item of updates) {
+      const key = item.key;
+      const record = key.id ? deliveryByMessage.get(key.id) : null;
+      if (!record || key.fromMe !== true || key.remoteJid !== `${record.recipient}@s.whatsapp.net`) continue;
+      const code = item.update.status;
+      const phase: DeliveryPhase | null = code === 0 ? 'failed' : code === 2 ? 'server'
+        : code === 3 ? 'delivered' : code === 4 || code === 5 ? 'read' : null;
+      if (phase) setDelivery(record.recipient, key.id!, phase);
     }
   });
   // A WebSocket can remain silent without emitting close. This occurs with both
@@ -266,7 +306,8 @@ export async function sendWhatsAppWeb(number: string, message: string): Promise<
   // Disconnect revokes send authority synchronously, before Baileys logout settles.
   if (!wantConnection || !socket || status.state !== 'connected') throw new Error('WhatsApp Web disconnected');
   if (!/^\d{8,15}$/.test(number)) throw new Error('Invalid WhatsApp number');
-  await socket.sendMessage(`${number}@s.whatsapp.net`, { text: message });
+  const sent = await socket.sendMessage(`${number}@s.whatsapp.net`, { text: message });
+  setDelivery(number, sent?.key?.id ?? null, sent?.key?.id ? 'accepted' : 'untracked');
 }
 /** Reserved for Jarvis once an actual MP3 is produced; never synthesize/claim audio here. */
 export async function sendWhatsAppWebMp3(number: string, audio: Buffer): Promise<void> {

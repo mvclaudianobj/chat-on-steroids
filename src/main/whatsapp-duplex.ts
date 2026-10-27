@@ -30,6 +30,7 @@ export interface WhatsAppDuplexDeps {
   answer(conversationId: string, cardId: string, choice: 'allow' | 'deny'): { ok: true } | { ok: false; error: string };
   latest(sessionId: string): Promise<{ id: string; text: string; seq: number } | null>;
   completedSince?(sessionId: string, afterSeq: number): Promise<Array<{id:string; text:string; seq:number}>>;
+  deliveryStatus?(number: string): 'accepted' | 'server' | 'delivered' | 'read' | 'failed' | 'untracked' | null;
   /** Exact durable user-message receipt, not mere enqueue or browser pickup. */
   delivered(sessionId: string, inputId: string): Promise<number | null>;
   load(): Promise<unknown>;
@@ -146,7 +147,7 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
         const arg = rest.join(' ').trim();
         const normalized = command?.toLocaleLowerCase('pt-BR') ?? '';
         if (['/menu', '/ajuda', '/help', '/start'].includes(normalized)) {
-          await respond(sender, 'Chat Marks · WhatsApp\n/chats — listar conversas\n/ativo — mostrar conversa selecionada\n/usar 1 — selecionar conversa\n/usar ativo — seguir chat ativo no computador\n/aprovacoes — solicitações pendentes\n/aprovar 1 ou /negar 1 — decisão para cartão exato\nEnvie uma mensagem normal para conversar.');
+          await respond(sender, 'Chat Marks · WhatsApp\n/chats — listar conversas\n/ativo — mostrar conversa selecionada\n/usar 1 — selecionar conversa\n/usar ativo — seguir chat ativo no computador\n/estado — consultar confirmação de entrega\n/aprovacoes — solicitações pendentes\n/aprovar 1 ou /negar 1 — decisão para cartão exato\nEnvie uma mensagem normal para conversar.');
           return;
         }
         if (normalized === '/chats') {
@@ -171,6 +172,19 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
         const selected = await target(sender, state, sessions);
         if (normalized === '/ativo') {
           await respond(sender, selected ? `Chat ativo: ${clip(selected.title, 180)}${state.selected[sender] ? ' (selecionado)' : ' (atividade recente do computador)'}.` : 'Nenhum chat ativo. Use /chats e /usar 1.');
+          return;
+        }
+        if (normalized === '/estado') {
+          const phase = deps.deliveryStatus?.(sender) ?? null;
+          const descriptions = {
+            accepted: 'Envio aceito pelo Baileys; entrega ao aparelho ainda não confirmada.',
+            server: 'Envio confirmado pelo servidor WhatsApp; entrega ao aparelho ainda não confirmada.',
+            delivered: 'Confirmação de entrega ao destinatário recebida.',
+            read: 'Confirmação de leitura recebida.',
+            failed: 'Falha reportada pelo WhatsApp; verifique a conexão.',
+            untracked: 'O transporte não retornou ID; não é possível confirmar a entrega.'
+          };
+          await respond(sender, phase ? descriptions[phase] : 'Ainda não existe confirmação de entrega para este número.');
           return;
         }
         if (normalized === '/aprovacoes' || normalized === '/aprovações') {

@@ -112,6 +112,52 @@ it('connects, emits pairing QR without real network and sends to a validated JID
   expect(sock.sendMessage).toHaveBeenCalledWith('5511999999999@s.whatsapp.net', { text: 'synthetic notice' });
   await expect(web.sendWhatsAppWeb('../bad', 'no')).rejects.toThrow('Invalid WhatsApp number');
 });
+it('tracks the exact outgoing message through server and recipient acknowledgements without exposing phone or message ID', async () => {
+  await web.startWhatsAppWeb();
+  const sock = mocks.sockets.at(-1)!;
+  sock.ev.emit('connection.update', { connection: 'open' });
+  sock.sendMessage.mockResolvedValueOnce({
+    key: { id: 'PRIVATE-OUTBOUND-ID-1', fromMe: true, remoteJid: '5511999999999@s.whatsapp.net' }
+  });
+  await web.sendWhatsAppWeb('5511999999999', 'synthetic response body');
+  expect(web.getWhatsAppWebDeliveryStatus('5511999999999')).toBe('accepted');
+  sock.ev.emit('messages.update', [{ key: { id: 'PRIVATE-OUTBOUND-ID-1', fromMe: true, remoteJid: '5511888888888@s.whatsapp.net' }, update: { status: 4 } }]);
+  sock.ev.emit('messages.update', [{ key: { id: 'PRIVATE-OUTBOUND-ID-1', fromMe: false, remoteJid: '5511999999999@s.whatsapp.net' }, update: { status: 4 } }]);
+  sock.ev.emit('messages.update', [{ key: { id: 'PRIVATE-OTHER-ID', fromMe: true, remoteJid: '5511999999999@s.whatsapp.net' }, update: { status: 4 } }]);
+  expect(web.getWhatsAppWebDeliveryStatus('5511999999999')).toBe('accepted');
+  sock.ev.emit('messages.update', [{ key: { id: 'PRIVATE-OUTBOUND-ID-1', fromMe: true, remoteJid: '5511999999999@s.whatsapp.net' }, update: { status: 2 } }]);
+  expect(web.getWhatsAppWebDeliveryStatus('5511999999999')).toBe('server');
+  sock.ev.emit('messages.update', [{ key: { id: 'PRIVATE-OUTBOUND-ID-1', fromMe: true, remoteJid: '5511999999999@s.whatsapp.net' }, update: { status: 3 } }]);
+  expect(web.getWhatsAppWebDeliveryStatus('5511999999999')).toBe('delivered');
+  sock.ev.emit('messages.update', [{ key: { id: 'PRIVATE-OUTBOUND-ID-1', fromMe: true, remoteJid: '5511999999999@s.whatsapp.net' }, update: { status: 2 } }]);
+  expect(web.getWhatsAppWebDeliveryStatus('5511999999999')).toBe('delivered');
+  sock.ev.emit('messages.update', [{ key: { id: 'PRIVATE-OUTBOUND-ID-1', fromMe: true, remoteJid: '5511999999999@s.whatsapp.net' }, update: { status: 4 } }]);
+  expect(web.getWhatsAppWebDeliveryStatus('5511999999999')).toBe('read');
+  const report = JSON.stringify(await web.getWhatsAppWebStatus());
+  expect(report).not.toContain('PRIVATE-OUTBOUND-ID-1');
+  expect(report).not.toContain('5511999999999');
+  expect(report).not.toContain('synthetic response body');
+  expect(report).toContain('"read":1');
+});
+it('never fabricates recipient delivery when Baileys provides no message ID', async () => {
+  await web.startWhatsAppWeb();
+  const sock = mocks.sockets.at(-1)!;
+  sock.ev.emit('connection.update', { connection: 'open' });
+  await web.sendWhatsAppWeb('5511999999999', 'synthetic response');
+  expect(web.getWhatsAppWebDeliveryStatus('5511999999999')).toBe('untracked');
+});
+it('invalidates old-socket delivery claims after a disconnect without touching credentials', async () => {
+  await web.startWhatsAppWeb();
+  const sock = mocks.sockets.at(-1)!;
+  sock.ev.emit('connection.update', { connection: 'open' });
+  sock.sendMessage.mockResolvedValueOnce({
+    key: { id: 'synthetic-ack', fromMe: true, remoteJid: '5511999999999@s.whatsapp.net' }
+  });
+  await web.sendWhatsAppWeb('5511999999999', 'synthetic response');
+  expect(web.getWhatsAppWebDeliveryStatus('5511999999999')).toBe('accepted');
+  await web.stopWhatsAppWeb();
+  expect(web.getWhatsAppWebDeliveryStatus('5511999999999')).toBeNull();
+});
 it('accepts only live direct text from other numbered users and never its own or group traffic', async () => {
   const inbound = vi.fn(async () => undefined);
   web.setWhatsAppWebInbound(inbound);

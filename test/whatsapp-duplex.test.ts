@@ -29,6 +29,22 @@ function setup(enabled = true) {
   return { duplex, sendText, send, answer, setLatest: (value: { id: string; text: string; seq: number }) => { latest = value; }, setDelivery: (value: number | null) => { deliverySeq = value; }, setCards: (value: typeof cards) => { cards = value; }, getState: () => state };
 }
 describe('WhatsApp bidirectional owner-only routing', () => {
+  it('reports only the allowlisted sender\'s latest outgoing delivery phase via /estado', async () => {
+    const sent = vi.fn(async (_number: string, _text: string) => undefined);
+    const duplex = createWhatsAppDuplex({
+      allowed: async () => [sender], sessions: async () => sessions, active: async () => null,
+      sendText: sent, send: async () => ({ id: 'input', state: 'queued' }),
+      approvals: () => [], answer: () => ({ ok: false as const, error: 'no-card' }),
+      latest: async () => null, delivered: async () => null,
+      deliveryStatus: number => number === sender ? 'delivered' : null,
+      load: async () => null, save: async () => undefined
+    });
+    await duplex.incoming(sender, 'delivery-command-1', '/estado');
+    expect(sent).toHaveBeenCalledTimes(1);
+    expect(sent.mock.calls[0]![1]).toContain('entrega');
+    await duplex.incoming('5511888888888', 'unauthorized-status', '/estado');
+    expect(sent).toHaveBeenCalledTimes(1);
+  });
   it('collects every new completed reply between 8-second polls without relaying streaming or aborted turns', () => {
     const messages = [
       {kind:'assistant_message',turnId:'turn-1',final:true,seq:10,time:100,messageId:'m1',message:{text:'final 1'}},
