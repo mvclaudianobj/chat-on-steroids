@@ -37,10 +37,10 @@ export async function readSession(id: string): Promise<SessionSummary | null> {
   return summary ? withActivity(summary) : null;
 }
 
-export async function readSessionList(options: { cursor?: SessionListCursor; limit: number; projectId?: string }) {
+export async function readSessionList(options: { cursor?: SessionListCursor; limit: number; projectId?: string; archived?: boolean; search?: string }) {
   const config = getConfig();
   const inputs = await listInputs(); // Restore exact helper origins before the first sidebar page.
-  const page = await listSessionPage({ cursor: options.cursor, limit: options.limit, ...(options.projectId ? { projectId: options.projectId } : {}) });
+  const page = await listSessionPage({ cursor: options.cursor, limit: options.limit, archived: options.archived, search: options.search, ...(options.projectId ? { projectId: options.projectId } : {}) });
   // Older recordings omitted worker origins' parent IDs. The broker's exact
   // retained owner can repair that presentation without reviving a worker or
   // guessing from reusable names such as worker-1.

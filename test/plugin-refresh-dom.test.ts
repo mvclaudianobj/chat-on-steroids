@@ -58,10 +58,10 @@ it('reads the Windows Desktop connector with all of its tools (#1763)', async ()
   // Windows Desktop with every permission declared 24 tools in 2.1.44; the card was refused at 16,
   // so its automatic refresh could never be confirmed.
   const { api, props } = page();
-  props.connector.name = 'Chat On Steroids Desktop';
+  props.connector.name = 'Chat Marks Desktop';
   props.actions = Array.from({ length: 24 }, (_, i) => ({ name: `desktop_tool_${i}`, description: `Desktop tool ${i}`, description_model: null,
     params: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] } }));
-  expect((await api.pluginRefreshView('Chat On Steroids Desktop'))?.tools).toHaveLength(24);
+  expect((await api.pluginRefreshView('Chat Marks Desktop'))?.tools).toHaveLength(24);
 });
 it("keeps the own connectors' limit above every tool they declare, in both readers", async () => {
   const { SURFACES } = await import('../src/main/mcp/surfaces.js');
@@ -86,7 +86,7 @@ it('reads a Plugins catalog that fits the publication budget even with long sche
   const view = await api.pluginRefreshView('Chat Marks Plugins');
   expect(view?.tools).toHaveLength(82);
 });
-it.each([['Chat Marks Plugins', 258], ['Chat Marks Core', 17], ['Chat Marks Core', 65]] as const)('retains the %s observation count guard', async (connector, count) => {
+it.each([['Chat Marks Plugins', 258], ['Chat Marks Core', 65]] as const)('retains the %s observation count guard', async (connector, count) => {
   const { api, props } = page();
   props.connector.name = connector;
   props.actions = Array.from({ length: count }, (_, i) => ({ name: `tool_${i}`, description: `Tool ${i}`, description_model: null,
@@ -214,9 +214,7 @@ it('reports the page connector tunnel and a settled empty Plugins list', async (
 });
 it.each([
   ['Chat Marks Plugins (Windows)', 257, true],
-  ['Chat Marks Core (Windows)', 17, false],
   ['Chat Marks Core (Windows)', 65, false],
-  ['Chat Marks Plugins Backup', 17, false],
   ['Chat Marks Plugins Backup', 65, false]
 ] as const)('applies the Plugins connector\'s limits to %s by its kind, whatever the computer', async (connector, count, accepted) => {
   // One ChatGPT account on two computers: this computer's Plugins connector carries its suffix

@@ -41,6 +41,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-engine-markscode': 'cm:code',
   'i-engine-opencode': 'cm:opencode',
   'i-module-zeroclaw': 'cm:claw',
+  'i-module-ccr': 'cm:ccr',
   'i-dock-restore': 'corners-in',
   'i-export': 'download-simple',
   'i-eye': 'eye',
@@ -146,18 +147,33 @@ export const $ = <T extends HTMLElement>(id: string): T => document.getElementBy
 let toastTimer: number | undefined;
 let toastWatch: ResizeObserver | undefined;
 
-export function toast(message: string): void {
+/** A button in a toast (Chat Marks): it runs once and closes the toast. */
+export interface ToastAction { label: string; run: () => void }
+
+export function toast(message: string, actions: readonly ToastAction[] = []): void {
   document.querySelector('.toast')?.remove();
   toastWatch?.disconnect();
   const node = el('div', 'toast', message);
   node.setAttribute('role', 'status');
+  if (actions.length) {
+    node.classList.add('has-actions');
+    const row = el('div', 'toast-actions');
+    for (const action of actions) {
+      const button = el('button', 'toast-action', action.label) as HTMLButtonElement;
+      button.type = 'button';
+      button.addEventListener('click', () => { node.remove(); toastWatch?.disconnect(); window.clearTimeout(toastTimer); action.run(); });
+      row.append(button);
+    }
+    node.append(row);
+  }
   document.body.append(node);
   placeToast(node);
   // The composer and its dock can grow or the window resize while the toast shows: it follows.
   toastWatch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (node.isConnected) placeToast(node); }) : undefined;
   for (const target of document.querySelectorAll('main, .card.is-session > .composer, .card.is-session > .composer-dock')) toastWatch?.observe(target);
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => { node.remove(); toastWatch?.disconnect(); }, 3200);
+  // A toast with buttons stays long enough to read it and choose one.
+  toastTimer = window.setTimeout(() => { node.remove(); toastWatch?.disconnect(); }, actions.length ? 10000 : 3200);
 }
 
 /** Shown over the content it is about: centred on the open chat's composer and just above it and

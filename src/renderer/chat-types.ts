@@ -48,11 +48,13 @@ export function chatTypeOf(summary: { conversationId: string | null; engine?: Ag
 /**
  * A module's own icon in its management entries (the Settings sub-nav item, the Modules card and
  * its page heading): the same drawing its chats and engine use. ZeroClaw (and the retired
- * MarksClaw fork) draw the claw; CLIProxyAPI the plug.
+ * MarksClaw fork) draw the claw; CLIProxyAPI the plug; Claude Code Router (not a chat type) its
+ * own line router.
  */
-export type ManagedModuleId = 'cliproxy' | 'opencode' | 'codex' | 'claude' | 'zeroclaw' | 'markscode' | 'marksclaw';
+export type ManagedModuleId = 'cliproxy' | 'opencode' | 'codex' | 'claude' | 'zeroclaw' | 'markscode' | 'marksclaw' | 'ccr';
 export function moduleIcon(id: ManagedModuleId): string {
   if (id === 'zeroclaw' || id === 'marksclaw') return 'i-module-zeroclaw';
+  if (id === 'ccr') return 'i-module-ccr';
   return ENGINE_ICONS[id];
 }
 

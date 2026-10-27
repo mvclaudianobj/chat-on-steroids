@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { installPublishedCli, publishedLatest, publishedUpdateAvailable, externalNpmPrefix } from '../src/main/cli-source-install.js';
 
 const fixture = vi.hoisted(() => ({
   command: true,
@@ -78,14 +79,37 @@ vi.mock('../src/main/durable.js', () => ({
     return fixture.save(name, value);
   }
 }));
-vi.mock('../src/main/cli-source-install.js', () => ({ installPublishedCli: vi.fn() }));
+vi.mock('../src/main/cli-source-install.js', () => ({ installPublishedCli: vi.fn(), publishedLatest: vi.fn(async () => null), publishedUpdateAvailable: vi.fn(() => false), verifiedVersion: vi.fn(async () => '1.0.0'), externalNpmPrefix: vi.fn(async () => null) }));
 
 import {
   cliAction, cliChatRuntime, cliCreateSession, cliEndEngineTerminal, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
-  OPENCODE_TERMINAL_SCRIPT, registerCliEngineOpenHook, registerCliModuleIpc, registerCliModuleStopHook
+  OPENCODE_TERMINAL_SCRIPT, ZEROCLAW_TERMINAL_SCRIPT, registerCliEngineOpenHook, registerCliModuleIpc, registerCliModuleStopHook
 } from '../src/main/cli-modules.js';
 
 beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.clients = ''; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
+
+describe('Codex standalone and Claude npm update routes (synthetic)', () => {
+  it('does not advertise npm in-place update for a standalone external Codex', async () => {
+    vi.mocked(publishedLatest).mockResolvedValue('1.2.3');
+    vi.mocked(publishedUpdateAvailable).mockReturnValue(true);
+    vi.mocked(externalNpmPrefix).mockResolvedValue(null);
+    const codex = (await cliStatus()).find(row => row.id === 'codex')!;
+    expect(codex).toMatchObject({ external: true, updateAvailable: true, externalNpmWritable: false });
+    await expect(cliAction('codex', 'update-external', '1.2.3')).rejects.toThrow('external_not_writable');
+    expect(installPublishedCli).not.toHaveBeenCalled();
+    await cliAction('codex', 'update', '1.2.3');
+    expect(installPublishedCli).toHaveBeenCalledWith('codex', '@openai/codex', '1.2.3', 'update', null, undefined);
+  });
+
+  it('advertises in-place npm only after verifying Claude package ownership', async () => {
+    vi.mocked(publishedLatest).mockResolvedValue('1.2.3');
+    vi.mocked(publishedUpdateAvailable).mockReturnValue(true);
+    vi.mocked(externalNpmPrefix).mockImplementation(async id => id === 'claude' ? '/home/test/.local' : null);
+    const results = await cliStatus();
+    expect(results.find(row => row.id === 'claude')).toMatchObject({ external: true, updateAvailable: true, externalNpmWritable: true });
+    expect(results.find(row => row.id === 'codex')?.externalNpmWritable).toBe(false);
+  });
+});
 
 describe('Persistent coding CLI terminal', () => {
   it('creates independent durable sessions and reopens each stable tmux identity', async () => {
@@ -133,7 +157,7 @@ describe('Persistent coding CLI terminal', () => {
     const result = await cliAction('codex', 'enable');
     expect(result.find(item => item.id === 'codex')).toMatchObject({ enabled: true, installed: true });
     expect(fixture.save).toHaveBeenCalledWith('marks-cli-modules', expect.objectContaining({ enabled: expect.arrayContaining(['codex']), sessions: expect.any(Array) }));
-    expect((await cliStatus()).find(item => item.id === 'codex')?.version).toBe('codex-cli 1.0');
+    expect((await cliStatus()).find(item => item.id === 'codex')?.version).toBe('1.0.0');
   });
 
   it('uses Windows WSL2 tmux with the converted approved workspace and detached session', async () => {
@@ -187,6 +211,12 @@ describe('Persistent coding CLI terminal', () => {
       const again = await cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--resume', id], title: 'ignored' });
       expect(again).toMatchObject({ id: session.id, args: ['--resume', id] });
       expect((await cliSessions()).filter(item => item.engineChat === 'session-0001')).toHaveLength(1);
+      // A direct chat's TUI carries exactly the direct route's flag settings first; no other settings pass.
+      const { CLAUDE_DIRECT_SETTINGS } = await import('../src/main/agent-engine/router.js');
+      const direct = await cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--settings', CLAUDE_DIRECT_SETTINGS, '--resume', id], title: 'ignored' });
+      expect(direct).toMatchObject({ id: session.id, args: ['--settings', CLAUDE_DIRECT_SETTINGS, '--resume', id] });
+      await expect(cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--settings', '{"permissions":{"defaultMode":"bypassPermissions"}}', '--resume', id], title: 'x' })).rejects.toThrow('Invalid terminal arguments');
+      await cliEngineTerminal('claude', { sessionId: 'session-0001', projectId: null, args: ['--resume', id], title: 'ignored' });
 
       fixture.missingSession = true;
       const hook = vi.fn(async (_session: unknown): Promise<void> => { throw new Error('Claude Code is still answering in this chat.'); });
@@ -317,18 +347,50 @@ describe('Persistent coding CLI terminal', () => {
       fixture.missingSession = true;
       const terminal = await cliCreateSession('zeroclaw', null);
       await cliOpen(terminal.id, 80, 24, 'zeroclaw-terminal');
-      expect(fixture.commands.find(command => command.includes('new-session'))!.slice(-4)).toEqual(['sh', '-c', 'exec "$@"', 'marks-cli', '/usr/local/bin/zerocode'].slice(-4));
+      expect(fixture.commands.find(command => command.includes('new-session'))!.slice(-5)).toEqual(['sh', '-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', '/usr/local/bin/zerocode']);
       fixture.commands.length = 0;
       const quickstart = await cliCreateSession('zeroclaw', null, 'quickstart');
       expect(quickstart).toMatchObject({ args: ['quickstart'], title: 'ZeroClaw quickstart' });
       await cliOpen(quickstart.id, 80, 24, 'zeroclaw-quickstart');
-      expect(fixture.commands.find(command => command.includes('new-session'))!.slice(-3)).toEqual(['marks-cli', '/usr/local/bin/zeroclaw', 'quickstart']);
+      // Exactly `zeroclaw quickstart` (0.8.6's subcommand; `onboard` is deprecated), through the same script.
+      expect(fixture.commands.find(command => command.includes('new-session'))!.slice(-6)).toEqual(['sh', '-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', '/usr/local/bin/zeroclaw', 'quickstart']);
       await expect(cliCreateSession('codex', null, 'quickstart')).rejects.toThrow('Only ZeroClaw');
       await expect(cliAction('zeroclaw', 'install')).rejects.toThrow('Settings > Modules');
     } finally {
       fixture.missingSession = false;
       await cliAction('zeroclaw', 'disable');
     }
+  });
+
+  it('runs ZeroClaw under umask 077, tightens only its own group-writable folders, and keeps its exit status on screen', async () => {
+    if (process.platform === 'win32') return;
+    const { spawnSync } = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const os = await vi.importActual<typeof import('node:os')>('node:os');
+    const path = await vi.importActual<typeof import('node:path')>('node:path');
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroclaw-script-'));
+    try {
+      // ZeroClaw 0.8.6 under umask 002 left these at 775 and then refused data/ ("writable by other users").
+      fs.mkdirSync(path.join(home, '.zeroclaw', 'data'), { recursive: true });
+      fs.chmodSync(path.join(home, '.zeroclaw'), 0o775); fs.chmodSync(path.join(home, '.zeroclaw', 'data'), 0o775);
+      const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'zeroclaw-outside-'));
+      fs.chmodSync(outside, 0o777);
+      const fake = path.join(home, 'fake-zeroclaw');
+      fs.writeFileSync(fake, '#!/bin/sh\necho "umask $(umask) args $*"\nexit 3\n', { mode: 0o755 });
+      const result = spawnSync('sh', ['-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', fake, 'quickstart'],
+        { env: { PATH: process.env.PATH, HOME: home }, input: '\n', encoding: 'utf8' });
+      expect(result.status).toBe(3);
+      expect(result.stdout).toContain('umask 0077 args quickstart');
+      expect(result.stdout).toContain('[fake-zeroclaw exited with status 3. Press Enter to close.]');
+      expect(fs.statSync(path.join(home, '.zeroclaw')).mode & 0o777).toBe(0o755);
+      expect(fs.statSync(path.join(home, '.zeroclaw', 'data')).mode & 0o777).toBe(0o755);
+      // A link in their place is never followed.
+      fs.rmSync(path.join(home, '.zeroclaw', 'data'), { recursive: true });
+      fs.symlinkSync(outside, path.join(home, '.zeroclaw', 'data'));
+      spawnSync('sh', ['-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', fake], { env: { PATH: process.env.PATH, HOME: home }, input: '\n' });
+      expect(fs.statSync(outside).mode & 0o777).toBe(0o777);
+      fs.rmSync(outside, { recursive: true, force: true });
+    } finally { fs.rmSync(home, { recursive: true, force: true }); }
   });
 
   it('never resolves, probes, installs or opens the retired MarksCode and MarksClaw, but still stops their sessions', async () => {

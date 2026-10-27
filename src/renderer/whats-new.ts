@@ -14,6 +14,39 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.45.3': {
+    lead: () => t('Jarvis voice now works with normal ChatGPT chats, with clear setup and microphone consent.'),
+    highlights: [
+      { icon: 'i-chat', title: () => t('Jarvis with ChatGPT normal'), text: () => t('Select a ChatGPT chat, enable Jarvis in Settings, and hold its microphone. CLIProxy is optional.') }
+    ]
+  },
+  '2.1.45.2': {
+    lead: () => t("Vault, notifications, Brain memory and new ways to work with agents."),
+    highlights: [
+      { icon: 'i-lock', title: () => t("Vault and notifications"), text: () => t("Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.") },
+      { icon: 'i-search', title: () => t("Brain memory"), text: () => t("Recall and save local memories, connect optional sources and selectively import past conversations.") },
+      { icon: 'i-terminal', title: () => t("Agent routes and remote labs"), text: () => t("Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.") },
+      { icon: 'i-chat', title: () => t("Jarvis and ZeroClaw"), text: () => t("Use Jarvis voice in your selected ChatGPT conversation or optional CLIProxy chats, and review MarksClaw profiles before importing into ZeroClaw.") }
+    ]
+  },
+  '2.1.45.1': {
+    lead: () => t("Chat groups, bookmarks, drafts that wait for you, and a better Review."),
+    highlights: [
+      { icon: 'i-group', title: () => t("Chat groups"), text: () => t("Sort a project's chats into groups from its ⋯ menu.") },
+      { icon: 'i-bookmark-fill', title: () => t("Bookmarks"), text: () => t("Bookmark an answer and jump back to it from the chat's header.") },
+      { icon: 'i-pencil', title: () => t("Drafts that wait"), text: () => t("A pencil marks chats with an unsent message, and drafts come back after a restart.") },
+      { icon: 'i-git-diff', title: () => t("A better Review"), text: () => t("Right-click an untracked file to add it, or its folder, to .gitignore.") }
+    ]
+  },
+  '2.1.44.2': {
+    lead: () => t("A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice."),
+    highlights: [
+      { icon: 'i-git-branch', title: () => t("A route for each chat"), text: () => t("Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.") },
+      { icon: 'i-agents', title: () => t("Real model names"), text: () => t("Model lists show each model's full name and version, not just a short alias.") },
+      { icon: 'i-module-zeroclaw', title: () => t("ZeroClaw has its own page"), text: () => t("Open it below Pets in the sidebar; Configure agent now draws its setup.") },
+      { icon: 'i-browser', title: () => t("The right extension notice"), text: () => t("The extension update notice follows the browser you chose for ChatGPT.") }
+    ]
+  },
   '2.1.44.1': {
     lead: () => t("Pictures with /image, keyboard shortcuts, and a quicker message after Stop."),
     highlights: [

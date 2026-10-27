@@ -148,7 +148,7 @@ export function usageCsv(overview: UsageOverview, divisor: number, exportedAt: n
   const tokens = new Map(overview.days.map(day => [day.date, day.tokens * 2 / divisor]));
   const dates = [...new Set([...tokens.keys(), ...sent.keys()])].sort();
   const rows: Array<Array<string | number | null>> = [
-    ['Chat On Steroids usage export', usageCsvTime(exportedAt)],
+    ['Chat Marks usage export', usageCsvTime(exportedAt)],
     ['Note', `Estimated tokens are this app's local estimate (final frontend context per unique tool call, divided by ${divisor}), not a provider invoice or exact token use. Messages sent count recorded native sends with verified model proof for the last 7 days only; they are not a quota. Limits are the latest reading only. Times are local.`],
     [],
     ['Date', 'Estimated tokens', 'GPT-5.6 messages sent', 'GPT-6 messages sent'],

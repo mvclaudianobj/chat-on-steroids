@@ -1,0 +1,18 @@
+# Chat Marks Brain — H1a (local memory)
+
+Brain H1a introduces private local memories. Memory records live under the Electron userData directory at `brain/brain.sqlite`, using SQLite WAL and FTS5 (`unicode61 remove_diacritics 2`). The database is not built from or connected to MarksCode, MarksClaw or external providers. A damaged existing database is never silently replaced. The file is created with 0600 permissions, and the directory is private to the user.
+
+Memories have an ID, redacted content, optional title and subject, tags, type (`episodic`, `semantic` or `procedural`), duration mode, importance, global/project scope, provenance, timestamps and a normalized content hash. Saves are deduplicated on that hash. Deleting a memory removes its database record and FTS row; SQLite may retain previous data in WAL or allocated pages until checkpoint/compaction, so deleting from an encrypted device or backup requires separate secure-storage controls. SQLite write operations are serialized. Save content and all text metadata pass through app credential redaction and the K vault redaction registry.
+
+The feature is disabled by default for both model-facing surfaces. The Settings > Brain page can enable native ChatGPT Core tools or API chat tools independently. `memory_search` is read-only; `memory_save` requires a proven chat/session owner, edit capability and a non-read-only connector. A model save asks for approval by default. API chats use the existing per-turn approval card, while ChatGPT uses Brain's ephemeral exact-chat pending approval; recheck session owner and capabilities after approval. A user-authored save in Brain or `/remember` is direct. Memory text returned to a model must be treated as untrusted context, never as system or user instructions.
+
+Core schema changes are published through the existing connector publication/refresh mechanism; ChatGPT may need to refresh the connector before newly enabled tools appear in its cached list. No additional MCP surface is created. A `marksBrain:request` renderer IPC channel permits only validated actions from the main app window/frame.
+
+Phase H1a has no remote provider, OpenViking, engine MCP, automatic prompt injection or history import. Future H1b/H1c/H2 require separate user approval, and H1b will refuse insecure plain HTTP memory endpoints unless explicitly reviewed in that phase.
+
+## H1b — optional sources
+
+Three opt-in providers (ai-memory remote MCP, OpenViking HTTP, Marks memory API) recall alongside
+local memories when "Remote recall" is on, and receive new memories when "Remote sync" is on.
+Keys live in the K vault bound to each provider origin. The Marks API is plain HTTP today and is
+used only after its insecure-HTTP acknowledgement. See AGENTS.md "Chat Marks Brain (H1b sources)".

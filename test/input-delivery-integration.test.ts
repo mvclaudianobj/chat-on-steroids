@@ -1,5 +1,6 @@
 import { GOAL_MARKER_INSTRUCTION } from '../src/shared/goal-templates.js';
 import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
+import { currentMarksSystemPrompt } from '../src/main/marks-system-prompt.js';
 import { prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
 import { finishInstruction } from '../src/shared/finish.js';
 import { initSkillsPath } from '../src/main/skills.js';
@@ -1742,7 +1743,7 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   const standing = 'ä 🐱 Complete standing guidance\n'.repeat(100) + 'FINAL_STANDING_MARKER';
   await saveConfig({ ...config, mcp: { ...config.mcp, instructions: standing } });
   const first = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'First request' });
-  const canonical = await currentCoreInstructions();
+  const canonical = [currentMarksSystemPrompt('chatgpt'), await currentCoreInstructions()].filter(Boolean).join('\n\n');
   const claim = await input.claimBrowserInput(first.id, 'exact-document', null, true);
   expect(claim?.text).toBe(prependUserPrompt('First request', canonical));
   expect(claim?.text).toContain(standing);
@@ -1752,7 +1753,8 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   await input.cancelInput(first.id);
   const second = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'Second request' });
   const next = await input.claimBrowserInput(second.id, 'next-document', null, true);
-  expect(next?.text).toBe(prependUserPrompt('Second request', await currentCoreInstructions()));
+  const updated = [currentMarksSystemPrompt('chatgpt'), await currentCoreInstructions()].filter(Boolean).join('\n\n');
+  expect(next?.text).toBe(prependUserPrompt('Second request', updated));
   expect(userPromptText(next!.text)).toBe('Second request');
 });
 

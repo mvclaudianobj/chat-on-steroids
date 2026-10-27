@@ -25,6 +25,7 @@ export type TerminalTransport = {
 export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount: HTMLElement,
   options: { id?: string; onEmpty?: () => void; onClosePanel?: () => void;
     dockedTabs?: boolean; onTabsChanged?: () => void; transport?: TerminalTransport;
+    /** Adds selected terminal text to the composer; false when nothing was added. */
     onSendSelection?: (text: string) => boolean } = {}) {
   const app = document.querySelector<HTMLElement>('.app')!;
   const panel = el('section', 'workspace-terminal'); panel.id = options.id ?? 'workspaceTerminal'; panel.hidden = true;
@@ -86,11 +87,16 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     for (const tab of tabs.values()) tab.term.options.theme = theme;
   });
   let project: LocalProject | null = null, selected: string | null = null, open = false;
+  /**
+   * The size main is asked for, within what it accepts (2–500 × 2–200): a terminal fitted into a
+   * pane that has no height yet has one row, and main refuses that open before anything starts.
+   */
+  const size = (term: Terminal): [number, number] => [Math.max(2, Math.min(500, term.cols)), Math.max(2, Math.min(200, term.rows))];
   const fit = (): void => {
     const tab = selected ? tabs.get(selected) : null;
     if (!tab || !open || !tab.node.getBoundingClientRect().height) return;
     tab.fit.fit();
-    if (tab.ready && !tab.exited) void transport.resize(tab.id, Math.min(500, tab.term.cols), Math.min(200, tab.term.rows));
+    if (tab.ready && !tab.exited) void transport.resize(tab.id, ...size(tab.term));
   };
   // xterm keeps Tab as shell input, so a previous-session tab focuses its Start button instead.
   const focusTab = (tab: Tab | undefined): void => {
@@ -181,7 +187,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       return true;
     });
     const start = async (): Promise<void> => {
-      const result = await transport.create(id, tab.projectId, Math.min(500, term.cols), Math.min(200, term.rows));
+      const result = await transport.create(id, tab.projectId, ...size(term));
       if (!tabs.has(id)) { void transport.close(id); return; }
       if (!result.ok) { tab.exited = true; term.writeln(`\r\n${t(result.error)}`); }
       else {

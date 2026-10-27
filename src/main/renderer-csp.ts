@@ -7,7 +7,7 @@
  */
 export const RENDERER_CONTENT_SECURITY_POLICY =
   "default-src 'none'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; " +
-  "img-src 'self' data: https://images.openai.com; font-src 'self'; connect-src 'self'; " +
+  "img-src 'self' data: https://images.openai.com; font-src 'self'; connect-src 'self'; media-src blob:; " +
   "form-action 'none'; base-uri 'none'; frame-ancestors 'none'";
 
 /** Only the static-rsc URL shape actually used by first-party reply images. */

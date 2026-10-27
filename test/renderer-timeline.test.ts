@@ -1996,7 +1996,7 @@ it('offers enabled CLI modules in a lazy project terminal submenu with the proje
   await settle();
 
   projectMenu(w, project.id);
-  expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'new-terminal', 'color', 'remove']);
+  expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'new-terminal', 'group-new', 'color', 'remove']);
   menuItem(w, 'new-terminal').click();
   const submenu = w.document.querySelectorAll<HTMLElement>('.row-menu')[1]!;
   expect([...submenu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-terminal-markscode', 'new-terminal-claude']);
@@ -2023,7 +2023,7 @@ it("keeps a project's engine chat and its terminal of the same name apart", asyn
 
   projectMenu(w, project.id);
   expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction))
-    .toEqual(['new-chat', 'new-chat-engine-claude', 'new-terminal', 'color', 'remove']);
+    .toEqual(['new-chat', 'new-chat-engine-claude', 'new-terminal', 'group-new', 'color', 'remove']);
   menuItem(w, 'new-chat-engine-claude').click();
   expect(engineChat).toHaveBeenCalledExactlyOnceWith(project.id);
   expect(createCliSession).not.toHaveBeenCalled();
@@ -6821,6 +6821,130 @@ async function typed(text: string, skills: Array<{ id: string; name: string }> =
   await settle(); await settle();
   return { ...app, input };
 }
+
+// Chat Marks Brain (H1b bug reports): a typed /remember really saves, and /recall never has a silent Insert.
+function brainFake(app: { w: any }, memories: Array<{ id: string; content: string; title?: string }> = []) {
+  const calls: Array<{ action: string; payload: any }> = [];
+  app.w.api.brain = async (action: string, payload?: any) => {
+    calls.push({ action, payload });
+    if (action === 'memories.save') return { ok: true, data: { id: '00000000-0000-4000-8000-000000000001', content: payload.content, synced: [] } };
+    if (action === 'memories.list') return { ok: true, data: memories.map(row => ({ ...row, contentHash: 'a'.repeat(64), tags: [] })) };
+    if (action === 'recall') return { ok: true, data: { items: memories.map(row => ({ source: 'local', ...row, contentHash: 'a'.repeat(64) })), errors: [], remote: false } };
+    return { ok: true, data: [] };
+  };
+  return calls;
+}
+it('saves a typed /remember with its text, toasts, and leaves nothing to send', async () => {
+  const app = await boot([], false);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  const calls = brainFake(app);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/remember o projeto usa pnpm';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle(); await settle();
+  expect(calls.filter(call => call.action === 'memories.save')).toEqual([{ action: 'memories.save', payload: { content: 'o projeto usa pnpm' } }]);
+  expect(app.w.document.querySelector('.toast')?.textContent).toBe('Memory saved');
+  expect(input.value).toBe('');
+  expect(app.live.sent).toHaveLength(0);
+});
+// Chat Marks live test: a bare /remember memorizes the context of the chat it is called in.
+const REMEMBER_INSTRUCTION = 'Review our conversation so far and save what is worth keeping with the memory_save tool: decisions, facts, preferences and open next steps. Save one memory per distinct item, each with a clear title and a few tags. Skip small talk, and never save passwords, keys or other secrets. I will approve each memory before it is saved.';
+function rememberFake(app: { w: any }, tools: { available: boolean; reason?: string }, latest: string | null = 'A resposta final') {
+  const calls: Array<{ action: string; payload: any }> = [];
+  app.w.api.brain = async (action: string, payload?: any) => {
+    calls.push({ action, payload });
+    if (action === 'chat.tools') return { ok: true, data: { kind: 'chatgpt', engine: 'chatgpt', ...tools } };
+    if (action === 'chat.save') return { ok: true, data: { id: '00000000-0000-4000-8000-000000000003', content: payload.content, synced: [] } };
+    if (action === 'chat.saveLatestAnswer') return { ok: true, data: latest === null ? null : { id: '00000000-0000-4000-8000-000000000004', content: latest, synced: [] } };
+    if (action.startsWith('import.') || action === 'status' || action === 'doctor') return { ok: false, error: 'not in this test' };
+    return { ok: true, data: [] };
+  };
+  return calls;
+}
+async function typedRemember(text: string, tools: { available: boolean; reason?: string }, latest?: string | null) {
+  const app = await boot([], true);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  const calls = rememberFake(app, tools, latest);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = text;
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle(); await settle(); await settle();
+  return { ...app, calls, input };
+}
+it('sends a bare /remember to the open chat as the memory instruction when its tools are available', async () => {
+  const { calls, live, input } = await typedRemember('/remember', { available: true });
+  expect(calls.map(call => call.action)).toEqual(['chat.tools']);
+  expect(calls[0]!.payload).toEqual({ sessionId: '2026-09-02-test0001' });
+  expect(live.sent).toHaveLength(1);
+  expect(live.sent[0]).toMatchObject({ sessionId: '2026-09-02-test0001', text: REMEMBER_INSTRUCTION });
+  expect(input.value).toBe('');
+});
+it('sends nothing for a bare /remember without memory tools and names the switch, with Open Brain', async () => {
+  const { w, calls, live } = await typedRemember('/remember', { available: false, reason: 'chatgpt-off' });
+  expect(calls.map(call => call.action)).toEqual(['chat.tools']);
+  expect(live.sent).toHaveLength(0);
+  const note = w.document.querySelector('.toast')!;
+  expect(note.textContent).toContain('Turn on “ChatGPT memory tools” on the Brain page.');
+  const buttons = [...note.querySelectorAll<HTMLButtonElement>('.toast-action')];
+  expect(buttons.map(button => button.textContent)).toEqual(['Open Brain', 'Save last answer']);
+  buttons[0]!.click(); await settle();
+  expect(w.document.querySelector('.toast')).toBeNull();
+  // The Brain page opened: it reads its status the moment it is shown.
+  expect(calls.map(call => call.action)).toContain('status');
+  expect(live.sent).toHaveLength(0);
+});
+it('saves the last answer from the toast and from /remember-answer, without sending anything', async () => {
+  const app = await typedRemember('/remember', { available: false, reason: 'engines-off' });
+  const save = [...app.w.document.querySelectorAll<HTMLButtonElement>('.toast-action')][1]!;
+  save.click(); await settle(); await settle();
+  expect(app.calls.filter(call => call.action === 'chat.saveLatestAnswer')).toEqual([{ action: 'chat.saveLatestAnswer', payload: { sessionId: '2026-09-02-test0001' } }]);
+  expect(app.w.document.querySelector('.toast')?.textContent).toBe('Memory saved');
+  app.input.value = '/remember-answer';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle(); await settle();
+  expect(app.calls.filter(call => call.action === 'chat.saveLatestAnswer')).toHaveLength(2);
+  expect(app.live.sent).toHaveLength(0);
+});
+it('says so when the chat has no finished answer to remember yet', async () => {
+  const { w, calls, live } = await typedRemember('/remember-answer', { available: true }, null);
+  expect(calls.map(call => call.action)).toEqual(['chat.saveLatestAnswer']);
+  expect(w.document.querySelector('.toast')?.textContent).toBe('This chat has no finished answer to remember yet.');
+  expect(live.sent).toHaveLength(0);
+});
+it('saves /remember <text> in a chat through chat.save, so main adds its provenance and project', async () => {
+  const { w, calls, live, input } = await typedRemember('/remember o projeto usa pnpm', { available: true });
+  expect(calls).toEqual([{ action: 'chat.save', payload: { sessionId: '2026-09-02-test0001', content: 'o projeto usa pnpm' } }]);
+  expect(w.document.querySelector('.toast')?.textContent).toBe('Memory saved');
+  expect(input.value).toBe('');
+  expect(live.sent).toHaveLength(0);
+});
+it('disables /recall Insert with a hint and shows how to add memories when there are none', async () => {
+  const app = await boot([], false);
+  brainFake(app);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  input.value = '/recall';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle(); await settle();
+  const dialog = app.w.document.querySelector('.brain-recall-dialog')!;
+  expect(dialog.textContent).toContain('No memories yet: use /remember or the Brain page.');
+  expect((dialog.querySelector('[data-action="insert"]') as HTMLButtonElement).disabled).toBe(true);
+  expect(app.w.document.querySelector('.brain-recall-dialog')).not.toBeNull();
+});
+it('preselects a single /recall result so Insert puts it into the draft with its source', async () => {
+  const app = await boot([], false);
+  (app.w as any).api.skillLibrary = async () => ({ ok: true, data: { skills: [], roots: [], errors: [], includeInstructions: true } });
+  brainFake(app, [{ id: '00000000-0000-4000-8000-000000000002', content: 'O projeto usa pnpm' }]);
+  const input = app.w.document.getElementById('chatInput') as HTMLTextAreaElement;
+  input.value = '/recall pnpm';
+  app.w.document.getElementById('composer')!.dispatchEvent(new app.w.Event('submit', { bubbles: true, cancelable: true }));
+  await settle(); await settle(); await settle();
+  const dialog = app.w.document.querySelector('.brain-recall-dialog')!;
+  const insert = dialog.querySelector('[data-action="insert"]') as HTMLButtonElement;
+  expect(insert.disabled).toBe(false);
+  insert.click(); await settle();
+  expect(input.value).toBe('<memory-context>\n[Local] O projeto usa pnpm\n</memory-context>');
+});
 
 it('runs a typed /goal as the Goal command and sends the rest as its message', async () => {
   const { w, live } = await typed('/goal Reply with exactly: done');

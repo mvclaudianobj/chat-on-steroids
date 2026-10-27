@@ -53,7 +53,7 @@ it('saves daily estimated tokens, the last week of sends and the latest limits a
   expect(encoding).toBe('utf8');
   expect(files.rename).toHaveBeenCalledWith(file, '/downloads/usage.csv');
   // Excel reads UTF-8 only with a byte-order mark; rows end in CRLF as RFC 4180 has it.
-  expect(csv.startsWith('﻿Chat On Steroids usage export,')).toBe(true);
+  expect(csv.startsWith('﻿Chat Marks usage export,')).toBe(true);
   const lines = rows(csv);
   expect(lines[1]).toMatch(/^Note,"Estimated tokens are this app's local estimate .*divided by 2\), not a provider invoice/);
   expect(lines.slice(3, 9)).toEqual([

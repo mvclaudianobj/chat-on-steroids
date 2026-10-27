@@ -244,10 +244,20 @@ function showUninstall(plugin: PluginView): void {
 function showConfigure(plugin: PluginView): void {
   const { box, body } = dialog(() => t("Configure {0}", [plugin.name])); const config = new Map<string, HTMLInputElement>(); const secrets = new Map<string, HTMLInputElement>();
   const name = field(body, () => t("Display name"), plugin.name);
+  const secretField = (key: string, label: string) => {
+    const input = field(body, label, '', true, () => t("Leave empty to keep the saved credential."));
+    const present = plugin.credentialPresence?.[key] === true;
+    input.placeholder = present ? '••••••••' : '';
+    const caption = plugin.credentialPresence?.[key] === undefined ? 'Credential status unavailable' : present ? 'Credential saved' : 'No saved credential';
+    input.setAttribute('aria-description', t(caption));
+    input.parentElement?.append(el('small', 'muted', () => t(caption)));
+    secrets.set(key, input);
+  };
   for (const item of plugin.fields ?? snapshot.catalog.find((entry) => entry.id === plugin.catalogId)?.fields ?? [])
-    (item.secret ? secrets : config).set(item.key, field(body, item.label, item.secret ? '' : plugin.config[item.key] ?? '', item.secret, () => item.secret ? t("Leave empty to keep the saved credential.") : item.placeholder ?? ''));
+    if (item.secret) secretField(item.key, item.label);
+    else config.set(item.key, field(body, item.label, plugin.config[item.key] ?? '', false, item.placeholder ?? ''));
   for (const [key, value] of Object.entries(plugin.config)) if (!config.has(key)) config.set(key, field(body, key, value));
-  for (const key of plugin.credentialKeys) if (!secrets.has(key)) secrets.set(key, field(body, key, '', true, () => t("Leave empty to keep the saved credential.")));
+  for (const key of plugin.credentialKeys) if (!secrets.has(key)) secretField(key, key);
   const source = field(body, () => t("Server configuration (JSON)"), JSON.stringify(plugin.source), false, () => t("Keep credentials in the secure fields, not in command arguments or URLs."));
   const extraConfig = field(body, () => t("Additional configuration (JSON object)"), '{}', false, () => t("Non-secret settings and environment variables only."));
   const extraKey = field(body, () => t("Additional credential name (optional)"), '', false, () => t("Environment variable for local servers; header name for remote servers.")); const extraValue = field(body, () => t("Additional credential value"), '', true);

@@ -659,6 +659,8 @@ export function originTitle(origin: SessionOrigin, source: string | null): strin
 }
 
 export interface SessionSummary {
+  /** Explicit local Chat Marks archive; absent means visible. It never changes ChatGPT's archive. */
+  archivedAt?: number;
   /** Rebuildable transcript boundaries; no message bodies or execution authority. */
   timelineTurns?: import('./chronology.js').TimelineTurns;
   /** Rebuildable request-to-turn proof from recorded MCP calls, never a caller permission. */
@@ -1076,6 +1078,9 @@ export interface AgentMessage {
   id: string;
   from: string;
   to: string;
+  /** Broker-owned sender provenance. Only a worker-scoped authenticated agents
+   * message to its prime can carry this flag. Old records must fail closed. */
+  origin?: 'authenticated-worker-message';
   /**
    * Prime-family address of the sender when a message crosses between existing prime families.
    *

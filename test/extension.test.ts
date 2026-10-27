@@ -3658,6 +3658,34 @@ describe('extension command delivery', () => {
     expect(tokens).toEqual(['Bearer stale-token', 'Bearer second-token']);
     expect(local.data.token).toBe('second-token');
   });
+
+  it.each(['external Chromium', 'native Chromium'] as const)('keeps its paired token through %s worker reload', async kind => {
+    const local = new FakeStorageArea({ port: 8765, token: 'fixture-credential', appInstance: 'f'.repeat(32) });
+    const session = new FakeStorageArea();
+    const headers: Array<{ host: unknown; auth: unknown }> = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const route = new URL(input).pathname;
+      if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true, instance: 'f'.repeat(32) });
+      if (route === '/status') {
+        const sent = (init.headers ?? {}) as Record<string, string>;
+        headers.push({ host: sent['x-extension-host'], auth: sent.authorization });
+        return response(200, { nonDiscardableConversations: [], inputOpeningIds: [], commandIds: [] });
+      }
+      return response(404, {});
+    });
+    const options = { local, session, fetch, ...(kind === 'native Chromium' ? {
+      cosWorker: { call: async () => 'f'.repeat(32) }
+    } : {}) };
+    const before = loadWorker(options);
+    await before.send({ type: 'status' });
+    await before.installed('update');
+    const after = loadWorker(options);
+    await after.send({ type: 'status' });
+    expect(local.data.token).toBe('fixture-credential');
+    expect(local.data.disconnected).not.toBe(true);
+    expect(fetch.mock.calls.some(([input]) => new URL(String(input)).pathname === '/pair')).toBe(false);
+    expect(headers.every(header => header.auth === 'Bearer fixture-credential')).toBe(true);
+  });
 });
 
 /**

@@ -4,13 +4,26 @@ import { registerCliModuleIpc } from './cli-modules.js';
 import { registerApiChatIpc } from './api-chat/ipc.js';
 import { registerCliProxyIpc } from './cliproxy/ipc.js';
 import { registerUpstreamIpc } from './upstream/ipc.js';
+import { registerCcrIpc } from './ccr/ipc.js';
+import { registerVmsIpc } from './vms.js';
 import { registerCliChatIpc } from './cli-chat.js';
+import { registerNotificationCenterIpc } from './notification-ipc.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
 import { isApiConversationId } from '../shared/api-chat.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
+import { registerRemoteHostsIpc } from './remote/hosts-ipc.js';
+import { revokeRemoteChat } from './remote/approval.js';
+import { registerJarvisAudioIpc } from './jarvis-audio.js';
+import { registerVaultIpc } from './marks-vault-ipc.js';
+import { registerBrainIpc } from './brain/ipc.js';
+import { registerCompanyIpc } from './company-ipc.js';
+import { initializeCompanyObservability } from './company-observability.js';
+import { initCompanyStore } from './company-store.js';
+import { initCompanyLocalGrants } from './company-local-grants.js';
+import { revokeVaultChat } from './marks-vault-approval.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
@@ -90,6 +103,7 @@ import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } fro
 import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
+import { currentMarksSystemPrompt } from './marks-system-prompt.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { PROJECT_COLORS } from '../shared/projects.js';
 import { bridgePortSelection } from './bridge-ports.js';
@@ -152,6 +166,7 @@ import {
   readToolEditReview,
   withSessionMutationFence
 } from './session/store.js';
+import { archiveSessionLocally } from './session/local-archive.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
@@ -698,11 +713,18 @@ export async function openSessionChat(id: string): Promise<void> {
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  registerVmsIpc(getWindow);
+  initCompanyStore(app.getPath('userData'));
+  initCompanyLocalGrants(app.getPath('userData'));
+  initializeCompanyObservability(app.getPath('userData'));
+  registerCompanyIpc(getWindow);
+  registerNotificationCenterIpc(getWindow);
   registerWorkspaceTerminalIpc(getWindow);
   registerCliModuleIpc(getWindow);
   registerApiChatIpc(getWindow);
   registerCliProxyIpc(getWindow); // Chat Marks: CLIProxyAPI versions, install/update, management keys.
   registerUpstreamIpc(getWindow); // Chat Marks: upstream OpenCode and ZeroClaw versions and install/update.
+  registerCcrIpc(getWindow); // Chat Marks: Claude Code Router module (install/update, service, router availability for chat routes).
   registerCliChatIpc(getWindow);
   // Sign out is an application admission transition. End this process after
   // clearing its secure session so the next startup must authenticate again.
@@ -718,6 +740,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     } catch { return { ok: false, error: 'Unable to sign out securely' }; }
   });
   registerDictationIpc(getWindow);
+  registerJarvisAudioIpc(getWindow);
+  registerVaultIpc(getWindow);
+  // Chat Marks: Brain has one fixed, frame-checked, validated IPC surface.
+  registerBrainIpc(getWindow);
+  registerRemoteHostsIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
   const deletingSessionIds = new Set<string>();
@@ -782,6 +809,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     logInfo('renderer state ready');
     return state;
   });
+  handle('marks:promptPreview', async () => currentMarksSystemPrompt('chatgpt'));
 
   // Phone notifications: a test message now, and the optional access token (kept in secure storage).
   handle('phonePush:test', async () => { await testPhonePush(); });
@@ -1718,16 +1746,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // ------------------------------------------------------------- sessions
 
   handle('sessions:list', async (payload) => {
-    const { cursor, limit, projectId } = z
+    const { cursor, limit, projectId, archived, search } = z
       .object({
         cursor: sessionListCursorSchema.optional(),
         // Keep one renderer payload small even when the store can index much more history.
         limit: z.number().int().min(1).max(60).optional(),
         // One project's own pages: expanding a project must not page the whole history (#1190).
         projectId: z.string().regex(/^[a-f0-9-]{36}$/i).optional()
+        ,archived: z.boolean().optional(),
+        search: z.string().trim().max(150).optional()
       })
       .parse(payload ?? {});
-    const list = await readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
+    const list = await readSessionList({ cursor, limit: limit ?? 60, archived, search, ...(projectId ? { projectId } : {}) });
     // Chat Marks: each API chat names its engine, for the sidebar's chat type icon.
     return { ...list, sessions: await withChatEngines(list.sessions) };
   });
@@ -2060,6 +2090,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     notifyChanged(id);
     return true;
   });
+  handle('sessions:archive', async (payload) => {
+    const { id, archived } = sessionIdArg.extend({ archived: z.boolean() }).parse(payload);
+    const summary = await archiveSessionLocally(id, archived);
+    notifyChanged(id);
+    return summary;
+  });
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
     if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
@@ -2090,6 +2126,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ], false);
       }
       await deleteSession(id);
+      if (summary?.conversationId) {
+        for (const conversationId of [summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)]) {
+          revokeVaultChat(conversationId);
+          revokeRemoteChat(conversationId);
+        }
+      }
       // A deleted chat leaves its group too; the group itself stays.
       await forgetChatGroupMember(id);
       logInfo(
@@ -2377,7 +2419,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // checkpoints and automatic continuations already have their instructions.
       // An edit of a chat's first question (#365) replaces the message that carried its setup.
       return ((entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish') || entry.editFramed
-        ? prepareSessionPrompt(text, entry, limits, authored)
+        ? prepareSessionPrompt(text, { ...entry, brainContext: true }, limits, authored)
         : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits, entry) : text;
     },
     applyAutomation: async (conversationId, automation, phase, objective, loopAfterTurn) => {

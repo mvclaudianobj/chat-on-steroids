@@ -1311,6 +1311,13 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
         const removed = entry.tail.splice(0, entry.tail.length - MAX_EVENT_TAIL);
         entry.tailFrom = removed[removed.length - 1]!.seq + 1;
       }
+      // A worker's genuinely newer turn brings its preserved session back into the live list.
+      // Replayed old browser observations must not silently undo a deliberate archive.
+      if (entry.summary.origin?.kind === 'worker' && entry.summary.archivedAt &&
+          full.time > entry.summary.archivedAt &&
+          (full.kind === 'turn_start' || full.kind === 'tool_call' || full.kind === 'user_message')) {
+        entry.summary.archivedAt = undefined;
+      }
       applyToSummary(entry.summary, full);
       entry.historySeq = full.seq;
       scheduleMeta(entry);
@@ -1515,6 +1522,10 @@ export function upsertMessageEvent(
       await writeCanonicalMessage(sessionId, key, full);
 
       entry.nextSeq += 1;
+      if (entry.summary.origin?.kind === 'worker' && entry.summary.archivedAt &&
+          full.kind === 'user_message' && full.time > entry.summary.archivedAt) {
+        entry.summary.archivedAt = undefined;
+      }
       entry.messages.set(key, full);
       if (full.kind === 'user_message') refreshUserTitle(entry.summary, entry.messages.values());
       if (!previous) {
@@ -2949,6 +2960,29 @@ export interface SessionPage {
   nextCursor: SessionListCursor | null;
 }
 
+/** Keep archival status in the same atomic session metadata as its durable identity. */
+export async function setSessionArchived(
+  id: string,
+  archived: boolean,
+  guard: (summary: Readonly<SessionSummary>) => Promise<string | null> = async () => null
+): Promise<SessionSummary> {
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'local archive', async () => {
+    const current = entry.summary;
+    if (Boolean(current.archivedAt) === archived) return { ...current };
+    if (archived) {
+      const refused = await guard(current);
+      if (refused) throw new Error(refused);
+    }
+    const staged: SessionSummary = { ...current, archivedAt: archived ? Date.now() : undefined };
+    await writeSummary(staged, entry.historySeq);
+    Object.assign(entry.summary, staged);
+    entry.metaDirty = false;
+    publishCachedSummary(entry.summary, false);
+    return { ...entry.summary };
+  });
+}
+
 function compareSummariesNewestFirst(left: SessionSummary, right: SessionSummary): number {
   if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
   if (left.id === right.id) return 0;
@@ -2971,6 +3005,9 @@ function comesAfterCursor(summary: SessionSummary, cursor: SessionListCursor): b
 export async function listSessionPage(options: {
   limit?: number;
   cursor?: SessionListCursor;
+  /** Archived results are a separate, independently paged and counted collection. */
+  archived?: boolean;
+  search?: string;
   /** Only this project's sessions (#1190). `total` stays the whole retained history. */
   projectId?: string;
 } = {}): Promise<SessionPage> {
@@ -2978,11 +3015,15 @@ export async function listSessionPage(options: {
   const limit = Math.max(1, Math.min(MAX_LISTED_SESSIONS, Math.floor(options.limit ?? MAX_LISTED_SESSIONS)));
   const openIds = new Set(open.keys());
   const candidates: SessionSummary[] = [];
+  const archiveMatch = (summary: SessionSummary): boolean =>
+    Boolean(summary.archivedAt) === (options.archived === true) &&
+    (!options.search || `${summary.title} ${summary.origin?.task ?? ''} ${summary.projectId ?? ''}`
+      .toLocaleLowerCase().includes(options.search.toLocaleLowerCase()));
 
   // Open summaries are authoritative between debounced metadata writes. There are normally one
   // or a handful, so overlay them explicitly instead of rebuilding/sorting every retained row.
   for (const entry of open.values()) {
-    if (entry.summary.origin?.kind === 'helper') continue;
+    if (entry.summary.origin?.kind === 'helper' || !archiveMatch(entry.summary)) continue;
     if (options.projectId && entry.summary.projectId !== options.projectId) continue;
     if (options.cursor && !comesAfterCursor(entry.summary, options.cursor)) continue;
     candidates.push({ ...entry.summary, chatIds: [...entry.summary.chatIds], agents: [...entry.summary.agents] });
@@ -2996,7 +3037,7 @@ export async function listSessionPage(options: {
   for (const id of catalog.orderedIds) {
     if (openIds.has(id)) continue;
     const summary = catalog.summaries.get(id);
-    if (!summary || summary.origin?.kind === 'helper' || (options.cursor && !comesAfterCursor(summary, options.cursor))) continue;
+    if (!summary || summary.origin?.kind === 'helper' || !archiveMatch(summary) || (options.cursor && !comesAfterCursor(summary, options.cursor))) continue;
     if (options.projectId && summary.projectId !== options.projectId) continue;
     if (durableEligible > limit) {
       durableHasMore = true;
@@ -3013,9 +3054,9 @@ export async function listSessionPage(options: {
   const nextCursor = hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null;
   let total = 0;
   for (const summary of catalog.summaries.values()) {
-    if (!openIds.has(summary.id) && summary.origin?.kind !== 'helper') total += 1;
+    if (!openIds.has(summary.id) && summary.origin?.kind !== 'helper' && archiveMatch(summary)) total += 1;
   }
-  for (const entry of open.values()) if (entry.summary.origin?.kind !== 'helper') total += 1;
+  for (const entry of open.values()) if (entry.summary.origin?.kind !== 'helper' && archiveMatch(entry.summary)) total += 1;
   return { sessions, total, nextCursor };
 }
 

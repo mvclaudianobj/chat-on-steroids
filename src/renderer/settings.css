@@ -67,7 +67,7 @@
 .api-chat-controls #apiChatComposerEffort { color: var(--soft); }
 .api-chat-controls select::picker(select) { width: max-content; min-width: anchor-size(width); max-width: min(320px, calc(100vw - 24px)); }
 .api-chat-label[hidden] { display: none; }
-.api-chat-label { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; max-width: 32%; overflow: hidden; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); white-space: nowrap; }
+.api-chat-label { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; max-width: 48%; overflow: hidden; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); white-space: nowrap; }
 .api-chat-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 /* Chat type icons (renderer/chat-types.ts): beside a chat's title in the sidebar, its Terminals and
    its header, at the size of the row's other marks and in their quiet colour. */
@@ -558,6 +558,8 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .cli-module-view .marks-cli-terminal { flex: 1; min-height: 0; height: auto; }
 /* Chat Marks D4: a paused API chat tool call, a row of the composer dock. */
 .api-chat-approval[hidden] { display: none; }
+.api-chat-route-notice { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--edge); color: var(--muted); font-size: calc(13px * var(--text-scale, 1)); }
+.api-chat-route-notice[hidden] { display: none; }
 .api-chat-approval { display: grid; gap: 8px; margin: 0; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--edge); color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); }
 .api-chat-approval-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .api-chat-approval-head code { color: var(--soft); }
@@ -569,10 +571,26 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .api-chat-approval-actions button:disabled { opacity: 0.6; cursor: default; }
 .api-chat-take-back-text { margin: 0; }
 /* Chat Marks: ZeroClaw's own Settings page (its setup terminal and its read-only settings). */
-.zeroclaw-setup-terminal { display: flex; flex-direction: column; }
+.zeroclaw-setup-terminal { display: flex; flex-direction: column; margin-top: 12px; }
 .zeroclaw-setup-terminal[hidden] { display: none; }
-.zeroclaw-setup-terminal > .marks-cli-terminal { flex: 1; min-height: 0; padding: 0; border: 0; }
+/* The mount must lay its terminal out too: as a block, the terminal's body had no height (0 px),
+   xterm fitted one row and nothing of ZeroClaw's quickstart could show. */
+.zeroclaw-setup-terminal > .marks-cli-terminal { display: flex; flex-direction: column; flex: 1; min-height: 0; height: auto; padding: 0; border: 0; border-radius: 0; }
+.zeroclaw-setup-terminal > .marks-cli-terminal[hidden] { display: none; }
 .zeroclaw-setup-terminal .workspace-terminal { flex: 1; min-height: 0; overflow: hidden; }
 .zeroclaw-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; font-size: calc(13px * var(--text-scale, 1)); }
 .zeroclaw-facts dt { color: var(--muted); }
+.zeroclaw-content > .appearance-section { margin-top: 28px; }
+.zeroclaw-panel .modules-service { padding: 14px 18px 0; }
+.zeroclaw-panel .zeroclaw-facts { padding-bottom: 4px; }
+.zeroclaw-panel .zeroclaw-setup-terminal { margin-bottom: 18px; }
+.zeroclaw-panel :is(button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
 .zeroclaw-facts dd { margin: 0; overflow-wrap: anywhere; }
+.vms-create { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px; }
+.vms-create label { display: flex; flex: 1 1 140px; flex-direction: column; gap: 5px; min-width: 120px; }
+.vms-create input { width: 100%; min-width: 0; }
+.vms-list { display: grid; gap: 12px; margin-top: 12px; }
+.vms-lab { padding: 16px; }
+.vms-lab h3 { margin: 0 0 8px; }
+.vms-log { max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vms-doctor { padding: 12px 16px; }

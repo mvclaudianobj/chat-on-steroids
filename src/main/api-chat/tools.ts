@@ -22,9 +22,9 @@ import { argsHash, canonicalJson } from '../agent-engine/approval.js';
 import type { ApiToolCall, ApiToolDefinition } from './client.js';
 
 /** v1 allowlist, by the exact registered names. Agents, finish, images, usage and code mode stay out. */
-export const API_CHAT_TOOL_NAMES = ['read', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'update_plan'] as const;
+export const API_CHAT_TOOL_NAMES = ['read', 'find', 'apply_patch', 'exec_command', 'write_stdin', 'update_plan', 'memory_search', 'memory_save'] as const;
 /** Tools that change files or run programs: these follow the chat's approval mode. */
-export const API_CHAT_MUTATING_TOOLS: ReadonlySet<string> = new Set(['apply_patch', 'exec_command', 'write_stdin']);
+export const API_CHAT_MUTATING_TOOLS: ReadonlySet<string> = new Set(['apply_patch', 'exec_command', 'write_stdin', 'memory_save']);
 /** What one tool result may put back into the model's context. */
 export const MAX_TOOL_RESULT_CHARS = 100_000;
 const MAX_SUMMARY_CHARS = 600;
@@ -64,7 +64,7 @@ export function apiChatTools(ctx: ToolContext = liveToolContext()): Map<string, 
       if (allowed.has(name)) tools.set(name, { name, description: config.description, inputSchema: config.inputSchema, handler: handler as ApiChatTool['handler'] });
     }
   };
-  registerCoreTools(capture);
+  registerCoreTools(capture, 'api');
   return tools;
 }
 

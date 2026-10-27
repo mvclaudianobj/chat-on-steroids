@@ -7054,11 +7054,11 @@
     if (!approvalCardIds.has(card.node)) approvalCardIds.set(card.node, crypto.randomUUID());
     return { id: approvalCardIds.get(card.node), lines: card.lines, allow: card.allow, node: card.node };
   }
-  function answerApproval(answer) {
+  async function answerApproval(answer) {
     if (!answer || typeof answer.token !== 'string' || approvalTokensDone.has(answer.token)) return;
     approvalTokensDone.add(answer.token);
     const card = currentApprovalCard();
-    const outcome = card && card.id === answer.cardId ? CLF_DOM.answerApprovalCard(card.node, answer.choice) : 'card_changed';
+    const outcome = card && card.id === answer.cardId ? await CLF_DOM.answerApprovalCard(card.node, answer.choice) : 'card_changed';
     approvalResult = { token: answer.token, outcome };
     setTimeout(() => void pullActivity(), 400);
   }
@@ -7107,7 +7107,7 @@
       }
       if (!current()) return;
       const data = reply.data;
-      if (data.approvalAnswer) answerApproval(data.approvalAnswer);
+      if (data.approvalAnswer) void answerApproval(data.approvalAnswer);
       // Popup-only. `sessionId` is the app saying it has a session for this exact chat,
       // which is the difference between "delivered" and "the app is actually recording it".
       observed.session = typeof data.sessionId === 'string' ? data.sessionId : null;

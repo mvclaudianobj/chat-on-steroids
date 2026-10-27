@@ -77,8 +77,21 @@ export const MAIN_TEXTS = [
   'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.',
   'Keep checkout',
   'Remove checkout; preserve Git branch',
+  'Authorize Company workers',
   // The turn-completion notice when an answer has no text to show.
   'ChatGPT finished.',
+  'Export encrypted Chat Marks vault',
+  'Import encrypted Chat Marks vault',
+  'Import GPG secrets',
+  'Chat Marks vault',
+  'GPG encrypted files',
+  'Export Brain memories',
+  'JSON Lines',
+  'Export notification settings',
+  'Import notification settings',
+  'Chat Marks notification settings',
+  'Select a copy of remote-targets.json',
+  'JSON files',
   // The Goal helper stopped without evidence that the requested work is complete.
   'Goal result needs review',
   'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'

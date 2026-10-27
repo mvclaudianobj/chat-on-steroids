@@ -11,6 +11,7 @@ import { createWorkspaceDocks } from './workspace-docks.js';
 import { showMarksProjectDockPicker } from './marks-project-dock.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
 import { APP_COMMANDS, initSkills } from './skills.js';
+import { openBrainRecall, rememberBrainSelection, rememberChatContext, rememberLatestAnswer } from './brain-ui.js';
 import { imageStorageButton } from './image-storage.js';
 import { applyChatModels, applyComposerSessionModel, initChatModels, confirmedComposerModel, composerSendModel, ensureComposerModel, chatModelName } from './chat-models.js';
 import { marked, Marked, type TokenizerAndRendererExtension } from 'marked';
@@ -108,7 +109,7 @@ import {
 import { DEFAULT_HANDOFF_LENGTH, DEFAULT_HANDOFF_PROMPT, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS, type HandoffLength } from '../shared/handoff.js';
 import { browserExtensionRequired, type AppState, type Config } from '../shared/types.js';
 import { $, ago, clockTime, compactNumber, disclosureChevron, el, icon, run, setIcon, toast } from './dom.js';
-import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, hostApprovalAttemptFailed, type ApprovalCardView } from '../shared/approval-wait.js';
 import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTICE, UNTRUSTED_WORKER_NOTICE } from '../shared/trust-notices.js';
 import { closeRowMenu, onRowMenuChange, openRowMenu, rowMenuOpenFor, toggleRowMenu, type RowMenuItem, type RowMenuOptions } from './row-menu.js';
 import { createSearchPopup } from './search-popup.js';
@@ -155,6 +156,8 @@ interface Deps {
   /** Chat Marks: provider chats a project's menu offers after its own New chat (CLIProxy). */
   projectChatItems?: (projectId: string) => RowMenuItem[];
   repaintCliSessions?: () => void;
+  /** Shows the Chat page, from wherever the window is (the approval notice's Open). */
+  showChat?: () => void;
 }
 
 let deps: Deps;
@@ -162,6 +165,15 @@ let initialized = false;
 let visible = false;
 
 let sessions: SessionSummary[] = [];
+let archivedSessions: SessionSummary[] = [];
+let archivedTotal = -1;
+let archiveCursor: { updatedAt: number; id: string } | null = null;
+let archiveQuery = '';
+let archiveLoadGeneration = 0;
+let archiveLoading = false;
+let archiveRefreshQueued = false;
+let archiveAppendQueued = false;
+let archiveLoadedOlder = false;
 let pressure = new Map<string, TokenPressure>();
 let sessionTotal = 0;
 let sessionPageCursor: { updatedAt: number; id: string } | null = null;
@@ -1202,6 +1214,12 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     title: () => t("Remove this chat and its saved history from the app. The chat stays in ChatGPT."),
     run: () => void deleteSession(summary.id)
   };
+  items.push({
+    action: summary.archivedAt ? 'restore' : 'archive', icon: 'i-folder',
+    label: () => summary.archivedAt ? t('Restore') : t('Archive'),
+    title: () => summary.archivedAt ? t('Restore chat to the main list') : t('Move chat to Archived without deleting its history'),
+    run: () => void changeArchiveStatus(summary.id, !summary.archivedAt)
+  });
   if (isUnattributedSession(summary)) {
     // Strict mode cannot trust an unattributed stream by definition. Do not offer an "Allow"
     // that the kernel will intentionally ignore; the Settings checkbox explains that
@@ -1291,7 +1309,8 @@ function sessionRow(summary: SessionSummary): HTMLElement {
           paintSessions();
           // The row moved: keep the keyboard on the same chat's menu button. Its button shows only
           // while the row has focus, so the row takes focus first.
-          const rebuilt = $('sessionList').querySelector<HTMLElement>(`.sess[data-id="${CSS.escape(summary.id)}"]`);
+          const rebuilt = [...$('sessionList').querySelectorAll<HTMLElement>('.sess')]
+            .find(row => row.dataset.id === summary.id);
           rebuilt?.querySelector<HTMLElement>('.sess-top')?.focus({ preventScroll: true });
           rowMenuButton(owner)?.focus({ preventScroll: true });
         }
@@ -1324,7 +1343,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
 let renaming: { id: string; original: string; value: string; start: number; end: number } | null = null;
 
 /** Slash commands that act on the open chat; New Chat does not offer them. */
-const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find']);
+const CHAT_COMMANDS = new Set(['rename', 'pin', 'status', 'compact', 'copy', 'export', 'find', 'remember-answer']);
 /** The commands that switch how the next message is sent; their rest is that message. */
 const MODE_COMMANDS = new Set(['plan', 'goal', 'loop']);
 /** The draft a typed /image is being sent from (#1701): that one message asks for a picture. */
@@ -1365,6 +1384,18 @@ async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'aft
   const rest = input.value.slice(typed[0].length).replace(/^\s+/, '');
   input.value = rest;
   input.dispatchEvent(new Event('input', { bubbles: true }));
+  if (name === 'recall') {
+    // /recall <query> is a local search command: the query is not part of the draft.
+    input.value = '';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    openBrainRecall(api, input, rest.trim());
+    return;
+  }
+  if (name === 'remember' && rest.trim()) {
+    // Chat Marks: a typed `/remember <text>` saves that text and clears it, so it is not sent too.
+    void rememberBrainSelection(api, input, { clearOnSave: true, sessionId: openChatSummary()?.id ?? null });
+    return;
+  }
   // The menu's Plan is a toggle; a typed /plan only arms, so an armed Plan stays armed.
   if (name === 'image') {
     // The rest is the picture request; a bare /image waits for one.
@@ -1423,6 +1454,9 @@ function runSlashCommand(name: string): void {
   } else if (name === 'pin') toast(t('This chat cannot be pinned yet.'));
   else if (name === 'status') afterClick(() => { const meter = $('contextMeterButton'); if (meter.getAttribute('aria-expanded') !== 'true') meter.click(); });
   else if (name === 'review') prefillComposer(t('Review the uncommitted changes in this project. Look for bugs, regressions and missing tests, and list what you find by severity with the file and line. Do not change any files.'));
+  else if (name === 'recall') afterClick(() => openBrainRecall(api, $<HTMLTextAreaElement>('chatInput')));
+  else if (name === 'remember') void rememberCommand();
+  else if (name === 'remember-answer' && chat) void rememberLatestAnswer(api, chat.id);
   else if (name === 'init') prefillComposer(t('Create an AGENTS.md for this project. Read the project first, then describe how it is built, tested and run, how it is laid out, and the conventions a coding agent should follow. Keep it short and accurate.'));
   else if (name === 'usage') openSettingsTab('usage');
   else if (name === 'feedback') openSettingsTab('activity');
@@ -1433,6 +1467,31 @@ function runSlashCommand(name: string): void {
   else if (name === 'export' && chat) void run(api.exportMarkdown({ id: chat.id, scope: 'session', target: 'file' }))
     .then(result => { if (result?.done === 'saved') toast(t('Saved {0}', [result.name])); });
   else if (name === 'find' && chat) afterClick(() => chatFind?.open());
+}
+
+/**
+ * Chat Marks `/remember`: text selected or left in the composer is saved as it is; with nothing
+ * there, the open chat's own model is asked to save the conversation's durable knowledge through
+ * `memory_save` (each memory passes its approval card), sent like any message the user sends.
+ */
+async function rememberCommand(): Promise<void> {
+  const input = $<HTMLTextAreaElement>('chatInput');
+  const chat = openChatSummary();
+  if (input.value.trim()) { void rememberBrainSelection(api, input, { sessionId: chat?.id ?? null }); return; }
+  if (!chat) { void rememberBrainSelection(api, input); return; }
+  const generation = selectionGeneration, key = draftKey();
+  await rememberChatContext(api, {
+    sessionId: chat.id,
+    openBrain: () => openSettingsTab('brain'),
+    send: async text => {
+      // Another chat opened, or the user started typing or attached files meanwhile: not for this send.
+      if (selectedId !== chat.id || selectionGeneration !== generation || draftKey() !== key || input.value.trim()) return false;
+      if (imageDrafts.get(key)?.length) { toast(t('Send or remove the attached files first, then use /remember again.')); return false; }
+      input.value = text;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      return await sendComposer() !== false;
+    }
+  });
 }
 
 function startRename(summary: SessionSummary): void {
@@ -1542,6 +1601,87 @@ async function deleteSession(id: string): Promise<void> {
   await loadSessions();
 }
 
+async function changeArchiveStatus(id: string, archived: boolean): Promise<void> {
+  const result = await run(api.archiveSession(id, archived));
+  if (!result) return;
+  if (archived) {
+    sessions = sessions.filter(row => row.id !== id);
+    sessionTotal = Math.max(0, sessionTotal - 1);
+    if (selectedId === id) selectedId = null;
+  } else {
+    archivedSessions = archivedSessions.filter(row => row.id !== id);
+    mergeSessionRows([result]);
+  }
+  if (archived) toast(t('Chat archived'));
+  else toast(t('Chat restored'));
+  await Promise.all([loadSessions('changed'), loadArchivedSessions()]);
+}
+
+async function loadArchivedSessions(append = false): Promise<void> {
+  if (append && !archiveCursor) return;
+  if (archiveLoading) {
+    if (append) archiveAppendQueued = true;
+    else archiveRefreshQueued = true;
+    return;
+  }
+  archiveLoading = true;
+  const generation = ++archiveLoadGeneration;
+  try {
+    const page = await run(api.listSessions({
+      archived: true, limit: SESSION_PAGE_SIZE,
+      ...(archiveQuery ? { search: archiveQuery } : {}),
+      ...(append && archiveCursor ? { cursor: archiveCursor } : {})
+    }));
+    if (!page || generation !== archiveLoadGeneration) return;
+    if (append) {
+      archiveLoadedOlder = true;
+      archivedSessions = [...archivedSessions, ...page.sessions.filter(row => !archivedSessions.some(old => old.id === row.id))];
+      archiveCursor = page.nextCursor;
+    } else if (archiveLoadedOlder) {
+      // A status push must not discard already-requested archive pages.
+      const last = page.sessions.at(-1);
+      const present = new Set(page.sessions.map(row => row.id));
+      archivedSessions = [...page.sessions, ...archivedSessions.filter(row => !present.has(row.id) && last &&
+        (row.updatedAt < last.updatedAt || (row.updatedAt === last.updatedAt && row.id < last.id)))];
+      if (!page.nextCursor) archiveCursor = null;
+    } else {
+      archivedSessions = page.sessions;
+      archiveCursor = page.nextCursor;
+    }
+    archivedTotal = page.total;
+    paintArchivedSessions();
+  } finally {
+    // A search changed while this response was in flight: leave its newer request in charge.
+    if (generation !== archiveLoadGeneration) return;
+    archiveLoading = false;
+    if (archiveAppendQueued && archiveCursor) {
+      archiveAppendQueued = false;
+      archiveRefreshQueued = false;
+      void loadArchivedSessions(true);
+    } else if (archiveRefreshQueued) {
+      archiveRefreshQueued = false;
+      void loadArchivedSessions();
+    }
+  }
+}
+
+function paintArchivedSessions(): void {
+  const list = $('archivesList');
+  const section = $('archivesSection');
+  const count = $('archivesCount');
+  count.textContent = archivedTotal < 0 ? '' : String(archivedTotal);
+  const rows = archivedSessions.map(summary => {
+    const row = sessionRow(summary);
+    row.classList.add('archived-session-row');
+    return row;
+  });
+  list.replaceChildren(...rows);
+  if (!rows.length) list.append(el('p', 'empty', () => t('No archived chats')));
+  const more = $<HTMLButtonElement>('archivesMore');
+  more.hidden = !archiveCursor;
+  section.querySelector('summary')?.setAttribute('aria-label', archivedTotal < 0 ? t('Archived') : `${t('Archived')} (${archivedTotal})`);
+}
+
 function sortSessionRows(rows: SessionSummary[]): SessionSummary[] {
   return rows.sort((left, right) => {
     if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
@@ -1600,9 +1740,11 @@ async function loadSessions(detail: 'reread' | 'changed' = 'reread'): Promise<vo
     pressure = new Map(list.pressure.map((entry) => [entry.id, entry]));
   }
   if (selectedId !== null && !sessions.some((s) => s.id === selectedId)) {
-    selectedId = null;
-    detailFor = null;
-    detailCursor = null;
+    if (!archivedSessions.some(s => s.id === selectedId)) {
+      selectedId = null;
+      detailFor = null;
+      detailCursor = null;
+    }
   }
   paintSessions();
   chatSearch?.refresh();
@@ -1944,9 +2086,9 @@ function paintInbox(): void {
   const inProject = (entry: SessionSummary) => !inboxProject || projectGroup(entry.projectId) === inboxProject;
   // Everything but the unattributed bucket is a chat, a new one still waiting for its conversation too (#1759).
   const attributed = (entry: SessionSummary) => !isUnattributedSession(entry);
-  const shown = sessions.filter(entry => entry.origin?.kind !== 'worker' && attributed(entry) && inProject(entry));
+  const shown = sessions.filter(entry => !entry.archivedAt && entry.origin?.kind !== 'worker' && attributed(entry) && inProject(entry));
   // What the tree puts under "Unattributed activity", under the same disclosure here.
-  const diagnostics = sessions.filter(entry => entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
+  const diagnostics = sessions.filter(entry => !entry.archivedAt && entry.origin?.kind !== 'worker' && !attributed(entry) && inProject(entry));
   const settles = new Set(shown.filter(entry => inboxSettled(entry, busy.get(entry.id))));
   // A settled chat ranks with the rest: one that failed long ago orders by recency and pages like any quiet chat.
   const rank = new Map(shown.map(entry => [entry.id, settles.has(entry) ? INBOX_REST : inboxRank(entry, busy.get(entry.id))]));
@@ -2098,7 +2240,7 @@ function inboxEmpty(id: string | null): HTMLElement {
 
 function projectSortEntries(groupOf: typeof projectGroup = projectGroup): Array<{ id: string; scope: string }> {
   const ids = new Set(projects.filter(project => !project.ungrouped).map(project => project.id));
-  for (const entry of sessions) {
+  for (const entry of sessions.filter(row => !row.archivedAt)) {
     if (entry.origin?.kind === 'worker' || isUnattributedSession(entry)) continue;
     const id = groupOf(entry.projectId);
     if (id) ids.add(id);
@@ -2146,7 +2288,7 @@ function sidebarFocus(list: HTMLElement, owner: string, controls: string[]): () 
 function workerChildren(): Map<string, SessionSummary[]> {
   const children = new Map<string, SessionSummary[]>();
   const ids = new Set(sessions.map((entry) => entry.id));
-  for (const entry of sessions) {
+  for (const entry of sessions.filter(row => !row.archivedAt)) {
     if (entry.origin?.kind !== 'worker') continue;
     const parent = entry.origin.fromSessionId;
     const key = parent && ids.has(parent) && parent !== entry.id ? parent : 'other-workers';
@@ -2282,6 +2424,8 @@ function unattributedActivity(entries: SessionSummary[]): HTMLElement | null {
 }
 
 function paintSessions(): void {
+  paintArchivedSessions();
+  paintApprovalNotice();
   // Keep the pointer's elected rows alive while asynchronous activity snapshots arrive.
   if (sidebarOrder?.interacting) return;
   // Nor replace the name field mid-word: an input method's composition (Chinese, Japanese,
@@ -4404,11 +4548,12 @@ function approvalCardPanel(sessionId: string): HTMLElement {
   const actions = el('div', 'approval-card-actions');
   const status = el('p', 'approval-card-status');
   status.hidden = true;
+  const nativeOptions = el('p', 'approval-card-status', () => t('For other approval options, continue in ChatGPT if they are available there.'));
   const deny = el('button', 'btn btn-solid', () => t('Deny')) as HTMLButtonElement;
   const allow = el('button', 'btn btn-solid is-primary', () => t('Allow once')) as HTMLButtonElement;
   deny.type = allow.type = 'button';
   actions.append(deny, allow);
-  panel.append(words, actions, status);
+  panel.append(words, actions, nativeOptions, status);
   let card: ApprovalCardView | null = null;
   const say = (text: () => string): void => { status.hidden = false; ui(status, 'textContent', text); };
   const show = (next: ApprovalCardView | null): void => {
@@ -4423,6 +4568,7 @@ function approvalCardPanel(sessionId: string): HTMLElement {
     if (pending) say(() => t('Sending your answer to ChatGPT…'));
     else if (outcome === 'card_changed') say(() => t('ChatGPT showed a different card by then. Nothing was pressed; answer the new one.'));
     else if (outcome === 'unavailable') say(() => t('ChatGPT no longer offered that choice. Nothing was pressed.'));
+    else if (outcome === 'not_confirmed') say(() => t('ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.'));
     else if (outcome === 'expired') say(() => t('The chat’s page did not take your answer in time. Nothing was pressed; open it in the browser to answer there.'));
     else if (!next.allow) say(() => t('ChatGPT does not allow it in this chat. You can only deny it.'));
     else status.hidden = true;
@@ -4444,17 +4590,76 @@ function approvalCardPanel(sessionId: string): HTMLElement {
       return;
     }
     say(() => t('Sending your answer to ChatGPT…'));
-    // The page takes the answer on its next poll (every 2 s while the card stands).
+    // A DOM click is only delivery, never proof that ChatGPT accepted the answer.
+    // Keep observing the actual card: a re-render or ignored synthetic click can
+    // leave the same approval waiting, and must not be shown as completion.
     for (let attempt = 0; attempt < 40 && panel.isConnected; attempt++) {
       await new Promise(resolve => setTimeout(resolve, 1000));
       const next = await refresh();
-      if (!next || (next.answer && next.answer.outcome !== null)) return;
+      if (hostApprovalAttemptFailed(next)) return;
+      if (!next) {
+        // Absence can be a successful host answer or a stale/failed read.
+        // Never display an invented positive acknowledgement here.
+        return;
+      }
+      if (next.answer?.outcome === 'clicked') {
+        say(() => t('ChatGPT button was pressed, but the approval card is still visible. Confirm in the browser if it does not disappear.'));
+      }
     }
+    if (panel.isConnected && card)
+      say(() => t('ChatGPT did not confirm the answer in the app. Open this chat in the browser to finish approval.'));
   };
   deny.addEventListener('click', () => void answer('deny'));
   allow.addEventListener('click', () => void answer('allow'));
   void refresh();
   return panel;
+}
+
+/**
+ * ChatGPT's approval card waiting in a chat that is not on screen, in the window's notices: one line
+ * per chat naming it ("worker-1 waits for your approval"), with Open and the chat row's own Deny and
+ * Allow once. 2026-10-22: two workers waited 85 minutes on the card while the window showed their
+ * prime, whose chat said nothing; the folded workers' dot was the only sign, and the desktop notice
+ * never comes while the window has focus. Lines are kept by chat, so a repaint never re-reads a card
+ * or loses an answer being sent.
+ */
+const approvalNoticeLines = new Map<string, HTMLElement>();
+function approvalNoticeName(summary: SessionSummary): string {
+  if (summary.origin?.kind !== 'worker') return shownSessionTitle(summary);
+  const parentId = summary.origin.fromSessionId;
+  const parent = parentId && parentId !== selectedId ? sessions.find(row => row.id === parentId) : undefined;
+  const agent = summary.origin.agentId ?? t('worker');
+  return parent ? `${agent} · ${shownSessionTitle(parent)}` : agent;
+}
+function paintApprovalNotice(): void {
+  const box = document.getElementById('approvalNotice');
+  if (!box) return;
+  // The open chat's own row shows its card; every other waiting chat is named here.
+  const onScreen = visible && document.querySelector<HTMLElement>('.app')?.dataset.screen === 'chat' && timelineShown() ? selectedId : null;
+  const waiting = sessions.filter(row => !!row.conversationId && approvalChats.has(row.conversationId) && row.id !== onScreen);
+  // The open chat's own workers first: that is the run the person is watching.
+  const own = (row: SessionSummary) => row.origin?.kind === 'worker' && row.origin.fromSessionId === selectedId ? 0 : 1;
+  waiting.sort((a, b) => own(a) - own(b));
+  for (const [id, line] of approvalNoticeLines) if (!waiting.some(row => row.id === id)) { line.remove(); approvalNoticeLines.delete(id); }
+  for (const row of waiting) {
+    let line = approvalNoticeLines.get(row.id);
+    if (!line) {
+      line = el('div', 'approval-notice-line');
+      line.dataset.approvalSession = row.id;
+      const head = el('div', 'approval-notice-head');
+      const open = el('button', 'btn btn-quiet', () => t('Open')) as HTMLButtonElement;
+      open.type = 'button';
+      const id = row.id;
+      open.addEventListener('click', () => { deps.showChat?.(); void selectChatSession(id); });
+      head.append(icon('i-lock'), el('span', 'approval-notice-text'), open);
+      line.append(head, approvalCardPanel(row.id));
+      approvalNoticeLines.set(row.id, line);
+    }
+    const name = approvalNoticeName(row);
+    ui(line.querySelector<HTMLElement>('.approval-notice-text')!, 'textContent', () => t('{0} waits for your approval', [name]));
+    box.append(line);
+  }
+  box.hidden = waiting.length === 0;
 }
 
 /**
@@ -7950,6 +8155,7 @@ export function chatApply(state: AppState, previous?: Config): void {
 export function chatVisible(next: boolean): void {
   if (visible === next) return;
   visible = next;
+  paintApprovalNotice();
   if (next) void refreshAll();
   else {
     window.clearTimeout(toolActivityTimer);
@@ -7966,9 +8172,10 @@ async function refreshAll(): Promise<void> {
 
 /** Sessions change on every recorded event, so the reload is coalesced. */
 function scheduleReload(change?: SessionChange): void {
-  if (!visible) return;
+  if (!visible) { scheduleApprovalRead(); return; }
   if (change?.allTranscripts) changedTranscripts.all = true;
   for (const id of change?.sessionIds ?? []) changedTranscripts.ids.add(id);
+  if (($('archivesSection') as HTMLDetailsElement).open) void loadArchivedSessions();
   // One refresh owns the timer until its asynchronous read completes. Starting a
   // newer read every 400 ms can invalidate every result on a busy/slower store.
   if (listTimer !== undefined) { listRefreshDirty = true; return; }
@@ -7979,6 +8186,29 @@ function scheduleReload(change?: SessionChange): void {
       if (listRefreshDirty) scheduleReload();
     });
   }, 400);
+}
+
+/**
+ * Off the Chat page the list is not reread, but a tool approval waiting in some chat still has to
+ * reach the window's notice (`paintApprovalNotice`): only the waiting set is taken from the read.
+ */
+let approvalReadTimer: number | undefined;
+function scheduleApprovalRead(): void {
+  if (approvalReadTimer !== undefined) return;
+  approvalReadTimer = window.setTimeout(() => {
+    void (async () => {
+      try {
+        const list = await run(api.listSessions({ limit: SESSION_PAGE_SIZE }));
+        if (!list || visible) return;
+        approvalChats = new Set(list.approval);
+        // A waiting chat the window has not listed yet still needs its row to be named.
+        const known = new Set(sessions.map(row => row.id));
+        const missing = list.sessions.filter(row => !known.has(row.id) && !!row.conversationId && approvalChats.has(row.conversationId));
+        if (missing.length) mergeSessionRows(missing);
+        paintApprovalNotice();
+      } finally { approvalReadTimer = undefined; }
+    })();
+  }, 1_000);
 }
 
 /**
@@ -8548,6 +8778,7 @@ export function openChatView(name: string): void {
 }
 
 function showView(name: string): void {
+  queueMicrotask(paintApprovalNotice);
   const pane = $('chatBody');
   if (name === 'settings') retireDictation();
   const leavingTimeline = timelineShown() && name !== 'timeline';
@@ -8573,10 +8804,12 @@ function showView(name: string): void {
 }
 
 /** Chat Marks: the selected chat and selection by id, for Marks modules (renderer/api-chat-ui.ts). */
-export function selectedChatSession(): { id: string; conversationId: string | null; engine?: AgentEngineId } | null {
+export function selectedChatSession(): { id: string; conversationId: string | null; engine?: AgentEngineId; title?: string; model?: string } | null {
   if (!selectedId) return null;
   const row = sessions.find(entry => entry.id === selectedId);
-  return { id: selectedId, conversationId: row?.conversationId ?? null, ...(row?.engine ? { engine: row.engine } : {}) };
+  return { id: selectedId, conversationId: row?.conversationId ?? null,
+    ...(row?.engine ? { engine: row.engine } : {}), ...(row?.title ? { title: row.title } : {}),
+    ...(row && row.selectedModel?.conversationId === row.conversationId && row.selectedModel?.model ? { model: row.selectedModel.model } : {}) };
 }
 export async function selectChatSession(id: string): Promise<void> {
   // A list read begun before the chat existed would drop the selection; this read supersedes it.
@@ -8585,6 +8818,11 @@ export async function selectChatSession(id: string): Promise<void> {
 }
 
 function selectSession(id: string): void {
+  // An archived chat is still readable; selecting its row is never a restoration.
+  if (archivedSessions.some(row => row.id === id) && !sessions.some(row => row.id === id)) {
+    const archived = archivedSessions.find(row => row.id === id)!;
+    sessions = [...sessions, archived];
+  }
   newChatBranch = null;
   // An edit belongs to its chat: leaving it gives the composer back the draft it held before.
   if (editingQuestion) endEditing(true);
@@ -8595,6 +8833,8 @@ function selectSession(id: string): void {
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = false;
   selectedId = id;
+  // Chat Marks J: the window's own Event, so a test DOM (another realm) accepts it too.
+  window.dispatchEvent(new window.Event('jarvis:selection'));
   refreshBackgroundProcesses();
   const selected = sessions.find(row => row.id === id);
   applyComposerSessionModel(`${id}:${selectionGeneration}`, composerSessionSelection(selected) ?? null);
@@ -8639,6 +8879,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
   inputQueueGeneration++;
   $('finishQueue').replaceChildren(); $('finishQueue').hidden = true;
   newChatSelected = true; selectedId = null; selectedProjectId = projectId; detailFor = null; detailCursor = null;
+  window.dispatchEvent(new window.Event('jarvis:selection'));
   refreshBackgroundProcesses();
   sendAnchor = null; readingAfterSend = false; readerAtEnd = true;
   if (projectId) expandedProjects.add(projectId);
@@ -9253,6 +9494,24 @@ export function initChat(next: Deps): void {
     pendingNewInput = null;
     selectSession(row.dataset.id);
   });
+  // Archived rows live outside #sessionList so paging them never changes Inbox totals.
+  // Give their button-equivalent title the same explicit click/keyboard selection behavior.
+  $('archivesList').addEventListener('click', event => {
+    const control = (event.target as HTMLElement).closest<HTMLElement>('[data-session-select]');
+    const id = control?.closest<HTMLElement>('[data-id]')?.dataset.id;
+    if (!id || id === selectedId) return;
+    pendingNewInput = null;
+    selectSession(id);
+  });
+  $('archivesList').addEventListener('keydown', event => {
+    if (event.altKey || event.ctrlKey || event.metaKey || !['Enter', ' '].includes(event.key)) return;
+    const control = (event.target as HTMLElement).closest<HTMLElement>('[data-session-select]');
+    if (!control || event.target !== control) return;
+    const id = control.closest<HTMLElement>('[data-id]')?.dataset.id;
+    if (!id) return;
+    event.preventDefault();
+    if (id !== selectedId) { pendingNewInput = null; selectSession(id); }
+  });
   initChatCycle($('sessionList'), () => selectedId);
   $('sessionList').closest<HTMLElement>('.scroll')?.addEventListener('scroll', maybePageSessions);
   // Prefetch the visible edge, retaining direction across collapsed batches.
@@ -9341,6 +9600,21 @@ export function initChat(next: Deps): void {
   });
 
   $('chatRefresh').addEventListener('click', event => { event.preventDefault(); void refreshAll(); });
+  $('archivesSection').addEventListener('toggle', () => {
+    if (($('archivesSection') as HTMLDetailsElement).open) void loadArchivedSessions();
+  });
+  $<HTMLInputElement>('archivesSearch').addEventListener('input', event => {
+    archiveQuery = (event.target as HTMLInputElement).value.trim();
+    archiveCursor = null;
+    archiveLoadedOlder = false;
+    // A query change retires any older request, even if its response arrives later.
+    archiveLoadGeneration++;
+    archiveLoading = false;
+    archiveRefreshQueued = false;
+    archiveAppendQueued = false;
+    void loadArchivedSessions();
+  });
+  $('archivesMore').addEventListener('click', () => void loadArchivedSessions(true));
   $('markAllSeen').addEventListener('click', () => markAllSeen());
 
   $('copyHandoff').addEventListener('click', async () => {

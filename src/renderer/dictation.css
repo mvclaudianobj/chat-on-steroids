@@ -61,3 +61,23 @@
 @media (prefers-reduced-motion: reduce) {
   .composer-dictation-button { transition: none; }
 }
+/* Jarvis J3: the visible turn state next to the push-to-talk button. */
+.composer-dictation-button:is([data-state='transcribing'],[data-state='thinking']) { color: var(--accent); }
+.composer-dictation-button[data-state='speaking'] { border-color: var(--accent-edge); color: var(--accent); }
+.jarvis-state[hidden] { display: none; }
+.jarvis-state {
+  align-self: center;
+  max-width: min(38vw, 38em);
+  padding: 0 4px;
+  overflow: hidden;
+  color: var(--soft);
+  font-size: calc(11px * var(--text-scale, 1));
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.jarvis-state[data-state='idle']:not([hidden]) { white-space: normal; }
+.jarvis-state:is([data-state='listening'],[data-state='speaking']) { color: var(--accent); }
+.jarvis-chat-target { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; padding: 4px 0 12px; }
+.jarvis-chat-target p { flex: 1 1 240px; min-width: 0; margin: 0; overflow-wrap: anywhere; }
+.jarvis-readiness { margin: 8px 0; color: var(--soft); line-height: 1.5; overflow-wrap: anywhere; }
+.jarvis-chat-action[hidden] { display: none; }

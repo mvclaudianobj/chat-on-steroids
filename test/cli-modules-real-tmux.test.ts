@@ -20,7 +20,8 @@ vi.mock('../src/main/durable.js', () => ({
   readDurable: async () => state.durable,
   writeDurableNow: async (_key: string, value: unknown) => { state.durable = value; }
 }));
-vi.mock('../src/main/cli-source-install.js', () => ({ installPublishedCli: vi.fn() }));
+// The real version probe; only installing is replaced, and no registry is asked.
+vi.mock('../src/main/cli-source-install.js', async importOriginal => ({ ...(await importOriginal<typeof import('../src/main/cli-source-install.js')>()), installPublishedCli: vi.fn(), publishedLatest: vi.fn(async () => null) }));
 
 import { cliAction, cliCreateSession, cliOpen, cliStatus, registerCliModuleIpc } from '../src/main/cli-modules.js';
 
@@ -62,7 +63,7 @@ describe.skipIf(!linux)('real Linux tmux terminal lifecycle', () => {
     for (const folder of [state.userData, state.home, state.project, binDir]) mkdirSync(folder, { recursive: true });
     for (const id of ['codex', 'claude']) {
       const binary = path.join(binDir, id);
-      writeFileSync(binary, `#!/bin/sh\nif [ "\${1:-}" = "--version" ]; then printf '${id} probe-1\\n'; exit 0; fi\nprintf 'ready\\n' > ready-${id}.txt\nexec /bin/sh -i\n`, { mode: 0o755 });
+      writeFileSync(binary, `#!/bin/sh\nif [ "\${1:-}" = "--version" ]; then printf '${id === 'codex' ? 'codex-cli 0.163.0' : id === 'claude' ? '2.1.306 (Claude Code)' : `${id} probe-1`}\\n'; exit 0; fi\nprintf 'ready\\n' > ready-${id}.txt\nexec /bin/sh -i\n`, { mode: 0o755 });
     }
     previousPath = process.env.PATH;
     process.env.PATH = `${binDir}:${previousPath ?? ''}`;
@@ -107,7 +108,7 @@ describe.skipIf(!linux)('real Linux tmux terminal lifecycle', () => {
     const codexOther = await cliOpen(codexOtherSession.id, 80, 24, randomUUID());
     expect(codex.session).not.toBe(codexOther.session);
     expect(codex.session).not.toBe(claude.session);
-    expect((await cliStatus()).find(item => item.id === 'codex')).toMatchObject({ installed: true, running: true, version: 'codex probe-1' });
+    expect((await cliStatus()).find(item => item.id === 'codex')).toMatchObject({ installed: true, running: true, version: '0.163.0' });
     await cliAction('codex', 'stop');
     expect(hasSession(codex.session)).toBe(false);
     expect(hasSession(codexOther.session)).toBe(false);

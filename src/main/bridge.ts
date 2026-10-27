@@ -15,6 +15,8 @@ import { goalErrorKey, goalErrorMessage } from '../shared/goal-errors.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../shared/user-prompt.js';
 import { CONVERSATION_DELETED } from '../shared/chat-error.js';
 import { prepareSessionPrompt } from './session/prompt.js';
+import { currentMarksSystemPrompt } from './marks-system-prompt.js';
+import { prependUserPrompt } from '../shared/user-prompt.js';
 import { NEW_CHAT, noteAutomaticReply } from './session/automatic-replies.js';
 import { pendingChatModelRequest, observeChatModels, requestChatModels } from './chat-models.js';
 import { resumeModelSelection } from './resume-model.js';
@@ -639,7 +641,8 @@ const listeners = new Set<() => void>();
  * peer without an id share one entry each). Two browsers may run different versions - Firefox
  * updates its add-on on its own schedule - and one shared value followed whichever asked last.
  */
-const extensionVersions = new Map<string, { version: string; engine?: 'gecko'; seenAt: number }>();
+type ObservedExtension = { version: string; host: 'cos' | 'browser' | 'unknown'; engine?: 'gecko'; seenAt: number };
+const extensionVersions = new Map<string, ObservedExtension>();
 /**
  * When each (version, build) pair was last announced. Two browsers with the extension installed
  * alternate requests, and a single "current" pair would turn every alternation into a fresh
@@ -1067,7 +1070,9 @@ export async function bridgeStatus(): Promise<BridgeStatus> {
     // Seen for the user: a recent request, or the authenticated wake channel held open. The
     // extension makes requests only while it has a chat to serve, so a browser with no ChatGPT
     // tab open went "missing" a minute after start although it was connected all along.
-    present: browserPresent() || browserWakeConnected(),
+    // UI presence belongs to the selected ChatGPT browser, as the reported version does.
+    // A paired Chrome profile must not make a stopped CoS browser look connected.
+    present: selectedBrowserPresent(),
     lastSeenAt,
     ...versionStatus(),
     externalExtension: externalExtensionStatus(),
@@ -1139,6 +1144,14 @@ function cosExtensionPresent(): boolean {
 
 function externalExtensionPresent(): boolean {
   return server !== null && externalExtension?.seenAt != null && Date.now() - externalExtension.seenAt < BROWSER_PRESENT_MS;
+}
+
+function selectedBrowserPresent(): boolean {
+  const chosen = getConfig().ui.chatBrowser;
+  if (chosen === 'cos') return cosExtensionPresent();
+  // Firefox and Chromium share the pairing credential; a live instance of the other engine
+  // is not evidence that the chosen browser is currently serving ChatGPT.
+  return externalExtensionPresent() && (chosen === 'firefox') === (externalExtension?.engine === 'gecko');
 }
 
 /**
@@ -1353,15 +1366,20 @@ export function noteExtensionUpdateHold(hold: unknown, browser: string | null = 
 }
 
 /**
- * The version the app reports: the oldest among browsers heard from recently, so an outdated copy
- * keeps its notice while a current one polls too. With none recent, the last one heard from: a
- * mismatched companion can fail the protocol gate before it ever counts as present.
+ * The version the app reports belongs to the browser selected for ChatGPT. In particular, when
+ * the built-in browser is current, an older companion still polling from Chrome must not keep
+ * asking the user to update the built-in browser's extension. Among copies of the selected
+ * browser type, the oldest recent one still wins, so a real mismatch is not hidden. With none
+ * recent, retain the last selected-browser sighting for the protocol-mismatch warning.
  */
 function reportedExtension(): { version: string; engine?: 'gecko' } | null {
   const now = Date.now();
-  let oldest: { version: string; engine?: 'gecko'; seenAt: number } | null = null;
-  let latest: { version: string; engine?: 'gecko'; seenAt: number } | null = null;
+  const browser = getConfig().ui.chatBrowser;
+  let oldest: ObservedExtension | null = null;
+  let latest: ObservedExtension | null = null;
   for (const entry of extensionVersions.values()) {
+    if (browser === 'cos' ? entry.host !== 'cos' :
+      entry.host === 'cos' || (browser === 'firefox' ? entry.engine !== 'gecko' : entry.engine === 'gecko')) continue;
     if (!latest || entry.seenAt >= latest.seenAt) latest = entry;
     if (now - entry.seenAt < BROWSER_PRESENT_MS && (!oldest || isNewer(oldest.version, entry.version))) oldest = entry;
   }
@@ -1385,7 +1403,9 @@ function noteExtensionVersion(req: http.IncomingMessage): void {
   const before = reportedExtension();
   const source = browserOf(req) ?? (req.headers['x-extension-host'] === 'cos' ? 'cos' : 'unknown');
   extensionVersions.delete(source);
-  extensionVersions.set(source, { version: extensionVersion, ...(geckoExtension(req) ? { engine: 'gecko' as const } : {}), seenAt: Date.now() });
+  const headerHost = req.headers['x-extension-host'];
+  const host = headerHost === 'cos' || headerHost === 'browser' ? headerHost : 'unknown';
+  extensionVersions.set(source, { version: extensionVersion, host, ...(geckoExtension(req) ? { engine: 'gecko' as const } : {}), seenAt: Date.now() });
   if (extensionVersions.size > 16) extensionVersions.delete(extensionVersions.keys().next().value!);
   const after = reportedExtension();
   const reportChanged = before?.version !== after?.version || before?.engine !== after?.engine;
@@ -10929,7 +10949,11 @@ function bootstrapText(spec: CommandSpec, summary: string): string {
       'ultrathink)'
     );
   }
-  return resumeBootstrapText(summary, spec.token);
+  // The destination is a new native conversation: inject the short Marks identity once.
+  // The handoff formatter remains unchanged for provenance/Goal transcript matching.
+  const bootstrap = resumeBootstrapText(summary, spec.token);
+  const marks = currentMarksSystemPrompt('chatgpt');
+  return marks ? prependUserPrompt(bootstrap, marks) : bootstrap;
 }
 
 /** The broker's current plan for waking one worker, or null once it is no longer waking. */

@@ -6,6 +6,8 @@
     <link rel="stylesheet" href="./icons.css" />
     <link rel="stylesheet" href="./styles.css" />
     <link rel="stylesheet" href="./settings.css" />
+    <link rel="stylesheet" href="./brain.css" />
+    <link rel="stylesheet" href="./company.css" />
     <link rel="stylesheet" href="./dictation.css" />
   </head>
   <body>
@@ -24,6 +26,7 @@
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
           <button class="btn sidebar-primary-link" id="sidebarSkills" data-sidebar-page="skills" type="button"><i class="ico ph ph-cube" aria-hidden="true"></i>Skills</button>
           <button class="btn sidebar-primary-link" id="sidebarPets" data-sidebar-page="pets" type="button"><i class="ico ph ph-paw-print" aria-hidden="true"></i>Pets</button>
+          <button class="btn sidebar-primary-link" id="sidebarCompany" data-sidebar-page="company" type="button"><i class="ico ph ph-house" aria-hidden="true"></i>Company</button>
         </div>
       <!-- Settings search: while it holds a query, its results take the page list's place. -->
       <div class="settings-find" id="settingsFindBox" hidden>
@@ -37,6 +40,9 @@
           <i class="ico ph ph-house" aria-hidden="true"></i>Workspace
         </button>
         <button data-tab="general" type="button"><i class="ico ph ph-sliders-horizontal" aria-hidden="true"></i>General</button>
+        <button data-tab="jarvis" type="button"><i class="ico ph ph-microphone" aria-hidden="true"></i>Jarvis</button>
+        <button data-tab="notifications" type="button"><i class="ico ph ph-bell" aria-hidden="true"></i>Notifications</button>
+        <button data-tab="remote-hosts" type="button"><i class="ico ph ph-monitor" aria-hidden="true"></i>Remote hosts</button>
         <button data-tab="usage" type="button"><i class="ico ph ph-chart-line" aria-hidden="true"></i>Usage</button>
 <button data-tab="setup" type="button">
           <i class="ico ph ph-list-checks" aria-hidden="true"></i>Setup
@@ -45,6 +51,7 @@
         <button data-tab="settings" type="button">
           <i class="ico ph ph-robot" aria-hidden="true"></i>Agents &amp; automation
         </button>
+        <button data-tab="brain" type="button"><i class="ico ph ph-brain" aria-hidden="true"></i>Brain</button>
         <button data-tab="modules" type="button"><i class="ico ph ph-squares-four" aria-hidden="true"></i>Modules</button>
         <button id="moduleCliNav" class="modules-subnav" data-module-page="module-cli-proxy" type="button" aria-label="CLIProxyAPI" translate="no" hidden>
           <i class="ico ph ph-plug chat-type-icon module-mark" aria-hidden="true" data-module="cliproxy"></i><span translate="no">CLIProxyAPI</span>
@@ -73,6 +80,16 @@
                 <div id="chatList"><p class="empty" role="status">Loading chats…</p></div>
                 <p class="empty sidebar-section-empty" id="sessionsEmpty" hidden>No chats outside projects yet.</p>
               </details>
+            </div>
+              <details class="sidebar-session-section" id="archivesSection">
+                <summary class="sidebar-session-heading"><span class="sidebar-session-label"><i class="ico ph ph-archive" aria-hidden="true"></i>Archived</span><span id="archivesCount" class="inbox-count"></span></summary>
+                <div class="archived-browser">
+                  <input type="search" id="archivesSearch" placeholder="Search archived chats" aria-label="Search archived chats" autocomplete="off" />
+                  <div id="archivesList" aria-live="polite"></div>
+                  <button class="btn" id="archivesMore" type="button" hidden>Show more</button>
+                </div>
+              </details>
+            <div id="sessionListExtra">
               <details class="sidebar-session-section" id="cliModuleChats" open>
                 <summary class="sidebar-session-heading" id="cliModuleChatsHeading">
                   <span class="sidebar-session-label"><svg class="disclosure-chevron sidebar-section-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Terminals</span>
@@ -129,6 +146,9 @@
            state.update plus the extension version the bridge already reports; see
            src/main/update.ts. Hidden whenever there is nothing to say. -->
       <div class="notices">
+      <!-- ChatGPT's tool approval card waiting in a chat that is not on screen, a worker's above all.
+           Painted by src/renderer/chat.ts (paintApprovalNotice); the lines carry their own text. -->
+      <div class="notice approval-notice" id="approvalNotice" role="alert" hidden></div>
       <!-- A new macOS build asks once for the Keychain password; everything that needs saved keys
            waits for the answer. See src/renderer/keychain-notice.ts. -->
       <div class="notice" id="keychainNotice" role="status" hidden>
@@ -191,6 +211,10 @@
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Follow new output</b><em>Stay at the end of the chat while answers grow, here and on ChatGPT. Scrolling up pauses it.</em></span><input id="followOutput" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Notify when a chat finishes</b><em>A notification when a chat's answer is done while this window is in the background. Workers and chats with Goal or Loop on don't notify.</em></span><input id="turnNotifications" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Prompt do Chat Marks</b><em>Identidade e instruções curtas ao iniciar ou retomar um chat.</em></span><input id="marksSystemPromptEnabled" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Como quer ser chamado</b><em>Deixe vazio para tratamento neutro.</em></span><input id="marksPreferredName" type="text" maxlength="80" autocomplete="off" placeholder="Senhor Marcos" translate="no" /></label>
+                <div class="setting"><span class="setting-text"><b>Prévia do prompt</b><em>Mostra o texto exato da variante ChatGPT conforme as configurações salvas.</em></span><button id="marksPromptPreviewButton" class="btn" type="button">Ver prompt</button></div>
+                <pre id="marksPromptPreview" class="settings-surface" style="white-space:pre-wrap;overflow-wrap:anywhere" hidden></pre>
                 <label class="setting"><span class="setting-text"><b>Messages during a running turn</b><em id="followUpHint" translate="no"></em></span><select id="followUp"><option value="steer">Join the running turn</option><option value="queue">Wait until the turn ends</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Send messages with</b><em id="enterSendsHint" translate="no"></em></span><select id="enterSends"><option value="enter">Enter</option><option value="modifier" id="enterSendsModifier" translate="no"></option></select></label>
                 <label class="setting"><span class="setting-text"><b>Keep awake while a chat works</b><em>Stops the computer from going to sleep, so long runs keep going. Some Windows laptops still sleep once the screen turns off; for those, choose “The computer and screen”.</em></span><select id="keepAwake"><option value="off">Off</option><option value="computer">The computer</option><option value="screen">The computer and screen</option></select></label>
@@ -241,6 +265,25 @@
                 <div class="setting"><span class="setting-text"><b>Sign out from MarksPanel</b><em>Clears the encrypted local login and closes Chat Marks. You will authenticate on the next start.</em></span><button id="marksPanelLogout" type="button" class="btn">Sign out</button></div>
               </div>
             </section>
+            <section class="appearance-section" id="marksVault">
+              <header class="settings-section-head"><div><h2>Chat Marks Vault</h2><p>Encrypted secrets: your master password is required only for recovery and administration. Chats never receive secret values.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <p id="vaultStatus" role="status">Checking vault…</p>
+                <label class="setting"><span class="setting-text"><b>Master password (administration only)</b><em>Use at least 12 characters. Daily chat uses your operating-system keyring instead.</em></span><input id="vaultMaster" type="password" autocomplete="new-password" /></label>
+                <div class="setting"><span class="setting-text"><b>Create or recover</b><em>A portable vault has independent master-password recovery.</em></span><button class="btn" type="button" id="vaultCreate">Create</button><button class="btn" type="button" id="vaultRecover">Recover on this device</button></div>
+                <label class="setting"><span class="setting-text"><b>Secret name</b><em>Only names are visible to chats.</em></span><input id="vaultName" type="text" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Secret</b><em>Never logged or added to chat history.</em></span><input id="vaultValue" type="password" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Allowed HTTPS origin</b><em>Exact origin for approved requests, e.g. https://example.com; empty means local-only.</em></span><input id="vaultOrigin" type="url" translate="no" placeholder="https://example.com" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Request header</b><em>Authorization uses a Bearer token. Other headers send their value unchanged.</em></span><input id="vaultHeader" type="text" value="Authorization" autocomplete="off" /></label>
+                <div class="setting"><button class="btn" type="button" id="vaultSave">Save secret</button><button class="btn" type="button" id="vaultReveal">Reveal (admin)</button><button class="btn" type="button" id="vaultRemove">Remove secret</button></div>
+                <div id="vaultEntries" role="group" aria-label="Stored secret names"></div>
+                <label class="setting"><span class="setting-text"><b>GPG passphrase (import only)</b><em>Import a GPG JSON catalog without placing its secrets in the app history.</em></span><input id="vaultGpgPassword" type="password" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>New master password</b><em>Requires current master password.</em></span><input id="vaultNewPassword" type="password" autocomplete="new-password" /></label>
+                <div class="setting"><button class="btn" type="button" id="vaultChangePassword">Change password</button><button class="btn" type="button" id="vaultImport">Import encrypted vault</button><button class="btn" type="button" id="vaultImportGpg">Import GPG</button><button class="btn" type="button" id="vaultExport">Export encrypted</button></div>
+                <header class="settings-section-head"><div><h3>Chat secret approvals</h3><p>Approve once, for this chat until you close Chat Marks, or deny.</p></div><button class="btn" type="button" id="vaultPendingRefresh">Refresh</button></header>
+                <div id="vaultPending" role="region" aria-label="Pending vault approvals"></div>
+              </div>
+            </section>
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>For developers</h2><p>Troubleshooting details and access for tools on this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
@@ -253,6 +296,167 @@
           </div>
         </section>
 
+        <!-- Chat Marks: H1a local-first Brain, independent of remote providers and imported history. -->
+        <section class="panel appearance-panel jarvis-panel scroll" data-panel="jarvis" aria-labelledby="jarvisTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head appearance-page-head">
+              <div><h1 id="jarvisTitle">Jarvis</h1><p>Speak with ChatGPT normal (Chat Marks GPT) or an optional CLIProxy chat on Linux, macOS and Windows.</p></div>
+            </header>
+            <section class="appearance-section" id="jarvisSettings">
+              <header class="settings-section-head"><div><h2>Jarvis with ChatGPT normal</h2><p>Select a normal ChatGPT conversation, enable Jarvis and consent to microphone use. Return to the chat and hold its Jarvis microphone or your chosen key to speak.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <div class="jarvis-chat-target"><p id="jarvisActiveChat" role="status" aria-live="polite">No ChatGPT conversation selected.</p><button id="jarvisGoToChat" type="button" class="btn">Go to selected chat</button></div>
+                <label class="setting"><span class="setting-text"><b>Enable Jarvis</b><em>Works in the selected ChatGPT conversation. Requires an available speech-to-text (STT) engine and microphone consent for this session.</em></span><input id="jarvisEnabled" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Transcription order</b><em>Jarvis uses the first available engine and tries the next one when it fails. Change priority here.</em></span><select id="jarvisEngine"><option value="auto">Voice provider → CLIProxy → local → Windows</option><option value="cliproxy">CLIProxy → local → Windows</option><option value="local">Local → CLIProxy → Windows</option><option value="windows">Windows → CLIProxy → local</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Transcription model</b><em>These CLIProxy audio models are optional. You can use the voice provider or a local STT engine instead.</em></span><select id="jarvisAudioModel"><option value="">Detect automatically</option></select></label>
+                <button type="button" class="btn" id="jarvisRefreshAudio">Refresh transcription engines</button>
+                <label class="setting"><span class="setting-text"><b>Push-to-talk key</b><em>Press the chosen key while in the chat composer.</em></span><select id="jarvisKey"><option value="F8">F8</option><option value="F9">F9</option><option value="F10">F10</option><option value="F11">F11</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Speech language</b><em>Optional language code (for example pt-BR). Windows must have its speech language installed; also sets the spoken reply language.</em></span><input id="jarvisLanguage" type="text" maxlength="35" placeholder="System default" /></label>
+                <label class="setting"><span class="setting-text"><b>Chat model</b><em>Jarvis uses the model of the selected ChatGPT or CLIProxy conversation. The voice provider supplies STT/TTS, not the chat model.</em></span><span id="jarvisModelInfo">Select a ChatGPT conversation</span></label>
+                <label class="setting"><span class="setting-text"><b>Speak replies</b><em>Off by default. Jarvis starts speaking while the answer is still being written, one sentence at a time.</em></span><input id="jarvisTts" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Speech engine</b><em>The voice provider when it is configured, otherwise the system voice.</em></span><select id="jarvisTtsEngine"><option value="auto">Voice provider, then system voice</option><option value="provider">Voice provider</option><option value="system">System voice</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Voice</b><em>Choose a voice installed in your operating system.</em></span><select id="jarvisVoice"><option value="">System default</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Continuous conversation</b><em>After a spoken answer, Jarvis listens again and sends when you stop talking. Push-to-talk stays the default; pressing the key always interrupts Jarvis.</em></span><input id="jarvisContinuous" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Sound cues</b><em>Short tones when listening starts and stops.</em></span><input id="jarvisEarcons" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Microphone and audio transmission consent (this session only)</b><em>The voice provider or CLIProxy transcribes recorded audio after release; local engines keep it here. Windows may use Microsoft's speech service.</em></span><input id="jarvisConsent" type="checkbox" /></label>
+                <p id="jarvisReadiness" class="jarvis-readiness" role="status" aria-live="polite">Jarvis needs setup before speaking.</p>
+                <p id="jarvisSettingsStatus" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+            <section class="appearance-section" id="jarvisProviderSettings">
+              <header class="settings-section-head"><div><h2>Voice provider</h2><p>An OpenAI-compatible speech service for transcription and spoken replies. Keys are kept in the vault, bound to this address.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Preset</b><em>Fills in the public settings only; you still enter your own keys.</em></span><select id="jarvisProviderPreset"><option value="">Custom</option><option value="g4f.space" translate="no">g4f.space</option><option value="Google Gemini TTS" translate="no">Google Gemini (microphone + voice PT-BR)</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Base URL</b><em>For example https://example.com/v1. HTTPS only, except on this computer.</em></span><input id="jarvisProviderUrl" translate="no" type="url" maxlength="300" placeholder="https://…/v1" spellcheck="false" /></label>
+                <label class="setting"><span class="setting-text"><b>Transcription method</b><em>Audio transcription endpoint, or a multimodal chat model that writes out the recording (needs ffmpeg).</em></span><select id="jarvisSttMode"><option value="transcriptions">Audio transcription endpoint</option><option value="chat-audio">Multimodal chat model</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Speech-to-text model</b><em>Suggestions come from the provider's model list.</em></span><input id="jarvisSttModel" type="text" maxlength="200" list="jarvisSttModels" spellcheck="false" /><datalist id="jarvisSttModels"></datalist></label>
+                <label class="setting"><span class="setting-text"><b>Text-to-speech model</b><em>For example gpt-4o-mini-tts.</em></span><input id="jarvisTtsModel" type="text" maxlength="200" list="jarvisTtsModels" spellcheck="false" /><datalist id="jarvisTtsModels"></datalist></label>
+                <label class="setting"><span class="setting-text"><b>Provider voice</b><em>For example alloy or nova.</em></span><input id="jarvisProviderVoice" type="text" maxlength="64" list="jarvisProviderVoices" spellcheck="false" /><datalist id="jarvisProviderVoices"></datalist></label>
+                <label class="setting"><span class="setting-text"><b>Primary key</b><em>Sent as a bearer token to this provider only.</em></span><input id="jarvisProviderKey" type="password" maxlength="16384" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Fallback key</b><em>Used when the primary key is rejected, rate limited or the provider fails.</em></span><input id="jarvisProviderFallbackKey" type="password" maxlength="16384" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Fallback key 2</b><em>Additional credential used if the previous key fails. Project quotas still apply.</em></span><input id="jarvisProviderFallbackKey2" type="password" maxlength="16384" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Fallback key 3</b><em>Additional credential used if the previous keys fail. Project quotas still apply.</em></span><input id="jarvisProviderFallbackKey3" type="password" maxlength="16384" autocomplete="off" /></label>
+                <label class="setting"><span class="setting-text"><b>Vault master password</b><em>Needed only to save keys.</em></span><input id="jarvisVaultPassword" type="password" maxlength="1024" autocomplete="off" /></label>
+                <button type="button" class="btn" id="jarvisSaveKeys">Save keys in the vault</button>
+                <button type="button" class="btn" id="jarvisTestProviderVoice">Test provider voice (PT-BR)</button>
+                <p id="jarvisProviderStatus" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+            <section class="appearance-section" id="jarvisRoutingSettings">
+              <header class="settings-section-head"><div><h2>TTS routing: Gemini + G4F</h2><p>Choose the fallback order for spoken replies. Your four Gemini keys remain in the provider vault, and both G4F profiles have separate credentials.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>TTS routing order</b><em>Off uses the current provider. Gemini first or G4F first tries the preferred group, then the other when permitted.</em></span><select id="jarvisRoutingMode"><option value="off">Off</option><option value="gemini-first">Gemini first</option><option value="g4f-first">G4F first</option></select></label>
+                <h3>G4F profile 1</h3>
+                <label class="setting"><span class="setting-text"><b>G4F profile 1 URL</b><em>HTTPS endpoint for the first independent G4F account.</em></span><input id="jarvisG4f1Url" type="url" maxlength="300" spellcheck="false" placeholder="https://g4f.space/v1" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 1 TTS model</b></span><input id="jarvisG4f1Model" type="text" maxlength="200" spellcheck="false" placeholder="gpt-4o-mini-tts" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 1 voice</b></span><input id="jarvisG4f1Voice" type="text" maxlength="64" spellcheck="false" placeholder="alloy" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 1 key</b><em>Blank means the stored key stays unchanged.</em></span><input id="jarvisG4f1Key" type="password" maxlength="16384" autocomplete="off" aria-describedby="jarvisG4fStatus" /></label>
+                <h3>G4F profile 2</h3>
+                <label class="setting"><span class="setting-text"><b>G4F profile 2 URL</b><em>May use the same host as profile 1 with a different account.</em></span><input id="jarvisG4f2Url" type="url" maxlength="300" spellcheck="false" placeholder="https://g4f.space/v1" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 2 TTS model</b></span><input id="jarvisG4f2Model" type="text" maxlength="200" spellcheck="false" placeholder="gpt-4o-mini-tts" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 2 voice</b></span><input id="jarvisG4f2Voice" type="text" maxlength="64" spellcheck="false" placeholder="alloy" /></label>
+                <label class="setting"><span class="setting-text"><b>G4F profile 2 key</b><em>Blank means the stored key stays unchanged.</em></span><input id="jarvisG4f2Key" type="password" maxlength="16384" autocomplete="off" aria-describedby="jarvisG4fStatus" /></label>
+                <button type="button" class="btn" id="jarvisG4fSaveKeys">Save G4F keys in the vault</button>
+                <p id="jarvisG4fStatus" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+          </div>
+        </section>
+        <section class="panel appearance-panel brain-panel scroll" data-panel="brain" aria-labelledby="brainTitle">
+          <div class="appearance-content settings-page-content" id="brainSettings">
+            <header class="settings-page-head"><h1 id="brainTitle"><i class="ico ph ph-brain" aria-hidden="true"></i>Brain</h1><p>Search and manage memories stored on this computer.</p></header>
+            <p id="brainRefreshWarning" class="brain-warning" role="alert" hidden></p>
+            <section class="appearance-section brain-approvals" id="brainApprovalsSection">
+              <header class="settings-section-head"><div><h2>Save approvals</h2><p>Review pending model requests before they become memories.</p></div><button class="btn" id="brainPendingRefresh" type="button">Refresh</button></header>
+              <div id="brainPending" class="settings-surface brain-output" role="region" aria-label="Pending memory saves"></div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Memory status</h2><p>Your local memory is private and stays on this device.</p></div><button class="btn" id="brainRefresh" type="button">Refresh</button></header>
+              <div class="settings-surface brain-overview"><p id="brainStatus" role="status">Checking local memory…</p><p id="brainCount"></p><p id="brainSize"></p></div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Diagnosis</h2><p>Check the local database, full-text search, and available connections.</p></div><button class="btn" id="brainDoctorRun" type="button">Run diagnosis</button></header>
+              <div id="brainDoctor" class="settings-surface brain-output" role="status">Run diagnosis to check Brain.</div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Sources</h2><p>Local memories and the providers you enabled.</p></div></header>
+              <div id="brainSources" class="settings-surface brain-output" role="status">Local database</div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Memories</h2><p>Search, review, edit, delete, or export your saved memories.</p></div><button class="btn" id="brainExport" type="button">Export JSONL</button></header>
+              <div class="settings-surface brain-library">
+                <form id="brainSearchForm" class="brain-search"><label for="brainQuery">Search memories</label><input id="brainQuery" type="search" maxlength="400" autocomplete="off" spellcheck="false" placeholder="Search saved memories…" /><button class="btn" type="submit">Search</button><button class="btn" id="brainClear" type="button">Clear</button></form>
+                <div id="brainResults" class="brain-results" role="region" aria-label="Saved memories"></div>
+                <form id="brainEditor" class="brain-editor">
+                  <h3 id="brainEditorTitle">New memory</h3><input id="brainMemoryId" type="hidden" />
+                  <label for="brainMemoryTitle">Title</label><input id="brainMemoryTitle" type="text" maxlength="160" />
+                  <label for="brainMemoryContent">Memory text</label><textarea id="brainMemoryContent" rows="5" maxlength="4000" required placeholder="What should Brain remember?"></textarea>
+                  <div class="brain-fields">
+                    <label for="brainMemoryType">Type<select id="brainMemoryType"><option value="semantic">Fact</option><option value="episodic">Event</option><option value="procedural">Procedure</option></select></label>
+                    <label for="brainMemoryMode">Retention<select id="brainMemoryMode"><option value="long_term">Long term</option><option value="short_term">Short term</option></select></label>
+                  </div>
+                  <label for="brainMemoryTags">Tags (comma separated)</label><input id="brainMemoryTags" type="text" maxlength="500" autocomplete="off" />
+                  <div class="brain-actions"><button class="btn" type="submit" id="brainSave">Save memory</button><button class="btn" type="button" id="brainNew">New memory</button><button class="btn" type="button" id="brainDelete" hidden>Delete memory</button></div>
+                  <p id="brainEditorStatus" role="status" aria-live="polite"></p>
+                </form>
+              </div>
+            </section>
+            <section class="appearance-section" id="brainImport"></section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Brain options</h2><p>Model access and automatic context remain disabled until you enable them.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card" id="brainOptions">
+                <label class="setting"><span class="setting-text"><b>ChatGPT memory tools</b><em>Allow ChatGPT chats to search and request saving local memories.</em></span><input id="brainChatgptTools" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>API chat memory tools</b><em>Allow CLIProxy chats to use local memory tools.</em></span><input id="brainApiChatTools" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Ask before model saves</b><em>Review each memory requested by a model. Manual saves happen immediately.</em></span><input id="brainAskBeforeSave" type="checkbox" checked /></label>
+                <label class="setting"><span class="setting-text"><b>Remote recall</b><em>Send recall queries to the enabled providers and merge their results with local memories.</em></span><input id="brainRemoteRecall" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Remote sync</b><em>Also save new memories to the enabled ai-memory and Marks API providers.</em></span><input id="brainRemoteSync" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Agent engine memory tools</b><em>Allow Claude Code, Codex and OpenCode chats to search and request saving local memories. Applies to new engine processes.</em></span><input id="brainEngineTools" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Automatic memory context</b><em>Add relevant local memories to API chat turns and to the opening ChatGPT message.</em></span><input id="brainAutoInject" type="checkbox" /></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Memory providers</h2><p>Optional remote sources, off by default. Nothing leaves this computer until you enable a provider and remote recall or remote sync. Keys are kept in the vault.</p></div></header>
+              <div id="brainProviders" class="settings-surface brain-providers"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel appearance-panel notifications-panel scroll" data-panel="notifications" aria-labelledby="notificationsTitle">
+          <div class="appearance-content settings-page-content">
+            <header class="settings-page-head appearance-page-head">
+              <div><h1 id="notificationsTitle">Notifications</h1><p>Manage notifications and delivery channels.</p></div>
+            </header>
+            <section class="appearance-section notification-center" id="notificationCenterSection" aria-labelledby="notificationCenterTitle">
+              <header class="settings-section-head">
+                <div><h2 id="notificationCenterTitle"><i class="ico ph ph-bell" aria-hidden="true"></i> Notification center</h2><p>Send important Chat Marks events through email, Telegram or WhatsApp. Each channel has its own recipients and event rules.</p></div>
+              </header>
+              <div class="settings-surface notification-center-surface">
+                <p id="notificationCenterStatus" class="notification-center-status" role="status" aria-live="polite">Loading notification settings…</p>
+                <div id="notificationCenterSettings"></div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section class="panel appearance-panel scroll" data-panel="remote-hosts" aria-labelledby="remoteHostsTitle">
+          <div class="appearance-content settings-page-content" id="remoteHosts">
+            <header class="settings-page-head"><h1 id="remoteHostsTitle">Remote hosts</h1><p>Saved connections. SSH uses your system key or agent.</p></header>
+            <section class="appearance-section"><div class="settings-surface pane appearance-settings-card">
+              <label class="setting"><span class="setting-text"><b>Name</b></span><input id="remoteName" autocomplete="off" /></label>
+              <label class="setting"><span class="setting-text"><b>Type</b></span><select id="remoteType"><option value="ssh">SSH</option><option value="winrm">WinRM (coming later)</option><option value="powershell">PowerShell (coming later)</option><option value="whm">WHM (coming later)</option><option value="custom">Custom (coming later)</option></select></label>
+              <label class="setting"><span class="setting-text"><b>Host</b></span><input id="remoteAddress" autocomplete="off" /></label>
+              <label class="setting"><span class="setting-text"><b>Port</b></span><input id="remotePort" type="number" min="1" max="65535" value="22" /></label>
+              <label class="setting"><span class="setting-text"><b>User</b></span><input id="remoteUser" autocomplete="off" /></label>
+              <label class="setting"><span class="setting-text"><b>Server password (one-time key installation only)</b></span><input id="remotePassword" type="password" autocomplete="new-password" /></label>
+              <div class="setting"><span class="setting-text"><em>Store the key passphrase in the vault as ssh/marks-key-mestra. The SSH agent unlock lasts at most one hour.</em></span><button class="btn" id="remoteUnlock" type="button">Unlock master key from vault</button></div>
+              <label class="setting"><span class="setting-text"><b>Project folder on host</b></span><input id="remoteFolder" placeholder="/srv/app" translate="no" autocomplete="off" /></label>
+              <div class="setting"><button class="btn" id="remoteSave" type="button">Save host</button><button class="btn" id="remotePreview" type="button">Preview MarksCode targets</button><button class="btn" id="remoteImport" type="button" disabled>Import preview</button></div>
+              <p id="remoteMessage" role="status"></p><div id="remotePreviewRows"></div><div id="remoteRows"></div>
+              <div id="remoteTerminalMount" hidden style="min-height:320px;height:320px;position:relative"><button id="remoteTerminalClose" class="btn" type="button">Hide remote terminal</button></div>
+              <header class="settings-section-head"><h2>Remote command approvals</h2></header><div id="remotePending"></div>
+            </div></section>
+          </div>
+        </section>
         <section class="panel appearance-panel modules-panel scroll" data-panel="modules" aria-labelledby="modulesTitle">
           <div class="appearance-content settings-page-content">
             <header class="settings-page-head">
@@ -443,6 +647,26 @@
               <div id="skillsRecommended" class="pet-library-grid" aria-live="polite"></div>
             </section>
           </div>
+        </section>
+        <section class="panel company-panel" data-panel="company" aria-label="Company">
+          <div class="company-shell" id="companyRoot">
+            <header class="company-header">
+              <div><div class="company-eyebrow">MARKS / ORGANIZATION <span class="company-preview">VISUAL PROTOTYPE</span></div><h1 id="companyTitle">Company</h1><p>Coordinate responsibilities, requests and decisions in one place.</p></div>
+              <div class="company-header-actions"><button class="btn" id="companySettings" type="button"><i class="ico ph ph-gear-six"></i> Settings</button><button class="btn" id="companyMeetingCreate" type="button"><i class="ico ph ph-chat-circle"></i> Meeting</button><button class="btn btn-solid" id="companyNewRequest" type="button"><i class="ico ph ph-plus"></i> New request</button></div>
+            </header>
+            <section id="companyModeBanner" class="company-mode-banner" aria-live="polite" aria-label="Company operating mode">
+              <div id="companyModeExplanation"></div><div id="companyModeActions" class="company-mode-actions"></div>
+            </section>
+            <div class="company-metrics" id="companyMetrics"></div>
+            <div class="company-toolbar"><div class="company-views" role="group" aria-label="Company view"><button type="button" class="btn is-sel" id="companyBoardTab" aria-pressed="true">Board</button><button type="button" class="btn" id="companyOfficeTab" aria-pressed="false">Office</button><button type="button" class="btn" id="companyRpgTab" aria-pressed="false">RPG</button></div><span class="company-mode">LOCAL PREVIEW · No live agents connected</span></div>
+            <div id="companyEmpty" class="company-empty" hidden><div class="company-empty-icon"><i class="ico ph ph-house"></i></div><h2>Your company starts here</h2><p>Use sample requests to explore the board and office, or create your first request.</p><button type="button" class="btn btn-solid" id="companyLoadDemo">Explore sample data</button></div>
+            <div id="companyBoard" class="company-board" aria-label="Requests by status"></div>
+            <div id="companyOffice" class="company-office" hidden></div>
+            <section id="companyRpg" class="company-rpg" aria-label="RPG company view" hidden></section>
+            <section id="companyObservePanel" class="company-surface company-observe-panel" aria-label="Worker observability"></section>
+            <div class="company-bottom"><section class="company-surface"><h2>CEO desk <span class="company-panel-ornament">↗</span></h2><div id="companyCeo"></div></section><section class="company-surface"><h2>Activity <span class="company-panel-ornament">↗</span></h2><div id="companyActivity"></div></section></div>
+          </div>
+          <dialog class="company-dialog" id="companyDialog"><form method="dialog" id="companyForm"><div class="company-dialog-head"><h2 id="companyDialogTitle">Request details</h2><button type="button" id="companyClose" class="btn" aria-label="Close">×</button></div><div id="companyDialogContent"></div><div class="company-dialog-actions" id="companyDialogActions"></div></form></dialog>
         </section>
         <section class="panel plugins-panel pets-panel" data-panel="pets">
           <div class="plugins-content">
@@ -1524,6 +1748,7 @@
                   </details>
                   <button id="createPlan" type="button"><i class="ico ph ph-list-checks" aria-hidden="true"></i><span>Plan</span></button>
                   <button class="composer-dictation-button" id="dictationButton" type="button" aria-label="Start dictation" aria-pressed="false" aria-describedby="dictationStatus" data-state="idle" title="Start dictation" hidden disabled><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button>
+                  <button class="composer-dictation-button" id="jarvisTalk" type="button" aria-label="Hold to speak to Jarvis" aria-pressed="false" aria-describedby="jarvisStatus" data-state="idle" title="Hold to speak to Jarvis" hidden><i class="ico ph ph-microphone" aria-hidden="true"></i><span class="dictation-recording-dot" aria-hidden="true"></span></button><button id="jarvisSetupChat" type="button" class="btn jarvis-chat-action" aria-describedby="jarvisStatus" hidden>Set up Jarvis</button><button id="jarvisCreateCliProxyChat" type="button" class="btn jarvis-chat-action" hidden>Open optional CLIProxy chat</button><button id="jarvisReturnChat" type="button" class="btn jarvis-chat-action" hidden>Return to previous chat</button><span class="jarvis-state" id="jarvisStatus" role="status" aria-live="polite" data-state="idle" hidden></span>
                 </div>
                 <div class="context-meter" id="contextMeter">
                   <button type="button" id="contextMeterButton" aria-label="Estimated session context" aria-expanded="false" aria-controls="contextMeterInfo">

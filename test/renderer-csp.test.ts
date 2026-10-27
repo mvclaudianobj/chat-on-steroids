@@ -17,6 +17,8 @@ describe('isolated static ChatGPT illustration policy', () => {
     expect(directives.get('img-src')).toEqual(["'self'", 'data:', 'https://images.openai.com']);
     expect(directives.get('script-src')).toEqual(["'self'"]);
     expect(directives.get('connect-src')).toEqual(["'self'"]);
+    // Jarvis plays provider speech from in-memory blob: URLs; no remote media origin.
+    expect(directives.get('media-src')).toEqual(['blob:']);
     expect(directives.get('font-src')).toEqual(["'self'"]);
     expect(directives.get('frame-ancestors')).toEqual(["'none'"]);
     expect(RENDERER_CONTENT_SECURITY_POLICY).not.toMatch(/\*\.openai|https:\s*\*/);

@@ -75,6 +75,10 @@ describe('portable browser-backed feature parity', () => {
       'agents',
       'session_finish',
       'usage',
+      'vault_use',
+      'memory_search',
+      'memory_save',
+      'remote_exec',
       'exec'
     ]);
     expect(surfaceIsUseful('core', config.capabilities, 'darwin')).toBe(true);

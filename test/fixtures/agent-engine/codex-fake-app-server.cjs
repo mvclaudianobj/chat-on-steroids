@@ -7,7 +7,8 @@
  *
  * CODEX_FAKE_SCRIPT (JSON file) drives it:
  *   { account?, models?, resumeTurns?, turns?: Step[][] (one list per turn/start, in order),
- *     interruptStatus?: 'interrupted' | null (null: never confirm) , failTurnStart?: string }
+ *     interruptStatus?: 'interrupted' | null (null: never confirm) , failTurnStart?: string,
+ *     routes?: { direct?: {...}, router?: {...} } (per CODEX_FAKE_ROUTE; router threads are `router-thread-N`) }
  * Step: { notify, params } | { request, id, params } | { waitForResponse: id } | { waitMs }
  * Strings "$THREAD" and "$TURN" in params are replaced by the current thread and turn ids.
  * `--version` prints `codex-cli $CODEX_FAKE_VERSION` (default 0.163.0).
@@ -23,7 +24,11 @@ if (process.argv.includes('--version')) {
 }
 
 const log = process.env.CODEX_FAKE_LOG;
-const script = process.env.CODEX_FAKE_SCRIPT ? JSON.parse(fs.readFileSync(process.env.CODEX_FAKE_SCRIPT, 'utf8')) : {};
+const loaded = process.env.CODEX_FAKE_SCRIPT ? JSON.parse(fs.readFileSync(process.env.CODEX_FAKE_SCRIPT, 'utf8')) : {};
+// One server per chat route: `routes.<route>` overrides the script for the server of CODEX_FAKE_ROUTE.
+const route = process.env.CODEX_FAKE_ROUTE || 'direct';
+const script = { ...loaded, ...(loaded.routes?.[route] ?? {}) };
+const threadPrefix = route === 'router' ? 'router-thread' : 'thread';
 const record = value => { if (log) fs.appendFileSync(log, `${JSON.stringify(value)}\n`); };
 record({ argv: process.argv.slice(2) });
 
@@ -62,7 +67,7 @@ function result(method, params) {
     case 'account/read': return script.account ?? { account: { type: 'chatgpt', email: null, planType: 'plus' }, requiresOpenaiAuth: true };
     case 'model/list': return { data: script.models ?? [], nextCursor: null };
     case 'thread/start':
-      thread = `thread-${++threadCount}`;
+      thread = `${threadPrefix}-${++threadCount}`;
       return { thread: threadShape(thread), model: params.model ?? 'gpt-5.5-codex', modelProvider: 'openai', serviceTier: null, disabledPluginIds: [], cwd: params.cwd,
         instructionSources: [], approvalPolicy: params.approvalPolicy, approvalsReviewer: params.approvalsReviewer, sandbox: { type: 'workspaceWrite' }, reasoningEffort: null };
     case 'thread/resume':

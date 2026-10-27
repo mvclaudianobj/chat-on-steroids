@@ -994,14 +994,27 @@ var CLF_DOM = (() => {
    * gone or replaced is never answered through an old reference, and the options menu beside
    * Allow once (where "always" lives) is never touched.
    */
-  function answerApprovalCard(card, choice) {
-    return safe(() => {
+  async function answerApprovalCard(card, choice) {
+    const initial = safe(() => {
       if (!card || !card.isConnected || waitingApprovalCard() !== card) return 'card_changed';
       const button = approvalButton(card, choice);
       if (!button) return 'unavailable';
       button.click();
       return 'clicked';
     }, 'unavailable');
+    if (initial !== 'clicked') return initial;
+    // A programmatic click can be ignored by the host. Only observed, stable
+    // disappearance establishes that the approval UI was dismissed. It does
+    // not prove which choice the provider accepted.
+    let absentSince = null;
+    for (let ms = 0; ms < 8_000; ms += 200) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      const current = waitingApprovalCard();
+      if (current) { absentSince = null; continue; }
+      if (absentSince === null) absentSince = ms;
+      if (ms - absentSince >= 2_000) return 'dismissed';
+    }
+    return 'not_confirmed';
   }
 
   /** Stop is a busy hint only; the exact provider terminal still owns turn completion. */

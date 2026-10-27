@@ -5,7 +5,21 @@ import {
   APPROVAL_ANSWER_MS, APPROVAL_FRESH_MS, APPROVAL_GONE_MS, APPROVAL_NOTICE_GRACE_MS, approvalAnswerFor, approvalCardView, approvalCardWaiting, approvalWaitingChats, noteApprovalCard,
   requestApprovalAnswer, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps
 } from '../src/main/approval-wait.js';
-import { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT } from '../src/shared/approval-wait.js';
+import { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT, hostApprovalAttemptFailed, type ApprovalCardView } from '../src/shared/approval-wait.js';
+
+describe('host approval delivery versus acceptance', () => {
+  const card = (outcome: ApprovalCardView['answer']): ApprovalCardView =>
+    ({ id:'card-1234', lines:['Synthetic approval'], allow:true, answer:outcome });
+  it('keeps observing after a click, since the host card may remain on screen', () => {
+    expect(hostApprovalAttemptFailed(card({choice:'allow',outcome:'clicked'}))).toBe(false);
+    expect(hostApprovalAttemptFailed(card({choice:'allow',outcome:null}))).toBe(false);
+    expect(hostApprovalAttemptFailed(null)).toBe(false);
+  });
+  it('stops polling on host refusal, stale card or expiration', () => {
+    for (const outcome of ['card_changed','unavailable','expired'] as const)
+      expect(hostApprovalAttemptFailed(card({choice:'allow',outcome}))).toBe(true);
+  });
+});
 
 // VM stress test, 2026-10-06: ChatGPT's own approval card stalled a Loop and nobody was told.
 
@@ -20,6 +34,18 @@ describe('approval card episodes', () => {
       notify: sessionId => { notices.push(sessionId); },
       log: () => undefined
     };
+  });
+
+  it('keeps a user-selected Allow once pending past one hidden-tab 30s poll, then expires safely', async () => {
+    const card = { id: 'card-hidden-tab-1', lines: ['Synthetic explicit host consent'], allow: true };
+    await noteApprovalCard('hidden-chat', true, 'session', deps, 1_000, card);
+    const answer = requestApprovalAnswer('hidden-chat', card.id, 'allow', 1_100);
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) return;
+    // A hidden tab can take a full poll interval plus scheduling jitter. The
+    // original 30s timeout can expire an answer before that poll takes it.
+    expect(approvalAnswerFor('hidden-chat', 32_100)).toEqual({ token: answer.token, cardId: card.id, choice: 'allow' });
+    expect(approvalAnswerFor('hidden-chat', 1_100 + APPROVAL_ANSWER_MS)).toBeNull();
   });
 
   it('writes the row at once, notices once after the grace, and rewrites the row when answered', async () => {
@@ -75,6 +101,80 @@ describe('approval card episodes', () => {
     expect(approvalCardWaiting('chat', 60_000)).toBe(false);
   });
 
+  it('FAIL-FIRST: a fresh same-word host card after observed dismissal starts a new consent episode', async () => {
+    // Reproduction of "Permitir uma vez volta toda hora": the host may ask again
+    // for another tool invocation with identical words. A 4 s redraw tolerance
+    // is valid while an approval is unresolved, but a confirmed dismissal must
+    // fence the earlier answer and start a distinct consent episode.
+    const first = { id:'card-first', lines:['Allow ChatGPT to use Chat Marks Core?', 'Run a local command.'], allow:true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, first);
+    const answer = requestApprovalAnswer('chat', first.id, 'allow', 1_100);
+    expect(answer.ok).toBe(true);
+    if (!answer.ok) throw new Error('Unexpected missing synthetic answer');
+    expect(settleApprovalAnswer('chat', answer.token, 'dismissed')).toBe(true);
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    await noteApprovalCard('chat', true, 'session', deps, 2_500, { ...first, id:'card-second' });
+    expect(approvalCardView('chat', 2_500)).toMatchObject({ id:'card-second', answer:null });
+    const waitingRows = deps.rows.filter(row=>row[2]===APPROVAL_WAITING_TEXT);
+    expect(waitingRows).toHaveLength(2);
+    // Unlike a flicker of the same unanswered card, two separate successful
+    // dismissals belong to two independently reviewable consent episodes.
+    expect(waitingRows[1]![1]).not.toBe(waitingRows[0]![1]);
+    expect(requestApprovalAnswer('chat', 'card-first', 'allow', 2_600)).toEqual({ ok:false, error:'card_changed' });
+    expect(requestApprovalAnswer('chat', 'card-second', 'allow', 2_600).ok).toBe(true);
+  });
+
+  it('accepts the host dismissal only for the old token after its card vanished, without replaying it', async () => {
+    const card = { id:'first-card', lines:['Allow ChatGPT to use Chat Marks Core?', 'Write a file.'], allow:true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card);
+    const first = requestApprovalAnswer('chat', card.id, 'allow', 1_100);
+    if (!first.ok) throw new Error('Synthetic card was not presented');
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    // The DOM detector waits until the card is stably gone before it can report dismissed.
+    expect(settleApprovalAnswer('chat', first.token, 'dismissed')).toBe(true);
+    expect(settleApprovalAnswer('chat', first.token, 'dismissed')).toBe(false);
+    const second = { ...card, id:'second-card' };
+    await noteApprovalCard('chat', true, 'session', deps, 2_500, second);
+    expect(approvalCardView('chat', 2_500)).toMatchObject({ id:'second-card', answer:null });
+    expect(new Set(deps.rows.filter(row=>row[2]===APPROVAL_WAITING_TEXT).map(row=>row[1])).size).toBe(2);
+    expect(settleApprovalAnswer('chat', first.token, 'dismissed')).toBe(false);
+    expect(approvalAnswerFor('chat', 2_500)).toBeNull();
+    expect(requestApprovalAnswer('chat', 'first-card', 'allow', 2_600)).toEqual({ ok:false, error:'card_changed' });
+  });
+
+  it('never restores the prior waiting progress row when a confirmed dismissal precedes a new request', async () => {
+    const card = { id:'first-card', lines:['Allow ChatGPT to use Chat Marks Core?'], allow:true };
+    let reads = 0;
+    deps.previous = async () => {
+      reads++;
+      return reads === 1 ? null : { progressId:deps.rows[0]![1], anchor:{ seq:7, time:1 } };
+    };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card);
+    const first = requestApprovalAnswer('chat', card.id, 'deny', 1_100);
+    if (!first.ok) throw new Error('Synthetic card was not presented');
+    expect(settleApprovalAnswer('chat', first.token, 'dismissed')).toBe(true);
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    await noteApprovalCard('chat', true, 'session', deps, 2_500, { ...card, id:'second-card' });
+    const waitingRows = deps.rows.filter(row=>row[2]===APPROVAL_WAITING_TEXT);
+    expect(waitingRows).toHaveLength(2);
+    expect(waitingRows[1]![1]).not.toBe(waitingRows[0]![1]);
+    expect(reads).toBe(2);
+  });
+
+  it('continues the one unresolved approval through a brief card redraw after a click was not confirmed', async () => {
+    const card = { id:'unresolved-first', lines:['Allow ChatGPT to use Chat Marks Core?'], allow:true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card);
+    const answer = requestApprovalAnswer('chat', card.id, 'allow', 1_100);
+    if (!answer.ok) throw new Error('Synthetic card was not presented');
+    expect(settleApprovalAnswer('chat', answer.token, 'not_confirmed')).toBe(true);
+    await noteApprovalCard('chat', false, 'session', deps, 2_000);
+    await noteApprovalCard('chat', true, 'session', deps, 3_200, { ...card, id:'unresolved-redraw' });
+    expect(new Set(deps.rows.map(row=>row[1]).filter(Boolean)).size).toBe(1);
+    expect(approvalCardView('chat', 3_200)).toMatchObject({ id:'unresolved-redraw', answer:null });
+    expect(approvalAnswerFor('chat', 3_200)).toBeNull();
+    expect(settleApprovalAnswer('chat', answer.token, 'dismissed')).toBe(false);
+  });
+
   it('keeps an answer when a different card follows it, or the same one only after a while', async () => {
     const first = { id: 'a', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Run one command.'], allow: true };
     const second = { id: 'b', lines: ['Allow ChatGPT to use Chat On Steroids Core?', 'Write one file.'], allow: true };
@@ -119,6 +219,66 @@ describe('approval card episodes', () => {
     expect(approvalCardWaiting('chat', 1_000 + APPROVAL_NOTICE_GRACE_MS)).toBe(true);
     expect(deps.rows).toEqual([]);
     expect(deps.notices).toEqual([]);
+  });
+
+  it('keeps a worker waiting through the flicker the live log shows, and notices it once', async () => {
+    // Live 2.1.44.1, 2026-10-22, worker-1 of a two-worker run: "waits" at 14:36:32.973, "no longer
+    // shows" 1.531 s later, "shows the same tool approval card again" 0.764 s after that, then the
+    // card stood for 85 minutes. The page polls every 2 s while the card stands.
+    const logs: string[] = [];
+    deps.log = message => { logs.push(message); };
+    const card = { id: 'node-1', lines: ['Allow ChatGPT to use Chat Marks Core?', 'Run one command.'], allow: true };
+    const start = 1_000;
+    await noteApprovalCard('worker-chat', true, 'worker-session', deps, start, card);
+    await noteApprovalCard('worker-chat', false, 'worker-session', deps, start + 1_531);
+    await noteApprovalCard('worker-chat', true, 'worker-session', deps, start + 2_295, { ...card, id: 'node-2' });
+    for (let at = start + 4_295; at < start + 10 * 60_000; at += 2_000)
+      await noteApprovalCard('worker-chat', true, 'worker-session', deps, at, { ...card, id: 'node-2' });
+    const end = start + 10 * 60_000;
+    expect(approvalCardWaiting('worker-chat', end)).toBe(true);
+    expect(approvalWaitingChats(end)).toEqual(['worker-chat']);
+    expect(approvalCardView('worker-chat', end)?.id).toBe('node-2');
+    // One episode, one row that ends saying waiting, one notice.
+    expect(new Set(deps.rows.map(row => row[1])).size).toBe(1);
+    expect(deps.rows.at(-1)![2]).toBe(APPROVAL_WAITING_TEXT);
+    expect(deps.notices).toEqual(['worker-session']);
+    expect(logs.filter(line => line.includes('waits for the user'))).toHaveLength(1);
+    expect(logs.filter(line => line.includes('redrawn, not answered'))).toHaveLength(1);
+  });
+
+  it('keeps the episode when the redrawn card comes while "answered" is still being written', async () => {
+    // The redraw poll is not serialized behind the one that saw the card go: with a slow write it
+    // found no answered episode, started a new one and reset its notice clock.
+    const card = { id: 'node-1', lines: ['Allow ChatGPT to use Chat Marks Core?', 'Write one file.'], allow: true };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, card);
+    await noteApprovalCard('chat', true, 'session', deps, 1_000 + APPROVAL_NOTICE_GRACE_MS, card);
+    expect(deps.notices).toEqual(['session']);
+    let release!: () => void;
+    const slow = new Promise<void>(resolve => { release = resolve; });
+    const record = deps.record;
+    deps.record = async (...args) => { if (args[2] === APPROVAL_ANSWERED_TEXT) await slow; return record(...args); };
+    const gone = noteApprovalCard('chat', false, 'session', deps, 40_000);
+    await noteApprovalCard('chat', true, 'session', deps, 41_000, { ...card, id: 'node-2' });
+    release();
+    await gone;
+    expect(approvalCardWaiting('chat', 41_000)).toBe(true);
+    expect(new Set(deps.rows.map(row => row[1])).size).toBe(1);
+    expect(deps.rows.at(-1)![2]).toBe(APPROVAL_WAITING_TEXT);
+    expect(deps.notices).toEqual(['session']);
+  });
+
+  it('tries the desktop notice again while the window had focus and showed none', async () => {
+    // A focused window showing another chat got no notice, and none ever came after it lost focus.
+    let focused = true;
+    deps.notify = sessionId => { if (focused) return false; deps.notices.push(sessionId); return true; };
+    await noteApprovalCard('chat', true, 'session', deps, 1_000);
+    await noteApprovalCard('chat', true, 'session', deps, 1_000 + APPROVAL_NOTICE_GRACE_MS);
+    await noteApprovalCard('chat', true, 'session', deps, 3_000 + APPROVAL_NOTICE_GRACE_MS);
+    expect(deps.notices).toEqual([]);
+    focused = false;
+    await noteApprovalCard('chat', true, 'session', deps, 5_000 + APPROVAL_NOTICE_GRACE_MS);
+    await noteApprovalCard('chat', true, 'session', deps, 7_000 + APPROVAL_NOTICE_GRACE_MS);
+    expect(deps.notices).toEqual(['session']);
   });
 });
 
@@ -223,7 +383,7 @@ describe('answering the card from the app', () => {
 describe('the page detector', () => {
   const source = readFileSync(new URL('../extension/chatgpt-dom.js', import.meta.url), 'utf8');
   let dom: JSDOM;
-  let api: { approvalWaiting(): boolean; approvalCard(): null | { node: Element; lines: string[]; allow: boolean }; answerApprovalCard(node: Element, choice: string): string };
+  let api: { approvalWaiting(): boolean; approvalCard(): null | { node: Element; lines: string[]; allow: boolean }; answerApprovalCard(node: Element, choice: string): string | Promise<string> };
   beforeEach(() => {
     dom = new JSDOM('<main></main>', { url: 'https://chatgpt.com/c/chat', runScripts: 'outside-only', pretendToBeVisual: true });
     Object.defineProperty(dom.window.HTMLElement.prototype, 'getClientRects', {
@@ -290,22 +450,78 @@ describe('the page detector', () => {
       'Zugangsschlüssel: sk-proj-FAKE0123', 'Befehl: echo test', 'ohne Label', 'Nur Label']);
   });
 
-  it('presses Deny or Allow once by their key hints, never the options menu, and only on that card', () => {
+  it('presses Deny or Allow once by their key hints, never the options menu, and only on that card', async () => {
+    vi.useFakeTimers();
+    try {
     const main = dom.window.document.querySelector('main')!;
     main.innerHTML = liveCard();
     const clicks: string[] = [];
     for (const button of main.querySelectorAll('button')) button.addEventListener('click', () => clicks.push(button.textContent!.replace(/\s+/g, ' ').trim() || button.getAttribute('aria-label')!));
     const found = api.approvalCard()!;
-    expect(api.answerApprovalCard(found.node, 'deny')).toBe('clicked');
-    expect(api.answerApprovalCard(found.node, 'allow')).toBe('clicked');
+    const deny = api.answerApprovalCard(found.node, 'deny');
+    const allow = api.answerApprovalCard(found.node, 'allow');
+    await vi.advanceTimersByTimeAsync(9_000);
+    expect(await deny).toBe('not_confirmed');
+    expect(await allow).toBe('not_confirmed');
     expect(clicks).toEqual(['AblehnenEsc', 'Einmal zulassen⏎']);
-    expect(api.answerApprovalCard(found.node, 'always')).toBe('unavailable');
+    expect(await api.answerApprovalCard(found.node, 'always')).toBe('unavailable');
     main.innerHTML = liveCard(true);
-    expect(api.answerApprovalCard(api.approvalCard()!.node, 'allow')).toBe('unavailable');
+    expect(await api.answerApprovalCard(api.approvalCard()!.node, 'allow')).toBe('unavailable');
     // A card that is gone, or another one, is never answered by the old reference.
     const old = api.approvalCard()!.node;
     main.innerHTML = liveCard();
-    expect(api.answerApprovalCard(old, 'deny')).toBe('card_changed');
+    expect(await api.answerApprovalCard(old, 'deny')).toBe('card_changed');
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('does not confuse an ignored React click with host acceptance', async () => {
+    vi.useFakeTimers();
+    try {
+      const main = dom.window.document.querySelector('main')!;
+      main.innerHTML = liveCard();
+      let clicks = 0;
+      main.querySelectorAll('button')[2]!.addEventListener('click', () => { clicks++; });
+      const attempt = api.answerApprovalCard(api.approvalCard()!.node, 'allow');
+      await vi.advanceTimersByTimeAsync(9_000);
+      expect(await attempt).toBe('not_confirmed');
+      expect(clicks).toBe(1);
+      expect(api.approvalWaiting()).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('reports only an observed stable removal, and refuses transient redraws', async () => {
+    try {
+      const main = dom.window.document.querySelector('main')!;
+      main.innerHTML = liveCard();
+      const first = [...main.querySelectorAll('button')].find(b => b.textContent.includes('Esc'))!;
+      first.addEventListener('click', () => { main.innerHTML = ''; });
+      const attempt = api.answerApprovalCard(api.approvalCard()!.node, 'deny');
+      expect(await attempt).toBe('dismissed');
+      expect(api.approvalWaiting()).toBe(false);
+      main.innerHTML = liveCard();
+      [...main.querySelectorAll('button')].find(b => b.textContent.includes('Esc'))!.addEventListener('click', () => {
+        main.innerHTML = '';
+        setTimeout(() => { main.innerHTML = liveCard(); }, 1_200);
+      });
+      const redrawn = api.answerApprovalCard(api.approvalCard()!.node, 'deny');
+      expect(await redrawn).toBe('not_confirmed');
+      expect(api.approvalWaiting()).toBe(true);
+    } finally { vi.useRealTimers(); }
+  }, 20_000);
+
+  it('does not invent a persistent action when a native options menu is present but its choices are not exposed', async () => {
+    const main = dom.window.document.querySelector('main')!;
+    main.innerHTML = liveCard();
+    const menu = main.querySelector('button[aria-haspopup="menu"]')!;
+    let menuClicks = 0;
+    menu.addEventListener('click', () => { menuClicks++; });
+    const found = api.approvalCard()!;
+    expect(found).toMatchObject({ allow: true });
+    expect(await api.answerApprovalCard(found.node, 'always')).toBe('unavailable');
+    expect(menuClicks).toBe(0);
+    main.innerHTML = liveCard(true);
+    expect(await api.answerApprovalCard(api.approvalCard()!.node, 'always')).toBe('unavailable');
+    expect(menuClicks).toBe(0);
   });
 
   it('ignores an answered card, a hidden one and one on a kept page', () => {
