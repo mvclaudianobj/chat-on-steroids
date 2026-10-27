@@ -9,6 +9,92 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.46.1] — Chat Marks integration of community 2.1.46
+
+- Integrated upstream 2.1.46 into Chat Marks; see community changes and existing Marks releases below.
+
+## [2.1.46] — Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast
+
+Get a note on your phone when a chat needs you, move your settings to another computer, and keep API keys and tokens out of what ChatGPT sees. Appearance gains high contrast, accent colors, line spacing and a more legible font.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### ✨ New
+
+- **Phone notifications.** Chat On Steroids can tell you on your phone, through the free ntfy app, when a chat needs you, something fails, or a long chat finishes. Settings → General → Phone notifications. Off until you turn it on.
+- **Settings backup.** Settings → General → Backup exports your settings to a file and imports them on another computer. Saved keys go in only if you choose, locked with a passphrase, and the import shows what it will change first.
+- **Keys stay on your computer.** When a tool's output contains an API key, a token, a private key or a password, Chat On Steroids hides it before ChatGPT sees it. You can turn this off in Settings, or for one project from its ⋯ menu.
+- **High contrast and accent colors.** Appearance has High contrast (black or white background, stronger text and lines) and eight accent colors that read well in light and dark.
+- **Easier reading.** Appearance also has a line spacing slider, the Atkinson Hyperlegible font, and an option to have your screen reader announce finished replies.
+- **Merge conflicts in Review.** A conflicted file shows its base, ours and theirs side by side, and Review can ask the chat to resolve it.
+- **A whole chat as one web page.** The export menu under an answer saves the chat as one HTML file anyone can open. Keys and tokens in it are hidden.
+
+### 💪 Better
+
+- **Tool calls answer sooner.** Chat On Steroids no longer saves a chat's summary before every tool result.
+- **Fewer "Suspicious instruction" cards from ChatGPT.** The app's own connector text now states facts only, so ChatGPT's check stops reading it as an instruction to the model.
+- **The bundled OpenAI tunnel client** is updated to v0.0.18.
+- **After a restart or update,** a message to an existing chat goes out as soon as the connection has really moved over, and the app learns how long this computer needs, instead of waiting about two minutes.
+- **The context meter** fills toward the point where the chat compacts (or toward the large-chat warning when automatic compaction is off), instead of a limit that moved with your settings.
+- **Sidebar menus** no longer cut off longer labels in other languages, and the empty side panel shows its shortcut keys in your language.
+- **Diagnostics reports** say whether each ChatGPT tab was visible and how long it was hidden, which helps with chats that run in the background.
+
+### 🛠 Fixed
+
+- **A chat whose page stopped responding** no longer says "Working for …" for hours. It says it stopped and how to continue.
+- **A chat whose ChatGPT answer stream broke** could stay stuck, because every recovery was taken for progress. It now recovers.
+- **Compact & Resume** no longer gives up on a handoff that contains a link ChatGPT shows as a rich preview, such as a Google Drive folder.
+- **A new chat in a project whose ChatGPT Project was deleted** now says so and offers Retry, instead of waiting without a word.
+- **Core plugin checks** work when more than one valid ChatGPT connector identity exists for the app.
+- **Calling sub-agents from an app without a ChatGPT chat** (such as Codex) now gets a clear answer, instead of starting workers it can never hear back from.
+- **When an automatic Continue cannot be sent,** the activity log says why.
+- **With the built-in browser chosen,** a sub-agent chat could open in another browser that still had the main chat open, and never start there. It now opens in the built-in browser.
+- **ChatGPT's approval card in the app** ran each shared value into its label (for example "Access keysk-…"). Label and value are now kept apart.
+- **The "Saved" message** reads naturally in German, French and Portuguese.
+
+## [2.1.45] — Chat groups, bookmarks, drafts that wait for you, and a better Review
+
+Sort a project's chats into groups, bookmark answers to find them again, and see at a glance which chats hold an unsent message. Review can add files to .gitignore, Compact & Resume works on the Free plan, and ChatGPT asks for permission less often.
+
+### 👉 After updating
+
+- Nothing to do. The browser extension updates itself once no chat is busy.
+
+### ✨ New
+
+- **Chat groups.** A project's ⋯ menu has **New group**. Move a chat into a group from its own ⋯ menu (**Move to group**), drag groups into the order you like, and rename or delete a group from its menu. Deleting a group keeps its chats in the project.
+- **Bookmarks.** Every finished answer has a bookmark button next to Copy. Once a chat has bookmarks, its header shows them with a count; pick one to jump back to that answer.
+- **Drafts that wait for you.** A chat with a half-written message shows a small pencil in the sidebar, and drafts come back after a restart or an update.
+- **Review: add to .gitignore.** Right-click an untracked file to add it, or its folder, to .gitignore.
+- **Code blocks** show their language, wrap long lines on request, and can be saved as a file.
+- **Terminal:** select output and send it to the message box as a code block. Terminal tabs come back after a restart; press **Start shell here** to open one again.
+- **Usage by project, and as a file.** Settings → Usage shows how much went to each project, and **Export CSV** saves the page as a spreadsheet.
+- **Mark all as seen.** One click clears every "New response" dot, or just one project's from its menu.
+- **Check Goal's "done" yourself.** Settings → Agents & automation → **Review Goal completion** (off by default) keeps a chat waiting for you when Goal says the work is finished, instead of ending on its own.
+
+### 💪 Better
+
+- **Fewer permission prompts from ChatGPT.** ChatGPT asked to approve some Chat On Steroids commands even with "Allow all", flagging the app's own connector text as a "Suspicious instruction". That text is now plain facts, and in our tests the prompts stopped.
+- **Goal and Loop keep your original request in mind.** Their helper now also sees the first message of the chat (shortened if it is very long), so requirements from the start aren't lost in long chats.
+- **Chats you start on chatgpt.com inside a linked Project** now show up in their Chat On Steroids project.
+- **Windows: Store apps take clicks and typing** (such as Calculator or Settings) while the Chat On Steroids window is in front.
+- **Illustrations ChatGPT draws** now show in the app's copy of an answer. Only ChatGPT's own image server is allowed.
+- **The connection to ChatGPT starts more reliably.** The bundled OpenAI tunnel client is updated to v0.0.17. When starting, it now retries short failures instead of giving up.
+- **More of the app speaks your language.** About 70 error messages showed in English in every language: /copy and Export, bookmarks, the SSH project dialog, setup profiles, the terminal, attachments, Git Review and secure storage.
+
+### 🛠 Fixed
+
+- **Compact & Resume on the Free plan** gave up before sending, because ChatGPT shows no model picker there. The new chat now starts on ChatGPT's current model.
+- **Windows: automatic refresh of the Desktop connector** never finished, because its tool list was larger than the app expected. It now confirms like the others.
+- **Windows: apps opened by the desktop tools stay open** when the app restarts its desktop helper. Before, they closed with it.
+- **PowerShell commands that print a table** (such as `Get-Location` or `Select-Object`) returned nothing, and a batch of commands could lose all of its output.
+- **A new chat waiting for its first message** was shown as "blocked · not a chat" under Unattributed activity. It now shows as a normal chat in its project.
+- **A new chat's first message after its project was removed** waited without saying why. It now says to add the folder again or cancel the message.
+- **A bookmark whose answer is no longer in the chat** can be removed: opening it removes it and says so.
+- **A message to a chat whose ChatGPT tab was closed** could wait 15 minutes and then say it "may already have been sent", without being sent. It now goes out.
+
 ## [2.1.44.1] — Chat Marks on community v2.1.44
 
 - Integrated the complete community 2.1.44 release with every Marks integration preserved (MarksPanel login, Marks modules and project terminals, CLIProxy module and chats, agent engines, the bridge instance, the dev profile, the extension build stamp, branding and icons, and the four-part release version).
@@ -24,6 +110,7 @@ the app refuses the extension and asks you to reload the matching copy.
 - **Consulta de versão OpenCode:** se o registro npm demorar a responder, a consulta não bloqueia o uso do módulo.
 - **Exclusividades preservadas:** login MarksPanel de sete dias, mascotes, ícones `icon_marks.png`, Skills/AI Hero e Marks Agency, atualizador do fork e sessões existentes.
 - **Plataformas:** instaladores Windows e Linux; alvos macOS permanecem pausados nesta revisão.
+
 
 ## [2.1.44] — Pictures with /image, keyboard shortcuts, and a quicker message after Stop
 

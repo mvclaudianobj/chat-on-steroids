@@ -163,6 +163,35 @@ it('blocks a worker relative write and command after its checkout lease is revok
   expect(leaseValidate).toHaveBeenCalledTimes(3);
 });
 
+it('refuses a substituted worker directory when its exact filesystem identity changed', async () => {
+  swarm.managed = true;
+  const parent = path.join(base, 'substituted-owner-test');
+  const original = path.join(parent, 'original');
+  const substitute = path.join(parent, 'substitute');
+  await fs.mkdir(original, { recursive: true });
+  await fs.mkdir(substitute, { recursive: true });
+  // Compare the full identity, including NTFS sequence bits, using bigint stats.
+  const identity = await fs.stat(original, { bigint: true });
+  const lease = { workspace: { virtual: '/work/substituted-owner-test/original', real: original } };
+  leaseLookup.mockReturnValue(lease);
+  leaseValidate.mockImplementation(async current => {
+    const now = await fs.stat(current.workspace.real, { bigint: true });
+    if (now.ino !== identity.ino || now.dev !== identity.dev) throw new Error('WORKTREE_PATH_CHANGED');
+    return current;
+  });
+  const untouched = path.join(substitute, 'notes.txt');
+  await fs.writeFile(untouched, 'USER-OWNED NOTES - KEEP');
+  lease.workspace.real = substitute;
+  await expect(workerRun('managed', async () => {
+    const target = await resolveIn(roots(), 'notes.txt', { allowMissing: true });
+    await fs.writeFile(target.real, 'UNAUTHORIZED');
+  })).rejects.toThrow(/WORKTREE_PATH_CHANGED/);
+  await expect(workerRun('managed', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined)))
+    .rejects.toThrow(/WORKTREE_PATH_CHANGED/);
+  expect(await fs.readFile(untouched, 'utf8')).toBe('USER-OWNED NOTES - KEEP');
+  expect(leaseValidate).toHaveBeenCalledTimes(2);
+});
+
 // 2026-10-21 (VM): while one chat had a sub-agent run, every other chat outside a project had its
 // first command refused with WORKSPACE_REQUIRED, because the check asked whether any run existed.
 it('asks only a chat that belongs to a run for an explicit folder', async () => {

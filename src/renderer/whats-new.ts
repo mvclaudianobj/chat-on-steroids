@@ -23,6 +23,24 @@ const RELEASES: Readonly<Record<string, Release>> = {
       { icon: 'i-agents', title: () => t("Sub-agent chats tidy up"), text: () => t("With archiving on, a worker's chat is archived two minutes after its task is done.") }
     ]
   },
+  '2.1.46': {
+    lead: () => t("Phone notifications, a settings backup, keys kept from ChatGPT, and high contrast."),
+    highlights: [
+      { icon: 'i-phone', title: () => t("Phone notifications"), text: () => t("Get a note on your phone when a chat needs you or a long chat finishes.") },
+      { icon: 'i-export', title: () => t("Settings backup"), text: () => t("Move your settings to another computer; saved keys only if you choose.") },
+      { icon: 'i-lock', title: () => t("Keys stay with you"), text: () => t("API keys and tokens in what tools return are hidden before ChatGPT sees them.") },
+      { icon: 'i-palette', title: () => t("Easier to read"), text: () => t("High contrast, eight accent colors, line spacing and a more legible font.") }
+    ]
+  },
+  '2.1.45': {
+    lead: () => t("Chat groups, bookmarks, drafts that wait for you, and a better Review."),
+    highlights: [
+      { icon: 'i-group', title: () => t("Chat groups"), text: () => t("Sort a project's chats into groups from its ⋯ menu.") },
+      { icon: 'i-bookmark-fill', title: () => t("Bookmarks"), text: () => t("Bookmark an answer and jump back to it from the chat's header.") },
+      { icon: 'i-pencil', title: () => t("Drafts that wait"), text: () => t("A pencil marks chats with an unsent message, and drafts come back after a restart.") },
+      { icon: 'i-git-diff', title: () => t("A better Review"), text: () => t("Right-click an untracked file to add it, or its folder, to .gitignore.") }
+    ]
+  },
   '2.1.44': {
     lead: () => t("Pictures with /image, keyboard shortcuts, and a quicker message after Stop."),
     highlights: [

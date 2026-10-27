@@ -118,7 +118,7 @@ it('keeps the reported interface language and the extension preferences through 
   expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
 });
 
-it.each(['playfulStatus', 'playfulContinue', 'followOutput'] as const)('saves the %s display switch from Settings', async key => {
+it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as const)('saves the %s display switch from Settings', async key => {
   // Both are plain ui booleans saved by the general Settings save. The save schema dropped keys
   // it did not list, so a switch that was not listed reverted on the next state push.
   const base = getConfig();
@@ -374,19 +374,25 @@ it('publishes Goal draft progress through the session refresh channel without a 
 });
 
 it('publishes the exact transcript owners of one recorder burst and an explicit global invalidation', async () => {
-  const { recordNote } = await import('../src/main/session/recorder.js');
+  const { notifyChanged, recordNote } = await import('../src/main/session/recorder.js');
   const first = await createSession({ title: 'Changed A', conversationId: 'ipc-changed-a' });
   const second = await createSession({ title: 'Changed B', conversationId: 'ipc-changed-b' });
   const send = vi.fn();
   currentWindow = { setBackgroundColor: vi.fn(), setTitleBarOverlay: vi.fn(), isDestroyed: () => false, webContents: { send } };
+  const changes = () => send.mock.calls.filter(([channel]) => channel === 'session:changed').map(([, change]) => change as { sessionIds: string[] });
+  // One burst names each owner once. Driven directly: three awaited disk writes can outlast the
+  // 400 ms burst on a busy machine and legitimately publish twice.
+  notifyChanged(first.id); notifyChanged(second.id); notifyChanged(first.id);
+  await vi.waitFor(() => expect(changes()).toHaveLength(1), { timeout: 5_000 });
+  expect(changes()[0]!.sessionIds).toEqual(expect.arrayContaining([first.id, second.id]));
+  expect(new Set(changes()[0]!.sessionIds).size).toBe(changes()[0]!.sessionIds.length);
+  send.mockClear();
+  // Recorder writes publish their owners, each publish naming an owner at most once.
   await recordNote(first.id, 'first owner');
   await recordNote(second.id, 'second owner');
   await recordNote(first.id, 'first owner again');
-  await vi.waitFor(() => expect(send.mock.calls.filter(([channel]) => channel === 'session:changed')).toHaveLength(1));
-  const [, change] = send.mock.calls.find(([channel]) => channel === 'session:changed')!;
-  // Earlier fixtures may share this burst; each owner is still named exactly once.
-  expect(change.sessionIds).toEqual(expect.arrayContaining([first.id, second.id]));
-  expect(new Set(change.sessionIds).size).toBe(change.sessionIds.length);
+  await vi.waitFor(() => expect(changes().flatMap(change => change.sessionIds)).toEqual(expect.arrayContaining([first.id, second.id])), { timeout: 5_000 });
+  for (const change of changes()) expect(new Set(change.sessionIds).size).toBe(change.sessionIds.length);
   send.mockClear();
   expect(await handlers.get('sessions:clearImageStorage')!(null, { mode: 'all' })).toMatchObject({ ok: true });
   expect(send).toHaveBeenCalledWith('session:changed', { allTranscripts: true });
@@ -550,6 +556,13 @@ it('adds picker-selected projects, reuses containing approval, and leaves cancel
   const uncolored = await handlers.get('projects:color')!(null, { id: first.data.id, color: null }) as any;
   expect(uncolored).toMatchObject({ ok: true, data: { id: first.data.id } });
   expect(uncolored.data.color).toBeUndefined();
+  // #1797: the secrets shield's per-project switch.
+  const shieldOff = await handlers.get('projects:secrets-shield')!(null, { id: first.data.id, off: true }) as any;
+  expect(shieldOff).toMatchObject({ ok: true, data: { id: first.data.id, secretsShieldOff: true } });
+  expect(await handlers.get('projects:secrets-shield')!(null, { id: first.data.id, off: 'yes' })).toMatchObject({ ok: false });
+  expect(await handlers.get('projects:secrets-shield')!(null, { id: first.data.id })).toMatchObject({ ok: false });
+  const shieldOn = await handlers.get('projects:secrets-shield')!(null, { id: first.data.id, off: false }) as any;
+  expect(shieldOn.data.secretsShieldOff).toBeUndefined();
   const removed = await handlers.get('projects:remove')!(null, { id: first.data.id }) as any;
   expect(removed).toMatchObject({ ok: true, data: { id: first.data.id, ungrouped: true } });
   expect(getConfig().roots).toHaveLength(1);
@@ -1100,6 +1113,21 @@ describe('settings writes from more than one UI', () => {
     expect(result.ok, result.error).toBe(true);
     expect(getConfig().ui.tabsToKeepOpen).toBe(6);
     expect(getConfig().goal).toMatchObject({ helperModel: 'account-helper', helperReasoning: 'medium', model: base.goal.model });
+  });
+  it('saves the secrets shield switch, and keeps it when a form without it saves (#1797)', async () => {
+    const base = defaultConfig();
+    await saveConfig(base);
+    expect(getConfig().ui.secretsShield).toBe(true);
+    expect((await save({ ...base, ui: { ...base.ui, secretsShield: false } }, base)).ok).toBe(true);
+    expect(getConfig().ui.secretsShield).toBe(false);
+    // An older window's form has no such field; saving it must not turn the shield back on.
+    const off = getConfig();
+    const { secretsShield: _, ...olderUi } = off.ui;
+    expect((await save({ ...off, ui: { ...olderUi, followOutput: false } }, off)).ok).toBe(true);
+    expect(getConfig().ui).toMatchObject({ secretsShield: false, followOutput: false });
+    const now = getConfig();
+    expect((await save({ ...now, ui: { ...now.ui, secretsShield: true } }, now)).ok).toBe(true);
+    expect(getConfig().ui.secretsShield).toBe(true);
   });
   it('persists and clears ordinary new-chat defaults independently through settings merge', async () => {
     const base = defaultConfig();
@@ -2289,6 +2317,139 @@ it('saves a diagnostics report through the renderer channel without personal det
   expect(shell.showItemInFolder).toHaveBeenCalledWith(target);
 });
 
+it('saves a code block where the save dialog says, offering only its bare name in Downloads', async () => {
+  const save = (payload: unknown) => handlers.get('code:save')!(null, payload);
+  const getPath = app.getPath;
+  const target = path.join(dir, 'chosen.ts');
+  (app as { getPath: (name: string) => string }).getPath = (name: string) => path.join(dir, name);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  try {
+    expect(await save({ text: 'const answer = 42;\n', name: 'snippet.ts' })).toEqual({ ok: true, data: { done: 'saved', name: 'chosen.ts' } });
+  } finally {
+    (app as { getPath: typeof getPath }).getPath = getPath;
+  }
+  expect(vi.mocked(dialog.showSaveDialog).mock.lastCall!.at(-1)).toMatchObject({
+    defaultPath: path.join(dir, 'downloads', 'snippet.ts'),
+    filters: [{ name: 'Text files', extensions: ['ts'] }]
+  });
+  expect(await fs.readFile(target, 'utf8')).toBe('const answer = 42;\n');
+  // The renderer suggests a name, never a place: anything but a bare `name.ext` is refused before any dialog.
+  vi.mocked(dialog.showSaveDialog).mockClear();
+  for (const name of ['../snippet.ts', 'C:\\Users\\you\\snippet.ts', '/home/you/snippet.ts', 'snippet']) {
+    expect(await save({ text: 'x', name })).toMatchObject({ ok: false });
+  }
+  expect(dialog.showSaveDialog).not.toHaveBeenCalled();
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true } as never);
+  expect(await save({ text: 'x', name: 'snippet.txt' })).toEqual({ ok: true, data: { done: 'cancelled' } });
+});
+
+it('leaves a code file the person chose to replace whole when writing the new one fails', async () => {
+  const folder = path.join(dir, 'code-replace');
+  const target = path.join(folder, 'kept.ts');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(target, 'const kept = true;\n', 'utf8');
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  const writeFile = fs.writeFile.bind(fs);
+  // The disk fills up partway: whatever file is being written ends up cut short.
+  const write = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (file) => {
+    await writeFile(file, 'const half', 'utf8');
+    throw Object.assign(new Error('no space left on device'), { code: 'ENOSPC' });
+  });
+  try {
+    expect(await handlers.get('code:save')!(null, { text: 'const replaced = true;\n', name: 'snippet.ts' })).toMatchObject({ ok: false });
+  } finally {
+    write.mockRestore();
+  }
+  expect(await fs.readFile(target, 'utf8')).toBe('const kept = true;\n');
+  expect(await fs.readdir(folder)).toEqual(['kept.ts']);
+  const { getLog } = await import('../src/main/logger.js');
+  expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: 'code save: refused, the file could not be written or replaced (ENOSPC)' });
+});
+
+it.runIf(process.platform !== 'win32')('keeps a replaced script runnable when a code block is saved over it', async () => {
+  const target = path.join(dir, 'run.sh');
+  await fs.writeFile(target, 'echo old\n', 'utf8');
+  await fs.chmod(target, 0o750);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  expect(await handlers.get('code:save')!(null, { text: 'echo new\n', name: 'snippet.sh' })).toEqual({ ok: true, data: { done: 'saved', name: 'run.sh' } });
+  expect(await fs.readFile(target, 'utf8')).toBe('echo new\n');
+  expect((await fs.stat(target)).mode & 0o777).toBe(0o750);
+});
+
+it.runIf(process.platform !== 'win32')('never leaves the new text of a private file readable to others while a code block is saved over it', async () => {
+  const target = path.join(dir, 'private.env');
+  await fs.writeFile(target, 'TOKEN=old\n', 'utf8');
+  await fs.chmod(target, 0o600);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  const writeFile = fs.writeFile.bind(fs);
+  let modeWhileWriting: number | undefined;
+  const write = vi.spyOn(fs, 'writeFile').mockImplementationOnce(async (file, data, options) => {
+    await writeFile(file, data, options);
+    modeWhileWriting = (await fs.stat(String(file))).mode & 0o777;
+  });
+  try {
+    expect(await handlers.get('code:save')!(null, { text: 'TOKEN=new\n', name: 'snippet.env' })).toMatchObject({ ok: true });
+  } finally {
+    write.mockRestore();
+  }
+  expect(modeWhileWriting).toBe(0o600);
+  expect((await fs.stat(target)).mode & 0o777).toBe(0o600);
+});
+
+it.runIf(process.platform !== 'win32')('leaves a code file alone when its permissions cannot be read', async () => {
+  const folder = path.join(dir, 'code-unreadable-mode');
+  const target = path.join(folder, 'run.sh');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(target, 'echo old\n', 'utf8');
+  await fs.chmod(target, 0o750);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: target } as never);
+  const stat = vi.spyOn(fs, 'stat').mockRejectedValueOnce(Object.assign(new Error('i/o error'), { code: 'EIO' }));
+  try {
+    expect(await handlers.get('code:save')!(null, { text: 'echo new\n', name: 'snippet.sh' })).toMatchObject({ ok: false });
+  } finally {
+    stat.mockRestore();
+  }
+  expect(await fs.readFile(target, 'utf8')).toBe('echo old\n');
+  expect((await fs.stat(target)).mode & 0o777).toBe(0o750);
+  expect(await fs.readdir(folder)).toEqual(['run.sh']);
+  const { getLog } = await import('../src/main/logger.js');
+  expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: "code save: refused, the chosen file's permissions could not be read (EIO)" });
+});
+
+it.runIf(process.platform !== 'win32')('writes through a symlink chosen in the save dialog instead of replacing the link', async () => {
+  const folder = path.join(dir, 'code-symlink');
+  const real = path.join(folder, 'real.ts');
+  const link = path.join(folder, 'link.ts');
+  await fs.mkdir(folder, { recursive: true });
+  await fs.writeFile(real, 'const old = true;\n', 'utf8');
+  await fs.symlink('real.ts', link);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: link } as never);
+  expect(await handlers.get('code:save')!(null, { text: 'const fresh = true;\n', name: 'snippet.ts' })).toEqual({ ok: true, data: { done: 'saved', name: 'link.ts' } });
+  expect((await fs.lstat(link)).isSymbolicLink()).toBe(true);
+  expect(await fs.readFile(real, 'utf8')).toBe('const fresh = true;\n');
+  expect((await fs.readdir(folder)).sort()).toEqual(['link.ts', 'real.ts']);
+  // A link to nothing has no file to keep whole: the save stops and says why.
+  const dangling = path.join(folder, 'dangling.ts');
+  await fs.symlink('missing.ts', dangling);
+  vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: dangling } as never);
+  expect(await handlers.get('code:save')!(null, { text: 'x', name: 'snippet.ts' })).toMatchObject({ ok: false });
+  expect((await fs.lstat(dangling)).isSymbolicLink()).toBe(true);
+  expect((await fs.readdir(folder)).sort()).toEqual(['dangling.ts', 'link.ts', 'real.ts']);
+  const { getLog } = await import('../src/main/logger.js');
+  expect(getLog().at(-1)).toMatchObject({ level: 'warn', message: 'code save: refused, the chosen file could not be resolved (ENOENT)' });
+});
+
+it('refuses a usage export without a positive, finite divisor, and logs why', async () => {
+  const { getLog } = await import('../src/main/logger.js');
+  const dialogs = vi.mocked(dialog.showSaveDialog).mock.calls.length;
+  for (const payload of [null, {}, { divisor: 0 }, { divisor: -2 }, { divisor: Number.POSITIVE_INFINITY }, { divisor: '2' }]) {
+    const before = getLog().length;
+    expect(await handlers.get('usage:export')!(null, payload)).toMatchObject({ ok: false });
+    expect(getLog().slice(before)).toEqual([expect.objectContaining({ level: 'warn', message: 'usage export: refused, the page sent no positive, finite token divisor' })]);
+  }
+  expect(vi.mocked(dialog.showSaveDialog).mock.calls.length).toBe(dialogs);
+});
+
 describe('native worker checkout cleanup confirmation', () => {
   const offer = {
     runId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
@@ -2480,4 +2641,376 @@ it('records the one-time answer to the automatic plugin refresh offer', async ()
   const accepted: any = await handlers.get('pluginRefresh:offer')!(null, { turnOn: true });
   expect(accepted).toMatchObject({ ok: true, data: { config: { ui: { autoRefreshPlugins: true, autoRefreshPluginsAsked: true } } } });
   expect(await handlers.get('pluginRefresh:offer')!(null, { turnOn: 'yes' })).toMatchObject({ ok: false });
+});
+
+describe('settings backup over IPC', () => {
+  const tunnelA = 'tunnel_' + 'a'.repeat(32), tunnelB = 'tunnel_' + 'b'.repeat(32);
+  // Made up for this test; not a real credential.
+  const key = 'sk-fixture-' + 'k'.repeat(40);
+  const exportTo = async (file: string, payload: object) => {
+    vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: false, filePath: file } as never);
+    return handlers.get('settings:export')!(null, payload) as Promise<any>;
+  };
+  const pick = async (file: string) => {
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: false, filePaths: [file] });
+    return handlers.get('settings:importPick')!(null, undefined) as Promise<any>;
+  };
+  const apply = (payload: object) => handlers.get('settings:importApply')!(null, payload) as Promise<any>;
+  beforeAll(() => {
+    // An earlier test registers the handlers against a destroyed window; these use the live one.
+    registerIpc(() => currentWindow as any, () => { quitToInstallCalls += 1; });
+  });
+  beforeEach(async () => {
+    const { deleteAllSecrets } = await import('../src/main/secrets.js');
+    await deleteAllSecrets();
+    // A refused export never reaches its dialog; its queued answer must not leak into the next test.
+    vi.mocked(dialog.showSaveDialog).mockReset().mockResolvedValue({ canceled: true } as never);
+    vi.mocked(dialog.showOpenDialog).mockReset().mockResolvedValue({ canceled: true, filePaths: [] });
+  });
+  const setUp = async (theme: 'light' | 'dark', tunnelId: string, readOnly: boolean) => {
+    const base = getConfig();
+    await saveConfig({ ...base, readOnly, tunnel: { ...base.tunnel, tunnelId }, ui: { ...base.ui, theme }, connectorSuffix: theme === 'dark' ? 'Mac' : 'PC' });
+  };
+
+  it('carries settings to another computer and keeps that computer\'s folders, tunnel and connector name', async () => {
+    const { setSecret } = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, true);
+    await setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'backup.json');
+    expect(await exportTo(file, { includeKeys: false })).toEqual({ ok: true, data: { file: 'backup.json', keyCount: 0 } });
+    const text = await fs.readFile(file, 'utf8');
+    expect(text).not.toContain(key);
+    expect(text).not.toContain(tunnelA);
+    expect(text).not.toContain(dir);
+    expect(JSON.parse(text)).toMatchObject({ format: 'chat-on-steroids-settings', version: 1, appVersion: '0.0.0', settings: { readOnly: true, ui: { theme: 'dark' } } });
+    // Not even as an unset (null) entry: this computer's own settings are not in the file at all.
+    const settings = JSON.parse(text).settings;
+    expect(settings.tunnel?.tunnelId).toBeUndefined();
+    expect('connectorSuffix' in settings).toBe(false);
+    expect('browserBridgePort' in settings.ui).toBe(false);
+    expect('startAtLogin' in settings.ui).toBe(false);
+    // The other computer: its own tunnel, name and look.
+    await setUp('light', tunnelB, false);
+    const roots = getConfig().roots;
+    const picked = await pick(file);
+    expect(picked).toMatchObject({ ok: true, data: { file: 'backup.json', appVersion: '0.0.0', keyCount: 0 } });
+    expect(picked.data.changed).toEqual(['readOnly', 'ui.theme']);
+    // Read-only switched on narrows access: nothing to warn about.
+    expect(picked.data.wider).toEqual([]);
+    const applied = await apply({ token: picked.data.token, includeKeys: false });
+    expect(applied, JSON.stringify(applied)).toMatchObject({ ok: true, data: { changedCount: 2, keyCount: 0 } });
+    expect(getConfig()).toMatchObject({ readOnly: true, ui: { theme: 'dark' }, tunnel: { tunnelId: tunnelB }, connectorSuffix: 'PC', roots });
+    // A token is used once.
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toEqual({ ok: false, error: 'Choose the backup file again.' });
+  });
+
+  it('carries saved keys only with the passphrase; a wrong one changes nothing', async () => {
+    const { getSecret, setSecret, clearSecret } = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, false);
+    await setSecret('openaiApiKey', key);
+    await setSecret('bridgeToken', 'local-bridge-token');
+    const file = path.join(dir, 'with-keys.json');
+    expect(await exportTo(file, { includeKeys: true })).toEqual({ ok: false, error: 'Use a passphrase of at least 8 characters.' });
+    expect(await exportTo(file, { includeKeys: true, passphrase: 'short' })).toEqual({ ok: false, error: 'Use a passphrase of at least 8 characters.' });
+    expect(await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' })).toEqual({ ok: true, data: { file: 'with-keys.json', keyCount: 1 } });
+    const text = await fs.readFile(file, 'utf8');
+    expect(text).not.toContain(key);
+    expect(text).not.toContain('local-bridge-token');
+    if (process.platform !== 'win32') expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    await clearSecret('openaiApiKey');
+    await setUp('light', tunnelB, false);
+    const picked = await pick(file);
+    expect(picked.data.keyCount).toBe(1);
+    expect(await apply({ token: picked.data.token, includeKeys: true, passphrase: 'wrong horse battery' }))
+      .toEqual({ ok: false, error: 'That passphrase does not open the saved keys in this backup.' });
+    expect(getConfig().ui.theme).toBe('light');
+    expect(await getSecret('openaiApiKey')).toBeNull();
+    // The same choice can be tried again with the right passphrase.
+    expect(await apply({ token: picked.data.token, includeKeys: true, passphrase: 'correct horse battery' }))
+      .toMatchObject({ ok: true, data: { changedCount: 1, keyCount: 1 } });
+    expect(getConfig().ui.theme).toBe('dark');
+    expect(await getSecret('openaiApiKey')).toBe(key);
+    expect(await getSecret('bridgeToken')).toBe('local-bridge-token');
+  });
+
+  it('imports only the settings when keys are left out, even from a backup that has them', async () => {
+    const { getSecret, setSecret, clearSecret } = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, false);
+    await setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'keys-left-out.json');
+    await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' });
+    await clearSecret('openaiApiKey');
+    await setUp('light', tunnelB, false);
+    const picked = await pick(file);
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true, data: { changedCount: 1, keyCount: 0 } });
+    expect(await getSecret('openaiApiKey')).toBeNull();
+  });
+
+  it('refuses a file that is not a backup, and does nothing when a dialog is cancelled', async () => {
+    const other = path.join(dir, 'package.json');
+    await fs.writeFile(other, JSON.stringify({ name: 'something' }));
+    expect(await pick(other)).toEqual({ ok: false, error: 'This file is not a Chat On Steroids settings backup.' });
+    vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: true, filePaths: [] });
+    expect(await handlers.get('settings:importPick')!(null, undefined)).toEqual({ ok: true, data: null });
+    vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true } as never);
+    expect(await handlers.get('settings:export')!(null, { includeKeys: false })).toEqual({ ok: true, data: null });
+    expect((await fs.readdir(dir)).filter(name => name.endsWith('.tmp'))).toEqual([]);
+  });
+
+  it('applies a backup that changes nothing without saving, and says so', async () => {
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'same.json');
+    await exportTo(file, { includeKeys: false });
+    const picked = await pick(file);
+    expect(picked.data.changed).toEqual([]);
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true, data: { changedCount: 0, keyCount: 0 } });
+  });
+
+  it('applies the interface language it counts', async () => {
+    await setUp('dark', tunnelA, false);
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'de' } });
+    const file = path.join(dir, 'german.json');
+    await exportTo(file, { includeKeys: false });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'en' } });
+    const picked = await pick(file);
+    expect(picked.data.changed).toEqual(['ui.language']);
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true, data: { changedCount: 1 } });
+    expect(getConfig().ui.language).toBe('de');
+  });
+
+  it('leaves out what only this computer reports, and never counts a change it would not make', async () => {
+    await setUp('dark', tunnelA, false);
+    const local = { browserPreferences: { overwrite: true, durations: false }, cosBrowserTrayHint: true, autoRefreshPluginsAsked: true };
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, ...local } });
+    const file = path.join(dir, 'this-computer.json');
+    await exportTo(file, { includeKeys: false });
+    const backup = JSON.parse(await fs.readFile(file, 'utf8'));
+    for (const field of Object.keys(local)) expect(backup.settings.ui).not.toHaveProperty(field);
+    // A backup that has them anyway (edited by hand) changes and counts none of them.
+    backup.settings.ui = { ...backup.settings.ui, browserPreferences: { overwrite: false, durations: true }, cosBrowserTrayHint: false, autoRefreshPluginsAsked: false };
+    await fs.writeFile(file, JSON.stringify(backup));
+    const picked = await pick(file);
+    expect(picked.data.changed).toEqual([]);
+    await apply({ token: picked.data.token, includeKeys: false });
+    expect(getConfig().ui).toMatchObject(local);
+  });
+
+  it('refuses a short export passphrase before any saved key is read', async () => {
+    const secrets = await import('../src/main/secrets.js');
+    const read = vi.spyOn(secrets, 'readSecretsFor');
+    try {
+      expect(await exportTo(path.join(dir, 'short.json'), { includeKeys: true, passphrase: 'seven77' }))
+        .toEqual({ ok: false, error: 'Use a passphrase of at least 8 characters.' });
+      expect(read).not.toHaveBeenCalled();
+    } finally { read.mockRestore(); }
+  });
+
+  it('finishes an import whose settings were saved even when a later step of the save fails, and says what failed', async () => {
+    const { setSecret, clearSecret, getSecret } = await import('../src/main/secrets.js');
+    const controlApi = await import('../src/main/control-api.js');
+    await setUp('dark', tunnelA, false);
+    await saveConfig({ ...getConfig(), controlApi: { enabled: true, allowActions: false }, ui: { ...getConfig().ui, language: 'de' } });
+    await setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'control-api-fails.json');
+    await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' });
+    await clearSecret('openaiApiKey');
+    await setUp('light', tunnelA, false);
+    await saveConfig({ ...getConfig(), controlApi: { enabled: false, allowActions: false }, ui: { ...getConfig().ui, language: 'en' } });
+    const start = vi.spyOn(controlApi, 'startControlApi').mockRejectedValue(new Error('control API could not start'));
+    try {
+      const picked = await pick(file);
+      const applied = await apply({ token: picked.data.token, includeKeys: true, passphrase: 'correct horse battery' });
+      expect(applied).toMatchObject({ ok: true, data: { keyCount: 1, warnings: ['control API could not start'] } });
+      expect(getConfig()).toMatchObject({ controlApi: { enabled: true }, ui: { theme: 'dark', language: 'de' } });
+      expect(await getSecret('openaiApiKey')).toBe(key);
+    } finally { start.mockRestore(); await saveConfig({ ...getConfig(), controlApi: { enabled: false, allowActions: false } }); }
+  });
+
+  it('puts back a switch that was never changed when the backup was made', async () => {
+    await setUp('dark', tunnelA, false);
+    const before = getConfig();
+    const { developerMode: _, ...ui } = before.ui;
+    await saveConfig({ ...before, ui });
+    const file = path.join(dir, 'unset-switch.json');
+    await exportTo(file, { includeKeys: false });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, developerMode: true } });
+    const picked = await pick(file);
+    expect(picked).toMatchObject({ ok: true, data: { changed: ['ui.developerMode'] } });
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toMatchObject({ ok: true });
+    expect(getConfig().ui.developerMode).not.toBe(true);
+  });
+
+  it('finishes an import when publishing the connector fails after the save, and a second import is not refused as changed', async () => {
+    const connection = await import('../src/main/connection.js');
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'publish-fails.json');
+    await exportTo(file, { includeKeys: false });
+    await setUp('light', tunnelA, false);
+    const publish = vi.spyOn(connection, 'applySettings').mockRejectedValueOnce(new Error('connector could not be published'));
+    try {
+      const picked = await pick(file);
+      const applied = await apply({ token: picked.data.token, includeKeys: false });
+      expect(applied).toMatchObject({ ok: true, data: { warnings: ['connector could not be published'] } });
+      expect(getConfig().ui.theme).toBe('dark');
+      // Nothing is left half done: the same file can be imported again, and changes nothing.
+      const again = await pick(file);
+      expect(again).toMatchObject({ ok: true, data: { changed: [] } });
+    } finally { publish.mockRestore(); }
+  });
+
+  it('still reports a failed step to the Settings form, after the rest of the save ran', async () => {
+    const connection = await import('../src/main/connection.js');
+    const controlApi = await import('../src/main/control-api.js');
+    const base = getConfig();
+    await saveConfig({ ...base, controlApi: { enabled: false, allowActions: false } });
+    const publish = vi.spyOn(connection, 'applySettings').mockRejectedValueOnce(new Error('connector could not be published'));
+    const start = vi.spyOn(controlApi, 'startControlApi').mockResolvedValue(undefined as never);
+    try {
+      const before = getConfig();
+      const saved = await save({ ...before, controlApi: { enabled: true, allowActions: false } }, before);
+      expect(saved).toMatchObject({ ok: false, error: 'connector could not be published' });
+      expect(getConfig().controlApi.enabled).toBe(true);
+      // The steps after the failed one still ran.
+      expect(start).toHaveBeenCalled();
+    } finally { publish.mockRestore(); start.mockRestore(); await saveConfig({ ...getConfig(), controlApi: { enabled: false, allowActions: false } }); }
+  });
+
+  it('leaves out this computer\'s login item, and refuses keys an unreadable key store could not take before changing anything', async () => {
+    const secrets = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, false);
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, startAtLogin: true } });
+    await secrets.setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'login-item.json');
+    await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' });
+    expect(JSON.parse(await fs.readFile(file, 'utf8')).settings.ui).not.toHaveProperty('startAtLogin');
+    await setUp('light', tunnelA, false);
+    const unreadable = vi.spyOn(secrets, 'storedSecretsUnreadable').mockReturnValue(true);
+    try {
+      const picked = await pick(file);
+      expect(await apply({ token: picked.data.token, includeKeys: true, passphrase: 'correct horse battery' }))
+        .toEqual({ ok: false, error: "The saved keys on this computer cannot be read, so the backup's keys cannot be added. Import without them." });
+      expect(getConfig().ui.theme).toBe('light');
+    } finally { unreadable.mockRestore(); await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, startAtLogin: false } }); }
+  });
+
+  it('reports keys that could not be stored after the settings were imported, and counts none', async () => {
+    const secrets = await import('../src/main/secrets.js');
+    await setUp('dark', tunnelA, false);
+    await secrets.setSecret('openaiApiKey', key);
+    const file = path.join(dir, 'keys-fail.json');
+    await exportTo(file, { includeKeys: true, passphrase: 'correct horse battery' });
+    await setUp('light', tunnelA, false);
+    const write = vi.spyOn(secrets, 'setSecrets').mockRejectedValue(new Error('keychain locked'));
+    try {
+      const picked = await pick(file);
+      expect(await apply({ token: picked.data.token, includeKeys: true, passphrase: 'correct horse battery' })).toMatchObject({ ok: true,
+        data: { keyCount: 0, warnings: ['The settings were imported, but the saved keys could not be stored. Add them again in Settings.'] } });
+      expect(getConfig().ui.theme).toBe('dark');
+    } finally { write.mockRestore(); }
+  });
+
+  it('refuses a backup with a setting value this version does not accept, in a sentence of its own', async () => {
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'invalid-value.json');
+    await exportTo(file, { includeKeys: false });
+    const backup = JSON.parse(await fs.readFile(file, 'utf8'));
+    backup.settings.ui.theme = 'cyan';
+    await fs.writeFile(file, JSON.stringify(backup));
+    await setUp('light', tunnelA, false);
+    expect(await pick(file)).toEqual({ ok: false, error: 'This backup has a setting this version does not accept, so nothing was imported.' });
+    expect(getConfig().ui.theme).toBe('light');
+  });
+
+  it('refuses an import whose preview no longer matches the settings, and changes nothing', async () => {
+    await setUp('dark', tunnelA, false);
+    const file = path.join(dir, 'stale.json');
+    await exportTo(file, { includeKeys: false });
+    await setUp('light', tunnelA, false);
+    const picked = await pick(file);
+    expect(picked.data).toMatchObject({ changed: ['ui.theme'], wider: [] });
+    // Read-only goes on after the preview: applying now would turn it off without the warning.
+    await setUp('light', tunnelA, true);
+    expect(await apply({ token: picked.data.token, includeKeys: false }))
+      .toEqual({ ok: false, error: 'Your settings changed after the file was chosen. Choose it again.' });
+    expect(getConfig()).toMatchObject({ readOnly: true, ui: { theme: 'light' } });
+    expect(await apply({ token: picked.data.token, includeKeys: false })).toEqual({ ok: false, error: 'Choose the backup file again.' });
+  });
+});
+
+describe('phone notifications over IPC', () => {
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+    finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
+  beforeAll(() => {
+    // An earlier test registers the handlers against a destroyed window; these use the live one.
+    registerIpc(() => currentWindow as any, () => { quitToInstallCalls += 1; });
+  });
+
+  it('saves the settings with the server tidied, and refuses a bad topic or server only while on', async () => {
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: true, server: 'https://ntfy.sh', topic: 'cos-fixturetopic234567' });
+    const now = getConfig();
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ topic: 'has space' }) } }, now))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ server: 'https://ntfy.sh/mytopic' }) } }, now))
+      .toEqual({ ok: false, error: 'Enter the address of an ntfy server, such as https://ntfy.sh.' });
+    // Switched off, a half-filled form still saves.
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ enabled: false, topic: '' }) } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+  });
+
+  it('checks the settings as they will be saved, not the stale form, and logs a refusal', async () => {
+    const { getLog } = await import('../src/main/logger.js');
+    // Off, with a topic: the form the renderer still shows.
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone({ enabled: false }) } }, base)).ok).toBe(true);
+    const stale = getConfig();
+    // Meanwhile another window clears the topic.
+    expect((await save({ ...stale, ui: { ...stale.ui, phonePush: phone({ enabled: false, topic: '' }) } }, stale)).ok).toBe(true);
+    // The stale form only turns it on: alone it looks complete, merged it has no topic.
+    expect(await save({ ...stale, ui: { ...stale.ui, phonePush: phone({ enabled: true }) } }, stale))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+    expect(getLog().some(entry => entry.message.includes('settings save refused: Choose a topic of letters'))).toBe(true);
+  });
+
+  it('never lets a damaged saved phone setting block other saves, or the save that repairs it', async () => {
+    // A hand-edited or older config: on, with no topic and a server with a path.
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, phonePush: phone({ topic: '', server: 'https://ntfy.sh/mytopic' }) } });
+    const stored = getConfig();
+    // An unrelated change carries the stored phone settings unchanged: it saves.
+    expect((await save({ ...stored, ui: { ...stored.ui, theme: 'light' } }, stored)).ok).toBe(true);
+    // Editing the phone settings is checked: still bad is refused, repaired or switched off saves.
+    const now = getConfig();
+    expect(await save({ ...now, ui: { ...now.ui, phonePush: phone({ topic: '' }) } }, now)).toMatchObject({ ok: false });
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone() } }, now)).ok).toBe(true);
+    const fixed = getConfig();
+    expect((await save({ ...fixed, ui: { ...fixed.ui, phonePush: phone({ enabled: false, topic: '' }) } }, fixed)).ok).toBe(true);
+  });
+
+  it('merges field by field, so a form from before a change does not undo it', async () => {
+    const base = getConfig();
+    await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base);
+    const before = getConfig();
+    // Another window turned on details meanwhile.
+    await save({ ...before, ui: { ...before.ui, phonePush: phone({ server: 'https://ntfy.sh', includeDetails: true }) } }, before);
+    // This form still shows details off and changes only the quiet hours.
+    expect((await save({ ...before, ui: { ...before.ui, phonePush: { ...before.ui.phonePush!, quietHours: { from: '22:00', to: '07:00' } } } }, before)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ includeDetails: true, quietHours: { from: '22:00', to: '07:00' } });
+  });
+
+  it('keeps the access token in secure storage and says only whether one is saved', async () => {
+    const { getSecret } = await import('../src/main/secrets.js');
+    const saved = await handlers.get('phonePush:token')!(null, { token: '  tk_fixture  ' }) as any;
+    expect(saved).toMatchObject({ ok: true, data: { hasPhonePushToken: true } });
+    expect(JSON.stringify(saved)).not.toContain('tk_fixture');
+    expect(await getSecret('ntfyToken')).toBe('tk_fixture');
+    expect(await handlers.get('phonePush:token')!(null, { token: 'tk_fixture with gap' })).toEqual({ ok: false, error: 'An access token is letters, digits and symbols, without spaces.' });
+    const { getLog } = await import('../src/main/logger.js');
+    const refused = getLog().filter(entry => entry.message.startsWith('phone push: access token'));
+    expect(refused.at(-1)?.message).toBe('phone push: access token not saved: it has spaces or other characters a token cannot have');
+    expect(refused.some(entry => entry.message.includes('tk_fixture'))).toBe(false);
+    expect(await handlers.get('phonePush:token')!(null, { token: '' })).toMatchObject({ ok: true, data: { hasPhonePushToken: false } });
+    expect(await getSecret('ntfyToken')).toBeNull();
+  });
 });

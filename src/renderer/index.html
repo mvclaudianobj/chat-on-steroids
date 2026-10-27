@@ -18,7 +18,7 @@
       <aside class="sidebar" id="sidebar">
         <div class="sidebar-resize" id="sidebarResize" role="separator" tabindex="0" aria-label="Chat list width" aria-orientation="vertical" aria-controls="sidebar" title="Drag to resize · Double-click to reset"></div>
         <button class="btn" id="backToChat" type="button" hidden><i class="ico ph ph-arrow-left" aria-hidden="true"></i><span>Back to chat</span></button>
-        <div class="sidebar-brand"><span class="mark"><img class="marks-app-icon" src="./browser-icons/cos.png" alt="" /></span><strong>Chat Marks</strong><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
+        <div class="sidebar-brand"><span class="mark"><img class="marks-app-icon" src="./browser-icons/cos.png" alt="" /></span><strong>Chat Marks</strong><button class="btn sidebar-brand-seen" id="markAllSeen" type="button" title="Mark all as seen" aria-label="Mark all as seen" hidden><i class="ico ph ph-checks" aria-hidden="true"></i></button><button class="btn sidebar-brand-search" id="searchChatsButton" type="button" aria-haspopup="dialog" aria-controls="searchDialog" title="Search chats" aria-label="Search chats"><i class="ico ph ph-magnifying-glass" aria-hidden="true"></i></button></div>
         <div class="sidebar-primary" id="sidebarPrimary">
           <button class="btn new-chat" id="newChat" type="button"><i class="ico ph ph-pencil-simple" aria-hidden="true"></i>New chat</button>
           <button class="btn sidebar-primary-link" id="sidebarPlugins" data-sidebar-page="plugins" type="button"><i class="ico ph ph-puzzle-piece" aria-hidden="true"></i>Plugins</button>
@@ -200,10 +200,39 @@
                 <label class="setting"><span class="setting-text"><b>Mention Plugins instead of Core</b><em>Ordinary messages the app sends mention Chat Marks Plugins. Goal, Loop, workers and recovery always mention Core. Messages you send in ChatGPT itself are unchanged.</em></span><input id="mentionPlugins" type="checkbox" /></label>
               </div>
             </section>
-            <section class="appearance-section" id="privacyScreenshotsSetting">
-              <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT sees of your screen.</p></div></header>
+            <section class="appearance-section" id="phonePushSettings">
+              <header class="settings-section-head"><div><h2>Phone notifications</h2><p>Hear about your chats on your phone while you are away from this computer.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
-                <label class="setting"><span class="setting-text"><b>Screenshot only the active window</b><em>For privacy, ChatGPT's screenshots show the window in front instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
+                <label class="setting"><span class="setting-text"><b>Send notifications to your phone</b><em>Through ntfy, a free notification app.</em></span><input id="phonePushEnabled" type="checkbox" /></label>
+                <div id="phonePushOptions" class="phone-push-options" hidden>
+                  <div class="setting phone-push-field"><label class="setting-text" for="phonePushTopic"><b>Topic</b><em>Subscribe to it in the ntfy app. Anyone who has it can read the messages.</em></label><div class="phone-push-control"><input id="phonePushTopic" type="text" maxlength="64" spellcheck="false" autocomplete="off" translate="no" /><button class="btn" id="phonePushCopyTopic" type="button">Copy</button></div></div>
+                  <div class="setting"><span class="setting-text"><b>Send a test</b><em id="phonePushTestStatus" role="status">A test never includes chat text.</em></span><button class="btn" id="phonePushTest" type="button">Send test</button></div>
+                  <label class="setting"><span class="setting-text"><b>When a chat needs you</b></span><input id="phonePushNeedsYou" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>When something fails</b></span><input id="phonePushFailures" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>When a chat finishes</b></span><select id="phonePushFinished"><option value="never">Never</option><option value="0">Always</option><option value="5">After 5 minutes of work</option><option value="15">After 15 minutes of work</option><option value="30">After 30 minutes of work</option><option value="60">After an hour of work</option></select></label>
+                  <label class="setting"><span class="setting-text"><b>Only when you are away</b><em>No input for 3 minutes, or a locked screen.</em></span><input id="phonePushAway" type="checkbox" /></label>
+                  <label class="setting"><span class="setting-text"><b>Quiet hours</b></span><select id="phonePushQuiet"><option value="">Off</option><option value="21:00-06:00" translate="no"></option><option value="22:00-07:00" translate="no"></option><option value="23:00-07:00" translate="no"></option><option value="23:00-08:00" translate="no"></option><option value="00:00-08:00" translate="no"></option></select></label>
+                  <label class="setting"><span class="setting-text"><b>Include chat names and answers</b><em>They go through the ntfy server, and anyone with the topic can read them.</em></span><input id="phonePushDetails" type="checkbox" /></label>
+                  <details class="phone-push-advanced" id="phonePushAdvanced"><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Advanced</summary>
+                    <div class="setting phone-push-field"><label class="setting-text" for="phonePushServer"><b>Server</b><em>ntfy.sh, or your own ntfy server.</em></label><div class="phone-push-control"><input id="phonePushServer" type="text" inputmode="url" maxlength="2048" spellcheck="false" autocomplete="off" translate="no" /><button class="btn" id="phonePushServerDefault" type="button" title="Use ntfy.sh">Default</button></div></div>
+                    <div class="setting phone-push-field"><label class="setting-text" for="phonePushToken"><b>Access token</b><em id="phonePushTokenStatus">Only if your server needs one. Kept in secure storage.</em></label><div class="phone-push-control"><input id="phonePushToken" type="password" maxlength="512" autocomplete="off" /><button class="btn" id="phonePushTokenSave" type="button">Save token</button></div></div>
+                    <div class="setting"><span class="setting-text"><b>New topic</b><em>The old topic stops getting messages.</em></span><button class="btn" id="phonePushNewTopic" type="button">New topic</button></div>
+                  </details>
+                </div>
+              </div>
+            </section>
+            <section class="appearance-section" id="privacySettings">
+              <header class="settings-section-head"><div><h2>Privacy</h2><p>What ChatGPT gets to see on this computer.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Hide secrets from ChatGPT</b><em>API keys, tokens, private keys and passwords in what tools return are replaced with a short note before ChatGPT sees them. Your files stay as they are. A project can turn this off in its menu.</em></span><input id="secretsShield" type="checkbox" /></label>
+                <label class="setting" id="privacyScreenshotsSetting"><span class="setting-text"><b>Screenshot only the active window</b><em>For privacy, ChatGPT's screenshots show the window in front instead of the whole screen.</em></span><input id="privacyScreenshots" type="checkbox" /></label>
+              </div>
+            </section>
+            <section class="appearance-section" id="backupSettings">
+              <header class="settings-section-head"><div><h2>Backup</h2><p>Keep a copy of your settings, or move them to another computer.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <div class="setting"><span class="setting-text"><b>Export settings</b><em>Saves your settings to a file. Folders and this computer's connection to ChatGPT stay out.</em></span><button class="btn" id="exportSettings" type="button">Export…</button></div>
+                <div class="setting"><span class="setting-text"><b>Import settings</b><em>Takes the settings from a backup file. You see how many change before anything does.</em></span><button class="btn" id="importSettings" type="button">Import…</button></div>
               </div>
             </section>
             <section class="appearance-section">
@@ -322,6 +351,8 @@
               <header class="settings-section-head"><div><h2>Colors</h2><p>Fine-tune background and accent colors for the selected theme.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
               <label class="setting"><span class="setting-text"><b>Theme</b><em>Light and dark keep their own colors.</em></span><select id="appearanceTheme"><option value="light">Light</option><option value="dark">Dark</option></select></label>
+              <label class="setting"><span class="setting-text"><b>High contrast</b><em>Black or white background with stronger text and lines. Your colors stay saved for when you turn it off.</em></span><input id="appearanceHighContrast" type="checkbox" /></label>
+              <div class="setting"><span class="setting-text"><b id="appearanceAccentPresetsLabel">Accent presets</b><em>Each is easy to read in light and dark.</em></span><div class="appearance-swatches" id="appearanceAccentPresets" role="radiogroup" aria-labelledby="appearanceAccentPresetsLabel"></div></div>
 
               <div class="setting"><label class="setting-text" for="appearance-accent"><b>Accent color</b></label><div class="appearance-color"><input id="appearance-accent" type="color" data-color="accent" aria-label="Accent color" /><input id="appearance-accent-hex" type="text" data-hex="accent" aria-label="Accent color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
               <div class="setting"><label class="setting-text" for="appearance-background"><b>Background color</b></label><div class="appearance-color"><input id="appearance-background" type="color" data-color="background" aria-label="Background color" /><input id="appearance-background-hex" type="text" data-hex="background" aria-label="Background color HEX" pattern="#[0-9a-fA-F]{6}" maxlength="7" spellcheck="false" autocomplete="off" /></div></div>
@@ -333,8 +364,15 @@
             <section class="appearance-section">
               <header class="settings-section-head"><div><h2>Typography</h2><p>Choose how text reads throughout the workspace.</p></div></header>
               <div class="settings-surface pane appearance-settings-card">
-              <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option></select></label>
+              <label class="setting"><span class="setting-text"><b>Font</b></span><select id="appearanceFont"><option value="system">System default</option><option value="sans">Sans serif</option><option value="serif">Serif</option><option value="mono">Monospace</option><option value="legible">Atkinson Hyperlegible</option></select></label>
               <label class="setting"><span class="setting-text"><b>Text size</b></span><span class="appearance-range"><input id="appearanceSize" type="range" min="12" max="18" aria-label="Text size" /><output id="appearanceSizeValue" for="appearanceSize"></output></span></label>
+              <label class="setting"><span class="setting-text"><b>Line spacing</b><em>Space between the lines of chat messages.</em></span><span class="appearance-range"><input id="appearanceLineSpacing" type="range" min="100" max="200" step="10" aria-label="Line spacing" /><output id="appearanceLineSpacingValue" for="appearanceLineSpacing"></output></span></label>
+              </div>
+            </section>
+            <section class="appearance-section">
+              <header class="settings-section-head"><div><h2>Accessibility</h2><p>Help for screen readers.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+              <label class="setting"><span class="setting-text"><b>Announce finished replies</b><em>Your screen reader says “Reply finished” when a reply in the open chat ends.</em></span><input id="announceTurns" type="checkbox" /></label>
               </div>
             </section>
             <section class="appearance-section">
@@ -444,7 +482,7 @@
               <section class="settings-section usage-section usage-messages" aria-labelledby="usageMessagesTitle">
                 <header class="settings-section-head">
                   <div><h2 id="usageMessagesTitle">Messages and limits</h2><p>Messages the app saw you send, per model, and the limits ChatGPT and Codex report.</p></div>
-                  <button class="btn" id="refreshUsage" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button>
+                  <span class="workspace-section-actions"><button class="btn" id="exportUsage" type="button"><i class="ico ph ph-download-simple" aria-hidden="true"></i>Export CSV</button><button class="btn" id="refreshUsage" type="button"><i class="ico ph ph-arrow-clockwise" aria-hidden="true"></i>Refresh</button></span>
                 </header>
                 <div class="settings-surface usage-message-surface">
                   <p class="muted usage-status" id="usageStatus" role="status">Updating usage in the background. After an update, this can take a few minutes. You can keep using the app.</p>
@@ -1020,6 +1058,10 @@
                 <span id="chatProjectName"></span>
               </span>
               <button id="chatBranchOrigin" class="chat-branch-origin" type="button" hidden></button>
+              <button id="chatBookmarks" class="chat-bookmarks" type="button" aria-haspopup="menu" aria-expanded="false" hidden>
+                <i class="ico ph ph-bookmark-simple" aria-hidden="true"></i>
+                <span class="chat-bookmarks-count">0</span>
+              </button>
               <span class="mark"><img class="marks-app-icon" src="./browser-icons/cos.png" alt="" /></span>
               <span class="title">
                 Chat Marks
@@ -1115,6 +1157,7 @@
                     </div>
                   </div>
                   <div class="setting"><span class="setting-text"><b id="rotateTurnMinutesTitle">Start a fresh turn after</b><em>Long work continues in a new turn with an automatic Continue, right after a tool result. Shorter turns break less often. Also in Goal and Loop chats; not with Pro models or in sub-agents’ own chats.</em></span><select id="rotateTurnMinutes" aria-labelledby="rotateTurnMinutesTitle"><option value="0">Off</option><option value="20">20 minutes</option><option value="30">30 minutes</option><option value="45">45 minutes</option><option value="60">60 minutes</option></select></div>
+                  <label class="setting"><span class="setting-text"><b>Review Goal completion</b><em>When Goal reports completion without proof, the result stays unverified and the reply stays pending. Session finish keeps its hold active, asks the model to keep the turn open, and may notify you. Off by default.</em></span><input id="finishHoldOnStop" type="checkbox" /></label>
                   <label class="setting"><span class="setting-text"><b>Stop and continue when ChatGPT offers no Send</b><em>Some chats show only Stop at a tool result, so the fresh turn's Continue can't be sent there. After that happens twice in a turn, the app stops the turn right after a result and sends the Continue once the stop shows. Goal and Loop stay on, and a step that arrives meanwhile is not run. Experimental.</em></span><input id="rotateStopFallback" type="checkbox" /></label>
                   <div class="setting"><span class="setting-text"><b id="goalBackendTitle">Goal response source</b><em>Where Goal's next message comes from: a separate ChatGPT chat in your account, your API key (most reliable), or Offline (prepared messages, no API cost).</em></span><select id="goalBackend" aria-labelledby="goalBackendTitle"><option value="chatgpt">Separate ChatGPT chat</option><option value="api">API key · Most reliable</option><option value="templates">Offline · No API cost</option></select></div>
                   <div class="setting"><span class="setting-text"><b id="loopBackendTitle">Loop response source</b><em>Where Loop's next message comes from: your API key (most reliable) or a separate ChatGPT chat in your account. Loop keeps going until you turn it off.</em></span><select id="loopBackend" aria-labelledby="loopBackendTitle"><option value="api">API key · Most reliable</option><option value="chatgpt">Separate ChatGPT chat</option></select></div>
@@ -1487,7 +1530,7 @@
                     <svg viewBox="0 0 16 16" aria-hidden="true"><circle class="context-track" cx="8" cy="8" r="6"/><circle id="contextMeterArc" cx="8" cy="8" r="6" stroke-dasharray="0 37.7"/></svg><span id="contextMeterCompact" aria-hidden="true"></span>
                   </button>
                   <div id="contextMeterInfo" role="dialog" aria-label="Session context · estimated">
-                    <dl class="context-data"><dt>This chat (estimate)</dt><dd id="contextTokens"></dd><dt>Context limit</dt><dd id="contextLimit"></dd><dt>Filled</dt><dd id="contextPercent"></dd><dt>Compacts automatically at</dt><dd id="contextThreshold"></dd></dl>
+                    <dl class="context-data"><dt>This chat (estimate)</dt><dd id="contextTokens"></dd><dt id="contextLimitLabel">Large-chat warning at</dt><dd id="contextLimit"></dd><dt>Filled</dt><dd id="contextPercent"></dd><dt>Compacts automatically at</dt><dd id="contextThreshold"></dd></dl>
                     <div class="context-progress" role="progressbar" aria-label="Estimated session context" aria-valuemin="0" aria-valuemax="100"><span></span></div>
                     <button type="button" class="context-action" id="contextDisplay"><i class="ico ph ph-arrows-clockwise" aria-hidden="true"></i><span>Show token values</span></button>
                     <button id="compactSession" class="context-action" type="button" hidden><i class="ico ph ph-copy" aria-hidden="true"></i><span>Compact &amp; resume</span></button>
@@ -1530,6 +1573,7 @@
               <p id="composerStatus" role="status" aria-live="polite"></p>
               <p class="composer-dictation-status" id="dictationStatus" role="status" aria-live="polite" aria-atomic="true" hidden></p>
               <span class="sr-only" id="recallAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
+              <span class="sr-only" id="turnAnnounce" role="status" aria-live="polite" aria-atomic="true"></span>
             </form>
             <p class="foot" id="chatFoot" hidden></p>
           </section>
@@ -1642,6 +1686,32 @@
         <button class="whats-new-link" id="whatsNewNotes" type="button"><i class="ico ph ph-arrow-square-out" aria-hidden="true"></i>Full release notes</button>
         <button class="whats-new-done" id="whatsNewDone" type="button">Got it</button>
       </footer>
+    </dialog>
+    <dialog class="plugin-dialog backup-dialog" id="exportSettingsDialog" aria-labelledby="exportSettingsTitle">
+      <div class="plugin-dialog-head"><h2 id="exportSettingsTitle">Export settings</h2><button class="btn" id="exportSettingsClose" type="button">Close</button></div>
+      <form id="exportSettingsForm" class="plugin-dialog-body">
+        <p>Folders and this computer's connection to ChatGPT are left out.</p>
+        <label class="setting"><span class="setting-text"><b>Include saved keys</b><em>Locked with a passphrase you choose.</em></span><input id="exportSettingsKeys" type="checkbox" /></label>
+        <div id="exportSettingsPassphrase" hidden>
+          <label class="plugin-field" for="exportSettingsPass"><span>Passphrase</span><input id="exportSettingsPass" type="password" maxlength="1024" autocomplete="new-password" /><small>At least 8 characters. A lost passphrase cannot be recovered.</small></label>
+          <label class="plugin-field" for="exportSettingsPassAgain"><span>Passphrase again</span><input id="exportSettingsPassAgain" type="password" maxlength="1024" autocomplete="new-password" /></label>
+        </div>
+        <p id="exportSettingsError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="exportSettingsCancel" type="button">Cancel</button><button class="btn btn-solid" id="exportSettingsSubmit" type="submit">Export</button></div>
+      </form>
+    </dialog>
+    <dialog class="plugin-dialog backup-dialog" id="importSettingsDialog" aria-labelledby="importSettingsTitle">
+      <div class="plugin-dialog-head"><h2 id="importSettingsTitle">Import settings</h2><button class="btn" id="importSettingsClose" type="button">Close</button></div>
+      <form id="importSettingsForm" class="plugin-dialog-body">
+        <p id="importSettingsSource"></p>
+        <p id="importSettingsSummary" role="status"></p>
+        <p class="backup-wider" id="importSettingsWider" hidden></p>
+        <details class="backup-review" id="importSettingsReview" hidden><summary><svg class="disclosure-chevron sum-chev" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path d="M6 3.5 10.5 8 6 12.5"></path></svg>Review changes</summary><ul id="importSettingsChanges"></ul></details>
+        <label class="setting" id="importSettingsKeysRow" hidden><span class="setting-text"><b id="importSettingsKeysLabel"></b><em>Needs the passphrase chosen when the backup was made.</em></span><input id="importSettingsKeys" type="checkbox" /></label>
+        <label class="plugin-field" for="importSettingsPass" id="importSettingsPassRow" hidden><span>Passphrase</span><input id="importSettingsPass" type="password" maxlength="1024" autocomplete="off" /></label>
+        <p id="importSettingsError" class="plugin-error" role="alert" hidden></p>
+        <div class="pet-delete-actions"><button class="btn" id="importSettingsCancel" type="button">Cancel</button><button class="btn btn-solid" id="importSettingsSubmit" type="submit">Import</button></div>
+      </form>
     </dialog>
     <dialog id="setupProfileDialog" class="setup-profile-dialog" aria-labelledby="setupProfileDialogTitle">
       <form id="setupProfileForm">

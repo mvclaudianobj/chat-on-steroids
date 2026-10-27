@@ -8,7 +8,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
  */
 
 import path from 'node:path';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
+import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
@@ -33,7 +33,9 @@ import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, onLog, sna
 import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
-import { initSecretsPath, keychainReadPending } from './secrets.js';
+import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
+import { installPhonePush, pushToPhone } from './phone-push.js';
+import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
@@ -82,6 +84,7 @@ import { initControlApiPath, shutdownControlApi, startControlApi } from './contr
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
 import { restoreTrustedChats } from './session/trusted-chats.js';
+import { restoreRouteHold } from './tunnel/route-settle.js';
 import { stopComputerHelper } from './computer/index.js';
 import {
   GOAL_OBJECTIVES_STATE,
@@ -124,8 +127,9 @@ import {
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath, WINDOWS_APP_USER_MODEL_ID } from './window-icon.js';
+import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
-import { showConnectionLossNotice } from './connection-loss-notice.js';
+import { connectionLossLine, showConnectionLossNotice } from './connection-loss-notice.js';
 import { requireMarkspanelLogin, startMarkspanelSessionMonitor } from './markspanel-auth.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
@@ -286,6 +290,12 @@ function createWindow(): void {
 
 /** When a Session-finish or stuck notice last went out per chat, so a turn-done notice does not repeat it. */
 const chatNoticeAt = new Map<string, number>();
+/** A chat that waits for the person, for the phone: its own rules decide whether it goes out. */
+const phoneNeedsYou = (sessionId: string): void => {
+  void getSession(sessionId).catch(() => null).then(summary => pushToPhone({ kind: 'needs-you', sessionId,
+    chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null }));
+};
+
 function showWindow(): void {
   // Defense in depth for every current or future native activation source. The explicit gate
   // below additionally protects the long pre-window startup interval, while this invariant makes
@@ -301,6 +311,7 @@ function showWindow(): void {
 }
 
 setFinishNotifier((title, body, sessionId, turnId) => {
+  phoneNeedsYou(sessionId);
   if (window?.isFocused() || !Notification.isSupported()) return false;
   chatNoticeAt.set(sessionId, Date.now());
   const write = (): void => {
@@ -323,6 +334,7 @@ setFinishNotifier((title, body, sessionId, turnId) => {
   return true;
 });
 setStuckNotifier((title, body, sessionId, opens = 'app') => {
+  phoneNeedsYou(sessionId);
   // A person looking at the app already has the timeline note this accompanies; interrupting
   // them with the same sentence is noise, exactly as the finish notice treats a focused window.
   if (window?.isFocused() || !Notification.isSupported()) return false;
@@ -342,14 +354,17 @@ setStuckNotifier((title, body, sessionId, opens = 'app') => {
   notice.show();
   return true;
 });
-setConnectionLossNotifier(surface => showConnectionLossNotice(surface, {
-  isQuitting: () => quitting,
-  isFocused: () => window?.isFocused() ?? false,
-  isSupported: () => Notification.isSupported(),
-  text: mainText,
-  create: options => new Notification(options),
-  showWindow
-}));
+setConnectionLossNotifier(surface => {
+  if (!quitting) void pushToPhone({ kind: 'failed', detail: connectionLossLine(surface, mainText) });
+  return showConnectionLossNotice(surface, {
+    isQuitting: () => quitting,
+    isFocused: () => window?.isFocused() ?? false,
+    isSupported: () => Notification.isSupported(),
+    text: mainText,
+    create: options => new Notification(options),
+    showWindow
+  });
+});
 
 setBrowserWorkArea(() => screen.getPrimaryDisplay().workArea);
 
@@ -523,6 +538,20 @@ void app.whenReady().then(async () => {
   onSessionChange(() => void keepAwake.refresh());
   setInterval(() => void keepAwake.refresh(), 60_000).unref();
   void keepAwake.refresh();
+  // Phone notifications (ntfy): the app's network stack (system proxy) and the system's own idle
+  // state, where three minutes without input, or a locked screen, count as away.
+  installPhonePush({
+    settings: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }),
+    // A failed read is reported, not treated as no token (phone-push.ts refuses to send).
+    token: () => getSecret('ntfyToken'),
+    now: () => Date.now(),
+    idleState: () => powerMonitor.getSystemIdleState(180),
+    post: async (url, body, headers) => {
+      const reply = await net.fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(10_000) });
+      return { ok: reply.ok, status: reply.status };
+    },
+    log: logInfo
+  });
   // Codex's turn-completion notifications: a finished answer in a background window.
   const turnNotifier = createTurnNotifier({
     getSession,
@@ -534,6 +563,11 @@ void app.whenReady().then(async () => {
     focused: () => window?.isFocused() === true,
     automated: conversationId => goalSwitchEnabledFor(conversationId),
     recentlyNotified: id => Date.now() - (chatNoticeAt.get(id) ?? 0) < 120_000,
+    turnStartedAt: async id => {
+      const [start] = await readRecentEvents(id, 1, { kinds: ['turn_start'] });
+      return start?.time ?? null;
+    },
+    phone: event => void pushToPhone({ kind: 'finished', ...event }),
     show: (title, body, sessionId) => {
       const notice = new Notification({ title, body });
       notice.on('click', () => {
@@ -584,6 +618,8 @@ void app.whenReady().then(async () => {
   // endpoints can accept work, just as blocked-chat policy is restored above.
   await restoreTrustedChats();
   if (windowActivation.isDisabled()) return;
+  // This computer's learned hold after a new tunnel-client (#1788), before any tunnel starts.
+  await restoreRouteHold();
   setAgentConversationLookup(agentConversation);
   // The prime's chat is the user's own, so no extension report can name it. It is bound
   // when the recorder manages to place the prime's first call. See recordToolCall.
@@ -669,13 +705,26 @@ void app.whenReady().then(async () => {
   // state and does not run until its first coarse interval after this point.
   startAgentRuntimeGc();
 
-  // Strict CSP for our own page. There is no remote content and no inline script.
+  // Do not let the new img-src origin permit arbitrary paths, tracking parameters,
+  // or requests of another type to that host. Redirects are checked again by CSP:
+  // an image cannot follow a Location header to a different remote origin.
+  // Electron supports only one onBeforeRequest listener per session: registering
+  // another one anywhere on defaultSession would replace this URL safety gate.
+  // Keep future request checks inside this listener rather than adding a second.
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['https://images.openai.com/*'] }, (details, callback) => {
+    const allowed = approvedChatGptImageRequest(details.url, details.resourceType, details.method);
+    if (!allowed) logWarn('static ChatGPT image request refused: unapproved URL or resource type');
+    callback({ cancel: !allowed });
+  });
+
+  // Strict CSP for our own page. Only the verified first-party static image host is
+  // remote; scripts, connections and all other capabilities remain app-local.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'none'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
+          RENDERER_CONTENT_SECURITY_POLICY
         ]
       }
     });

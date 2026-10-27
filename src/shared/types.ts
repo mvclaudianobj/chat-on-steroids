@@ -1,3 +1,4 @@
+import type { PhonePushSettings } from './phone-push.js';
 import type { ReasoningEffort, RecordingStorageLimitGiB } from './session.js';
 import type { PluginRefreshStatus } from './plugin-refresh.js';
 import { WINDOWS_COMPUTER_READ_METHODS, WINDOWS_COMPUTER_INPUT_METHODS } from './windows-computer.js';
@@ -166,10 +167,14 @@ export interface UiPrefs {
   finishTool?: boolean;
   planBackend?: 'chatgpt' | 'api';
   finishAction?: 'notify' | 'goal';
+  /** Leave unverified Goal completion pending; Session finish may notify. Off by default. */
+  finishHoldOnStop?: boolean;
   finishLeadMinutes?: number;
   developerMode?: boolean;
   /** Rotating joke words instead of "Working" in a chat's status line. Off by default. */
   playfulStatus?: boolean;
+  /** Screen readers hear "Reply finished" when a turn completes in the open chat. Off by default. */
+  announceTurns?: boolean;
   /** A random fun-fact aside at the end of each automatic Continue, marked for the model to ignore. Off by default. */
   playfulContinue?: boolean;
   /** The person's own words in place of the built-in automatic Continue phrase (silence recovery only). Unset means the built-in phrases. */
@@ -219,6 +224,10 @@ export interface UiPrefs {
   keepScreenAwake?: boolean;
   /** Default screenshots to the active window instead of the whole primary monitor. */
   privacyScreenshots: boolean;
+  /** Phone notifications through ntfy; missing means off. */
+  phonePush?: PhonePushSettings;
+  /** Mask API keys, tokens, private keys and secret settings in what tools return to ChatGPT. Missing means on. */
+  secretsShield?: boolean;
   /** Browser for app-originated launches; connected source tabs retain placement ownership. */
   chatBrowser?: ChatBrowser;
   /** Where a minimized built-in browser window goes (default: the taskbar or Dock). */
@@ -877,6 +886,8 @@ export interface AppState {
   hasGoalKey: boolean;
   /** True when a custom-provider key is stored. Only meaningful beside a custom endpoint, which may also run keyless. */
   hasCustomProviderKey: boolean;
+  /** An ntfy access token is saved (never the token itself). */
+  hasPhonePushToken?: boolean;
   /** Resolved path of the tunnel binary we would run, or null if we cannot find one. */
   resolvedBinary: string | null;
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */
@@ -984,4 +995,19 @@ export function capabilityTools(capability: Capability, platform?: PlatformFamil
     case 'clipboardWrite': return ['write_clipboard'];
     default: return [];
   }
+}
+
+/** A settings backup the person chose to import, as the page sees it: a summary, never its keys. */
+export interface SettingsBackupChoice {
+  /** Names this choice for the import that follows; one use. */
+  token: string;
+  file: string;
+  appVersion: string | null;
+  exportedAt: string | null;
+  /** Dotted paths of the settings that would change here, e.g. `ui.theme`. */
+  changed: string[];
+  /** Of those, the ones that give ChatGPT more access (`widerAccess`): a permission on, read-only off… */
+  wider: string[];
+  /** Saved keys the backup carries, locked with its passphrase. */
+  keyCount: number;
 }

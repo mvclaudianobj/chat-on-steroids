@@ -1375,9 +1375,42 @@ describe('extension update holds', () => {
     expect(lines().at(-1)!.message).toContain('already tried this update once; reload it in chrome://extensions');
     await status('browser-updates-itself');
     expect(lines().at(-1)!.message).toContain('Firefox updates the signed add-on itself');
-    // An unknown reason is not logged, and a report without a hold resets it.
+    // An unknown reason is not logged; going back to an earlier reason is a change and is logged.
     await status('made-up'); await status(); await status('chat-busy');
     expect(lines().slice(before)).toHaveLength(4);
+  });
+
+  // VM, 2026-10-20/21: Firefox suspends the add-on's background page between polls, and each wake
+  // reported no hold first, so the same "Firefox updates the signed add-on itself" was logged 907
+  // times in 36 hours. A report without a hold no longer forgets the reason already logged.
+  it('logs a hold once while its browser keeps reporting no hold in between, and again after six hours', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = (updateHold?: string) => request('POST', '/status', { browser: 'firefoxbrowser0000002',
+      body: { openConversations: [], ...(updateHold ? { updateHold } : {}) } });
+    for (let round = 0; round < 5; round += 1) { await status(); await status('browser-updates-itself'); }
+    expect(lines().slice(before)).toHaveLength(1);
+    const now = Date.now();
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(now + 6 * 60 * 60_000 + 1);
+    try {
+      await status('browser-updates-itself');
+      expect(lines().slice(before)).toHaveLength(2);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('logs the same hold again when this app ships a different extension build', async () => {
+    await pair();
+    const lines = () => getLog().filter(entry => entry.message.includes('browser extension waits to update'));
+    const before = lines().length;
+    const status = () => request('POST', '/status', { browser: 'firefoxbrowser0000003', body: { openConversations: [], updateHold: 'browser-updates-itself' } });
+    try {
+      setShippedExtensionBuildForTest('aaaaaaaaaaaa');
+      await status(); await status();
+      setShippedExtensionBuildForTest('bbbbbbbbbbbb');
+      await status(); await status();
+      expect(lines().slice(before)).toHaveLength(2);
+    } finally { setShippedExtensionBuildForTest(); }
   });
 
   // 2.1.39 release round: Chrome (updated) and Firefox (waiting for its signed add-on) both report
@@ -2612,6 +2645,9 @@ describe('automatic compaction', () => {
 
     expect(seen, 'the repair was still being offered after forty reads').toBeLessThan(40);
     expect(await offered(), 'it came back after being retired').toBe(false);
+    // #1787: the chat's own caption says so too, rather than counting on as if work went on.
+    const stoppedSession = (await findSessionByConversation(conversationId))!;
+    expect((await sessionControlsFor(stoppedSession.id)).pageless, 'the chat window was not told recovery stopped').toBe(true);
 
     // The ceiling above bounds one repair, not the supply of them: the chat goes quiet, the sweep
     // reads silence, and a fresh repair used to arrive with its own budget. Measured on 2026-09-21
@@ -2633,6 +2669,7 @@ describe('automatic compaction', () => {
     ] } });
     await settled();
     expect(await offered(), 'a page that came back was still refused recovery').toBe(true);
+    expect((await sessionControlsFor(stoppedSession.id)).pageless, 'a page that came back still read as stopped').toBe(false);
 
     const session = (await findSessionByConversation(conversationId))!;
     const notes = (await readEvents(session.id, { kinds: ['note'] }))
@@ -4051,6 +4088,26 @@ describe('capturing a sent handoff from the recorder', () => {
     expect((await sessionStoreModule.readHandoff(sessionId, handoffId!))?.text).toContain('carry on');
   });
 
+  // #1852, the same gap for Compact & Resume: chat A's page in a browser that is not the chosen one
+  // would open chat B there, and its page is refused as not chosen. B stays for the chosen browser.
+  it('hands chat B to no page in a browser that is not the chosen one', async () => {
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    const before = getConfig().ui.chatBrowser;
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      await request('GET', '/status', { browser: builtIn, host: 'cos' });
+      const conversationId = 'c0c0c0c0-7870-4000-8000-000000000009';
+      const { token, anchor } = await sentHandoff(conversationId);
+      await request('POST', '/events', { body: { conversationId, events: generation('handoff-turn', 'assistant-final', `carry on\n\n${SAMPLE_BRIEF}`) } });
+      const bound = await request('POST', '/compact', { body: { conversationId, token, sourceMessageId: anchor }, browser: chrome, host: 'browser' });
+      expect(bound.body).toMatchObject({ bound: true, stored: true });
+      expect(bound.body.placement).toBeNull();
+    } finally {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
+    }
+  });
+
   it('keeps over 120 KB of a final handoff through /events, overflow storage and capture', async () => {
     await pair();
     const conversationId = 'c0c0c0c0-7870-4000-8000-000000000005';
@@ -5011,6 +5068,42 @@ describe('delivering a bootstrap', () => {
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }
     expect(command.text).not.toContain('SCOPED_AGENTS_TAIL');
+  });
+
+  it('puts a chat recorded inside a linked ChatGPT Project into its project before it runs commands (#1744)', async () => {
+    const fs = await import('node:fs/promises');
+    const path = await import('node:path');
+    const { addProject, armProjectCreate, claimProjectCreate, completeProjectCreate, getSessionProject } = await import('../src/main/projects.js');
+    const { getSession } = await import('../src/main/session/store.js');
+    const first = path.join(dir, 'first-root-1744');
+    const folder = path.join(dir, 'linked-project-1744');
+    await fs.mkdir(first, { recursive: true });
+    await fs.mkdir(folder, { recursive: true });
+    // Without the project, a command would run in the first approved folder.
+    await saveConfig({ ...suiteConfig, roots: [{ name: 'first', path: first }, { name: 'linked', path: folder }] });
+    const project = await addProject(folder);
+    const requestId = (project.chatgpt as { requestId: string }).requestId;
+    const chatgptProject = `g-p-${'c'.repeat(32)}`;
+    expect(await claimProjectCreate(requestId, 'page')).toBe(true);
+    expect(await armProjectCreate(requestId, 'page')).toBe(true);
+    expect(await completeProjectCreate(requestId, 'page', chatgptProject)).toBe(true);
+    await pair();
+    const record = (conversationId: string, extra: Record<string, unknown>) => request('POST', '/events', {
+      body: { conversationId, ...extra, events: [{ kind: 'user_message', time: Date.now(), text: 'list the files', messageId: `m-${conversationId}` }] }
+    });
+    const inside = await record('17440000-0000-4000-8000-000000000001', { chatgptProject });
+    expect(inside.body).toMatchObject({ stored: 1 });
+    expect((await getSession(inside.body.sessionId as string))?.projectId).toBe(project.id);
+    expect(await getSessionProject(inside.body.sessionId as string)).toMatchObject({ virtual: '/linked' });
+    // Outside any Project, or with a malformed value, a chat stays as it was.
+    const outside = await record('17440000-0000-4000-8000-000000000002', {});
+    expect((await getSession(outside.body.sessionId as string))?.projectId).toBeUndefined();
+    const odd = await record('17440000-0000-4000-8000-000000000003', { chatgptProject: 'g-p-../../x' });
+    expect(odd.status).toBe(200);
+    expect((await getSession(odd.body.sessionId as string))?.projectId).toBeUndefined();
+    // A worker's events (its origin may not be recorded yet) never pick a project this way.
+    const worker = await record('17440000-0000-4000-8000-000000000004', { chatgptProject, agent: 'worker-1' });
+    expect((await getSession(worker.body.sessionId as string))?.projectId).toBeUndefined();
   });
 
   it('redeems a restored broker-owned worktree as the worker cwd, preserves source instructions and rejects a lost lease', async () => {
@@ -8290,6 +8383,43 @@ describe('a worker chat that never opens', () => {
     } finally {
       setShippedExtensionBuildForTest();
       const closed = once(socket, 'close'); socket.close(); await closed;
+    }
+  });
+
+  // #1852: with the built-in browser chosen, the prime chat still open in Chrome collected one of
+  // three worker tabs through its page's /activity poll. Chrome opened it, and the redeem route then
+  // refused that page as not the chosen browser, so the worker timed out.
+  it('hands a worker tab to no page in a browser that is not the chosen one', async () => {
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    const before = getConfig().ui.chatBrowser;
+    await pair();
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      await request('GET', '/status', { browser: builtIn, host: 'cos' });
+      const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+      try {
+        const prime = '6addb72e-42c0-83eb-be7c-746ff547fa01';
+        await createSession({ conversationId: prime });
+        spawn({ workers: [{ task: 'built-in placement probe' }], caller: { conversationId: prime } });
+        // The prime chat's page in Chrome polls its own activity the whole time the tab is offered.
+        for (let poll = 0; poll < 40; poll++) {
+          const activity = await request('GET', `/activity?conversationId=${prime}`, { browser: chrome, host: 'browser' });
+          expect(activity.status).toBe(200);
+          expect(activity.body.placement).toBeNull();
+          await new Promise(resolve => setTimeout(resolve, 25));
+        }
+        // Said once, not once per poll, and only because a tab was waiting for this chat.
+        expect(getLog().filter(entry => entry.message.includes('/activity withheld a tab to open')).length).toBe(1);
+        let placement: any;
+        await vi.waitFor(async () => {
+          placement ||= (await request('GET', '/status', { browser: builtIn, host: 'cos' })).body.placement;
+          expect(placement?.id).toBeTruthy();
+        }, { timeout: 15_000, interval: 50 });
+      } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
+    } finally {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
     }
   });
 
