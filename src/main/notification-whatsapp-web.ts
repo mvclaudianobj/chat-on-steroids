@@ -103,9 +103,11 @@ function scheduleReconnect(): void {
   restart = setTimeout(() => {
     restart = null;
     void beginConnect().catch(error => {
-      if (wantConnection) status = {
-        state: 'error', reason: error instanceof WhatsAppPairingError ? error.issue : 'unknown', stage: status.stage
-      };
+      if (!wantConnection) return;
+      status = { state: 'error', reason: error instanceof WhatsAppPairingError ? error.issue : 'unknown', stage: status.stage };
+      // A transient filesystem/network failure on the retry itself must not
+      // strand a previously connected session until a manual Connect click.
+      scheduleReconnect();
     });
   }, backoff);
   restart.unref();

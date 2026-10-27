@@ -400,6 +400,27 @@ it('does not reconnect when shutdown supersedes an in-flight startup credential 
   expect(await web.getWhatsAppWebStatus()).toEqual({ state: 'disconnected' });
 });
 
+it('retries a transient storage failure during automatic reconnect and returns to connected', async () => {
+  await web.startWhatsAppWeb();
+  mocks.sockets[0]!.ev.emit('connection.update', { connection: 'open' });
+  const mkdirSpy = vi.spyOn(fs, 'mkdir').mockImplementationOnce(async () => {
+    throw Object.assign(new Error('synthetic unavailable drive'), { code: 'EIO' });
+  });
+  vi.useFakeTimers();
+  try {
+    mocks.sockets[0]!.ev.emit('connection.update', { connection: 'close', lastDisconnect: { error: new Error('synthetic network') } });
+    await vi.advanceTimersByTimeAsync(3_100);
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'error', reason: 'storage_unavailable' });
+    mkdirSpy.mockRestore();
+    expect(vi.getTimerCount()).toBeGreaterThan(0);
+    await vi.advanceTimersByTimeAsync(6_100);
+    vi.useRealTimers();
+    await vi.waitFor(() => expect(mocks.sockets).toHaveLength(2));
+    mocks.sockets[1]!.ev.emit('connection.update', { connection: 'open' });
+    expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected' });
+  } finally { vi.useRealTimers(); }
+});
+
 it('flushes a queued registered auth update on graceful shutdown and reconnects after process reinitialization', async () => {
   await web.startWhatsAppWeb();
   const oldSocket = mocks.sockets[0]!;
