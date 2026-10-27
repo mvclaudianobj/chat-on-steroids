@@ -29,6 +29,7 @@ export interface WhatsAppDuplexDeps {
   approvals(): DuplexApproval[];
   answer(conversationId: string, cardId: string, choice: 'allow' | 'deny'): { ok: true } | { ok: false; error: string };
   latest(sessionId: string): Promise<{ id: string; text: string; seq: number } | null>;
+  completedSince?(sessionId: string, afterSeq: number): Promise<Array<{id:string; text:string; seq:number}>>;
   /** Exact durable user-message receipt, not mere enqueue or browser pickup. */
   delivered(sessionId: string, inputId: string): Promise<number | null>;
   load(): Promise<unknown>;
@@ -245,11 +246,16 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
             dirty = true;
             continue;
           }
-          if (!latest || latest.seq <= marker.seq || latest.id === marker.id) continue;
-          if (!await respond(sender, 'Resposta de Chat Marks:\n' + latest.text)) continue;
-          state.mirrored[sender] = { sessionId, seq: latest.seq, id: latest.id };
-          dirty = true;
-          await commit(state);
+          const answers = deps.completedSince
+            ? await deps.completedSince(sessionId, marker.seq).catch(() => [])
+            : latest && latest.seq > marker.seq ? [latest] : [];
+          for (const answer of answers.sort((a,b)=>a.seq-b.seq)) {
+            if (answer.seq <= state.mirrored[sender]!.seq) continue;
+            if (!await respond(sender, 'Resposta de Chat Marks:\n' + answer.text)) break;
+            state.mirrored[sender] = { sessionId, seq: answer.seq, id: answer.id };
+            dirty = true;
+            await commit(state);
+          }
         }
         if (dirty) await commit(state);
       });
@@ -278,6 +284,18 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
       });
     }
   };
+}
+
+export function completedWhatsAppAnswers(
+  messages: readonly {kind:string;turnId?:string;final?:boolean;time:number;seq:number;messageId?:string;message?:{text:string}}[],
+  boundaries: readonly {kind:string;turnId?:string;outcome?:string;time:number;seq:number}[],
+  afterSeq:number
+): Array<{id:string;seq:number;text:string}> {
+  const completed = new Map(boundaries.filter(e=>e.kind==='turn_end' && e.outcome==='completed' && e.turnId)
+    .map(e=>[e.turnId!,e.time]));
+  return messages.filter(e=>e.kind==='assistant_message' && e.final && e.turnId &&
+    completed.has(e.turnId) && e.time<=completed.get(e.turnId)! && e.seq>afterSeq && !!e.message?.text?.trim())
+    .sort((a,b)=>a.seq-b.seq).map(e=>({id:`${e.seq}:${e.messageId??''}`,seq:e.seq,text:e.message!.text}));
 }
 
 /** Reads the last finished answer even if another turn has already started.

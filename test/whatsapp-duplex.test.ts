@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createWhatsAppDuplex, lastRelayableWhatsAppAnswer } from '../src/main/whatsapp-duplex.js';
+import { createWhatsAppDuplex, lastRelayableWhatsAppAnswer, completedWhatsAppAnswers } from '../src/main/whatsapp-duplex.js';
 
 const sessions = [
   { id: 'session-first-123', title: 'Projeto Alpha', conversationId: 'chat-alpha', updatedAt: 30 },
@@ -29,6 +29,38 @@ function setup(enabled = true) {
   return { duplex, sendText, send, answer, setLatest: (value: { id: string; text: string; seq: number }) => { latest = value; }, setDelivery: (value: number | null) => { deliverySeq = value; }, setCards: (value: typeof cards) => { cards = value; }, getState: () => state };
 }
 describe('WhatsApp bidirectional owner-only routing', () => {
+  it('collects every new completed reply between 8-second polls without relaying streaming or aborted turns', () => {
+    const messages = [
+      {kind:'assistant_message',turnId:'turn-1',final:true,seq:10,time:100,messageId:'m1',message:{text:'final 1'}},
+      {kind:'assistant_message',turnId:'turn-2',final:true,seq:12,time:150,messageId:'m2',message:{text:'final 2'}},
+      {kind:'assistant_message',turnId:'turn-3',final:false,seq:14,time:190,messageId:'m3',message:{text:'partial'}},
+      {kind:'assistant_message',turnId:'turn-4',final:true,seq:16,time:195,messageId:'m4',message:{text:'interrupted'}}
+    ];
+    const ends=[
+      {kind:'turn_end',turnId:'turn-1',outcome:'completed',seq:11,time:110},
+      {kind:'turn_end',turnId:'turn-2',outcome:'completed',seq:13,time:160},
+      {kind:'turn_end',turnId:'turn-4',outcome:'interrupted',seq:17,time:210}
+    ];
+    expect(completedWhatsAppAnswers(messages,ends,9).map(r=>r.text)).toEqual(['final 1','final 2']);
+    expect(completedWhatsAppAnswers(messages,ends,10).map(r=>r.text)).toEqual(['final 2']);
+  });
+  it('mirrors all completed answers since the last acknowledged sequence in order', async () => {
+    let saved: unknown = null;
+    const sendText=vi.fn(async (_number:string,_text:string)=>undefined);
+    let answers=[{id:'baseline',seq:1,text:'old answer'}];
+    const duplex=createWhatsAppDuplex({
+      allowed:async()=>[sender],sessions:async()=>sessions,active:async()=>sessions[0]!.id,
+      sendText,send:async()=>({id:'x',state:'queued'}),approvals:()=>[],answer:()=>({ok:false as const,error:'none'}),
+      latest:async()=>answers.at(-1)??null,
+      completedSince:async(_sid,after)=>answers.filter(a=>a.seq>after),
+      delivered:async()=>null,load:async()=>saved,save:async value=>{saved=structuredClone(value)}
+    });
+    await duplex.incoming(sender,'pick','/usar 1');
+    sendText.mockClear();
+    answers=[...answers,{id:'a',seq:2,text:'first new'},{id:'b',seq:3,text:'second new'}];
+    await duplex.changed([]);await duplex.changed([]);
+    expect(sendText.mock.calls.map(c=>c[1])).toEqual(['Resposta de Chat Marks:\nfirst new','Resposta de Chat Marks:\nsecond new']);
+  });
   it('recognizes last completed answer even when the next turn is already streaming', () => {
     const events = [
       { kind: 'assistant_message', final: true, time: 200, seq: 10, messageId: 'done', message: { text: 'Resposta final' } },

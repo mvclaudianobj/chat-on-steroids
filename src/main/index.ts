@@ -51,7 +51,7 @@ import { sendDesktopInput } from './session/start-input.js';
 import { createTurnNotifier } from './turn-notifications.js';
 import { createOutboundTurnWatcher } from './notification-events.js';
 import { getWhatsAppWebStatus, resumeWhatsAppWeb, sendWhatsAppWeb, setWhatsAppWebInbound, stopWhatsAppWeb } from './notification-whatsapp-web.js';
-import { createWhatsAppDuplex, lastRelayableWhatsAppAnswer } from './whatsapp-duplex.js';
+import { createWhatsAppDuplex, lastRelayableWhatsAppAnswer, completedWhatsAppAnswers } from './whatsapp-duplex.js';
 import { redactSecretText } from './redaction.js';
 import { watchWhatsAppResumeOnGreen } from './whatsapp-resume-on-green.js';
 import { notificationSettings, queueOutboundNotice } from './notification-center.js';
@@ -800,6 +800,10 @@ void app.whenReady().then(async () => {
     delivered: async (sessionId, inputId) => {
       const events = await readRecentEvents(sessionId, 100, { kinds: ['user_message'] });
       return events.find(event => event.kind === 'user_message' && event.inputId === inputId && event.inputDelivery !== 'offered')?.seq ?? null;
+    },
+    completedSince: async (sessionId, afterSeq) => {
+      const events = await readRecentEvents(sessionId, 200, { kinds: ['assistant_message', 'turn_end'] });
+      return completedWhatsAppAnswers(events, events, afterSeq);
     },
     load: () => readDurable('whatsapp-duplex-control'),
     save: state => writeDurableNow('whatsapp-duplex-control', state)
