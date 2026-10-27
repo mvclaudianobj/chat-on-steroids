@@ -356,6 +356,49 @@ it('only resumes with stored auth files', async () => {
   await web.resumeWhatsAppWeb();
   expect(mocks.sockets).toHaveLength(1);
 });
+it('does not restart a persisted WhatsApp session after shutdown wins a delayed resume read', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'creds.json'), '{"registered":true}');
+  const originalRead = fs.readFile.bind(fs);
+  let release!: () => void;
+  const gate = new Promise<void>(resolve => { release = resolve; });
+  let observed!: () => void;
+  const reached = new Promise<void>(resolve => { observed = resolve; });
+  vi.spyOn(fs, 'readFile').mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+    if (String(args[0]).endsWith('creds.json')) { observed(); await gate; }
+    return originalRead(...args);
+  }) as typeof fs.readFile);
+  const starting = web.resumeWhatsAppWeb();
+  await reached;
+  const stopping = web.stopWhatsAppWeb();
+  release();
+  await Promise.all([starting, stopping]);
+  expect(mocks.sockets).toHaveLength(0);
+  expect(await web.getWhatsAppWebStatus()).toEqual({ state: 'disconnected' });
+});
+
+it('does not reconnect when shutdown supersedes an in-flight startup credential read', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'creds.json'), '{"registered":true}');
+  const original = fs.readFile.bind(fs);
+  let unblock!: () => void;
+  const blocked = new Promise<void>(resolve => { unblock = resolve; });
+  let entered!: () => void;
+  const started = new Promise<void>(resolve => { entered = resolve; });
+  vi.spyOn(fs, 'readFile').mockImplementation((async (...args: Parameters<typeof fs.readFile>) => {
+    if (String(args[0]).endsWith('creds.json')) { entered(); await blocked; }
+    return original(...args);
+  }) as typeof fs.readFile);
+  const resume = web.resumeWhatsAppWeb();
+  await started;
+  const stop = web.stopWhatsAppWeb();
+  unblock();
+  await Promise.all([resume, stop]);
+  expect(mocks.sockets).toHaveLength(0);
+  expect(await web.getWhatsAppWebStatus()).toEqual({ state: 'disconnected' });
+});
 
 it('flushes a queued registered auth update on graceful shutdown and reconnects after process reinitialization', async () => {
   await web.startWhatsAppWeb();

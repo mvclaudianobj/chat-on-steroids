@@ -284,12 +284,13 @@ export async function stopWhatsAppWeb(): Promise<void> {
 }
 export async function resumeWhatsAppWeb(): Promise<void> {
   if (wantConnection || status.state === 'connected' || status.state === 'connecting' || status.state === 'qr') return;
+  const resumeEpoch = generation;
   try {
     const files = await fs.readdir(directory());
     if (files.includes('creds.json')) {
       const raw = await fs.readFile(path.join(directory(), 'creds.json'), 'utf8');
       const creds = JSON.parse(raw) as { registered?: unknown };
-      if (creds.registered === true) await startWhatsAppWeb();
+      if (creds.registered === true && resumeEpoch === generation && !disconnecting) await startWhatsAppWeb();
     }
   } catch { /* No existing pairing. */ }
 }
