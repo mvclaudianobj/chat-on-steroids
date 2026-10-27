@@ -90,6 +90,17 @@ afterEach(async () => {
 });
 
 describe('WhatsApp development environment: complete duplex chat', () => {
+  it('sends one new desktop reply over Baileys to the explicitly selected WhatsApp phone', async () => {
+    const sock = mocks.sockets.at(-1)!;
+    await receive('choose-desktop', '/usar 1');
+    const count = sock.sendMessage.mock.calls.length;
+    state.last = { id: 'completed-desktop-answer', text: 'Mensagem do Chat Marks concluída', seq: 60 };
+    await duplex.changed([]);
+    await duplex.changed([]);
+    expect(sock.sendMessage).toHaveBeenCalledTimes(count + 1);
+    expect(sock.sendMessage.mock.calls.at(-1)?.[1]?.text).toContain('Mensagem do Chat Marks concluída');
+    expect(sock.sendMessage.mock.calls.at(-1)?.[0]).toBe(`${owner}@s.whatsapp.net`);
+  });
   it('menus, selecting chat, queued input, confirmed reply and host-bound one-time approval', async () => {
     const sock = mocks.sockets.at(-1)!;
     await receive('step-1', '/menu');
@@ -112,8 +123,9 @@ describe('WhatsApp development environment: complete duplex chat', () => {
     const beforeApproval = sock.sendMessage.mock.calls.length;
     await receive('step-5', '/aprovacoes');
     await vi.waitFor(() => expect(sock.sendMessage.mock.calls.length).toBeGreaterThan(beforeApproval));
-    expect(sock.sendMessage.mock.calls.at(-1)?.[1]?.text).toContain('card-dev-e2e-1');
-    await receive('step-6', '/aprovar card-dev-e2e-1');
+    expect(sock.sendMessage.mock.calls.at(-1)?.[1]?.text).toContain('/aprovar 1');
+    expect(sock.sendMessage.mock.calls.at(-1)?.[1]?.text).not.toContain('card-dev-e2e-1');
+    await receive('step-6', '/aprovar 1');
     await vi.waitFor(() => expect(approve).toHaveBeenCalledWith('native-chat-id', 'card-dev-e2e-1', 'allow'));
     expect(sock.sendMessage.mock.calls.at(-1)?.[1]?.text).toContain('não concede permissão permanente');
   });

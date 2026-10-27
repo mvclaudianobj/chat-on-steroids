@@ -7,13 +7,17 @@ export interface DuplexSession {
   id: string; title: string; conversationId: string | null; updatedAt: number;
 }
 export interface DuplexApproval {
-  conversationId: string; cardId: string; title: string; allow: boolean; outcome: string | null;
+  conversationId: string; cardId: string; title: string; allow: boolean; outcome: string | null; details?: string;
 }
 interface State {
   selected: Record<string, string>;
   receipts: string[];
   pending: Record<string, { sessionId: string; before: string | null; queuedId: string; at: number }>;
   alerts: Record<string, string>;
+  /** A short number refers only to the exact live card this phone was shown. */
+  approvalRefs: Record<string, { sessionId: string; conversationId: string; cardIds: string[]; at: number }>;
+  /** Final answers already shown to a deliberately selected phone; no bodies stored. */
+  mirrored: Record<string, { sessionId: string; seq: number; id: string }>;
 }
 export interface WhatsAppDuplexDeps {
   /** Whitelisted E.164 numbers (digits only); empty disables inbound completely. */
@@ -33,12 +37,13 @@ export interface WhatsAppDuplexDeps {
 
 const LIMIT = 400;
 const PENDING_MS = 60 * 60_000;
+const APPROVAL_REF_MS = 5 * 60_000;
 const numberPattern = /^\d{8,15}$/;
 function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 function validatedState(raw: unknown): State {
-  const state: State = { selected: {}, receipts: [], pending: {}, alerts: {} };
+  const state: State = { selected: {}, receipts: [], pending: {}, alerts: {}, approvalRefs: {}, mirrored: {} };
   if (!isRecord(raw)) return state;
   if (isRecord(raw.selected)) for (const [number, id] of Object.entries(raw.selected)) {
     if (numberPattern.test(number) && typeof id === 'string' && id.length >= 8 && id.length <= 64) state.selected[number] = id;
@@ -55,6 +60,23 @@ function validatedState(raw: unknown): State {
   }
   if (isRecord(raw.alerts)) for (const [number, id] of Object.entries(raw.alerts)) {
     if (numberPattern.test(number) && typeof id === 'string' && id.length < 256) state.alerts[number] = id;
+  }
+  if (isRecord(raw.approvalRefs)) for (const [number, value] of Object.entries(raw.approvalRefs)) {
+    if (!numberPattern.test(number) || !isRecord(value) || typeof value.sessionId !== 'string' ||
+        value.sessionId.length < 8 || value.sessionId.length > 64 ||
+        typeof value.conversationId !== 'string' || value.conversationId.length > 256 ||
+        !Array.isArray(value.cardIds) || value.cardIds.length === 0 || value.cardIds.length > 12 ||
+        !value.cardIds.every(id => typeof id === 'string' && id.length > 0 && id.length <= 256) ||
+        typeof value.at !== 'number' || !Number.isFinite(value.at) ||
+        Date.now() - value.at >= APPROVAL_REF_MS || value.at > Date.now() + 60_000) continue;
+    state.approvalRefs[number] = { sessionId: value.sessionId, conversationId: value.conversationId, cardIds: value.cardIds, at: value.at };
+  }
+  if (isRecord(raw.mirrored)) for (const [number, value] of Object.entries(raw.mirrored)) {
+    if (!numberPattern.test(number) || !isRecord(value) || typeof value.sessionId !== 'string' ||
+        value.sessionId.length < 8 || value.sessionId.length > 64 ||
+        typeof value.seq !== 'number' || !Number.isSafeInteger(value.seq) || value.seq < 0 ||
+        typeof value.id !== 'string' || value.id.length > 256) continue;
+    state.mirrored[number] = { sessionId: value.sessionId, seq: value.seq, id: value.id };
   }
   return state;
 }
@@ -88,10 +110,23 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
   };
   // Access may be revoked while awaiting sessions/host events. Check again at
   // the irreversible send boundary, not only at command admission.
-  const respond = async (number: string, body: string): Promise<void> => {
-    if (!await authorized(number)) return;
+  const respond = async (number: string, body: string): Promise<boolean> => {
+    if (!await authorized(number)) return false;
     await deps.sendText(number, clip(body));
+    return true;
   };
+  const rememberCards = (state: State, sender: string, session: DuplexSession, cards: DuplexApproval[]): void => {
+    if (!session.conversationId || !cards.length) { delete state.approvalRefs[sender]; return; }
+    state.approvalRefs[sender] = {
+      sessionId: session.id, conversationId: session.conversationId,
+      cardIds: cards.slice(0, 12).map(card => card.cardId), at: Date.now()
+    };
+  };
+  const displayCards = (session: DuplexSession, cards: DuplexApproval[]): string =>
+    cards.slice(0, 12).map((card, index) => {
+      const code = index + 1;
+      return `Aprovação ${code} em ${clip(session.title, 80)}\n${clip(card.title, 140)}${card.details ? '\n' + clip(card.details, 380) : ''}\n${card.allow ? '/aprovar ' + code + '\n' : ''}/negar ${code}\nDecisão para este cartão apenas; confirmação final ocorre no ChatGPT.`;
+    }).join('\n\n');
   return {
     incoming(sender, messageId, text) {
       return serial(async () => {
@@ -110,7 +145,7 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
         const arg = rest.join(' ').trim();
         const normalized = command?.toLocaleLowerCase('pt-BR') ?? '';
         if (['/menu', '/ajuda', '/help', '/start'].includes(normalized)) {
-          await respond(sender, 'Chat Marks · WhatsApp\n/chats — listar conversas\n/ativo — mostrar conversa selecionada\n/usar 1 — selecionar conversa\n/usar ativo — seguir chat ativo no computador\n/aprovacoes — solicitações pendentes\n/aprovar ID ou /negar ID — decisão para cartão exato\nEnvie uma mensagem normal para conversar.');
+          await respond(sender, 'Chat Marks · WhatsApp\n/chats — listar conversas\n/ativo — mostrar conversa selecionada\n/usar 1 — selecionar conversa\n/usar ativo — seguir chat ativo no computador\n/aprovacoes — solicitações pendentes\n/aprovar 1 ou /negar 1 — decisão para cartão exato\nEnvie uma mensagem normal para conversar.');
           return;
         }
         if (normalized === '/chats') {
@@ -125,6 +160,9 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
           state.selected[sender] = selected.id;
           delete state.pending[sender];
           delete state.alerts[sender];
+          delete state.approvalRefs[sender];
+          const last = await deps.latest(selected.id).catch(() => null);
+          state.mirrored[sender] = { sessionId: selected.id, seq: last?.seq ?? 0, id: last?.id ?? '' };
           await commit(state);
           await respond(sender, `Conversa selecionada: ${clip(selected.title, 130)}. Mensagens serão enviadas apenas a este chat.`);
           return;
@@ -137,14 +175,21 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
         if (normalized === '/aprovacoes' || normalized === '/aprovações') {
           if (!selected) { await respond(sender, 'Selecione um chat antes: /chats'); return; }
           const cards = deps.approvals().filter(card => card.conversationId === selected.conversationId && !card.outcome);
-          await respond(sender, cards.length ? cards.map(card => `Aprovação pendente em ${clip(selected.title, 80)}\nID: ${card.cardId}\n${card.allow ? '/aprovar ' + card.cardId + '\n' : ''}/negar ${card.cardId}`).join('\n\n') : 'Nenhuma aprovação pendente no chat selecionado.');
+          rememberCards(state, sender, selected, cards);
+          await commit(state);
+          await respond(sender, cards.length ? displayCards(selected, cards) : 'Nenhuma aprovação pendente no chat selecionado.');
           return;
         }
         if (normalized === '/aprovar' || normalized === '/negar') {
           if (!selected?.conversationId) { await respond(sender, 'Selecione o chat da aprovação: /chats'); return; }
-          const card = deps.approvals().find(item => item.conversationId === selected.conversationId && item.cardId === arg && !item.outcome);
+          const ref = state.approvalRefs[sender];
+          const short = /^\d{1,2}$/.test(arg) && Number(arg) >= 1 && Number(arg) <= 12;
+          const cardId = short && ref && Date.now() - ref.at < APPROVAL_REF_MS && ref.sessionId === selected.id &&
+            ref.conversationId === selected.conversationId ? ref.cardIds[Number(arg) - 1] : short ? null : arg;
+          const card = deps.approvals().find(item => item.conversationId === selected.conversationId && item.cardId === cardId && !item.outcome);
           if (!card || (normalized === '/aprovar' && !card.allow)) { await respond(sender, 'Cartão ausente, expirado ou não autorizado. Use /aprovacoes novamente.'); return; }
           const answer = deps.answer(card.conversationId, card.cardId, normalized === '/aprovar' ? 'allow' : 'deny');
+          if (answer.ok) { delete state.approvalRefs[sender]; await commit(state); }
           await respond(sender, answer.ok ? 'Decisão encaminhada ao Chat Marks. Aguarde a confirmação efetiva no ChatGPT; isto não concede permissão permanente.' : 'O cartão mudou ou a decisão não foi aceita. Use /aprovacoes novamente.');
           return;
         }
@@ -181,8 +226,29 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
           if (sentSeq === null || !latest || latest.seq <= sentSeq || latest.id === pending.before) continue;
           // Preserve the reply across WhatsApp outages: send before clearing the
           // pending receipt, and let the periodic connected poll retry it.
-          await respond(sender, 'Resposta de Chat Marks:\n' + latest.text);
+          if (!await respond(sender, 'Resposta de Chat Marks:\n' + latest.text)) continue;
           delete state.pending[sender]; dirty = true;
+          if (state.selected[sender] === pending.sessionId) {
+            state.mirrored[sender] = { sessionId: pending.sessionId, seq: latest.seq, id: latest.id };
+          }
+          await commit(state);
+        }
+        // Explicit /usar selection also subscribes this phone to future desktop
+        // replies. Never replay the previous chat history on first subscription.
+        const sessions = await available();
+        for (const [sender, sessionId] of Object.entries(state.selected)) {
+          if (state.pending[sender] || !await authorized(sender) || !sessions.some(s => s.id === sessionId)) continue;
+          const latest = await deps.latest(sessionId).catch(() => null);
+          const marker = state.mirrored[sender];
+          if (!marker || marker.sessionId !== sessionId) {
+            state.mirrored[sender] = { sessionId, seq: latest?.seq ?? 0, id: latest?.id ?? '' };
+            dirty = true;
+            continue;
+          }
+          if (!latest || latest.seq <= marker.seq || latest.id === marker.id) continue;
+          if (!await respond(sender, 'Resposta de Chat Marks:\n' + latest.text)) continue;
+          state.mirrored[sender] = { sessionId, seq: latest.seq, id: latest.id };
+          dirty = true;
           await commit(state);
         }
         if (dirty) await commit(state);
@@ -197,10 +263,14 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
           const selected = await target(sender, state, sessions);
           if (!selected?.conversationId) continue;
           const card = deps.approvals().find(item => item.conversationId === selected.conversationId && !item.outcome);
-          if (!card) { delete state.alerts[sender]; continue; }
+          if (!card) { delete state.alerts[sender]; delete state.approvalRefs[sender]; continue; }
           const fingerprint = `${card.conversationId}:${card.cardId}`;
-          if (state.alerts[sender] === fingerprint) continue;
-          await respond(sender, `Aprovação pendente em ${clip(selected.title, 100)}.\nID: ${card.cardId}\n${card.allow ? '/aprovar ' + card.cardId + '\n' : ''}/negar ${card.cardId}\nConfirmação final ocorre no host ChatGPT.`);
+          const ref = state.approvalRefs[sender];
+          if (state.alerts[sender] === fingerprint && ref?.cardIds[0] === card.cardId &&
+              ref.sessionId === selected.id && Date.now() - ref.at < APPROVAL_REF_MS) continue;
+          rememberCards(state, sender, selected, [card]);
+          await commit(state);
+          if (!await respond(sender, displayCards(selected, [card]))) continue;
           state.alerts[sender] = fingerprint;
           await commit(state);
         }
@@ -208,4 +278,21 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
       });
     }
   };
+}
+
+/** Reads the last finished answer even if another turn has already started.
+ * A streaming bubble is not terminal; a stale answer after the finish boundary is not relayed.
+ */
+export function lastRelayableWhatsAppAnswer(
+  events: readonly { kind: string; final?: boolean; state?: string; time: number; seq: number; messageId?: string; message?: { text: string } }[],
+  completedAt: number | null
+): { id: string; seq: number; text: string } | null {
+  if (completedAt === null) return null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const item = events[i]!;
+    if (item.kind !== 'assistant_message' || !item.final || item.time > completedAt ||
+        !item.message?.text?.trim()) continue;
+    return { id: `${item.seq}:${item.messageId ?? ''}`, seq: item.seq, text: item.message.text };
+  }
+  return null;
 }

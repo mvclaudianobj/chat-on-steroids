@@ -51,7 +51,8 @@ import { sendDesktopInput } from './session/start-input.js';
 import { createTurnNotifier } from './turn-notifications.js';
 import { createOutboundTurnWatcher } from './notification-events.js';
 import { getWhatsAppWebStatus, resumeWhatsAppWeb, sendWhatsAppWeb, setWhatsAppWebInbound, stopWhatsAppWeb } from './notification-whatsapp-web.js';
-import { createWhatsAppDuplex } from './whatsapp-duplex.js';
+import { createWhatsAppDuplex, lastRelayableWhatsAppAnswer } from './whatsapp-duplex.js';
+import { redactSecretText } from './redaction.js';
 import { watchWhatsAppResumeOnGreen } from './whatsapp-resume-on-green.js';
 import { notificationSettings, queueOutboundNotice } from './notification-center.js';
 import { listProjects } from './projects.js';
@@ -775,7 +776,13 @@ void app.whenReady().then(async () => {
     },
     approvals: () => approvalWaitingChats().flatMap(conversationId => {
       const card = approvalCardView(conversationId);
-      return card ? [{ conversationId, cardId: card.id, title: 'Solicitação ChatGPT', allow: card.allow, outcome: card.answer?.outcome ?? null }] : [];
+      return card ? [{ conversationId, cardId: card.id, title: 'Solicitação ChatGPT',
+        details: redactSecretText(card.lines.slice(0, 3).join(' · ')), allow: card.allow,
+        // A command awaiting the exact host acknowledgement must not reappear
+        // as a fresh approval every eight seconds.
+        outcome: card.answer?.outcome === null ? 'pending'
+          : card.answer?.outcome === 'clicked' || card.answer?.outcome === 'dismissed'
+            ? card.answer.outcome : null }] : [];
     }),
     answer: (conversationId, cardId, choice) => {
       const result = requestApprovalAnswer(conversationId, cardId, choice);
@@ -783,12 +790,12 @@ void app.whenReady().then(async () => {
     },
     latest: async sessionId => {
       const session = await getSession(sessionId);
-      // Streaming commentary or a different turn is not a response. Only a
-      // confirmed terminal ChatGPT turn may be relayed to a phone.
-      if (!session || session.activeTurnId || session.lastTurnOutcome !== 'completed' || !session.lastTurnEndAt) return null;
-      const [answer] = await readRecentEvents(sessionId, 1, { kinds: ['assistant_message'] });
-      return answer?.kind === 'assistant_message' && answer.final && answer.time <= session.lastTurnEndAt
-        ? { id: `${answer.seq}:${answer.messageId ?? ''}`, text: answer.message.text, seq: answer.seq } : null;
+      // A new streaming turn may already have started by the time the WhatsApp
+      // poll runs. The previous *completed* answer is still valid, but a
+      // streaming revision must never displace it in a limit-one query.
+      if (!session || session.lastTurnOutcome !== 'completed' || !session.lastTurnEndAt) return null;
+      const answers = await readRecentEvents(sessionId, 32, { kinds: ['assistant_message'] });
+      return lastRelayableWhatsAppAnswer(answers, session.lastTurnEndAt);
     },
     delivered: async (sessionId, inputId) => {
       const events = await readRecentEvents(sessionId, 100, { kinds: ['user_message'] });
