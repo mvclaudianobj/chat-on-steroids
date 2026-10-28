@@ -175,6 +175,31 @@ describe('WhatsApp bidirectional owner-only routing', () => {
     await app.duplex.incoming(sender, 'deny-short', '/negar 1');
     expect(app.answer).toHaveBeenCalledExactlyOnceWith('chat-alpha', 'card-specific-1', 'deny');
   });
+  it('retains the pending short-card reference after the card leaves the live list, until host outcome is observable', async () => {
+    let phase: 'pending' | 'dismissed' = 'pending';
+    let stored: any = null;
+    let visible = true;
+    const sent = vi.fn(async (_n:string, _text:string) => undefined);
+    const duplex = createWhatsAppDuplex({
+      allowed: async()=>[sender], sessions:async()=>sessions, active:async()=>sessions[0]!.id,
+      sendText:sent,send:async()=>({id:'q',state:'queued'}),
+      approvals:()=>visible ? [{conversationId:'chat-alpha',cardId:'card-specific-1',title:'Synthetic',allow:true,outcome:null}]:[],
+      approvalStatus:()=>phase,
+      answer:()=>({ok:true}),latest:async()=>null,delivered:async()=>null,
+      load:async()=>stored,save:async state=>{stored=structuredClone(state);}
+    });
+    await duplex.incoming(sender,'select','/usar 1');
+    await duplex.incoming(sender,'list','/aprovacoes');
+    await duplex.incoming(sender,'allow','/aprovar 1');
+    visible = false;
+    sent.mockClear();
+    await duplex.pollApprovals();
+    expect(stored.approvalRefs[sender]).toBeDefined();
+    phase = 'dismissed';
+    await duplex.pollApprovals();
+    expect(sent.mock.calls.at(-1)?.[1]).toContain('não comprova');
+    expect(stored.approvalRefs[sender]).toBeUndefined();
+  });
   it('does not complete a command after its sender loses authorization during asynchronous session enumeration', async () => {
     let enabled = true;
     let release!: () => void;

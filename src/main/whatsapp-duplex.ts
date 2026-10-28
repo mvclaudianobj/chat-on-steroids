@@ -305,7 +305,20 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
           const selected = await target(sender, state, sessions);
           if (!selected?.conversationId) continue;
           const card = deps.approvals().find(item => item.conversationId === selected.conversationId && !item.outcome);
-          if (!card) { delete state.alerts[sender]; delete state.approvalRefs[sender]; continue; }
+          if (!card) {
+            const ref = state.approvalRefs[sender];
+            const awaitingHost = ref?.conversationId === selected.conversationId &&
+              ref.sessionId === selected.id && Date.now() - ref.at < APPROVAL_REF_MS &&
+              ref.cardIds.some(cardId => {
+                const phase = deps.approvalStatus?.(ref.conversationId, cardId);
+                return phase === 'pending' || phase === 'clicked';
+              });
+            if (!awaitingHost) {
+              delete state.alerts[sender];
+              delete state.approvalRefs[sender];
+            }
+            continue;
+          }
           const fingerprint = `${card.conversationId}:${card.cardId}`;
           const ref = state.approvalRefs[sender];
           if (ref?.conversationId === card.conversationId && ref.cardIds[0] === card.cardId &&
