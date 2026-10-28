@@ -71,6 +71,28 @@ interface Wait {
 const waits = new Map<string, Wait>();
 /** The previous episode, kept briefly to distinguish a redraw from a separately dismissed request. */
 const answered = new Map<string, { wait: Wait; at: number; anchor: { seq: number; time: number } | null }>();
+/** Only a receipt of what the page observed, not a grant or host authorization. */
+const decisionReceipts = new Map<string, { token: string; at: number; outcome: ApprovalOutcome | null }>();
+const DECISION_RECEIPT_MS = 5 * 60_000;
+const decisionKey = (conversationId: string, cardId: string): string => JSON.stringify([conversationId, cardId]);
+
+/** Exposes the exact card's page observation to an authorized outbound channel. */
+export function approvalDecisionStatus(conversationId: string, cardId: string, now = Date.now()): ApprovalOutcome | 'pending' | null {
+  const key = decisionKey(conversationId, cardId);
+  const receipt = decisionReceipts.get(key);
+  if (!receipt) return null;
+  if (now - receipt.at >= DECISION_RECEIPT_MS || now < receipt.at - 60_000) {
+    decisionReceipts.delete(key);
+    return null;
+  }
+  if (receipt.outcome === null && now - receipt.at >= APPROVAL_ANSWER_MS) receipt.outcome = 'expired';
+  return receipt.outcome ?? 'pending';
+}
+
+function receiptOutcome(conversationId: string, answer: ApprovalAnswer, outcome: ApprovalOutcome): void {
+  const receipt = decisionReceipts.get(decisionKey(conversationId, answer.cardId));
+  if (receipt?.token === answer.token) receipt.outcome = outcome;
+}
 
 function sameWords(a: ApprovalCardFacts | null, b: ApprovalCardFacts | null | undefined): boolean {
   if (!a || !b) return !a && !b;
@@ -163,7 +185,10 @@ export async function noteApprovalCard(
   }
   if (card) {
     // Another card replaces this one: an answer filed for the old card must never reach it.
-    if (wait.card && wait.card.id !== card.id) wait.answer = null;
+    if (wait.card && wait.card.id !== card.id) {
+      if (wait.answer?.outcome === null) receiptOutcome(conversationId, wait.answer, 'card_changed');
+      wait.answer = null;
+    }
     wait.card = card;
   }
   if (sessionId && !wait.sessionId) {
@@ -213,6 +238,8 @@ export function requestApprovalAnswer(conversationId: string, cardId: string, ch
   expire(wait, now);
   if (wait.answer && wait.answer.outcome === null) return { ok: false, error: 'answer_pending' };
   wait.answer = { token: randomUUID(), cardId, choice, at: now, outcome: null };
+  decisionReceipts.set(decisionKey(conversationId, cardId), { token: wait.answer.token, at: now, outcome: null });
+  if (decisionReceipts.size > 150) decisionReceipts.delete(decisionReceipts.keys().next().value!);
   return { ok: true, token: wait.answer.token };
 }
 
@@ -233,6 +260,7 @@ export function settleApprovalAnswer(conversationId: string, token: string, outc
   const answer = waits.get(conversationId)?.answer ?? answered.get(conversationId)?.wait.answer;
   if (!answer || answer.token !== token || answer.outcome !== null) return false;
   answer.outcome = outcome;
+  receiptOutcome(conversationId, answer, outcome);
   return true;
 }
 
@@ -260,11 +288,17 @@ export function parseApprovalResult(raw: string | null): { token: string; outcom
 }
 
 function expire(wait: Wait, now: number): void {
-  if (wait.answer && wait.answer.outcome === null && now - wait.answer.at >= APPROVAL_ANSWER_MS) wait.answer.outcome = 'expired';
+  if (wait.answer && wait.answer.outcome === null && now - wait.answer.at >= APPROVAL_ANSWER_MS) {
+    wait.answer.outcome = 'expired';
+    // No host confirmation was received in time.
+    const receipt = [...decisionReceipts.values()].find(value => value.token === wait.answer!.token);
+    if (receipt) receipt.outcome = 'expired';
+  }
 }
 
 export function resetApprovalWaits(): void {
   for (const wait of waits.values()) if (wait.stale) clearTimeout(wait.stale);
   waits.clear();
   answered.clear();
+  decisionReceipts.clear();
 }

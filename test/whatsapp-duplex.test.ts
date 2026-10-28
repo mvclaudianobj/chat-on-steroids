@@ -128,6 +128,43 @@ describe('WhatsApp bidirectional owner-only routing', () => {
     await app.duplex.incoming(sender, 'replayed-different-id', '/aprovar 1');
     expect(app.answer).toHaveBeenCalledTimes(1);
   });
+  it('FAIL-FIRST: /aprovar 1 without an advertised mapping shows the exact card instead of silently failing', async () => {
+    const app = setup();
+    await app.duplex.incoming(sender, 'choose', '/usar 1');
+    app.sendText.mockClear();
+    await app.duplex.incoming(sender, 'first-approval-attempt', '/aprovar 1');
+    expect(app.answer).not.toHaveBeenCalled();
+    expect(app.sendText.mock.calls.at(-1)![1]).toContain('/aprovar 1');
+    await app.duplex.incoming(sender, 'second-approval-attempt', '/aprovar 1');
+    expect(app.answer).toHaveBeenCalledExactlyOnceWith('chat-alpha', 'card-specific-1', 'allow');
+  });
+  it('FAIL-FIRST: reports a verified host card dismissal separately from the WhatsApp forwarding receipt', async () => {
+    let outcome: 'pending' | 'dismissed' | null = 'pending';
+    let state: unknown = null;
+    const sendText = vi.fn(async (_number: string, _text: string) => {});
+    const duplex = createWhatsAppDuplex({
+      allowed: async () => [sender], sessions: async () => sessions, active: async () => sessions[0]!.id,
+      sendText, send: async () => ({ id: 'unused', state: 'queued' }),
+      approvals: () => [{ conversationId: 'chat-alpha', cardId: 'card-specific-1', title: 'Synthetic', allow: true, outcome: outcome === 'dismissed' ? 'dismissed' : null }],
+      answer: () => ({ ok: true }),
+      approvalStatus: () => outcome,
+      latest: async () => null, delivered: async () => null,
+      load: async () => state, save: async next => { state = structuredClone(next); }
+    });
+    await duplex.incoming(sender, 'selection', '/usar 1');
+    await duplex.incoming(sender, 'list-card', '/aprovacoes');
+    await duplex.incoming(sender, 'decide-card', '/aprovar 1');
+    sendText.mockClear();
+    await duplex.pollApprovals();
+    expect(sendText).not.toHaveBeenCalled();
+    outcome = 'dismissed';
+    await duplex.pollApprovals();
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText.mock.calls[0]![1]).toMatch(/cartão.*(retirado|desapareceu)/i);
+    expect(sendText.mock.calls[0]![1]).toMatch(/não comprova/i);
+    await duplex.pollApprovals();
+    expect(sendText).toHaveBeenCalledTimes(1);
+  });
   it('allows /negar 1 only for the exact card advertised in an automatic notification', async () => {
     const app = setup();
     await app.duplex.incoming(sender, 'choose', '/usar 1');

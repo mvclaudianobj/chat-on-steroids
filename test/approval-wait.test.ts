@@ -3,7 +3,7 @@ import { JSDOM } from 'jsdom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   APPROVAL_ANSWER_MS, APPROVAL_FRESH_MS, APPROVAL_GONE_MS, APPROVAL_NOTICE_GRACE_MS, approvalAnswerFor, approvalCardView, approvalCardWaiting, approvalWaitingChats, noteApprovalCard,
-  requestApprovalAnswer, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps
+  requestApprovalAnswer, approvalDecisionStatus, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps
 } from '../src/main/approval-wait.js';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_WAITING_TEXT, hostApprovalAttemptFailed, type ApprovalCardView } from '../src/shared/approval-wait.js';
 
@@ -355,6 +355,9 @@ describe('answering the card from the app', () => {
     expect(settleApprovalAnswer('chat', token, 'clicked')).toBe(true);
     expect(approvalAnswerFor('chat', 1_500)).toBeNull();
     expect(approvalCardView('chat', 1_500)?.answer).toMatchObject({ choice: 'deny', outcome: 'clicked' });
+    expect(approvalDecisionStatus('chat', 'c1', 1_500)).toBe('clicked');
+    await noteApprovalCard('chat', false, 'session', deps, 1_600);
+    expect(approvalDecisionStatus('chat', 'c1', 1_700)).toBe('clicked');
   });
 
   it('refuses a stale card, a missing card and Allow where ChatGPT itself disabled it', async () => {

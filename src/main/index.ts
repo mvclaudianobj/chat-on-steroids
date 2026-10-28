@@ -98,7 +98,7 @@ import { loadConnectorIdentity } from './connector-identity.js';
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
 import { startMobilePanel, type MobilePanelInstance } from './mobile-panel.js';
 import { getCompany } from './company-store.js';
-import { approvalCardView, approvalWaitingChats, requestApprovalAnswer } from './approval-wait.js';
+import { approvalCardView, approvalWaitingChats, requestApprovalAnswer, approvalDecisionStatus } from './approval-wait.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
 import { restoreTrustedChats } from './session/trusted-chats.js';
@@ -820,6 +820,7 @@ void app.whenReady().then(async () => {
           : card.answer?.outcome === 'clicked' || card.answer?.outcome === 'dismissed'
             ? card.answer.outcome : null }] : [];
     }),
+    approvalStatus: approvalDecisionStatus,
     answer: (conversationId, cardId, choice) => {
       const result = requestApprovalAnswer(conversationId, cardId, choice);
       return result.ok ? { ok: true } : { ok: false, error: result.error };

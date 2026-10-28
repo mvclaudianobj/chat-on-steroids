@@ -27,6 +27,8 @@ export interface WhatsAppDuplexDeps {
   sendText(number: string, text: string): Promise<void>;
   send(sessionId: string, text: string): Promise<{ id: string; state: string }>;
   approvals(): DuplexApproval[];
+  /** Page observation only; never proof of an actual host grant. */
+  approvalStatus?(conversationId: string, cardId: string): 'pending' | 'clicked' | 'dismissed' | 'not_confirmed' | 'card_changed' | 'unavailable' | 'expired' | null;
   answer(conversationId: string, cardId: string, choice: 'allow' | 'deny'): { ok: true } | { ok: false; error: string };
   latest(sessionId: string): Promise<{ id: string; text: string; seq: number } | null>;
   completedSince?(sessionId: string, afterSeq: number): Promise<Array<{id:string; text:string; seq:number}>>;
@@ -129,6 +131,18 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
       const code = index + 1;
       return `Aprovação ${code} em ${clip(session.title, 80)}\n${clip(card.title, 140)}${card.details ? '\n' + clip(card.details, 380) : ''}\n${card.allow ? '/aprovar ' + code + '\n' : ''}/negar ${code}\nDecisão para este cartão apenas; confirmação final ocorre no ChatGPT.`;
     }).join('\n\n');
+  const approvalReceipt = async (sender: string, state: State): Promise<boolean> => {
+    const ref = state.approvalRefs[sender];
+    if (!ref?.cardIds.length || !deps.approvalStatus) return false;
+    const outcome = deps.approvalStatus(ref.conversationId, ref.cardIds[0]!);
+    if (!outcome || outcome === 'pending' || outcome === 'clicked') return false;
+    delete state.approvalRefs[sender];
+    await commit(state);
+    const result = outcome === 'dismissed'
+      ? 'O cartão foi retirado da tela do ChatGPT após o clique. Isso não comprova que o host concedeu a permissão; confira a execução da ferramenta.'
+      : `A tentativa de aprovação terminou com estado ${outcome}; a autorização não foi confirmada. Consulte /aprovacoes.`;
+    return respond(sender, result);
+  };
   return {
     incoming(sender, messageId, text) {
       return serial(async () => {
@@ -199,12 +213,19 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
           if (!selected?.conversationId) { await respond(sender, 'Selecione o chat da aprovação: /chats'); return; }
           const ref = state.approvalRefs[sender];
           const short = /^\d{1,2}$/.test(arg) && Number(arg) >= 1 && Number(arg) <= 12;
+          if (short && (!ref || Date.now() - ref.at >= APPROVAL_REF_MS || ref.sessionId !== selected.id || ref.conversationId !== selected.conversationId)) {
+            const cards = deps.approvals().filter(item => item.conversationId === selected.conversationId && !item.outcome);
+            rememberCards(state, sender, selected, cards);
+            await commit(state);
+            await respond(sender, cards.length ? `O código ainda não estava vinculado a um cartão. Confira e envie o comando novamente:\n${displayCards(selected, cards)}` : 'Nenhuma aprovação pendente no chat selecionado.');
+            return;
+          }
           const cardId = short && ref && Date.now() - ref.at < APPROVAL_REF_MS && ref.sessionId === selected.id &&
             ref.conversationId === selected.conversationId ? ref.cardIds[Number(arg) - 1] : short ? null : arg;
           const card = deps.approvals().find(item => item.conversationId === selected.conversationId && item.cardId === cardId && !item.outcome);
           if (!card || (normalized === '/aprovar' && !card.allow)) { await respond(sender, 'Cartão ausente, expirado ou não autorizado. Use /aprovacoes novamente.'); return; }
           const answer = deps.answer(card.conversationId, card.cardId, normalized === '/aprovar' ? 'allow' : 'deny');
-          if (answer.ok) { delete state.approvalRefs[sender]; await commit(state); }
+          if (answer.ok && !deps.approvalStatus) { delete state.approvalRefs[sender]; await commit(state); }
           await respond(sender, answer.ok ? 'Decisão encaminhada ao Chat Marks. Aguarde a confirmação efetiva no ChatGPT; isto não concede permissão permanente.' : 'O cartão mudou ou a decisão não foi aceita. Use /aprovacoes novamente.');
           return;
         }
@@ -280,12 +301,15 @@ export function createWhatsAppDuplex(deps: WhatsAppDuplexDeps): {
         const sessions = await available();
         for (const sender of await deps.allowed()) {
           if (!await authorized(sender)) continue;
+          if (await approvalReceipt(sender, state)) continue;
           const selected = await target(sender, state, sessions);
           if (!selected?.conversationId) continue;
           const card = deps.approvals().find(item => item.conversationId === selected.conversationId && !item.outcome);
           if (!card) { delete state.alerts[sender]; delete state.approvalRefs[sender]; continue; }
           const fingerprint = `${card.conversationId}:${card.cardId}`;
           const ref = state.approvalRefs[sender];
+          if (ref?.conversationId === card.conversationId && ref.cardIds[0] === card.cardId &&
+              deps.approvalStatus?.(card.conversationId, card.cardId) === 'pending') continue;
           if (state.alerts[sender] === fingerprint && ref?.cardIds[0] === card.cardId &&
               ref.sessionId === selected.id && Date.now() - ref.at < APPROVAL_REF_MS) continue;
           rememberCards(state, sender, selected, [card]);

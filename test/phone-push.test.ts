@@ -28,7 +28,7 @@ describe('what reaches the phone', () => {
     const { push, sent, log } = setUp();
     expect(await push.notify({ kind: 'needs-you', sessionId: 's1', chatTitle: 'Payroll export', conversationId: 'c-1' })).toBe('sent');
     expect(sent).toEqual([{ url: 'https://ntfy.sh', headers: { 'Content-Type': 'application/json' },
-      body: { topic: 'cos-k3j9x2m4q8w7e5r1', title: 'Chat On Steroids', message: 'A chat is waiting for you.', priority: 4, tags: ['raising_hand'] } }]);
+      body: { topic: 'cos-k3j9x2m4q8w7e5r1', title: 'Chat Marks', message: 'A chat is waiting for you.', priority: 4, tags: ['raising_hand'] } }]);
     expect(JSON.stringify(sent)).not.toContain('Payroll');
     expect(log).toHaveBeenCalledWith('phone push: sent "needs you" to the phone');
   });
@@ -72,7 +72,7 @@ describe('what reaches the phone', () => {
     setToken('tk_secret');
     await push.notify({ kind: 'failed', detail: 'The tunnel disconnected unexpectedly.' });
     expect(sent[0]).toEqual({ url: 'https://ntfy.example.org', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tk_secret' },
-      body: { topic: 'cos-k3j9x2m4q8w7e5r1', title: 'Chat On Steroids', message: 'The tunnel disconnected unexpectedly.', priority: 4, tags: ['warning'] } });
+      body: { topic: 'cos-k3j9x2m4q8w7e5r1', title: 'Chat Marks', message: 'The tunnel disconnected unexpectedly.', priority: 4, tags: ['warning'] } });
   });
 });
 
@@ -194,7 +194,7 @@ describe('a test message', () => {
     const { push, sent, setNow } = setUp({ quietHours: { from: '00:00', to: '23:59' } }, 'active');
     setNow(at(12));
     await expect(push.test()).resolves.toBeUndefined();
-    expect(sent[0]!.body).toMatchObject({ message: 'This is a test from Chat On Steroids. Phone notifications work.', priority: 3 });
+    expect(sent[0]!.body).toMatchObject({ title: 'Chat Marks', message: 'This is a test from Chat Marks. Phone notifications work.', priority: 3 });
     const failing = createPhonePush({ settings: () => settings(), token: async () => null, now: () => at(14), idleState: () => 'idle', log: vi.fn(),
       post: async () => ({ ok: false, status: 401 }) });
     await expect(failing.test()).rejects.toThrow('The ntfy server refused the message. Check the server, the topic and the access token.');
