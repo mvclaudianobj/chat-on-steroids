@@ -7,6 +7,8 @@ vi.mock('../src/main/secrets.js', () => ({
   getSecret: async (key: string) => secrets.get(key) ?? null,
   hasSecret: async (key: string) => secrets.has(key),
   setSecret: async (key: string, value: string) => { if (value.trim()) secrets.set(key, value.trim()); else secrets.delete(key); },
+  secureStorageStatus: async () => ({ available: true, detail: null }),
+  storedSecretsUnreadable: () => false,
   secretsRevision: () => 1
 }));
 

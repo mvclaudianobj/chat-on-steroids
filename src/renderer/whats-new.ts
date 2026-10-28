@@ -285,12 +285,14 @@ const RELEASES: Readonly<Record<string, Release>> = {
 };
 
 export function hasHighlights(version: string): boolean {
-  return Object.hasOwn(RELEASES, version);
+  return version === '2.1.46.1' || Object.hasOwn(RELEASES, version);
 }
 
 /** Paints the dialog for one version; separate from showing it so a check can paint any entry. */
 export function paintWhatsNew(version: string): boolean {
-  const release = RELEASES[version];
+  // The Marks patch release retains 2.1.46 highlights while showing its own version
+  // and opening its own release notes.
+  const release = RELEASES[version === '2.1.46.1' ? '2.1.46' : version];
   if (!release) return false;
   ui($('whatsNewVersion'), 'textContent', () => t('Version {0}', [version]));
   ui($('whatsNewLead'), 'textContent', release.lead);

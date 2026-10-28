@@ -42,10 +42,10 @@ export const MAIN_TEXTS = [
   'Export usage as CSV',
   // Phone notifications (ntfy).
   'A chat is waiting for you.',
-  'Something failed in Chat On Steroids.',
+  'Something failed in Chat Marks.',
   'A chat finished.',
   'Finished after {0} min.',
-  'This is a test from Chat On Steroids. Phone notifications work.',
+  'This is a test from Chat Marks. Phone notifications work.',
   'Import CoS Pet folder',
   'Export settings',
   'Import settings',

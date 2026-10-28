@@ -222,7 +222,7 @@ export async function buildBackup(input: {
   return `${JSON.stringify(backup, null, 2)}\n`;
 }
 
-const NOT_A_BACKUP = 'This file is not a Chat On Steroids settings backup.';
+const NOT_A_BACKUP = 'This file is not a Chat Marks settings backup.';
 const base64 = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9+/]*={0,2}$/.test(value);
 
 function sealedSecrets(value: unknown): SealedSecrets {
@@ -245,7 +245,7 @@ export function readBackup(text: string): ParsedBackup {
   try { parsed = JSON.parse(text); } catch { throw new BackupError('not-a-backup', NOT_A_BACKUP); }
   if (!isPlainObject(parsed) || parsed.format !== BACKUP_FORMAT) throw new BackupError('not-a-backup', NOT_A_BACKUP);
   if (typeof parsed.version === 'number' && parsed.version > BACKUP_VERSION) {
-    throw new BackupError('newer-version', 'This backup comes from a newer Chat On Steroids. Update the app, then import it.');
+    throw new BackupError('newer-version', 'This backup comes from a newer Chat Marks. Update the app, then import it.');
   }
   if (parsed.version !== BACKUP_VERSION || !isPlainObject(parsed.settings)) throw new BackupError('not-a-backup', NOT_A_BACKUP);
   const secrets = parsed.secrets === undefined ? null : sealedSecrets(parsed.secrets);

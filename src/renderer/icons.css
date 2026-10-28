@@ -38,6 +38,7 @@
 
 
 .ph.ph-activity::before { content: '\e000'; }
+.ph.ph-archive::before { content: '\e00c'; }
 .ph.ph-arrow-clockwise::before { content: '\e036'; }
 .ph.ph-arrow-counter-clockwise::before { content: '\e038'; }
 .ph.ph-arrow-down::before { content: '\e03e'; }

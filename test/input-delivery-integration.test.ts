@@ -54,7 +54,7 @@ beforeAll(async () => {
   directory = await makeTempDir('clf-input-integration-');
   initConfigPath(directory); initSecretsPath(directory); initDurableStore(directory); initSessionStore(directory);
   await saveConfig(defaultConfig());
-  registerIpc(() => ({ isDestroyed: () => false, webContents: { send: pushed } }) as never, () => undefined);
+  registerIpc(() => ({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: pushed } }) as never, () => undefined);
   await startBridge();
   // These tests move a mocked Date.now by minutes and call the sweep themselves. The bridge's own
   // 30-second timer would read such a jump as the computer waking and push every deadline 90 s

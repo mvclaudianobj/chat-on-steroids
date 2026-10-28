@@ -98,7 +98,7 @@ export function createPhonePush(deps: PhonePushDeps) {
     const title = details && event.chatTitle ? oneLine(event.chatTitle, 80) : 'Chat Marks';
     let text: string;
     if (event.kind === 'needs-you') text = mainText('A chat is waiting for you.');
-    else if (event.kind === 'failed') text = oneLine(event.detail ?? mainText('Something failed in Chat On Steroids.').replaceAll('Chat On Steroids', 'Chat Marks'), 240);
+    else if (event.kind === 'failed') text = oneLine(event.detail ?? mainText('Something failed in Chat Marks.').replaceAll('Chat On Steroids', 'Chat Marks'), 240);
     else {
       // Under a minute says no length: "after 1 min" for 20 seconds would not be true.
       const minutes = event.workedMs === undefined || event.workedMs < 60_000 ? null : Math.round(event.workedMs / 60_000);
@@ -174,7 +174,7 @@ export function createPhonePush(deps: PhonePushDeps) {
       if (!isValidTopic(settings.topic)) throw new Error('Choose a topic of letters, digits, - and _ (up to 64).');
       let reply: { ok: boolean; status: number };
       try {
-        reply = await send(settings, { title: 'Chat Marks', message: mainText('This is a test from Chat On Steroids. Phone notifications work.').replaceAll('Chat On Steroids', 'Chat Marks'), priority: 3, tags: ['bell'] });
+        reply = await send(settings, { title: 'Chat Marks', message: mainText('This is a test from Chat Marks. Phone notifications work.').replaceAll('Chat On Steroids', 'Chat Marks'), priority: 3, tags: ['bell'] });
       } catch (error) {
         if (error instanceof SendRefused) {
           deps.log(`phone push: test not sent: ${error.message}${error.reason ? ` (${error.reason})` : ''}`);
