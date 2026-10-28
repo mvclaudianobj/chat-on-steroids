@@ -186,6 +186,14 @@ export async function startMobilePanel(opts: MobilePanelOptions, deps: MobilePan
           (parsed.choice !== 'allow' && parsed.choice !== 'deny')) {
         respond(res, 400, '{"error":"invalid_request"}'); return;
       }
+      // Reconcile against the live card after authentication, not just against
+      // syntax. A guessed/stale card id must never be delegated to the host.
+      const snapshot = await deps.snapshot();
+      const exact = snapshot.approvals.find(item => item.conversationId === parsed.conversationId &&
+        item.cardId === parsed.cardId && !item.outcome);
+      if (!exact || (parsed.choice === 'allow' && !exact.choiceEnabled)) {
+        respond(res, 409, '{"error":"approval_not_current"}'); return;
+      }
       const result = deps.answer(parsed.conversationId,parsed.cardId,parsed.choice);
       respond(res, result.ok ? 202 : 409, JSON.stringify(result)); return;
     }

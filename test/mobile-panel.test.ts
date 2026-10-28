@@ -56,12 +56,12 @@ it('queues only an exact, intentionally initiated approval; never silently confi
   expect((await send(payload)).status).toBe(403);
   expect((await send(payload,'https://external.invalid')).status).toBe(403);
   expect((await send({...payload,choice:'permanent'},url)).status).toBe(400);
-  expect((await send({...payload,cardId:'other-card-123'},url)).status).toBe(202);
-  expect(deps.answer).toHaveBeenCalledWith('test-convo-123','other-card-123','allow');
+  expect((await send({...payload,cardId:'other-card-123'},url)).status).toBe(409);
+  expect(deps.answer).not.toHaveBeenCalled();
   expect((await send(payload,url)).status).toBe(202);
   expect(deps.answer).toHaveBeenCalledWith('test-convo-123','card-synth-123','allow');
   expect((await send({...payload,choice:'deny'},url)).status).toBe(202);
-  expect(deps.answer).toHaveBeenCalledTimes(3);
+  expect(deps.answer).toHaveBeenCalledTimes(2);
 });
 it('deletes its temporary token on stop and does not retain credentials between process starts', async () => {
   const url = await init();
