@@ -42,6 +42,7 @@ import { listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { refreshAppProxy } from './app-proxy.js';
+import { externalModuleAction } from './external-modules.js';
 import { committedResumeAncestorsFromSummary, DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
@@ -1679,7 +1680,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // reaches the window through the ordinary state push; this returns before the check does.
   handle('modules:status', async () => modulesStatus());
   handle('modules:action', async payload => {
-    const request = z.object({ id: z.literal('cli-proxy-api'), action: z.enum(['install', 'update', 'start', 'stop', 'restart', 'enable', 'disable', 'open']), managementUrl: z.string().max(256).optional() }).strict().parse(payload);
+    const request = z.object({ id: z.enum(['cli-proxy-api', 'firefox-vpn', 'twindesk']), action: z.enum(['install', 'update', 'start', 'stop', 'restart', 'enable', 'disable', 'open']), managementUrl: z.string().max(256).optional() }).strict().parse(payload);
+    if (request.id !== 'cli-proxy-api') {
+      if (request.managementUrl !== undefined) throw new Error('External modules do not accept arbitrary management URLs.');
+      await externalModuleAction(request.id, request.action);
+      return modulesStatus();
+    }
     return moduleAction(request.action, request.managementUrl);
   });
 

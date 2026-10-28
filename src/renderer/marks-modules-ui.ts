@@ -11,6 +11,7 @@ import type { RowMenuItem } from './row-menu.js';
 import { createCliProxyManageUi } from './cliproxy-manage-ui.js';
 import { createCcrManageUi } from './ccr-manage-ui.js';
 import { createVmsUi } from './vms-ui.js';
+import { createExternalModulesUi } from './external-modules-ui.js';
 
 export interface MarksModulesUiHooks {
   showTab(name: string): void;
@@ -49,6 +50,7 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
   // A change (installed, started, stopped) changes which routes Codex and Claude Code chats offer.
   const ccr = createCcrManageUi(api, document.querySelector('[data-panel="modules"] .appearance-content')!, () => void apiChatChats.refresh());
   const vms = createVmsUi(api, document.querySelector('[data-panel="modules"] .appearance-content')!);
+  const externalModules = createExternalModulesUi(api, document.querySelector('[data-panel="modules"] .appearance-content')!);
   const apiChat = createApiChatSettingsUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!);
   // Versions, verified install/update, management password and API keys inside the same card.
   const manage = createCliProxyManageUi(api, $('moduleCliError').closest<HTMLElement>('.modules-service')!,
@@ -227,8 +229,9 @@ export function initMarksModulesUi(api: AppApi, hooks: MarksModulesUiHooks): Mar
     }
   }
 
-  $('moduleRefresh').addEventListener('click', () => { void refreshModules().then(() => manage.refresh(true)); void apiChat.refresh(); void apiChatChats.refresh(); void ccr.refresh(true); void vms.refresh(); });
+  $('moduleRefresh').addEventListener('click', () => { void refreshModules().then(() => manage.refresh(true)); void apiChat.refresh(); void apiChatChats.refresh(); void ccr.refresh(true); void vms.refresh(); void externalModules.refresh(); });
   $('moduleCliReopen').addEventListener('click', () => void actOnModule('open'));
+  void externalModules.refresh();
   $<HTMLInputElement>('moduleCliActive').addEventListener('change', () =>
     setModuleUiActive($<HTMLInputElement>('moduleCliActive').checked));
   for (const [button, action] of [

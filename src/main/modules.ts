@@ -7,6 +7,7 @@ import { BrowserWindow, shell } from 'electron';
 import { MARKS_MODULE_SOURCES } from '../shared/module-sources.js';
 import { managementKey } from './cliproxy/management.js';
 import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
+import { externalModuleStatus } from './external-modules.js';
 
 const exec = promisify(execFile);
 const SERVICE = 'cli-proxy-api.service';
@@ -227,7 +228,7 @@ export async function modulesStatus(): Promise<MarksModuleState[]> {
     installed: false, enabled: false, running: false, supported: false, managementUrl: '',
     consoleAvailable: false, detail: 'System service management is currently available on Linux only.'
   };
-  if (process.platform !== 'linux') return [base];
+  if (process.platform !== 'linux') return [base, ...await externalModuleStatus()];
   const service = await serviceState();
   const port = service.installed && service.running ? await verifiedPort() : null;
   return [{ ...base, ...service, supported: true, consoleAvailable: port !== null,
@@ -236,7 +237,7 @@ export async function modulesStatus(): Promise<MarksModuleState[]> {
       : !service.running ? 'The CLIProxyAPI systemd service is stopped.'
         : port === null ? 'CLIProxyAPI is active, but its management console could not be safely identified. Check the service port.'
           : 'Managed through the existing systemd service. Configuration and credentials stay with CLIProxyAPI.'
-  }];
+  }, ...await externalModuleStatus()];
 }
 
 export async function moduleAction(action: MarksModuleAction, managementUrl?: string): Promise<MarksModuleState[]> {

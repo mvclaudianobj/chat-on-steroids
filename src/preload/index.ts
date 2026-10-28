@@ -420,7 +420,7 @@ const api = {
   // installer runs, and the app comes back as the new version. It takes no argument because
   // there is nothing here to choose - the main process knows what is staged.
   modulesStatus: () => call<MarksModuleState[]>('modules:status'),
-  moduleAction: (id: 'cli-proxy-api', action: MarksModuleAction, managementUrl?: string) => call<MarksModuleState[]>('modules:action', { id, action, managementUrl }),
+  moduleAction: (id: MarksModuleState['id'], action: MarksModuleAction, managementUrl?: string) => call<MarksModuleState[]>('modules:action', { id, action, managementUrl }),
   // Chat Marks: CLIProxyAPI management. The password only travels in; API keys come back masked.
   cliProxyStatus: (refresh = false) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'status', refresh }),
   cliProxySetManagementKey: (key: string) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'setManagementKey', key }),

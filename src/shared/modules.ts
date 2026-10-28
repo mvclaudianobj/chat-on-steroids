@@ -1,7 +1,7 @@
 /** Managed applications remain independent; Marks only orchestrates their existing interfaces. */
 import type { MarksModuleSource } from './module-sources.js';
 
-export type MarksModuleId = 'cli-proxy-api';
+export type MarksModuleId = 'cli-proxy-api' | 'firefox-vpn' | 'twindesk';
 export type MarksModuleAction = 'install' | 'update' | 'start' | 'stop' | 'restart' | 'enable' | 'disable' | 'open';
 export interface MarksModuleState {
   id: MarksModuleId;
