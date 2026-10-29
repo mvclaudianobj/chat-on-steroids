@@ -3065,6 +3065,7 @@
   "Secure OS credential storage is unavailable, so nothing was changed": "O armazenamento seguro de credenciais do sistema não está disponível, então nada foi alterado",
   "A handoff cannot be empty": "Uma passagem não pode estar vazia",
   "That session no longer exists": "Essa sessão não existe mais",
+  "The recorded session is unavailable for recovery": "A sessão registrada não está disponível para recuperação",
   "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "Grupos de chats, favoritos, rascunhos que esperam por você e uma Revisão melhor.",
   "Chat groups": "Grupos de chats",
   "Sort a project's chats into groups from its ⋯ menu.": "Organize os chats de um projeto em grupos pelo menu ⋯.",

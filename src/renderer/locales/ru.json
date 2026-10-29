@@ -3115,6 +3115,7 @@
   "Secure OS credential storage is unavailable, so nothing was changed": "Защищённое хранилище учётных данных системы недоступно, поэтому ничего не изменено",
   "A handoff cannot be empty": "Передача не может быть пустой",
   "That session no longer exists": "Этого сеанса больше нет",
+  "The recorded session is unavailable for recovery": "Записанный сеанс недоступен для восстановления",
   "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "Группы чатов, закладки, черновики, которые вас ждут, и улучшенная «Проверка».",
   "Chat groups": "Группы чатов",
   "Sort a project's chats into groups from its ⋯ menu.": "Раскладывайте чаты проекта по группам через его меню ⋯.",

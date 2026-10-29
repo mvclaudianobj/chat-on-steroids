@@ -6997,6 +6997,13 @@ async function captureCompactionBrief(
   if (shortfall) {
     logWarn(`bridge: refused the compaction brief for ${sessionId} — ${shortfall}`);
     try {
+      // An empty answer has no brief to repair, and keeps the original fail-closed
+      // contract: retire the continuation only after its abort is durable. A
+      // nonempty but truncated answer is evidence the model attempted a handoff;
+      // only that case starts B3b's bounded new-request chain.
+      if (!brief) {
+        await cancelResumeNow(sessionId);
+      } else {
       const retry = await retryIncompleteHandoffNow(token, shortfall, 2);
       if (retry?.next) {
         rememberToken(sessionId, retry.next.token);
@@ -7025,6 +7032,7 @@ async function captureCompactionBrief(
           job: resumeJobFor(sessionId) } };
       }
       return { status: 409, body: { error: 'brief_not_current', sessionId, job: resumeJobFor(sessionId) } };
+      }
     } catch (err) {
       // The semantic refusal is terminal only once its matching abort is durable. Returning
       // 409 here used to make content.js discard the generation-bound brief even though the
