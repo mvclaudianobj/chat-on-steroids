@@ -408,6 +408,36 @@ jobs:
           (cd release && sha256sum "${files[@]}" > SHA256SUMS.txt)
           cat release/SHA256SUMS.txt
 
+      # Keep electron-builder's stable internal filenames for updater compatibility,
+      # but offer people a versioned download without changing those filenames.
+      - name: Prepare versioned Linux installer
+        id: linux_download
+        if: contains(needs.plan.outputs.files, 'Chat-Marks-Linux-x64.deb')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node scripts/release-version.mjs --deb)"
+          source=release/Chat-Marks-Linux-x64.deb
+          target="release/Chat-Marks-Linux-${version}-amd64.deb"
+          test -s "$source"
+          test "$(dpkg-deb --field "$source" Version)" = "$version"
+          test "$(dpkg-deb --field "$source" Architecture)" = amd64
+          cp -- "$source" "$target"
+          cmp -s "$source" "$target"
+          (cd release && sha256sum "$(basename "$target")" > "$(basename "$target").sha256")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Upload versioned Linux installer
+        if: steps.linux_download.outputs.version != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: Chat-Marks-Linux-${{ steps.linux_download.outputs.version }}-amd64
+          path: |
+            release/Chat-Marks-Linux-${{ steps.linux_download.outputs.version }}-amd64.deb
+            release/Chat-Marks-Linux-${{ steps.linux_download.outputs.version }}-amd64.deb.sha256
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload release candidate
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
