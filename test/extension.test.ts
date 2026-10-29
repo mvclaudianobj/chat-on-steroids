@@ -1512,7 +1512,8 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
         tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${navigated ? OTHER : CHAT}` }),
         tabsSendMessage: async (_id, message) => message.type === 'clf-repair-check'
           ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' }
-          : message.type === 'clf-resume-compaction' ? { accepted: true } : { ok: true },
+          : message.type === 'clf-resume-compaction' ? { accepted: true }
+          : message.type === 'clf-page-status' ? { ok: true, conversationId: CHAT } : { ok: true },
         tabsQuery: async () => {
           if (handed) {
             trace.push('scan');
@@ -4003,6 +4004,39 @@ describe('extension revival delivery', () => {
   });
 });
 
+describe('the ChatGPT Projects a page lists (#1756)', () => {
+  it('passes only valid Projects from a registered page to the app', async () => {
+    const posted: Array<Record<string, unknown>> = [];
+    const worker = loadWorker({
+      local: new FakeStorageArea({ port: 8765, token: 'paired-token' }),
+      session: new FakeStorageArea(),
+      fetch: async (input, init = {}) => {
+        const pathname = new URL(input).pathname;
+        if (pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (pathname !== '/chatgpt-projects') return response(404, {});
+        posted.push(JSON.parse(String(init.body)));
+        return response(200, { ok: true, changed: true });
+      },
+      tabsGet: async (id) => ({ id, url: 'https://chatgpt.com/' })
+    });
+    await worker.registerTab(61);
+    const listed = `g-p-${'a'.repeat(32)}`;
+    expect(await worker.send({ type: 'project_catalog', projects: [{ id: listed, name: 'Kunden' }, { id: 'g-p-bad', name: 'x' }, { id: `g-p-${'b'.repeat(32)}` }], workspace: 'team-account-0001' }, 61))
+      .toEqual({ ok: true });
+    expect(posted).toEqual([{ projects: [{ id: listed, name: 'Kunden' }], workspace: 'team-account-0001' }]);
+    // No workspace, or something that is not one, goes on as none.
+    expect(await worker.send({ type: 'project_catalog', projects: [{ id: listed, name: 'Kunden' }], workspace: { x: 1 } }, 61)).toEqual({ ok: true });
+    expect(posted[1]).toEqual({ projects: [{ id: listed, name: 'Kunden' }], workspace: null });
+    posted.pop();
+    expect(await worker.send({ type: 'project_catalog', projects: [{ id: 'g-p-bad', name: 'x' }] }, 61)).toEqual({ ok: false });
+    expect(await worker.send({ type: 'project_catalog', projects: 'nope' }, 61)).toEqual({ ok: false });
+    expect(posted).toHaveLength(1);
+    // An empty sidebar still names the workspace in use (CodeRabbit on #1757).
+    expect(await worker.send({ type: 'project_catalog', projects: [], workspace: 'team-account-0002' }, 61)).toEqual({ ok: true });
+    expect(posted[1]).toEqual({ projects: [], workspace: 'team-account-0002' });
+  });
+});
+
 describe('extension observation journal', () => {
   // #1744: a chat started inside a ChatGPT Project joins the CoS project linked to it; the app
   // learns the Project from the tab that recorded the chat, never from the page's own report.
@@ -6055,6 +6089,7 @@ it.each([
  */
 it.each([
   ['unattributed', { ok: true, draft: false, streaming: true }, 0],
+  ['unattributed', { ok: true, draft: false, streaming: true, approval: true }, 0],
   ['unattributed', { ok: true, draft: false, streaming: false }, 1],
   ['unattributed', null, 1],
   ['blind', { ok: true, draft: false, streaming: true }, 0],
@@ -6081,7 +6116,7 @@ it.each([
   const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
     tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
     conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
-    createChatTab: vi.fn(), call, tabReply: async () => status,
+    createChatTab: vi.fn(), call, tabReply: async () => status && { ...status, conversationId },
     chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
     CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
   });
@@ -6096,8 +6131,39 @@ it.each([
   } else {
     expect(reported.filter((url) => url.includes('repairFailed='))).toHaveLength(1 - reloads);
     // A stream that is running again is a reason to wait, and the app is told so (not "Reload failed").
-    if (reloads === 0) expect(reported.find((url) => url.includes('repairFailed='))).toContain('&why=streaming');
+    if (reloads === 0) {
+      const failure = reported.find((url) => url.includes('repairFailed='))!;
+      expect(failure).toContain('&why=streaming');
+      expect(new URL(failure, 'http://localhost').searchParams.get('approval')).toBe(
+        status && 'approval' in status && status.approval === true ? '1' : null
+      );
+    }
   }
+});
+
+it.each([true, false])('rejects another chat from the repair page check (streaming=%s)', async streaming => {
+  const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
+  const otherChat = 'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff';
+  const tab = { id: 76, url: `https://chatgpt.com/c/${conversationId}` };
+  const reload = vi.fn();
+  const call = vi.fn(async () => ({ ok: true }));
+  const source = backgroundSource.slice(backgroundSource.indexOf('async function performBrowserRepairs('),
+    backgroundSource.indexOf('\nfunction conversationStillOpen('));
+  const repair = vm.runInNewContext(`${source}\nperformBrowserRepairs`, {
+    tabConversations: { '76': conversationId }, tabDocuments: { '76': 'live-document' },
+    conversationForTab: (value: { url?: string }) => value.url?.split('/c/')[1] ?? null,
+    createChatTab: vi.fn(), call,
+    tabReply: async () => {
+      // The selected tab changes chat while the page-status request is in flight.
+      tab.url = `https://chatgpt.com/c/${otherChat}`;
+      return { ok: true, conversationId: otherChat, streaming, approval: true };
+    },
+    chrome: { tabs: { query: async () => [tab], reload, get: async () => tab, update: vi.fn() } },
+    CHATGPT_TAB_URLS: ['https://chatgpt.com/*']
+  });
+  await repair([{ conversationId, token: 'switched-chat', reason: 'unattributed' }], {});
+  expect(reload).not.toHaveBeenCalled();
+  expect(call).toHaveBeenCalledExactlyOnceWith('/status?repairFailed=switched-chat&repairAction=reloaded&why=changed&detail=other-chat');
 });
 
 /**

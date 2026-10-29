@@ -15,6 +15,8 @@ const oldDocument = globalThis.document;
 const oldWindow = globalThis.window;
 const oldResizeObserver = globalThis.ResizeObserver;
 const oldCss = globalThis.CSS;
+const oldRequestAnimationFrame = globalThis.requestAnimationFrame;
+const oldCancelAnimationFrame = globalThis.cancelAnimationFrame;
 const randomUuid = vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000000');
 
 beforeEach(() => {
@@ -28,12 +30,14 @@ beforeEach(() => {
     window: dom.window,
     ResizeObserver: class { observe() {} disconnect() {} },
     CSS: { escape: (value: string) => value },
+    requestAnimationFrame: dom.window.requestAnimationFrame.bind(dom.window),
+    cancelAnimationFrame: dom.window.cancelAnimationFrame.bind(dom.window),
     getComputedStyle: dom.window.getComputedStyle.bind(dom.window)
   });
 });
 
 afterEach(() => {
-  Object.assign(globalThis, { document: oldDocument, window: oldWindow, ResizeObserver: oldResizeObserver, CSS: oldCss });
+  Object.assign(globalThis, { document: oldDocument, window: oldWindow, ResizeObserver: oldResizeObserver, CSS: oldCss, requestAnimationFrame: oldRequestAnimationFrame, cancelAnimationFrame: oldCancelAnimationFrame });
   randomUuid.mockClear();
 });
 

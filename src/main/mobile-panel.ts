@@ -21,6 +21,8 @@ export interface MobilePanelData {
 export interface MobilePanelDeps {
   snapshot(): Promise<MobilePanelData>;
   answer(conversationId: string, cardId: string, choice: 'allow' | 'deny'): { ok: true } | { ok: false; error: string };
+  history?(sessionId: string): Promise<Array<{seq:number;kind:'user'|'assistant';text:string}>>;
+  send?(sessionId: string, text: string): Promise<{id:string;state:string}>;
 }
 export interface MobilePanelOptions {
   userData: string;
@@ -33,11 +35,12 @@ export interface MobilePanelInstance {
   address: string;
   stop(): Promise<void>;
 }
-const PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chat Marks · Painel</title><link rel="stylesheet" href="/mobile.css"></head><body><main><header><h1>Chat Marks</h1><p>Central mobile · sessão local autenticada</p></header><section class="login"><label for="token">Código de acesso do computador</label><div class="inline"><input id="token" type="password" autocomplete="off" placeholder="Código privado"><button id="login">Entrar</button></div><p id="message" role="status" aria-live="polite">Acesso desativado sem o código gerado pelo Chat Marks.</p></section><section id="dashboard" hidden><div class="inline"><h2>Visão geral</h2><button id="refresh">Atualizar</button><button id="logout">Sair</button></div><p id="last-update"></p><h2>Aprovações pendentes</h2><div id="approvals"></div><h2>Empresa</h2><div id="company"></div><h2>Conversas recentes</h2><div id="sessions"></div></section><footer>A aprovação é encaminhada ao aplicativo. Somente o ChatGPT pode confirmar a permissão final.</footer></main><script src="/mobile.js" defer></script></body></html>`;
-const CSS = `:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#121a24;color:#f0f4f9}*{box-sizing:border-box}body{margin:0}main{width:min(850px,100%);margin:auto;padding:22px}header{padding:12px 0 20px}h1{margin:0;font-size:2rem}h2{font-size:1.22rem;margin:26px 0 10px}p{color:#b7c6d9;line-height:1.5}.inline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.inline h2{flex:1}input{min-width:140px;flex:1;padding:13px;background:#26364a;border:1px solid #526982;border-radius:10px;color:inherit;font-size:1rem}button{background:#346da9;border:1px solid #6493c5;color:#fff;border-radius:10px;padding:11px 14px;font:inherit;cursor:pointer}button:hover{background:#4586c8}button:disabled{opacity:.5;cursor:default}.card{padding:15px;border:1px solid #35485f;background:#1d2939;border-radius:12px;margin:9px 0;overflow-wrap:anywhere}.card strong{display:block}.meta{font-size:.85rem;color:#b7c6d9}.login{background:#1c2937;border-radius:14px;padding:17px}.actions{display:flex;gap:8px;margin-top:12px}.deny{background:#613d46}footer{border-top:1px solid #35485f;margin-top:30px;padding:20px 0;color:#a7b8c9;font-size:.85rem}@media(max-width:500px){main{padding:14px}button{min-height:45px}}`;
+const PAGE = `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Chat Marks · Painel</title><link rel="stylesheet" href="/mobile.css"></head><body><main><header><h1>Chat Marks</h1><p>Central mobile · sessão local autenticada</p></header><section class="login"><label for="token">Código de acesso do computador</label><div class="inline"><input id="token" type="password" autocomplete="off" placeholder="Código privado"><button id="login">Entrar</button></div><p id="message" role="status" aria-live="polite">Acesso desativado sem o código gerado pelo Chat Marks.</p></section><section id="dashboard" hidden><div class="inline"><h2>Visão geral</h2><button id="refresh">Atualizar</button><button id="logout">Sair</button></div><p id="last-update"></p><h2>Aprovações pendentes</h2><div id="approvals"></div><h2>Empresa</h2><div id="company"></div><h2>Conversas recentes</h2><div id="sessions"></div><section id="selected-chat" hidden><h2 id="chat-title">Conversa selecionada</h2><div id="history" role="log" aria-live="polite"></div><label for="reply">Mensagem para esta conversa</label><textarea id="reply" rows="3" maxlength="1600" placeholder="Digite uma mensagem"></textarea><button id="send" type="button">Enviar à conversa</button><p class="meta">Aceite na fila não significa entrega ou resposta concluída.</p></section></section><footer>A aprovação é encaminhada ao aplicativo. Somente o ChatGPT pode confirmar a permissão final.</footer></main><script src="/mobile.js" defer></script></body></html>`;
+const CSS = `:root{color-scheme:dark;font:16px system-ui,sans-serif;background:#121a24;color:#f0f4f9}*{box-sizing:border-box}body{margin:0}main{width:min(850px,100%);margin:auto;padding:22px}header{padding:12px 0 20px}h1{margin:0;font-size:2rem}h2{font-size:1.22rem;margin:26px 0 10px}p{color:#b7c6d9;line-height:1.5}.inline{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.inline h2{flex:1}input,textarea{min-width:140px;flex:1;padding:13px;background:#26364a;border:1px solid #526982;border-radius:10px;color:inherit;font:inherit}textarea{width:100%;resize:vertical}button{background:#346da9;border:1px solid #6493c5;color:#fff;border-radius:10px;padding:11px 14px;font:inherit;cursor:pointer}button:hover{background:#4586c8}button:disabled{opacity:.5;cursor:default}.card{padding:15px;border:1px solid #35485f;background:#1d2939;border-radius:12px;margin:9px 0;overflow-wrap:anywhere}.card strong{display:block}.meta{font-size:.85rem;color:#b7c6d9}.login{background:#1c2937;border-radius:14px;padding:17px}.actions{display:flex;gap:8px;margin-top:12px}.deny{background:#613d46}footer{border-top:1px solid #35485f;margin-top:30px;padding:20px 0;color:#a7b8c9;font-size:.85rem}@media(max-width:500px){main{padding:14px}button{min-height:45px}}`;
 const JS = `(() => {
   'use strict';
   let token = '';
+  let selectedSession = '';
   const $ = id => document.getElementById(id);
   const message = text => { $('message').textContent = text; };
   function card(title, details, buttons) {
@@ -54,6 +57,20 @@ const JS = `(() => {
       ...(payload ? {body: JSON.stringify(payload)} : {}) });
     if (!response.ok) throw Error(response.status === 401 ? 'Código de acesso inválido.' : 'Não foi possível concluir a solicitação (' + response.status + ').');
     return response.json();
+  }
+  async function openChat(session) {
+    selectedSession = session.id;
+    $('selected-chat').hidden = false;
+    $('chat-title').textContent = session.title;
+    $('history').replaceChildren();
+    try {
+      const data = await api('/api/chat/' + encodeURIComponent(session.id), 'GET');
+      if (selectedSession !== session.id) return;
+      for (const row of data.messages) {
+        $('history').append(card(row.kind === 'assistant' ? 'Chat Marks' : 'Você', row.text));
+      }
+      if (!data.messages.length) $('history').append(card('Sem mensagens recentes', 'Nada registrado neste histórico.'));
+    } catch (error) { message(error.message); }
   }
   async function refresh() {
     try {
@@ -85,8 +102,18 @@ const JS = `(() => {
       company.append(card(data.company.name, data.company.demo ? 'Demonstração · não são trabalhadores reais' : 'Empresa real · estado do broker não atestado neste painel'));
       for (const seat of data.company.seats) company.append(card(seat.seat, seat.state + ' · ' + seat.tickets + ' solicitações atribuídas'));
       const sessions = $('sessions'); sessions.replaceChildren();
-      for (const item of data.sessions) sessions.append(card(item.title,item.state + ' · ' + new Date(item.updatedAt).toLocaleString('pt-BR')));
+      for (const item of data.sessions) {
+        const actions = document.createElement('div'); actions.className = 'actions';
+        if (item.conversationId) {
+          const button = document.createElement('button'); button.textContent = 'Abrir conversa';
+          button.addEventListener('click', () => void openChat(item)); actions.append(button);
+        }
+        sessions.append(card(item.title,item.state + ' · ' + new Date(item.updatedAt).toLocaleString('pt-BR'),actions));
+      }
       if (!data.sessions.length) sessions.append(card('Nenhuma conversa','Sem sessões registradas.'));
+      if (selectedSession && !data.sessions.some(item => item.id === selectedSession && item.conversationId)) {
+        selectedSession = ''; $('selected-chat').hidden = true; $('history').replaceChildren();
+      }
     } catch (e) { message(e.message); if (String(e.message).includes('inválido')) {token='';$('dashboard').hidden=true;} }
   }
   $('login').addEventListener('click', async () => {
@@ -95,7 +122,17 @@ const JS = `(() => {
     await refresh();
   });
   $('refresh').addEventListener('click', refresh);
-  $('logout').addEventListener('click', () => {token='';$('dashboard').hidden=true;message('Sessão encerrada neste navegador.');});
+  $('send').addEventListener('click', async () => {
+    if (!selectedSession || !$('reply').value.trim()) return;
+    const send = $('send'); send.disabled = true;
+    try {
+      const result = await api('/api/chat/send', 'POST', {sessionId:selectedSession,text:$('reply').value});
+      $('reply').value = '';
+      message('Mensagem ' + result.state + ' na fila local. Ainda sem confirmação de entrega.');
+    } catch (error) { message(error.message); }
+    finally { send.disabled = false; }
+  });
+  $('logout').addEventListener('click', () => {token='';selectedSession='';$('reply').value='';$('history').replaceChildren();$('selected-chat').hidden=true;$('dashboard').hidden=true;message('Sessão encerrada neste navegador.');});
 })();`;
 const MAX_BODY = 2048;
 function security(res: ServerResponse): void {
@@ -160,7 +197,7 @@ export async function startMobilePanel(opts: MobilePanelOptions, deps: MobilePan
     }
     const expectedOrigin = (ssl ? 'https://' : 'http://') + authority;
     if (req.headers.origin && req.headers.origin !== expectedOrigin) { respond(res, 403, '{"error":"origin_denied"}'); return; }
-    const route = (req.url || '').split('?')[0];
+    const route = (req.url || '').split('?')[0] ?? '';
     if (req.url?.includes('?')) { respond(res, 400, '{"error":"query_denied"}'); return; }
     if (req.method === 'GET' && route === '/') { respond(res, 200, PAGE, 'text/html; charset=utf-8'); return; }
     if (req.method === 'GET' && route === '/mobile.css') { respond(res, 200, CSS, 'text/css; charset=utf-8'); return; }
@@ -172,6 +209,30 @@ export async function startMobilePanel(opts: MobilePanelOptions, deps: MobilePan
     if (!equalToken(req.headers.authorization, secret)) { respond(res, 401, '{"error":"not_authorized"}'); return; }
     if (req.method === 'GET' && route === '/api/status') {
       respond(res, 200, JSON.stringify(await deps.snapshot())); return;
+    }
+    if (req.method === 'GET' && route.startsWith('/api/chat/')) {
+      const id = route.slice('/api/chat/'.length);
+      const snapshot = await deps.snapshot();
+      if (!deps.history || !snapshot.sessions.some(session => session.id === id && session.conversationId)) {
+        respond(res, 404, '{"error":"session_not_available"}'); return;
+      }
+      respond(res, 200, JSON.stringify({sessionId:id,messages:(await deps.history(id)).slice(-40)})); return;
+    }
+    if (req.method === 'POST' && route === '/api/chat/send') {
+      if (req.headers.origin !== expectedOrigin || req.headers['content-type'] !== 'application/json') {
+        respond(res, 403, '{"error":"action_origin_denied"}'); return;
+      }
+      const parsed = await body(req) as Record<string,unknown>;
+      if (!parsed || Object.keys(parsed).sort().join(',') !== 'sessionId,text' ||
+          typeof parsed.sessionId !== 'string' || typeof parsed.text !== 'string' ||
+          !parsed.text.trim() || parsed.text.length > 1600 || !deps.send) {
+        respond(res, 400, '{"error":"invalid_request"}'); return;
+      }
+      const snapshot = await deps.snapshot();
+      if (!snapshot.sessions.some(session => session.id === parsed.sessionId && session.conversationId)) {
+        respond(res, 404, '{"error":"session_not_available"}'); return;
+      }
+      respond(res, 202, JSON.stringify(await deps.send(parsed.sessionId,parsed.text.trim()))); return;
     }
     if (req.method === 'POST' && route === '/api/approval') {
       // Browsers send Origin on POST. Require it, and a matching non-credential

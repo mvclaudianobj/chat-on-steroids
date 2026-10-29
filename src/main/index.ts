@@ -9,7 +9,7 @@ import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js
 
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
+import { app, Notification, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
@@ -36,6 +36,7 @@ import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
 import { installPhonePush, pushToPhone } from './phone-push.js';
+import { createSoundReadiness, installSoundCues, soundCue, soundQuietHours } from './sound-cues.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { initRemoteHosts } from './remote/hosts.js';
 import { initMarksVault, warmVaultRedaction } from './marks-vault.js';
@@ -50,6 +51,8 @@ import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdow
 import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
 import { sendDesktopInput } from './session/start-input.js';
+import { runDueSchedules, type RunnerDeps } from './scheduled-runs.js';
+import { enqueueInput, listInputs } from './session/input.js';
 import { createTurnNotifier } from './turn-notifications.js';
 import { createOutboundTurnWatcher } from './notification-events.js';
 import { getWhatsAppWebStatus, getWhatsAppWebDeliveryStatus, resumeWhatsAppWeb, sendWhatsAppWeb, setWhatsAppWebInbound, stopWhatsAppWeb } from './notification-whatsapp-web.js';
@@ -94,6 +97,8 @@ import {
   type SwarmSnapshot
 } from './agents.js';
 import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
+import { performance } from 'node:perf_hooks';
+import { createStartupTiming, installStartupTiming, markStartup, STARTUP_STATE } from './startup-timing.js';
 import { loadConnectorIdentity } from './connector-identity.js';
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
 import { startMobilePanel, type MobilePanelInstance } from './mobile-panel.js';
@@ -106,15 +111,18 @@ import { restoreRouteHold } from './tunnel/route-settle.js';
 import { stopComputerHelper } from './computer/index.js';
 import {
   GOAL_OBJECTIVES_STATE,
+  GOAL_OUTCOMES_STATE,
   GOAL_REPLIES_STATE,
   GOAL_SWITCHES_STATE,
   GOAL_HELPER_SIZE_STATE,
   restoreGoalHelperSize,
   goalSwitchEnabledFor,
   restoreGoalObjectives,
+  restoreGoalOutcomes,
   restoreGoalReplies,
   restoreGoalSwitches,
   type GoalObjectivesSnapshot,
+  type GoalOutcomesSnapshot,
   type GoalRepliesSnapshot,
   type GoalSwitchesSnapshot
 } from './goal.js';
@@ -255,7 +263,7 @@ function createWindow(): void {
 
   // A renderer that fails to load leaves a blank window with no other clue, so
   // record it where the diagnostics panel can show it.
-  window.webContents.on('did-finish-load', () => logInfo('window loaded'));
+  window.webContents.on('did-finish-load', () => { logInfo('window loaded'); markStartup('window'); });
   window.webContents.on('before-input-event', (event, input) => {
     if (input.type !== 'keyDown' || input.key !== 'F11' || input.isAutoRepeat) return;
     event.preventDefault();
@@ -312,6 +320,7 @@ function createWindow(): void {
 const chatNoticeAt = new Map<string, number>();
 /** A chat that waits for the person, for the phone: its own rules decide whether it goes out. */
 const phoneNeedsYou = (sessionId: string): void => {
+  soundCue('needs-you', sessionId);
   void getSession(sessionId).catch(() => null).then(summary => pushToPhone({ kind: 'needs-you', sessionId,
     chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null }));
 };
@@ -375,7 +384,7 @@ setStuckNotifier((title, body, sessionId, opens = 'app') => {
   return true;
 });
 setConnectionLossNotifier(surface => {
-  if (!quitting) void pushToPhone({ kind: 'failed', detail: connectionLossLine(surface, mainText) });
+  if (!quitting) { soundCue('failed'); void pushToPhone({ kind: 'failed', detail: connectionLossLine(surface, mainText) }); }
   return showConnectionLossNotice(surface, {
     isQuitting: () => quitting,
     isFocused: () => window?.isFocused() ?? false,
@@ -458,6 +467,11 @@ void app.whenReady().then(async () => {
   // This guard is intentionally before even app.getPath/init* calls. A secondary instance, or a
   // primary that was told to quit before ready, must never touch the primary's shared userData.
   if (!shouldBeginAppBootstrap(hasSingleInstanceLock, quitting)) return;
+  // Startup timing (ms since the process started); saved and compared once the store is open.
+  const startupTiming = createStartupTiming({ clock: () => performance.now(), now: Date.now, version: app.getVersion(), log: logInfo,
+    save: runs => writeDurableSoon(STARTUP_STATE, runs) });
+  installStartupTiming(startupTiming);
+  markStartup('ready');
   powerMonitor.on('suspend', suspendConnectionLossNotices);
   powerMonitor.on('resume', resumeConnectionLossNotices);
   // Counted for the diagnostics report: kinds of warnings, ended page and helper processes, sleep.
@@ -494,6 +508,7 @@ void app.whenReady().then(async () => {
   initDurableStore(userData);
   try { await loadBrainSettings(); }
   catch { logWarn('Brain settings unavailable; all model-facing Brain integrations remain disabled'); }
+  startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
   await loadConnectorIdentity();
@@ -506,6 +521,7 @@ void app.whenReady().then(async () => {
   await restoreChatModels();
   if (windowActivation.isDisabled()) return;
   await loadConfig();
+  markStartup('config');
   // The login page opens before the ordinary renderer CSP/permissions setup.
   // It never requires OS permissions; deny them before creating that window.
   session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
@@ -567,6 +583,22 @@ void app.whenReady().then(async () => {
   onSessionChange(() => void keepAwake.refresh());
   setInterval(() => void keepAwake.refresh(), 60_000).unref();
   void keepAwake.refresh();
+  // #1802: the window plays the sound; a closed window (only the tray left) plays none, and nor
+  // does a page that is not listening yet (loading, reloading, crashed).
+  const soundReadiness = createSoundReadiness();
+  ipcMain.on('sound:ready', event => { if (window && !window.isDestroyed() && event.sender === window.webContents) soundReadiness.mark(event.sender); });
+  installSoundCues({
+    enabled: () => getConfig().ui.sounds === true,
+    focused: () => window?.isFocused() === true,
+    quietHours: () => soundQuietHours(getConfig().ui),
+    now: () => Date.now(),
+    play: kind => {
+      if (!window || window.isDestroyed() || !soundReadiness.ready(window.webContents)) return false;
+      window.webContents.send('sound:cue', kind);
+      return true;
+    },
+    log: logInfo
+  });
   // Phone notifications (ntfy): the app's network stack (system proxy) and the system's own idle
   // state, where three minutes without input, or a locked screen, count as away.
   installPhonePush({
@@ -596,7 +628,7 @@ void app.whenReady().then(async () => {
       const [start] = await readRecentEvents(id, 1, { kinds: ['turn_start'] });
       return start?.time ?? null;
     },
-    phone: event => void pushToPhone({ kind: 'finished', ...event }),
+    phone: event => { soundCue('finished', event.sessionId); void pushToPhone({ kind: 'finished', ...event }); },
     show: (title, body, sessionId) => {
       const notice = new Notification({ title, body });
       notice.on('click', () => {
@@ -629,6 +661,19 @@ void app.whenReady().then(async () => {
     announcedRelease = latest;
     void queueOutboundNotice({ event: 'app-release', title: `Chat Marks ${latest}`, project: 'Chat Marks' }).catch(() => undefined);
   });
+  // #1826: scheduled runs. Checked every 30 s and right after the computer wakes; a run missed
+  // while it slept or the app was closed goes out once, labelled late.
+  const scheduleDeps: RunnerDeps = {
+    // A lookup that fails is not a deleted chat: the runner keeps the schedule and asks again.
+    session: async id => { const summary = await getSession(id); return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null; },
+    enqueue: input => enqueueInput(input),
+    pending: async () => new Set((await listInputs()).filter(row => ['queued', 'browser', 'tool'].includes(row.state)).map(row => row.id)),
+    log: logInfo
+  };
+  const checkSchedules = () => void runDueSchedules(Date.now(), scheduleDeps).catch(error => logWarn(`scheduled runs: the check failed (${error instanceof Error ? error.message : String(error)})`));
+  setInterval(checkSchedules, 30_000).unref();
+  powerMonitor.on('resume', checkSchedules);
+  checkSchedules();
   // The app's own requests follow the system proxy too, not only the tunnel (#1255).
   configureAppProxy(url => session.defaultSession.resolveProxy(url), () => [
     ...(getConfig().goal.provider.kind === 'custom' ? [getConfig().goal.provider.baseUrl] : []),
@@ -649,6 +694,9 @@ void app.whenReady().then(async () => {
   const savedGoalSwitches = await readDurable<GoalSwitchesSnapshot>(GOAL_SWITCHES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalSwitches(savedGoalSwitches);
+  const savedGoalOutcomes = await readDurable<GoalOutcomesSnapshot>(GOAL_OUTCOMES_STATE);
+  if (windowActivation.isDisabled()) return;
+  restoreGoalOutcomes(savedGoalOutcomes);
   const savedGoalReplies = await readDurable<GoalRepliesSnapshot>(GOAL_REPLIES_STATE);
   if (windowActivation.isDisabled()) return;
   restoreGoalReplies(savedGoalReplies);
@@ -868,6 +916,8 @@ void app.whenReady().then(async () => {
       app.quit();
     }
   );
+  // Chats are restored here; the window, once enabled, can ask for its state before the pet overlay is ready.
+  markStartup('restored');
   windowActivation.enable();
   if (!isBackgroundLaunch(process.argv)) windowActivation.request();
   // The desktop pet overlay is independent of the main window once started; it stays hidden
@@ -945,6 +995,25 @@ void app.whenReady().then(async () => {
       answer: (conversationId, cardId, choice) => {
         const result = requestApprovalAnswer(conversationId, cardId, choice);
         return result.ok ? { ok: true } : { ok: false, error: result.error };
+      },
+      history: async sessionId => {
+        const events = await readRecentEvents(sessionId, 40, { kinds: ['user_message', 'assistant_message'] });
+        return events.flatMap(event => {
+          if (event.kind !== 'user_message' && (event.kind !== 'assistant_message' || !event.final)) return [];
+          return [{
+            seq: event.seq,
+            kind: event.kind === 'user_message' ? 'user' as const : 'assistant' as const,
+            text: redactSecretText(event.message.text).slice(0, 4000)
+          }];
+        });
+      },
+      send: async (sessionId, text) => {
+        const session = (await listSessions()).find(item => item.id === sessionId && !item.archivedAt && !!item.conversationId);
+        if (!session) throw new Error('session_not_available');
+        const queued = await sendDesktopInput({
+          id: randomUUID(), sessionId, text, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null
+        });
+        return { id: queued.id, state: queued.state };
       }
     }).then(async panel => {
       if (quitting || windowActivation.isDisabled()) { await panel.stop(); return; }
