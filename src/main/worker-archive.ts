@@ -48,6 +48,10 @@ export const WORKER_ARCHIVE_LEASE_MS = 2 * 60_000;
 export const WORKER_ARCHIVE_MAX_ATTEMPTS = 6;
 /** How long after a worker reports its task done its chat is archived: its last answer may still be streaming. */
 export const WORKER_ARCHIVE_AFTER_FINISH_MS = 2 * 60_000;
+/** Read at completion, so changing the preference affects subsequent finishes only. */
+export function workerArchiveFinishDelayMs(): number {
+  return (getConfig().multiAgent.archiveWorkerDelayMinutes ?? 2) * 60_000;
+}
 /** The longest a wake waits for its chat to be unarchived before it goes ahead anyway. */
 export const WORKER_UNARCHIVE_HOLD_MS = 90_000;
 const FIRST_BACKOFF_MS = 5 * 60_000;

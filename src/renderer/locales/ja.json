@@ -1,4 +1,7 @@
 {
+  "Archive finished workers after (minutes)": "完了したワーカーをアーカイブするまでの時間（分）",
+  "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1～1440分。既存の環境では標準の2分が維持されます。",
+  "After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.": "設定した時間が経つと完了したワーカーのチャットがChatGPTにアーカイブされます。会話と履歴は保持され、次の作業前に復元されます。クリアしたワーカーのチャットは直ちにアーカイブされます。削除はされません。",
   "Dictation unavailable": "音声入力を利用できません",
   "Cancel dictation": "音声入力をキャンセル",
   "Stop dictation": "音声入力を停止",

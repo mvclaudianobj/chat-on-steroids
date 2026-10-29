@@ -44,6 +44,23 @@ describe('browser bridge port config', () => {
 });
 
 describe('settings migration', () => {
+  it('keeps the legacy two-minute worker archive delay and accepts only bounded integer minutes', async () => {
+    const original = defaultConfig();
+    const legacy = structuredClone(original);
+    delete legacy.multiAgent.archiveWorkerDelayMinutes;
+    await fs.writeFile(path.join(dir, 'config.json'), JSON.stringify(legacy), 'utf8');
+    expect((await loadConfig()).multiAgent.archiveWorkerDelayMinutes).toBe(2);
+    for (const minutes of [1, 9, 1440]) {
+      await saveConfig({ ...original, multiAgent: { ...original.multiAgent, archiveWorkerDelayMinutes: minutes } });
+      expect((await loadConfig()).multiAgent.archiveWorkerDelayMinutes).toBe(minutes);
+    }
+    const saved = await fs.readFile(path.join(dir, 'config.json'), 'utf8');
+    for (const invalid of [0, 1441, 1.5, -1, '5']) {
+      await expect(saveConfig({ ...original, multiAgent: { ...original.multiAgent, archiveWorkerDelayMinutes: invalid as number } }))
+        .rejects.toThrow();
+      expect(await fs.readFile(path.join(dir, 'config.json'), 'utf8')).toBe(saved);
+    }
+  });
   it('defaults command policy enforcement off in allow mode and round-trips both modes', async () => {
     expect(defaultConfig().commandAllowlist).toEqual({ enabled: false, mode: 'allow', rules: [] });
     const legacy = defaultConfig() as Partial<ReturnType<typeof defaultConfig>>;

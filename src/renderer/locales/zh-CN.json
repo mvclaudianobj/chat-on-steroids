@@ -1,4 +1,7 @@
 {
+  "Archive finished workers after (minutes)": "完成任务后归档工作者聊天的延迟（分钟）",
+  "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1 至 1440 分钟。现有安装保留默认的两分钟。",
+  "After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.": "经过设定延迟后，已完成任务的工作者聊天将在 ChatGPT 中归档。对话和历史记录会保留，并在新任务前恢复。已清理的工作者聊天会立即归档。不会删除任何内容。",
   "Dictation unavailable": "语音听写不可用",
   "Cancel dictation": "取消听写",
   "Stop dictation": "停止听写",

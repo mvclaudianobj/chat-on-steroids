@@ -12,7 +12,8 @@ import {
   WORKER_ARCHIVE_LEASE_MS,
   WORKER_ARCHIVE_MAX_ATTEMPTS,
   WORKER_UNARCHIVE_HOLD_MS,
-  workerArchiveWritten
+  workerArchiveWritten,
+  workerArchiveFinishDelayMs
 } from '../src/main/worker-archive.js';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
@@ -49,6 +50,20 @@ it('queues nothing while the setting is off', async () => {
   queueWorkerArchives([A], 1_000);
   await archiving(true);
   expect(nextArchive(1_000)).toBeNull();
+});
+
+it('uses the configured finish delay and rechecks it for new work without losing old queued jobs', async () => {
+  const base = defaultConfig();
+  expect(workerArchiveFinishDelayMs()).toBe(2 * 60_000);
+  await saveConfig({ ...base, multiAgent: { ...base.multiAgent, archiveWorkerChats: true, archiveWorkerDelayMinutes: 9 } });
+  expect(workerArchiveFinishDelayMs()).toBe(9 * 60_000);
+  queueWorkerArchives([A], 1_000, workerArchiveFinishDelayMs());
+  await saveConfig({ ...base, multiAgent: { ...base.multiAgent, archiveWorkerChats: true, archiveWorkerDelayMinutes: 1 } });
+  expect(workerArchiveFinishDelayMs()).toBe(60_000);
+  queueWorkerArchives([B], 1_000, workerArchiveFinishDelayMs());
+  expect(nextArchive(1_000 + 60_000 - 1)).toBeNull();
+  expect(nextArchive(1_000 + 60_000)).toBe(B);
+  expect(nextArchive(1_000 + 9 * 60_000)).toBe(A);
 });
 
 it('hands out each ended worker chat once, leased, and forgets it once archived', () => {

@@ -1,4 +1,7 @@
 {
+  "Archive finished workers after (minutes)": "Arquivar trabalhadores concluídos após (minutos)",
+  "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "De 1 a 1440 minutos. As instalações existentes mantêm a predefinição de dois minutos.",
+  "After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.": "Após o intervalo configurado, a conversa do trabalhador concluído é arquivada no ChatGPT. A conversa e o histórico mantêm-se disponíveis e são restaurados antes de novo trabalho. Conversas de trabalhadores removidos são arquivadas imediatamente. Nada é eliminado.",
   "Dictation unavailable": "Ditado indisponível",
   "Cancel dictation": "Cancelar ditado",
   "Stop dictation": "Parar ditado",
