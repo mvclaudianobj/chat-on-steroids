@@ -146,6 +146,28 @@ it('sends an API chat through apiChatSend and clears the composer; other chats k
   expect(api.apiChatSend).toHaveBeenCalledTimes(1);
 });
 
+it('routes Ctrl+Shift+Enter through the CLI engine instead of the ChatGPT delivery shortcut', async () => {
+  const api = apiMock();
+  let selected = { id: 'session-api', conversationId: 'cosapi-1' };
+  const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => selected });
+  chats.sync();
+  const normalShortcut = vi.fn();
+  $('chatInput').addEventListener('keydown', normalShortcut);
+  $<HTMLTextAreaElement>('chatInput').value = 'continue with Codex';
+  const shortcut = () => new dom.window.KeyboardEvent('keydown', {
+    key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true
+  });
+  $('chatInput').dispatchEvent(shortcut());
+  await vi.waitFor(() => expect(api.apiChatSend).toHaveBeenCalledWith('session-api', 'continue with Codex'));
+  expect(normalShortcut).not.toHaveBeenCalled();
+
+  selected = { id: 'chatgpt-session', conversationId: '11111111-1111-4111-8111-111111111111' };
+  chats.sync();
+  $('chatInput').dispatchEvent(shortcut());
+  expect(normalShortcut).toHaveBeenCalledTimes(1);
+  expect(api.apiChatSend).toHaveBeenCalledTimes(1);
+});
+
 it('keeps the text and says why when an API send fails or carries attachments', async () => {
   const api = apiMock({ apiChatSend: vi.fn(async () => ({ ok: false as const, error: 'This chat is still answering' })) });
   const chats = createApiChatUi(api, { showTab: () => undefined, workspace: () => null, selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });

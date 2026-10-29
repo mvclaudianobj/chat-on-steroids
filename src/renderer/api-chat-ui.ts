@@ -510,10 +510,19 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     void sendText(id, text);
   }, { capture: true });
 
-  // Skills and @file mentions are ChatGPT tools, and their menu is hidden here: Enter must not
-  // pick an invisible choice when a message starts with "/" or contains "@".
+  // The native Cmd/Ctrl+Shift+Enter shortcut bypasses form submit and calls
+  // ChatGPT's outbox directly. CLI conversations have no delivery-mode choice:
+  // always route that shortcut through their own form/engine instead.
+  // Skills and @file mentions are ChatGPT tools, and their menu is hidden here.
   document.addEventListener('keydown', event => {
-    if (event.target !== input || event.key !== 'Enter' || event.shiftKey || event.isComposing || !selectedApiChat()) return;
+    if (event.target !== input || event.key !== 'Enter' || event.isComposing || !selectedApiChat()) return;
+    if (event.shiftKey && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault();
+      event.stopPropagation();
+      composer?.requestSubmit();
+      return;
+    }
+    if (event.shiftKey) return;
     if (document.getElementById('skillPicker')?.hidden !== false) return;
     event.preventDefault();
     event.stopPropagation();
