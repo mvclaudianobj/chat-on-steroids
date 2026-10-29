@@ -49,6 +49,11 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     const reply = await api.company(request);
     if (!reply.ok) throw new Error(reply.error);
     snapshot = reply.data; observed = null; paint();
+    if(request.action==='create') {
+      const created=snapshot.requests.find(row=>row.workflow?.phase==='planning'&&!row.workflow.planner);
+      if(created){const next=await api.company({action:'startCompanyWork',payload:{id:created.id}});
+        if(next.ok){snapshot=next.data;paint();}else throw Error(next.error);}
+    }
   }
   async function change(request: Parameters<AppApi['company']>[0]): Promise<void> {
     if (loading) return;
@@ -70,16 +75,18 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     const requestTitle = input(); requestTitle.required = true;
     const project = input('General');
     const owner = select(COMPANY_ROLES, 'marks-coo', roleLabel);
+    const automated=el('input');automated.type='checkbox';automated.checked=true;
     const engine = select(['chatgpt', 'codex', 'claude', 'opencode', 'cliproxy', 'zeroclaw'], 'chatgpt');
+    engine.addEventListener('change',()=>{automated.disabled=engine.value!=='chatgpt';automated.checked=engine.value==='chatgpt';});
     const model = input('gpt-6');
     const acceptance = el('textarea'); acceptance.value = 'Deliver a reviewable result with acceptance evidence.';
     const tokens = input('10000', 'number'); tokens.min = '0'; tokens.max = '10000000';
     const minutes = input('120', 'number'); minutes.min = '0'; minutes.max = '525600';
-    content.append(field('Request title', requestTitle), field('Project', project), field('Responsible role', owner), field('Engine', engine), field('Model', model), field('Acceptance criteria', acceptance), field('Token budget', tokens), field('Time budget (minutes)', minutes));
+    content.append(field('Request title', requestTitle), field('Project', project), field('Responsible role', owner), field('Engine', engine), field('Model', model), field('Acceptance criteria', acceptance), field('Token budget', tokens), field('Time budget (minutes)', minutes),field('COO coordinates two workers',automated));
     content.append(el('p','company-dialog-hint',t('Only ChatGPT tickets can currently dispatch workers through the broker. Other engines remain manual.')));
     const save = button('Create request', () => {
       if (!requestTitle.value.trim() || !project.value.trim() || !acceptance.value.trim()) { requestTitle.reportValidity(); return; }
-      void change({ action: 'create', payload: { title: requestTitle.value.trim(), project: project.value.trim(), owner: owner.value as typeof COMPANY_ROLES[number], origin: 'ceo', engine: engine.value, model: model.value.trim(), acceptance: acceptance.value.trim(), tokenBudget: Number(tokens.value), timeBudgetMinutes: Number(minutes.value), dueAt: null } });
+      void change({ action: 'create', payload: { title: requestTitle.value.trim(), project: project.value.trim(), owner: owner.value as typeof COMPANY_ROLES[number], origin: 'ceo', engine: engine.value, model: model.value.trim(), acceptance: acceptance.value.trim(), tokenBudget: Number(tokens.value), timeBudgetMinutes: Number(minutes.value), dueAt: null,autoRun:automated.checked } });
     }, 'btn btn-solid'); actions.append(save);
     requestTitle.focus();
   }
@@ -139,6 +146,12 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     content.append(el('h4', '', 'RACI'), el('p', 'company-dialog-hint', `R: ${request.raci.responsible} · A: ${request.raci.accountable} · C: ${request.raci.consulted.join(', ')} · I: ${request.raci.informed.join(', ')}`));
     if (request.execution) content.append(el('p','company-dialog-hint',`Execution: ${request.execution.phase} · ${request.execution.workerId ?? 'unbound'} · ${request.execution.evidence ?? 'No verified report'}`));
     if (request.cooConfirmation) content.append(el('p', 'company-dialog-hint', `${t('COO confirmation')}: ${request.cooConfirmation.reportId} · ${date(request.cooConfirmation.at)}`));
+    if(request.workflow){
+      content.append(el('p','company-dialog-hint',`COO workflow: ${request.workflow.phase} · ${request.workflow.children.length} delegated tasks`));
+      for(const childId of request.workflow.children){const child=snapshot.requests.find(item=>item.id===childId);if(child)content.append(el('p','company-dialog-hint',`${child.seat}: ${child.title} · ${child.status}`));}
+      if(!request.workflow.planner)actions.append(button('Start COO workflow',()=>void change({action:'startCompanyWork',payload:{id}}),'btn btn-solid'));
+      actions.append(button('Check COO and worker reports',()=>void change({action:'advanceCompanyWork',payload:{id}})));
+    }
     content.append(el('h4', '', t('History')));
     const history = el('div', 'company-history'); for (const item of request.history.slice(-10).reverse()) history.append(el('p', '', `${date(item.at)} · ${item.actor}: ${item.note}`)); content.append(history);
     actions.append(button('Save assignment', () => void change({ action: 'seat', payload: { id, seat: seat.value || null } })));
@@ -336,7 +349,10 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     rpgWorld??=createCompanyRpgWorld($('companyRpg'),t,undefined,undefined,workerInspector);
     const safeRows=(observed?.seats??[]).map(row=>{
       const safe=companyLiveSeatState(observed,row.seat,snapshot!.demo);
-      return {...row,state:safe.state,source:safe.source,error:safe.state==='unverified'};
+      const ticket=snapshot!.requests.find(item=>item.id===row.ticketId && item.seat===row.seat &&
+        item.execution?.runId===row.runId && item.execution?.workerId===row.workerId);
+      return {...row,state:safe.state,source:safe.source,error:safe.state==='unverified',
+        taskTitle:safe.state==='working'&&safe.source==='broker'?ticket?.title:null};
     });
     rpgWorld.update(snapshot.company.seats,safeRows,snapshot.demo || observed?.demo===true);
   }
@@ -440,6 +456,11 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
       if(generation!==snapshotGeneration||!panel.classList.contains('is-active'))return;
       ++observationGeneration;observed=null;
       snapshot=result.data;
+      for(const workflow of snapshot.requests.filter(row=>row.workflow &&
+        row.workflow.phase!=='done'&&row.workflow.phase!=='needs-ceo').slice(0,2)){
+        const next=await api.company({action:'advanceCompanyWork',payload:{id:workflow.id}});
+        if(next.ok)snapshot=next.data;
+      }
       paint();
       await loadObservation();
     }catch{

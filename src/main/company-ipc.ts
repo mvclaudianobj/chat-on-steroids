@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema, companyMeetingKindSchema, companyChiefSchema, companyDelegationScopeSchema, companyChiefTitleSchema } from '../shared/company.js';
 import { activateRealCompany, restoreDemoCompany, getCompany, mutateCompany } from './company-store.js';
 import { createCompanyBroker } from './company-broker.js';
+import { createCompanyOrchestrator } from './company-orchestrator.js';
 import { createCompanyObserver } from './company-observability.js';
 import { mainText } from './main-texts.js';
 import { companyLocalConsentCopy, localGrantDecision, readLocalCompanyGrants, recordLocalCompanyRequest, revokeLocalCompanyGrant,
@@ -21,6 +22,8 @@ export const companyIpcSchema = z.discriminatedUnion('action', [
     ]), requestId: z.string().uuid()
   }).strict() }).strict(),
   z.object({ action: z.literal('observe') }).strict(),
+  z.object({ action:z.literal('startCompanyWork'),payload:z.object({id:z.string().uuid()}).strict() }).strict(),
+  z.object({ action:z.literal('advanceCompanyWork'),payload:z.object({id:z.string().uuid()}).strict() }).strict(),
   z.object({ action: z.literal('dispatch'), payload: z.object({ id: z.string().uuid(), consent: z.literal(true) }).strict() }).strict(),
   z.object({ action: z.literal('refreshBroker'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
   z.object({ action: z.literal('reviewBroker'), payload: z.object({ id: z.string().uuid(), evidence: z.string().trim().min(3).max(400), consent: z.literal(true) }).strict() }).strict(),
@@ -33,7 +36,7 @@ export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('activateReal'), consent: z.literal(true) }).strict(),
   z.object({ action: z.literal('restoreDemo'), consent: z.literal(true) }).strict(),
   z.object({ action: z.literal('configure'), payload: z.object({ name: z.string().trim().min(1).max(100), seatCount: z.number().int().min(1).max(99) }).strict() }).strict(),
-  z.object({ action: z.literal('create'), payload: z.object({ title: z.string().trim().min(1).max(160), project: z.string().trim().min(1).max(120), owner: companyRoleSchema, origin: z.union([z.literal('ceo'), companyRoleSchema]), acceptance: z.string().trim().min(1).max(1200), engine: z.string().trim().min(1).max(60), model: z.string().trim().min(1).max(120), tokenBudget: z.number().int().min(0).max(10_000_000), timeBudgetMinutes: z.number().int().min(0).max(525600), dueAt: z.number().int().nonnegative().nullable() }).strict() }).strict(),
+  z.object({ action: z.literal('create'), payload: z.object({ title: z.string().trim().min(1).max(160), project: z.string().trim().min(1).max(120), owner: companyRoleSchema, origin: z.union([z.literal('ceo'), companyRoleSchema]), acceptance: z.string().trim().min(1).max(1200), engine: z.string().trim().min(1).max(60), model: z.string().trim().min(1).max(120), tokenBudget: z.number().int().min(0).max(10_000_000), timeBudgetMinutes: z.number().int().min(0).max(525600), dueAt: z.number().int().nonnegative().nullable(), autoRun:z.boolean().optional() }).strict() }).strict(),
   z.object({ action: z.literal('prepare'), payload: z.object({ id: z.string().uuid(), seat: companySeatSchema }).strict() }).strict(),
   z.object({ action: z.literal('move'), payload: z.object({ id: z.string().uuid(), status: companyStateNameSchema }).strict() }).strict(),
   z.object({ action: z.literal('authorize'), payload: z.object({ id: z.string().uuid(), ownerId: z.string().uuid(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/), runId: z.string().uuid(), consent: z.literal(true) }).strict() }).strict(),
@@ -118,6 +121,8 @@ export function registerCompanyIpc(
           return { ok: false, error: 'Human authorization was not granted' };
       }
       const data = request.action === 'get' ? await getCompany() :
+        request.action === 'startCompanyWork' ? await createCompanyOrchestrator().start(request.payload.id) :
+        request.action === 'advanceCompanyWork' ? await createCompanyOrchestrator().advance(request.payload.id) :
         request.action === 'activateReal' ? await activateRealCompany() :
         request.action === 'restoreDemo' ? await restoreDemoCompany() :
         request.action === 'observe' ? await observer.snapshot() :

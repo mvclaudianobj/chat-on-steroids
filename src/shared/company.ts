@@ -59,6 +59,15 @@ export const companySchema = z.object({
     context.addIssue({ code: 'custom', path: ['seats'], message: 'Seats must be marks1..N' });
 });
 export const companyHistorySchema = z.object({ at: tick, actor, note: safeText(400), from: companyStateNameSchema.optional(), to: companyStateNameSchema.optional() }).strict();
+const companyWorkflowSchema = z.object({
+  phase: z.enum(['planning','running','reviewing','needs-ceo','done']),
+  planner: z.object({ runId: z.string().uuid().nullable(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/).nullable(),
+    conversationId: safeText(160).nullable(), reportId: safeText(100).nullable() }).strict().nullable(),
+  children: z.array(z.string().uuid()).max(8), meetingId: z.string().uuid().nullable(),
+  handoffs: z.array(z.object({ childId: z.string().uuid(), queuedId: safeText(100).nullable(),
+    state: z.enum(['reserved','sent','approved','rejected']), reviewReceiptId: safeText(100).nullable() }).strict()).max(8),
+  error: z.string().max(240).nullable()
+}).strict();
 export const companyRequestSchema = z.object({
   id: z.string().uuid(), title: safeText(160), project: safeText(120), origin: z.union([z.literal('ceo'), companyRoleSchema]),
   owner: companyRoleSchema, seat: companySeatSchema.nullable(), engine: safeText(60), model: safeText(120),
@@ -69,6 +78,8 @@ export const companyRequestSchema = z.object({
   execution: z.object({ mode: z.enum(['simulated','live']), phase: z.enum(['awaiting-authorization','admitted','running','reported','failed']), ownerId: z.string().uuid().nullable(), workerId: z.string().regex(/^worker-[1-9][0-9]*$/).nullable(), runId: z.string().uuid().nullable(), conversationId: safeText(160).optional(), reportId: z.string().max(100).nullable(), result: z.string().max(1200).nullable(), evidence: z.string().max(1200).nullable(), authorizedAt: tick.nullable() }).strict().optional(),
   /** COO receipt binds the exact worker report to a review. Absent on legacy tickets. */
   cooConfirmation: z.object({ actor: z.enum(['marks-coo','ceo']), at: tick, reportId: safeText(100), workerId: z.string().regex(/^worker-[1-9][0-9]*$/), evidence: safeText(400) }).strict().optional(),
+  /** One CEO request owns a durable COO workflow; children remain ordinary broker tickets. */
+  workflow: companyWorkflowSchema.optional(), parentId: z.string().uuid().optional(),
   history: z.array(companyHistorySchema).max(300), createdAt: tick, updatedAt: tick
 }).strict();
 export const companyMeetingSchema = z.object({
@@ -88,8 +99,10 @@ export const companySnapshotSchema = z.object({ version: z.literal(1), company: 
     if (ids.has(request.id)) context.addIssue({ code: 'custom', path: ['requests', index, 'id'], message: 'Duplicate request' });
     ids.add(request.id);
     if (request.seat && !data.company.seats.includes(request.seat)) context.addIssue({ code: 'custom', path: ['requests', index, 'seat'], message: 'Seat not in company' });
-    if ((request.status === 'assigned' || request.status === 'working' || request.status === 'review') && !request.seat)
+    if ((request.status === 'assigned' || request.status === 'working' || request.status === 'review') && !request.seat && !request.workflow)
       context.addIssue({ code: 'custom', path: ['requests', index, 'seat'], message: 'Assigned work requires a seat' });
+    if (request.workflow && (request.parentId || request.seat))
+      context.addIssue({ code:'custom',path:['requests',index,'workflow'],message:'COO workflow cannot own an employee seat' });
   }
 });
 export type Company = z.infer<typeof companySchema>;

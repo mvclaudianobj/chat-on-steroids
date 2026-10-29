@@ -101,7 +101,7 @@ export function restoreDemoCompany(): Promise<CompanySnapshot> {
     return original;
   });
 }
-export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'confirmDelegated' | 'delegationGrant' | 'delegationRevoke' | 'delegationDeny' | 'delegationTriage' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered', payload: unknown): Promise<CompanySnapshot> {
+export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'confirmDelegated' | 'delegationGrant' | 'delegationRevoke' | 'delegationDeny' | 'delegationTriage' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered' | 'autoPlanReserve' | 'autoPlanBind' | 'autoPlanConversation' | 'autoPlanReceive' | 'autoHandoffReserve' | 'autoHandoffSent' | 'autoReview' | 'autoFinish' | 'autoNeedsCeo', payload: unknown): Promise<CompanySnapshot> {
   return serialized(async () => {
     const current = await load();
     if (action === 'demo') {
@@ -122,6 +122,87 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
       request.history.push({at:now,actor:'ceo',note:`Prepared configured seat ${fields.seat}; broker admission still requires approval`,from:'inbox',to:'assigned'});
       current.activities.unshift({id:randomUUID(),at:now,actor:'ceo',kind:'seat',requestId:request.id,message:`Ticket assigned to ${fields.seat}; worker not started`});
       await save(current); return current;
+    }
+    if (action.startsWith('auto')) {
+      const fields = payload as { id: string; workerId?: string; runId?: string; conversationId?: string;
+        reportId?: string; plan?: Array<{ seat: string; title: string; acceptance: string }>;
+        minutes?: string; childId?: string; queuedId?: string; receiptId?: string; reason?: string };
+      const rootRequest = current.requests.find(row=>row.id===fields.id);
+      const workflow = rootRequest?.workflow;
+      if (!rootRequest || !workflow || current.demo) throw new Error('No real COO workflow');
+      const planner = workflow.planner;
+      if (action === 'autoPlanReserve') {
+        if (workflow.phase !== 'planning' || planner) throw new Error('COO planner already reserved');
+        workflow.planner = { runId:null, workerId:null, conversationId:null, reportId:null };
+      } else if (action === 'autoPlanBind') {
+        if (workflow.phase !== 'planning' || !planner || planner.runId || planner.workerId) throw new Error('COO planner already bound');
+        planner.runId=fields.runId!;planner.workerId=fields.workerId!;
+      } else if (action === 'autoPlanConversation') {
+        if (!planner?.runId || !planner.workerId || workflow.phase === 'done' ||
+            (planner.conversationId && planner.conversationId!==fields.conversationId)) throw new Error('COO worker binding changed');
+        planner.conversationId=fields.conversationId!;
+      } else if (action === 'autoPlanReceive') {
+        if (workflow.phase!=='planning'||!planner?.runId||!planner.workerId||!planner.conversationId||
+            planner.reportId||!fields.reportId||fields.plan?.length!==2 || current.company.seatCount<2)
+          throw new Error('COO plan is missing a verified report or two workers');
+        const allowed=new Set(current.company.seats);
+        const seats=fields.plan.map(item=>item.seat);
+        if (new Set(seats).size!==2 || seats.some(seat=>!allowed.has(seat)) ||
+            fields.plan.some(item=>!item.title.trim()||item.title.length>160||!item.acceptance.trim()||item.acceptance.length>1200 ||
+              current.requests.some(row=>row.seat===item.seat && (row.status==='working'||
+                row.execution && ['admitted','running','awaiting-authorization'].includes(row.execution.phase)))))
+          throw new Error('COO selected duplicate, unavailable or invalid seats');
+        const children=fields.plan.map(item=>{
+          const child:CompanyRequest={...rootRequest,id:randomUUID(),title:item.title,acceptance:item.acceptance,
+            owner:rootRequest.owner,seat:item.seat as CompanyRequest['seat'],parentId:rootRequest.id,
+            workflow:undefined,status:'assigned',execution:undefined,cooConfirmation:undefined,
+            tokensUsed:0,minutesUsed:0,createdAt:now,updatedAt:now,
+            raci:{responsible:item.seat as `marks${number}`,accountable:'marks-coo',consulted:[],informed:['ceo']},
+            history:[{at:now,actor:'marks-coo',note:`Delegated from ${rootRequest.id}`}]};
+          delete child.workflow;delete child.execution;delete child.cooConfirmation;
+          return child;
+        });
+        const meetingId=randomUUID();
+        current.meetings.unshift({id:meetingId,title:`Planning: ${rootRequest.title}`,kind:'ad-hoc',
+          agenda:rootRequest.acceptance,participants:['ceo','marks-coo',...seats as `marks${number}`[]],
+          invitations:seats.map(seat=>({seat:seat as `marks${number}`,state:'invited' as const,contribution:'',confirmedAt:null,evidence:null})),
+          at:now,durationMinutes:30,minutes:(fields.minutes??'').slice(0,5000),
+          decisions:children.map(child=>`${child.seat}: ${child.title}`),brainSync:'pending'});
+        planner.reportId=fields.reportId;
+        workflow.children=children.map(child=>child.id);workflow.meetingId=meetingId;workflow.phase='running';
+        rootRequest.status='working';current.requests.unshift(...children);
+      } else if (action === 'autoNeedsCeo') {
+        workflow.phase='needs-ceo';workflow.error=(fields.reason??'COO action needs attention').slice(0,240);
+        rootRequest.status='needs-ceo';
+      } else if (action === 'autoHandoffReserve' || action === 'autoHandoffSent' || action === 'autoReview') {
+        if (!planner?.runId||!planner.workerId||!planner.conversationId||!fields.childId||
+            !workflow.children.includes(fields.childId)||!['running','reviewing'].includes(workflow.phase)) throw Error('Invalid COO handoff');
+        const child=current.requests.find(row=>row.id===fields.childId&&row.parentId===rootRequest.id);
+        if (!child?.execution || child.status!=='review'||child.execution.phase!=='reported') throw Error('Verified worker report required');
+        const handoff=workflow.handoffs.find(row=>row.childId===fields.childId);
+        if (action==='autoHandoffReserve') {
+          if (handoff) throw Error('Report was already submitted to COO');
+          workflow.handoffs.push({childId:fields.childId,queuedId:null,state:'reserved',reviewReceiptId:null});
+        } else if (action==='autoHandoffSent') {
+          if (!handoff||handoff.state!=='reserved'||!fields.queuedId) throw Error('Report submission not reserved');
+          handoff.queuedId=fields.queuedId;handoff.state='sent';workflow.phase='reviewing';
+        } else {
+          if (!handoff||handoff.state!=='sent'||!fields.receiptId||
+              workflow.handoffs.some(row=>row.reviewReceiptId===fields.receiptId)) throw Error('COO review receipt already used');
+          handoff.reviewReceiptId=fields.receiptId;handoff.state='approved';
+          child.cooConfirmation={actor:'marks-coo',at:now,reportId:child.execution.reportId!,workerId:child.execution.workerId!,evidence:`coo:${fields.receiptId}`};
+          child.status='done';child.updatedAt=now;
+          child.history.push({at:now,actor:'marks-coo',note:`COO approved broker report ${fields.receiptId}`,from:'review',to:'done'});
+        }
+      } else if (action === 'autoFinish') {
+        if (workflow.children.length!==2 || workflow.handoffs.filter(row=>row.state==='approved').length!==2 ||
+            workflow.children.some(id=>!current.requests.some(row=>row.id===id&&row.status==='done'))) throw Error('COO reviews pending');
+        workflow.phase='done';rootRequest.status='done';
+      }
+      rootRequest.updatedAt=now;
+      rootRequest.history.push({at:now,actor:'marks-coo',note:action.slice(0,100)});
+      current.activities.unshift({id:randomUUID(),at:now,actor:'marks-coo',kind:'request',requestId:rootRequest.id,message:action});
+      await save(current);return current;
     }
     if (action === 'delegationGrant' || action === 'delegationRevoke') {
       if (current.demo) throw new Error('Delegation is unavailable for synthetic company data');
@@ -209,12 +290,19 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
       current.company.name = name; current.company.seatCount = seatCount; current.company.seats = companySeats(seatCount);
       current.activities.unshift({ id: randomUUID(), at: now, actor: 'ceo', kind: 'company', message: 'Company settings updated.' });
     } else if (action === 'create') {
-      const fields = payload as Pick<CompanyRequest, 'title'|'project'|'owner'|'origin'|'acceptance'|'engine'|'model'|'tokenBudget'|'timeBudgetMinutes'|'dueAt'>;
+      const fields = payload as Pick<CompanyRequest, 'title'|'project'|'owner'|'origin'|'acceptance'|'engine'|'model'|'tokenBudget'|'timeBudgetMinutes'|'dueAt'> & { autoRun?: boolean };
       const request: CompanyRequest = {
         ...fields, id: randomUUID(), seat: null, tokensUsed: 0, minutesUsed: 0, status: 'inbox',
         raci: { responsible: fields.owner, accountable: 'ceo', consulted: [], informed: ['marks-coo'] },
         history: [{ at: now, actor: fields.origin, note: 'Request created.' }], createdAt: now, updatedAt: now
       };
+      delete (request as CompanyRequest & {autoRun?: boolean}).autoRun;
+      if (fields.autoRun) {
+        if (current.demo || fields.engine!=='chatgpt' || current.company.seatCount<2 || !fields.tokenBudget || !fields.timeBudgetMinutes)
+          throw new Error('Automatic COO work requires real ChatGPT and two seats with positive budgets');
+        request.workflow={phase:'planning',planner:null,children:[],meetingId:null,handoffs:[],error:null};
+        request.status='working';
+      }
       current.requests.unshift(request);
       current.activities.unshift({ id: randomUUID(), at: now, actor: fields.origin, kind: 'request', requestId: request.id, message: `Created ${request.title}` });
     } else if (action === 'meeting') {
@@ -333,6 +421,7 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
       const { id, status, seat } = payload as { id: string; status?: CompanyRequest['status']; seat?: string | null };
       const request = current.requests.find(r => r.id === id);
       if (!request) throw new Error('Request not found');
+      if (request.workflow || request.parentId) throw Error('Automated tickets can only be changed by their broker workflow');
       const before = request.status;
       if (action === 'move') {
         if (status === 'working') throw new Error('Working requires verified broker admission');
@@ -347,7 +436,7 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
       request.updatedAt = now;
       const note = action === 'move' ? `Moved to ${request.status}` : `Assigned to ${request.seat ?? 'queue'}`;
       request.history.push({ at: now, actor: 'ceo', note, ...(action === 'move' ? { from: before, to: request.status } : {}) });
-      current.activities.unshift({ id: randomUUID(), at: now, actor: 'ceo', kind: action, requestId: id, message: `${request.title}: ${note}` });
+      current.activities.unshift({ id: randomUUID(), at: now, actor: 'ceo', kind: action as 'move' | 'seat', requestId: id, message: `${request.title}: ${note}` });
     }
     current.activities = current.activities.slice(0, 1000);
     current.delegationAudit = current.delegationAudit.slice(0, 300);
