@@ -43,6 +43,8 @@ interface Ledger {
 
 let ledger: Ledger | null = null;
 let writes: Promise<void> = Promise.resolve();
+/** Session IDs explicitly deleted in this process must not be revived by late engine events. */
+const deletedChatIds = new Set<string>();
 
 function parseLedger(stored: unknown): Ledger {
   const parsed: Ledger = { records: {}, foreign: {} };
@@ -101,6 +103,7 @@ export async function withChatEngines<T extends { id: string; conversationId: st
 /** Serialized durable change of one chat's record; memory follows the write. */
 export function updateChatRecord(sessionId: string, change: (record: ChatRecord | undefined) => ChatRecord | undefined): Promise<void> {
   const write = writes.then(async () => {
+    if (deletedChatIds.has(sessionId)) return;
     const current = await loaded();
     const records = { ...current.records };
     const foreign = { ...current.foreign };
@@ -111,6 +114,22 @@ export function updateChatRecord(sessionId: string, change: (record: ChatRecord 
     else delete records[sessionId];
     await writeDurableNow(API_CHAT_SESSIONS_STATE, { ...foreign, ...records });
     ledger = { records, foreign };
+  });
+  writes = write.catch(() => undefined);
+  return write;
+}
+
+/** Remove a deleted chat's readable or foreign record and fence late writes by its engine. */
+export function forgetChatRecord(sessionId: string): Promise<void> {
+  const write = writes.then(async () => {
+    const current = await loaded();
+    const records = { ...current.records };
+    const foreign = { ...current.foreign };
+    delete records[sessionId];
+    delete foreign[sessionId];
+    await writeDurableNow(API_CHAT_SESSIONS_STATE, { ...foreign, ...records });
+    ledger = { records, foreign };
+    deletedChatIds.add(sessionId);
   });
   writes = write.catch(() => undefined);
   return write;
@@ -127,4 +146,5 @@ export function withoutTurn(current: ChatRecord | undefined): ChatRecord | undef
 export function resetChatLedgerForTests(): void {
   ledger = null;
   writes = Promise.resolve();
+  deletedChatIds.clear();
 }

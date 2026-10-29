@@ -497,6 +497,18 @@ describe('Codex engine (fake app-server)', () => {
     expect((await ledger.storedChatRecord(chat.sessionId))?.openTurn).toBeUndefined();
   });
 
+  it('does not reconnect to Codex when an old recovery snapshot names a deleted chat', async () => {
+    const first = start();
+    const chat = await first.engine.create({ projectId: null });
+    first.engine.shutdown();
+    await ledger.updateChatRecord(chat.sessionId, record => ({ ...record!, openTurn: { turnId: 'old-turn', startedAt: 1 } }));
+    await store.deleteSession(chat.sessionId);
+    const { fake, engine } = start();
+    await engine.recover();
+    expect(fake.requests('thread/resume')).toEqual([]);
+    expect(fake.opened).toEqual([]);
+  });
+
   it('resumes the thread before the first turn after a restart', async () => {
     const first = start();
     const chat = await first.engine.create({ projectId: null, model: 'gpt-5.5-codex' });

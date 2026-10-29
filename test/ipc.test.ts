@@ -2251,6 +2251,23 @@ describe('session IPC contracts', () => {
     expect(isChatBlocked(conversationId)).toBe(false);
   });
 
+  it('deletes an API engine ledger entry and fences late updates after removing its chat', async () => {
+    const ledger = await import('../src/main/agent-engine/ledger.js');
+    const conversationId = 'cosapi-00000000-0000-4000-8000-000000000071';
+    const session = await createSession({ title: 'removed API engine', conversationId });
+    await ledger.updateChatRecord(session.id, () => ({ engine: 'codex', backendSessionId: 'thread-deleted',
+      model: null, effort: null }));
+    expect((await ledger.storedChatRecord(session.id))?.backendSessionId).toBe('thread-deleted');
+    const deleted = await handlers.get('sessions:delete')!(null, { id: session.id }) as { ok: boolean; error?: string };
+    expect(deleted.ok, deleted.error).toBe(true);
+    expect(await getSession(session.id)).toBeNull();
+    expect(await ledger.storedChatRecord(session.id)).toBeUndefined();
+    await ledger.updateChatRecord(session.id, () => ({ engine: 'codex', backendSessionId: 'late-thread', model: null, effort: null }));
+    expect(await ledger.storedChatRecord(session.id)).toBeUndefined();
+    const stored = await readDurable<Record<string, unknown>>(ledger.API_CHAT_SESSIONS_STATE);
+    expect(stored).not.toHaveProperty(session.id);
+  });
+
   it('removes trust when the row that carries its button is deleted', async () => {
     const { isChatTrusted, resetTrustedChatsForTests } = await import('../src/main/session/trusted-chats.js');
     resetTrustedChatsForTests();

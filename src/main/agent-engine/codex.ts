@@ -123,6 +123,25 @@ async function childEnvironment(): Promise<NodeJS.ProcessEnv> {
 
 const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
+/** The native Codex CLI runs below a Node wrapper. On POSIX, detached launch makes the
+ * wrapper the leader of a private process group, so the native child exits with it. */
+function terminateCodexChild(child: ChildProcess): void {
+  if (!child.pid || child.exitCode !== null || child.signalCode !== null) return;
+  try {
+    if (process.platform !== 'win32' && child.spawnargs.length > 0 && child.pid > 1) {
+      // Only our own detached children are group-killable; test fakes and WSL aren't.
+      if ((child as ChildProcess & { codexDetached?: boolean }).codexDetached) {
+        process.kill(-child.pid, 'SIGTERM');
+        const pid = child.pid;
+        const timer = setTimeout(() => { try { process.kill(-pid, 'SIGKILL'); } catch { /* exited */ } }, 2_000);
+        timer.unref?.();
+        return;
+      }
+    }
+    child.kill('SIGTERM');
+  } catch { /* already exited */ }
+}
+
 /** The real host: cli-modules resolution, a private socket directory, Electron's quit. */
 export function defaultCodexHost(): CodexHost {
   const sockets = new Map<AgentEngineRoute, string>();
@@ -159,13 +178,45 @@ export function defaultCodexHost(): CodexHost {
   async function stopOrphan(socket: string): Promise<void> {
     const pidFile = `${socket}.pid`;
     const pid = Number((await fs.readFile(pidFile, 'utf8').catch(() => '')).trim());
-    if (Number.isInteger(pid) && pid > 1) {
-      const command = await run('ps', ['-o', 'command=', '-p', String(pid)], { timeout: 3_000 }).then(result => result.stdout, () => '');
-      if (command.includes('app-server') && command.includes(socket)) {
-        try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
-        await delay(300);
+    // The wrapper can die without its native child, and the pidfile can point to an older
+    // wrapper. Discover every process that names this profile's exact socket, including native
+    // descendants with another pid. The user-owned Codex daemon has no such argument.
+    const candidates = new Set<number>();
+    const matches = async (candidate: number): Promise<boolean> => {
+      if (!Number.isInteger(candidate) || candidate <= 1 || candidate === process.pid) return false;
+      const proc = `/proc/${candidate}`;
+      const stat = await fs.stat(proc).catch(() => null);
+      if (!stat || (process.getuid && stat.uid !== process.getuid())) return false;
+      const argv = await fs.readFile(`${proc}/cmdline`).catch(() => null);
+      if (!argv) return false;
+      const args = argv.toString('utf8').split('\0').filter(Boolean);
+      return args.some(arg => arg.includes('app-server')) && args.some(arg => arg === `unix://${socket}` || arg === socket);
+    };
+    if (process.platform === 'linux') {
+      const entries = await fs.readdir('/proc').catch(() => []);
+      for (const entry of entries) {
+        if (!/^\d+$/.test(entry)) continue;
+        const candidate = Number(entry);
+        if (await matches(candidate)) candidates.add(candidate);
+      }
+    } else if (await run('ps', ['-o', 'command=', '-p', String(pid)], { timeout: 3_000 })
+      .then(result => result.stdout.includes('app-server') && result.stdout.includes(socket), () => false)) {
+      candidates.add(pid);
+    }
+    for (const candidate of candidates) {
+      if (await matches(candidate) || process.platform !== 'linux') {
+        try { process.kill(candidate, 'SIGTERM'); } catch { /* already gone */ }
       }
     }
+    if (candidates.size) await delay(300);
+    for (const candidate of candidates) {
+      if (await matches(candidate)) {
+        try { process.kill(candidate, 'SIGKILL'); } catch { /* already gone */ }
+      }
+    }
+    // Refuse to unlink a socket while an owner still has it open. New startup would otherwise
+    // strand that process and allow two servers to execute the same thread.
+    for (const candidate of candidates) if (await matches(candidate)) throw new Error('The previous Codex app-server is still running');
     await fs.rm(pidFile, { force: true });
     await fs.rm(socket, { force: true });
   }
@@ -206,16 +257,18 @@ export function defaultCodexHost(): CodexHost {
       // Chat Marks: the Brain MCP server (H1c); its bearer token only in the server's environment.
       const brain = await codexBrainMcpLaunch(runtime.windows);
       const [serverFile, serverArgs] = exec(runtime, codexServerArgv(socket, overrides, brain?.args));
-      const server = spawn(serverFile, serverArgs, { cwd: home, env: { ...env, ...brain?.env }, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+      const server = spawn(serverFile, serverArgs, { cwd: home, env: { ...env, ...brain?.env }, stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true, detached: !runtime.windows });
+      (server as ChildProcess & { codexDetached?: boolean }).codexDetached = !runtime.windows;
       if (!runtime.windows && server.pid) await fs.writeFile(`${socket}.pid`, String(server.pid), { mode: 0o600 }).catch(() => undefined);
       try {
         await waitForSocket(runtime, socket, server);
       } catch (error) {
-        server.kill('SIGTERM');
+        terminateCodexChild(server);
         throw error;
       }
       const [clientFile, clientArgs] = exec(runtime, codexProxyArgv(socket));
-      const client = spawn(clientFile, clientArgs, { cwd: home, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+      const client = spawn(clientFile, clientArgs, { cwd: home, env, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true, detached: !runtime.windows });
+      (client as ChildProcess & { codexDetached?: boolean }).codexDetached = !runtime.windows;
       return { client, server, socket };
     },
     workspace: async (projectId, runtime) => {
@@ -350,8 +403,8 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
   function killProcesses(processes: CodexProcesses): void {
     for (const child of [processes.client, processes.server]) {
       if (!child || child.exitCode !== null || child.signalCode !== null) continue;
-      try { child.kill('SIGTERM'); } catch { /* gone */ }
-      const timer = setTimeout(() => { try { if (child.exitCode === null) child.kill('SIGKILL'); } catch { /* gone */ } }, 2_000);
+      terminateCodexChild(child);
+      const timer = setTimeout(() => { try { if (child.exitCode === null && !(child as ChildProcess & { codexDetached?: boolean }).codexDetached) child.kill('SIGKILL'); } catch { /* gone */ } }, 2_000);
       timer.unref?.();
     }
   }
@@ -847,6 +900,8 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
           const threadId = record.backendSessionId;
           if (threadId) {
             const session = await getSession(sessionId);
+            // A deleted chat can leave a stale recovery snapshot. Never wake Codex for it.
+            if (!session || !isApiConversationId(session.conversationId)) continue;
             const runtime = await runtimeOrThrow();
             const cwd = await host.workspace(session?.projectId ?? null, runtime);
             const connection = await connection_(routeOf(record));

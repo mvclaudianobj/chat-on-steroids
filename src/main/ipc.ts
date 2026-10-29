@@ -181,7 +181,8 @@ import { forgetSession, notifyChanged, onSessionChange } from './session/recorde
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
-import { withChatEngines } from './agent-engine/ledger.js'; // Chat Marks: chat type icons
+import { withChatEngines, forgetChatRecord, storedChatRecord } from './agent-engine/ledger.js'; // Chat Marks: chat type icons and deletion
+import { agentEngine } from './agent-engine/registry.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { commitProjectChanges, createPullRequest, pushProject, readCommitState } from './project-commit.js';
 import { exportSessionPage } from './session/page-export.js';
@@ -2336,6 +2337,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
           ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
         ], false);
       }
+      // Stop engine work while the session is still addressable. In particular, a deleted Codex
+      // chat must not keep a live turn or be picked up by the next startup recovery sweep.
+      if (summary && isApiConversationId(summary.conversationId)) {
+        const record = await storedChatRecord(id);
+        if (record) {
+          const engine = agentEngine(record.engine ?? 'cliproxy');
+          await engine.stop(id);
+        }
+      }
       // Detach first. The recorder maps live ChatGPT conversations to session ids, so
       // deleting the folder underneath a live one left it appending to a session that no
       // longer existed — the events went to a resurrected half-session with no summary.
@@ -2351,6 +2361,9 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ], false);
       }
       await deleteSession(id);
+      // Delete the ledger only after the session was deleted successfully. Serialized updates
+      // prevent a previously queued turn write from restoring a stale entry.
+      if (summary && isApiConversationId(summary.conversationId)) await forgetChatRecord(id);
       if (summary?.conversationId) {
         for (const conversationId of [summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)]) {
           revokeVaultChat(conversationId);
