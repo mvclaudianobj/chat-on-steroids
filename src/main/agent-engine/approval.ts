@@ -30,7 +30,9 @@ export interface ApprovalRequest {
 interface Entry {
   view: ApiChatPendingApproval;
   hash: string;
+  identity: string;
   engineRequestId: string | null;
+  pending: Promise<ApprovalOutcome>;
   resolve(outcome: ApprovalOutcome): void;
 }
 
@@ -51,6 +53,9 @@ const clip = (text: string, max: number): string => text.length > max ? `${text.
 /** One running turn's pending approvals, oldest first; the renderer is shown the oldest. */
 export class ApprovalGate {
   private readonly entries: Entry[] = [];
+  /** Exact retransmissions of an already decided engine request must not ask again. This
+   * cache is only for this running turn, never a grant for a later tool call or restart. */
+  private readonly decided = new Map<string, { hash: string; outcome: ApiChatApprovalDecision }>();
   private closed = false;
 
   constructor(private readonly onChange: () => void = () => undefined) {}
@@ -58,26 +63,43 @@ export class ApprovalGate {
   /** Waits for the answer. After `stop()` it answers `stop` at once. */
   request(input: ApprovalRequest, now = Date.now()): Promise<ApprovalOutcome> {
     if (this.closed) return Promise.resolve('stop');
-    return new Promise(resolve => {
-      const entry: Entry = {
-        view: {
-          approvalId: randomUUID(), turnId: input.turnId, toolCallId: input.toolCallId, tool: input.tool,
-          summary: clip(input.summary, MAX_SUMMARY_CHARS), files: (input.files ?? []).slice(0, MAX_FILES).map(file => clip(file, 300)),
-          requestedAt: now
-        },
-        hash: argsHash(input.tool, input.action),
-        engineRequestId: input.engineRequestId ?? null,
-        resolve: outcome => {
-          const index = this.entries.indexOf(entry);
-          if (index < 0) return;
-          this.entries.splice(index, 1);
-          this.onChange();
-          resolve(outcome);
+    const identity = JSON.stringify([input.turnId, input.toolCallId, input.engineRequestId ?? null]);
+    const hash = argsHash(input.tool, input.action);
+    const already = this.decided.get(identity);
+    if (already && already.hash === hash) return Promise.resolve(already.outcome);
+    const duplicate = this.entries.find(entry => entry.identity === identity);
+    if (duplicate?.hash === hash) return duplicate.pending;
+    // A provider may reuse an RPC id after changing its action. Withdraw the earlier
+    // prompt instead of letting an old approval authorize the replacement.
+    if (duplicate) duplicate.resolve('resolved');
+    let settle!: (outcome: ApprovalOutcome) => void;
+    const pending = new Promise<ApprovalOutcome>(resolve => { settle = resolve; });
+    const entry: Entry = {
+      view: {
+        approvalId: randomUUID(), turnId: input.turnId, toolCallId: input.toolCallId, tool: input.tool,
+        summary: clip(input.summary, MAX_SUMMARY_CHARS), files: (input.files ?? []).slice(0, MAX_FILES).map(file => clip(file, 300)),
+        requestedAt: now
+      },
+      hash, identity, pending,
+      engineRequestId: input.engineRequestId ?? null,
+      resolve: outcome => {
+        const index = this.entries.indexOf(entry);
+        if (index < 0) return;
+        this.entries.splice(index, 1);
+        if (outcome === 'approve' || outcome === 'deny' || outcome === 'always') {
+          // An engine's retry of the *same* request gets the explicit answer. Never
+          // reuse it for a new toolCallId, turn, or changed action.
+          this.decided.delete(identity);
+          this.decided.set(identity, { hash, outcome });
+          if (this.decided.size > 128) this.decided.delete(this.decided.keys().next().value!);
         }
-      };
-      this.entries.push(entry);
-      this.onChange();
-    });
+        this.onChange();
+        settle(outcome);
+      }
+    };
+    this.entries.push(entry);
+    this.onChange();
+    return pending;
   }
 
   /** Whether that exact approval id is pending now. */
@@ -115,6 +137,7 @@ export class ApprovalGate {
   stop(): void {
     this.closed = true;
     for (const entry of [...this.entries]) entry.resolve('stop');
+    this.decided.clear();
   }
 
   view(): ApiChatPendingApproval | null {
