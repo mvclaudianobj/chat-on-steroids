@@ -59,7 +59,7 @@ import { UI_BASE_ZOOM, titleBarOverlayForTheme, windowBackgroundForTheme } from 
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, cancelSessionInputs } from './session/input.js';
+import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, cancelSessionInputs, retryStoppedQueuedPickup } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -2167,6 +2167,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const sent = await sendQueuedInputNow(id);
     if (sent) wakeBrowserWork();
     return sent;
+  });
+  handle('sessions:retryPickup', async (payload) => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const retried = await retryStoppedQueuedPickup(id);
+    if (retried) wakeBrowserWork();
+    return retried;
   });
   handle('sessions:editInput', async (payload) => { const { id, text, afterTurn } = z.object({ id: z.string().uuid(), text: inputArgs.shape.text, afterTurn: z.boolean().optional() }).parse(payload); return editQueuedInput(id, text, afterTurn); });
   handle('sessions:cancelInput', async (payload) => cancelDesktopInput(z.object({ id: z.string().uuid() }).parse(payload).id));

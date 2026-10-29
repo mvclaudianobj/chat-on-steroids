@@ -9082,6 +9082,22 @@ async function refreshInputQueue(): Promise<void> {
           void refreshInputQueue();
         } else cancel.disabled = false;
       };
+      if (entry.pickupRecovery?.stoppedAt) {
+        card.classList.add('is-delivery-error');
+        const paused = el('span', 'pending-message-status', () =>
+          t('Browser pickup stopped after {0} attempts', [entry.pickupRecovery!.attempts]));
+        card.append(paused);
+        const retry = dockAction(() => t('Retry delivery'), 'i-retry', () => {});
+        retry.classList.add('delivery-retry');
+        retry.onclick = async () => {
+          if (retry.disabled || !card.isConnected || selection !== selectionGeneration) return;
+          retry.disabled = true;
+          const restarted = await run(api.retryQueuedPickup(entry.id));
+          if (restarted === false) toast(t('The queue changed during the move. Try again.'));
+          void refreshInputQueue();
+        };
+        card.append(retry);
+      }
       if (entry.recovery) { card.append(cancel); return card; }
       // Like Codex's Steer: send a message that waits for the end of the turn into the turn now.
       if (entry.mode === 'after-turn' && !entry.attachments?.length && !entry.images?.length && !entry.stages?.length) {

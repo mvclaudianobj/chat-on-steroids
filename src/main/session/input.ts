@@ -1171,6 +1171,29 @@ export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: stri
       ...('stoppedAt' in pickupRecovery && pickupRecovery.stoppedAt ? { stoppedAt: pickupRecovery.stoppedAt } : {}) };
   });
 }
+
+/** Explicit user retry after the bounded automatic pickup budget has stopped.
+ * The budget belongs to one source turn, so every sibling stage must be reset
+ * together; neither text nor any potentially sent delivery is replayed here.
+ */
+export function retryStoppedQueuedPickup(id: string): Promise<boolean> {
+  return serial(async () => {
+    const rows = await load();
+    const head = rows.find(row => row.id === id && row.state === 'queued' && row.pickupRecovery?.stoppedAt &&
+      row.sessionId && row.conversationId && row.queuedTurn);
+    if (!head) return false;
+    const session = await getSession(head.sessionId!);
+    if (!session || session.conversationId !== head.conversationId || session.browserRecoveryDismissedAt !== undefined) return false;
+    const stoppedAt = head.pickupRecovery!.stoppedAt;
+    const next = rows.map(row => row.state === 'queued' && row.sessionId === head.sessionId &&
+      row.queuedTurn?.conversationId === head.queuedTurn?.conversationId &&
+      row.queuedTurn?.turnId === head.queuedTurn?.turnId && row.pickupRecovery?.stoppedAt === stoppedAt
+      ? { ...row, pickupRecovery: undefined, error: undefined } : row);
+    if (next.every((row, index) => row === rows[index])) return false;
+    await commit(next);
+    return true;
+  });
+}
 /** A sent receipt survives a recorder failure. Existing outbox reads retry publication,
  * never transport; the stable canonical key makes a lost recording ACK idempotent. */
 async function publishHistory(): Promise<void> {
