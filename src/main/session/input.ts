@@ -37,6 +37,7 @@ import { autoSelectManagedSkills } from '../skill-routing.js';
 import { SEND_CHECK_RETRY_MS, type SendCheckKind } from '../send-check.js';
 import { asksForImage } from './image-request.js';
 import { readyForWake } from '../worker-archive.js';
+import { promisesImmediateNextStep } from '../../shared/next-step-continue.js';
 
 /** ChatGPT's own conversation and message ids; synthetic interim ids never name a branch point. */
 const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -115,6 +116,8 @@ const entrySchema = inputArgs.extend({
   companionInputId: z.string().uuid().optional(),
   /** `rotation`: the app's automatic continue that starts a fresh turn in a long one (#1402). */
   purpose: z.enum(['user', 'decision', 'rotation']).optional(),
+  /** A final answer's promise to do work, admitted once from an exact completed MCP turn. */
+  promisedStep: z.object({ sourceTurnId: z.string().min(1).max(256), finalMessageId: z.string().min(1).max(256) }).optional(),
   lifetime: z.literal('temporary-planner').optional(),
   decisionSourceSessionId: z.string().min(8).max(64).optional(),
   response: z.string().max(16000).optional(),
@@ -303,6 +306,12 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
   // Silence can leave the recorder's original turn open. Its durable ticket
   // proves the exact unchanged work; the native page must still be idle for Send.
   if (entry.silenceBoundary) return await eligibleStageEnd(entry) === entry.silenceBoundary.turnId;
+  if (entry.promisedStep) {
+    const session = await getSession(entry.sessionId);
+    const final = await readCompletedFinal(entry.sessionId, entry.conversationId!, entry.promisedStep.sourceTurnId);
+    return !!session && !session.activeTurnId && session.conversationId === entry.conversationId &&
+      final?.messageId === entry.promisedStep.finalMessageId && (await sessionInputPolicy(entry.sessionId)).browserAllowed;
+  }
   const policy = await sessionInputPolicy(entry.sessionId);
   if (entry.completedTurnId && await eligibleStageEnd(entry) !== entry.completedTurnId) return false;
   if (entry.directTurn) {
@@ -916,6 +925,45 @@ export function fileRotationContinueAfterStop(sessionId: string, turnId: string)
       queuedTurn: { conversationId: session.conversationId, turnId }, state: 'queued', owner: null, createdAt: now,
       conversationId: session.conversationId };
     await commit(append(current, entry));
+    return { ...entry };
+  });
+}
+
+/** A final answer can still explicitly promise an immediate next step.
+ * The existing fresh-turn outbox owns it, once per MCP-backed source turn.
+ */
+export function filePromisedStepContinue(sessionId: string, conversationId: string,
+  source: { turnId: string | null; messageId: string; text: string }): Promise<InputEntry | null> {
+  return serial(async () => {
+    if (!source.turnId || !promisesImmediateNextStep(source.text) || getConfig().ui.autoContinue === false) return null;
+    const current = await load();
+    if (current.some(row => row.sessionId === sessionId && !terminal(row))) return null;
+    if (current.some(row => row.sessionId === sessionId && row.promisedStep?.sourceTurnId === source.turnId)) return null;
+    const session = await getSession(sessionId);
+    if (!session || session.conversationId !== conversationId || session.activeTurnId ||
+        session.origin?.kind === 'worker' || session.origin?.kind === 'helper' ||
+        session.browserRecoveryDismissedAt !== undefined || isChatBlocked(conversationId)) return null;
+    const [final, attributable] = await Promise.all([
+      readCompletedFinal(sessionId, conversationId, source.turnId),
+      turnHasMcpCall(sessionId, conversationId, source.turnId)
+    ]);
+    if (!final || !attributable || final.messageId !== source.messageId || !promisesImmediateNextStep(final.text)) return null;
+    // A new authored instruction re-arms this budget; repeated empty promises do not.
+    const lastUser = current.findLastIndex(row => row.sessionId === sessionId &&
+      !row.promisedStep && row.purpose !== 'rotation' && !row.recovery);
+    if (current.slice(lastUser + 1).filter(row => row.sessionId === sessionId && row.promisedStep).length >= 8) return null;
+    const latest = await getSession(sessionId);
+    if (!latest || latest.activeTurnId || latest.conversationId !== conversationId ||
+        (await readCompletedFinal(sessionId, conversationId, source.turnId))?.messageId !== source.messageId) return null;
+    const now = Date.now();
+    const entry: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
+      text: 'Continue the unfinished task now. Your last answer promised the next step. Carry it out and verify the result before concluding. Check existing work so no action is duplicated.',
+      mode: 'auto', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
+      authoredSource: 'none', purpose: 'rotation', transportIntent: 'browser',
+      promisedStep: { sourceTurnId: source.turnId, finalMessageId: source.messageId },
+      queuedTurn: { conversationId, turnId: source.turnId } };
+    await commit(append(current, entry));
+    logInfo(`input: Automatic Continue filed for promised next step in ${conversationId} (turn ${source.turnId})`);
     return { ...entry };
   });
 }
