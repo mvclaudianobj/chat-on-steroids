@@ -46,6 +46,34 @@ beforeEach(() => {
   button = document.querySelector('[data-testid="send-button"]')!;
 });
 afterEach(() => { dom.window.close(); vi.useRealTimers(); });
+
+it('does not interpret Marks controls injected inside the editor as an authored draft', () => {
+  box.textContent = '';
+  document.execCommand = (command, _ui, value) => {
+    if (command !== 'insertHTML' || document.activeElement !== box) return false;
+    const range = document.getSelection()!.getRangeAt(0);
+    range.deleteContents();
+    const template = document.createElement('template');
+    template.innerHTML = value || '';
+    range.insertNode(template.content);
+    return true;
+  };
+  const overlay = document.createElement('span');
+  overlay.className = 'clf-composer';
+  overlay.textContent = 'Marks: Continue';
+  box.append(overlay);
+  expect(api.composerText()).toBe('');
+  let reason = '';
+  expect(api.insertPrompt('New message', false, why => { reason = why; })).toBe(true);
+  expect(reason).toBe('');
+  expect(api.composerText()).toBe('New message');
+  box.textContent = 'User draft';
+  box.append(overlay);
+  expect(api.composerText()).toBe('User draft');
+  expect(api.insertPrompt('New message', false, why => { reason = why; })).toBe(false);
+  expect(reason).toBe('existing_draft');
+  expect(api.composerText()).toBe('User draft');
+});
 function user(text: string) {
   const section = document.createElement('section');
   section.setAttribute('data-testid', 'conversation-turn-1');

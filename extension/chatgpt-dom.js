@@ -79,9 +79,11 @@ var CLF_DOM = (() => {
   /** The editor's text as written: everything but those nodes. The common case reads it directly. */
   const editorText = (node) => {
     if (!node || node.matches?.(NOT_PROMPT)) return '';
-    if (!node.querySelector?.(NOT_PROMPT) || typeof node.cloneNode !== 'function') return node.textContent ?? '';
+    // The extension can mount its own controls under the rich editor during a React
+    // redraw. Their labels are not user-authored text and must not block an outbox send.
+    if (!node.querySelector?.(`${NOT_PROMPT}, ${OWN_SURFACES}`) || typeof node.cloneNode !== 'function') return node.textContent ?? '';
     const clone = node.cloneNode(true);
-    for (const injected of clone.querySelectorAll(NOT_PROMPT)) injected.remove();
+    for (const injected of clone.querySelectorAll(`${NOT_PROMPT}, ${OWN_SURFACES}`)) injected.remove();
     return clone.textContent ?? '';
   };
   const authoredText = (node) => {
