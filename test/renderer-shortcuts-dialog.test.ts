@@ -160,7 +160,9 @@ it('has a row for every file that handles modifier keys, so a new shortcut canno
   }
   // Files that read a modifier or a physical key without owning a shortcut of their own.
   const guards = new Map([
-    ['skills.ts', 'the slash menu only steps aside when a modifier is held']
+    ['skills.ts', 'the slash menu only steps aside when a modifier is held'],
+    ['cli-chat-ui.ts', 'the CLI chat composer guards Alt+Enter without defining a global shortcut'],
+    ['jarvis.ts', 'the configurable hold-to-talk key already appears as Hold to dictate']
   ]);
   const renderer = new URL('../src/renderer/', import.meta.url);
   const handlers = readdirSync(renderer).filter(name => name.endsWith('.ts') &&

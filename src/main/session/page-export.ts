@@ -69,7 +69,7 @@ export async function exportSessionPage(request: PageExportRequest, owner: Brows
   const title = hide(summary.title.trim() || mainText('New chat'));
   const word = mainText('hidden');
   const html = transcriptHtml(title, messages, { user: mainText('You'), assistant: 'ChatGPT' }, {
-    lang: request.lang, date: longDate(request.lang, new Date()), footer: mainText('Shared from Chat On Steroids'), hidden: word
+    lang: request.lang, date: longDate(request.lang, new Date()), footer: mainText('Shared from Chat Marks'), hidden: word
   });
   // A hidden detail in the title stays hidden in the suggested file name too.
   const fileName = markdownFileName(title.replace(/\[redacted(?: private key)?\]/g, word), '', 'html');

@@ -9,6 +9,8 @@
  * text without a published translation is shown as written.
  */
 export const MAIN_TEXTS = [
+  'Cancel',
+  'Authorize',
   'Open',
   'Show browser',
   'Hide browser',
@@ -103,7 +105,7 @@ export const MAIN_TEXTS = [
   // A chat shared as a web page: the page's own labels ('You' is above).
   'New chat',
   'hidden',
-  'Shared from Chat On Steroids'
+  'Shared from Chat Marks'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

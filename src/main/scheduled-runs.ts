@@ -88,7 +88,7 @@ async function load(): Promise<ScheduledRun[]> {
   return raw.success ? raw.data.schedules.flatMap(entry => { const parsed = recordSchema.safeParse(entry); return parsed.success ? [parsed.data] : []; }) : [];
 }
 const save = async (schedules: ScheduledRun[]) => {
-  if (foreign) throw new Error('These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.');
+  if (foreign) throw new Error('These schedules were saved by a newer version of Chat Marks. Update the app to change them.');
   await writeDurableNow(STORE, { version: 1, schedules });
 };
 

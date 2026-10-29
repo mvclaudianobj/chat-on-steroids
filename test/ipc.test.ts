@@ -3070,7 +3070,7 @@ describe('settings backup over IPC', () => {
   it('refuses a file that is not a backup, and does nothing when a dialog is cancelled', async () => {
     const other = path.join(dir, 'package.json');
     await fs.writeFile(other, JSON.stringify({ name: 'something' }));
-    expect(await pick(other)).toEqual({ ok: false, error: 'This file is not a Chat On Steroids settings backup.' });
+    expect(await pick(other)).toEqual({ ok: false, error: 'This file is not a Chat Marks settings backup.' });
     vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: true, filePaths: [] });
     expect(await handlers.get('settings:importPick')!(null, undefined)).toEqual({ ok: true, data: null });
     vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true } as never);

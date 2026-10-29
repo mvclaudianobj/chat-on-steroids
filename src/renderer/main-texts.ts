@@ -9,6 +9,8 @@ import type { MainText } from '../shared/main-texts.js';
  */
 export function mainTexts(): Record<MainText, string> {
   return {
+    'Cancel': t('Cancel'),
+    'Authorize': t('Authorize'),
     'Open': t('Open'),
     'Show browser': t('Show browser'),
     'Hide browser': t('Hide browser'),
@@ -104,7 +106,7 @@ export function mainTexts(): Record<MainText, string> {
       t('The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'),
     'New chat': t('New chat'),
     'hidden': t('hidden'),
-    'Shared from Chat On Steroids': t('Shared from Chat On Steroids'),
+    'Shared from Chat Marks': t('Shared from Chat Marks'),
   };
 }
 

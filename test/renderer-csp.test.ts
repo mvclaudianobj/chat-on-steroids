@@ -19,7 +19,12 @@ describe('isolated static ChatGPT illustration policy', () => {
       }
     };
     scan(new URL('../src/main/', import.meta.url));
-    expect(registrations).toEqual(['index.ts']);
+    // The CLIProxy management window uses an independent, ephemeral partition;
+    // its request gate cannot replace the app's default-session gate.
+    const modules = readFileSync(new URL('../src/main/modules.ts', import.meta.url), 'utf8');
+    expect(modules).toContain('partition: `marks-cli-proxy-console-${randomUUID()}`');
+    expect(modules).toContain('window.webContents.session.webRequest.onBeforeRequest');
+    expect(registrations).toEqual(['index.ts', 'modules.ts']);
   });
   it('allows only the first-party image origin, not remote scripts, frames, network calls or wildcard hosts', () => {
     const directives = new Map(RENDERER_CONTENT_SECURITY_POLICY.split(';').map(part => {
