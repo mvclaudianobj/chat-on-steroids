@@ -196,6 +196,12 @@ export function sessionSearchIndexPath(id: string): string {
   return path.join(sessionDir(id), 'search.txt');
 }
 
+/** The chat's bookmarked answers (bookmarks.ts); they live and are deleted with the session. */
+export function sessionBookmarksPath(id: string): string {
+  assertSessionId(id);
+  return path.join(sessionDir(id), 'bookmarks.json');
+}
+
 function sessionDir(id: string): string {
   assertReady();
   return path.join(root, id);
@@ -538,13 +544,19 @@ export async function flushSessions(): Promise<void> {
  * it also waits for an in-flight reconstruction of this exact session before deciding whether
  * there is anything live to flush.
  */
-async function flushSession(sessionId: string): Promise<void> {
+/**
+ * Waits until every append already queued for this chat is in events.jsonl, without writing
+ * its summary. Event readers need only that: an open chat's summary is read from memory, and
+ * meta.json (two disk syncs) stays batched by scheduleMeta. Each of them used to force that
+ * write first, so every tool call paid one before ChatGPT got its answer.
+ */
+async function settleSessionWrites(sessionId: string): Promise<void> {
   let entry = open.get(sessionId);
   if (!entry) {
     const reconstructing = opening.get(sessionId);
     if (reconstructing) entry = await reconstructing;
   }
-  if (entry) await flushSessionEntry(entry);
+  if (entry) await entry.queue;
 }
 
 async function flushSessionEntry(entry: OpenSession): Promise<void> {
@@ -1299,6 +1311,13 @@ export function appendEvent(sessionId: string, event: NewSessionEvent): Promise<
         const removed = entry.tail.splice(0, entry.tail.length - MAX_EVENT_TAIL);
         entry.tailFrom = removed[removed.length - 1]!.seq + 1;
       }
+      // A worker's genuinely newer turn brings its preserved session back into the live list.
+      // Replayed old browser observations must not silently undo a deliberate archive.
+      if (entry.summary.origin?.kind === 'worker' && entry.summary.archivedAt &&
+          full.time > entry.summary.archivedAt &&
+          (full.kind === 'turn_start' || full.kind === 'tool_call' || full.kind === 'user_message')) {
+        entry.summary.archivedAt = undefined;
+      }
       applyToSummary(entry.summary, full);
       entry.historySeq = full.seq;
       scheduleMeta(entry);
@@ -1503,6 +1522,10 @@ export function upsertMessageEvent(
       await writeCanonicalMessage(sessionId, key, full);
 
       entry.nextSeq += 1;
+      if (entry.summary.origin?.kind === 'worker' && entry.summary.archivedAt &&
+          full.kind === 'user_message' && full.time > entry.summary.archivedAt) {
+        entry.summary.archivedAt = undefined;
+      }
       entry.messages.set(key, full);
       if (full.kind === 'user_message') refreshUserTitle(entry.summary, entry.messages.values());
       if (!previous) {
@@ -1722,7 +1745,7 @@ export interface ReadOptions {
  */
 export async function readEvents(sessionId: string, options: ReadOptions = {}): Promise<SessionEvent[]> {
   assertSessionId(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   const from = options.from ?? 0;
   const limit = options.limit ?? Number.MAX_SAFE_INTEGER;
 
@@ -1856,7 +1879,7 @@ export async function readRecentEvents(
   } = {}
 ): Promise<SessionEvent[]> {
   assertSessionId(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   return readRecentEventsFromDisk(sessionId, limit, options);
 }
 
@@ -1864,7 +1887,7 @@ export async function readRecentEvents(
  * which have no native user bubble and cannot grant another error reload. */
 export async function readLatestUserMessage(sessionId: string, _turnId?: string | null): Promise<Extract<SessionEvent, { kind: 'user_message' }> | undefined> {
   assertSessionId(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   const summary = await readAuthoritativeSummary(sessionId);
   const [message] = await readRecentEventsFromDisk(sessionId, 1, { kinds: ['user_message'], orderByOrigin: true,
     before: Number.POSITIVE_INFINITY, acceptEvent: (event: SessionEvent) => !injectedUserMessage(event, summary?.timelineTurns) });
@@ -1882,7 +1905,7 @@ function isTurnCorrection(event: SessionEvent, turnId?: string | null, turns?: T
  * retain their authored position so replaying an old question cannot cancel current work. */
 export async function readRecoveryBoundary(sessionId: string, turnId?: string | null): Promise<SessionEvent | undefined> {
   const entry = await ensureOpen(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   // Read under this session's existing queue. Another read or metadata flush
   // must not invalidate the boundary and permanently spend a valid silence grant.
   return enqueueSessionOperation(entry, 'recovery boundary read', async () => {
@@ -1903,7 +1926,7 @@ export async function readCompletedFinal(sessionId: string, conversationId: stri
   messageId: string; turnId: string | null; completedAt: number; contentSeq: number; text: string;
 } | null> {
   const entry = await ensureOpen(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   const revision = entry.nextSeq;
   if (entry.summary.conversationId !== conversationId) return null;
   const [recent, questions] = await Promise.all([
@@ -2008,7 +2031,7 @@ export async function readHandoffResponse(sessionId: string, conversationId: str
 > {
   const pending = { status: 'pending' } as const, ambiguous = { status: 'ambiguous' } as const;
   const entry = await ensureOpen(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   const revision = entry.nextSeq;
   if (entry.summary.conversationId !== conversationId) return pending;
   const anchor = entry.messages.get(`user_message\u0000${anchorMessageId}`);
@@ -2052,7 +2075,7 @@ export async function readHandoffResponse(sessionId: string, conversationId: str
 /** Recorded local execution, not a native tool label or a request-id sighting alone. */
 export async function turnHasMcpCall(sessionId: string, conversationId: string, turnId: string): Promise<boolean> {
   assertSessionId(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   // Attribution repair appends historical calls, often without a known turn. Such a tail
   // cannot erase earlier exact proof. Filter inside one bounded-buffer reverse scan so a
   // missing proof does not repeatedly rescan the journal for each presentation page.
@@ -2087,7 +2110,7 @@ export async function requestTurnOwnershipCutoff(
   conversationId: string
 ): Promise<number | null> {
   const entry = await ensureOpen(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   if (entry.summary.conversationId !== conversationId) return null;
   return Math.max(0, entry.nextSeq - 1);
 }
@@ -2099,7 +2122,7 @@ export async function turnEndedDurably(
   expectedTurnId: string
 ): Promise<boolean> {
   const entry = await ensureOpen(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   if (entry.summary.conversationId !== conversationId) return false;
   const sameTurn = (turnId: string | null | undefined): boolean =>
     !!turnId && responseTurnId(entry.summary.timelineTurns, turnId) ===
@@ -2144,7 +2167,7 @@ export async function conversationHasMcpCallSince(
   sessionId: string, conversationId: string, startedAt: number, turnId: string | null
 ): Promise<boolean> {
   assertSessionId(sessionId);
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   const calls = await readRecentEventsFromDisk(sessionId, 1, {
     kinds: ['tool_call'], before: Number.POSITIVE_INFINITY,
     // Repaired calls may lack a local turn id. Exact conversation and original call
@@ -2367,7 +2390,7 @@ export async function readHydratedActivityCall(
 export async function readToolEditReview(sessionId: string, callId: string, changeIndex: number): Promise<ToolEditReview | null> {
   assertSessionId(sessionId);
   if (!/^[0-9a-f-]{36}$/i.test(callId) || !Number.isSafeInteger(changeIndex) || changeIndex < 0 || changeIndex >= 64) return null;
-  await flushSession(sessionId);
+  await settleSessionWrites(sessionId);
   const [event] = await readRecentEventsFromDisk(sessionId, 1, {
     kinds: ['tool_call'], before: Number.POSITIVE_INFINITY,
     acceptEvent: value => value.kind === 'tool_call' && value.call.callId === callId
@@ -2937,6 +2960,29 @@ export interface SessionPage {
   nextCursor: SessionListCursor | null;
 }
 
+/** Keep archival status in the same atomic session metadata as its durable identity. */
+export async function setSessionArchived(
+  id: string,
+  archived: boolean,
+  guard: (summary: Readonly<SessionSummary>) => Promise<string | null> = async () => null
+): Promise<SessionSummary> {
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'local archive', async () => {
+    const current = entry.summary;
+    if (Boolean(current.archivedAt) === archived) return { ...current };
+    if (archived) {
+      const refused = await guard(current);
+      if (refused) throw new Error(refused);
+    }
+    const staged: SessionSummary = { ...current, archivedAt: archived ? Date.now() : undefined };
+    await writeSummary(staged, entry.historySeq);
+    Object.assign(entry.summary, staged);
+    entry.metaDirty = false;
+    publishCachedSummary(entry.summary, false);
+    return { ...entry.summary };
+  });
+}
+
 function compareSummariesNewestFirst(left: SessionSummary, right: SessionSummary): number {
   if (right.updatedAt !== left.updatedAt) return right.updatedAt - left.updatedAt;
   if (left.id === right.id) return 0;
@@ -2959,6 +3005,9 @@ function comesAfterCursor(summary: SessionSummary, cursor: SessionListCursor): b
 export async function listSessionPage(options: {
   limit?: number;
   cursor?: SessionListCursor;
+  /** Archived results are a separate, independently paged and counted collection. */
+  archived?: boolean;
+  search?: string;
   /** Only this project's sessions (#1190). `total` stays the whole retained history. */
   projectId?: string;
 } = {}): Promise<SessionPage> {
@@ -2966,11 +3015,15 @@ export async function listSessionPage(options: {
   const limit = Math.max(1, Math.min(MAX_LISTED_SESSIONS, Math.floor(options.limit ?? MAX_LISTED_SESSIONS)));
   const openIds = new Set(open.keys());
   const candidates: SessionSummary[] = [];
+  const archiveMatch = (summary: SessionSummary): boolean =>
+    Boolean(summary.archivedAt) === (options.archived === true) &&
+    (!options.search || `${summary.title} ${summary.origin?.task ?? ''} ${summary.projectId ?? ''}`
+      .toLocaleLowerCase().includes(options.search.toLocaleLowerCase()));
 
   // Open summaries are authoritative between debounced metadata writes. There are normally one
   // or a handful, so overlay them explicitly instead of rebuilding/sorting every retained row.
   for (const entry of open.values()) {
-    if (entry.summary.origin?.kind === 'helper') continue;
+    if (entry.summary.origin?.kind === 'helper' || !archiveMatch(entry.summary)) continue;
     if (options.projectId && entry.summary.projectId !== options.projectId) continue;
     if (options.cursor && !comesAfterCursor(entry.summary, options.cursor)) continue;
     candidates.push({ ...entry.summary, chatIds: [...entry.summary.chatIds], agents: [...entry.summary.agents] });
@@ -2984,7 +3037,7 @@ export async function listSessionPage(options: {
   for (const id of catalog.orderedIds) {
     if (openIds.has(id)) continue;
     const summary = catalog.summaries.get(id);
-    if (!summary || summary.origin?.kind === 'helper' || (options.cursor && !comesAfterCursor(summary, options.cursor))) continue;
+    if (!summary || summary.origin?.kind === 'helper' || !archiveMatch(summary) || (options.cursor && !comesAfterCursor(summary, options.cursor))) continue;
     if (options.projectId && summary.projectId !== options.projectId) continue;
     if (durableEligible > limit) {
       durableHasMore = true;
@@ -3001,9 +3054,9 @@ export async function listSessionPage(options: {
   const nextCursor = hasMore && last ? { updatedAt: last.updatedAt, id: last.id } : null;
   let total = 0;
   for (const summary of catalog.summaries.values()) {
-    if (!openIds.has(summary.id) && summary.origin?.kind !== 'helper') total += 1;
+    if (!openIds.has(summary.id) && summary.origin?.kind !== 'helper' && archiveMatch(summary)) total += 1;
   }
-  for (const entry of open.values()) if (entry.summary.origin?.kind !== 'helper') total += 1;
+  for (const entry of open.values()) if (entry.summary.origin?.kind !== 'helper' && archiveMatch(entry.summary)) total += 1;
   return { sessions, total, nextCursor };
 }
 

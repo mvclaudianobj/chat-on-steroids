@@ -1,5 +1,7 @@
+import { applyPhonePush, initPhonePushSettings, readPhonePush } from './phone-push-settings.js';
 import { initBrowserSetup } from './setup-browser.js';
-import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange } from './i18n.js';
+import { currentLanguage, ui, uiText, t, tn, initLanguage, onLanguageChange, setLanguage, type Language } from './i18n.js';
+import { initSettingsBackup } from './settings-backup-dialog.js';
 import { initLayoutPreviews } from './layout-previews.js';
 import { workerName } from './agent-panel.js';
 import { primaryShiftShortcut, primaryShortcut } from './shortcuts.js';
@@ -27,6 +29,8 @@ import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
 import { initWhatsNew } from './whats-new.js';
 import { initSettingsSearch } from './settings-search.js';
+import { installNotificationCenter } from './notification-center.js';
+import { initJarvis } from './jarvis.js';
 import type { AppearanceSettings } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -65,6 +69,11 @@ import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
 import { initMarksModulesUi } from './marks-modules-ui.js';
+import { initMarksVaultUi } from './marks-vault.js';
+import { initBrainUi } from './brain-ui.js';
+import { initCompanyUi } from './company-ui.js';
+import { mountBrainImport } from './brain-import-ui.js';
+import { initRemoteHostsUi } from './remote-hosts.js';
 
 declare global {
   interface Window {
@@ -73,6 +82,7 @@ declare global {
 }
 
 const api = window.api;
+installNotificationCenter(api);
 
 document.getElementById('marksPanelLogout')?.addEventListener('click', async () => {
   const button = document.getElementById('marksPanelLogout') as HTMLButtonElement;
@@ -84,6 +94,13 @@ document.getElementById('marksPanelLogout')?.addEventListener('click', async () 
 initKeychainNotice(api);
 initLanguage();
 initLayoutPreviews();
+initMarksVaultUi(api);
+// Chat Marks: the local Brain page shares the Settings navigation and app IPC.
+const brainUi = initBrainUi(api);
+const companyUi = initCompanyUi(api);
+// Chat Marks H2: old-history search and confirmed imports on the Brain page.
+const brainImportUi = mountBrainImport(api, { showTab: name => showTab(name), selectChat: selectChatSession });
+initRemoteHostsUi(api);
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
 ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
 ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));
@@ -123,6 +140,18 @@ onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
 // Chat Marks: API chats select their session and follow the selected one.
 const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId, selectedChat: selectedChatSession, selectChat: selectChatSession });
+initSettingsBackup(api, {
+  imported: next => {
+    apply(next);
+    // The language lives in this page; a backup in another one switches it here too.
+    const language = next.config.ui.language;
+    if (language && language !== currentLanguage()) setLanguage(language as Language);
+  },
+  toast
+});
+initPhonePushSettings(api, { save: () => save(), applied: next => apply(next), toast });
+initJarvis(api, selectedChatSession, { createCliProxyChat: () => marksModulesUi.createJarvisChat(), selectChat: selectChatSession,
+  openSettings: () => showTab('jarvis'), openChat: () => showTab('chat') });
 const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
@@ -246,9 +275,12 @@ function placePermissions(tab: string): void {
 
 function showTab(name: string): void {
   name = marksModulesUi.normalizeTab(name);
+  if (name === 'company') void companyUi.refresh();
+  if (name === 'brain') { void brainUi.refresh(); void brainImportUi.refresh(); }
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
-  const library = name === 'plugins' || name === 'skills' || name === 'pets';
+  // Chat Marks: ZeroClaw's page is a main view beside them, opened from the sidebar.
+  const library = name === 'plugins' || name === 'skills' || name === 'pets' || name === 'zeroclaw' || name === 'company';
   const settings = name !== 'chat' && !library;
   // Opening Settings asks whether "Up to date" is still true (the check itself waits ten minutes).
   if (settings && document.querySelector<HTMLElement>('.app')!.dataset.screen !== 'settings') void api.refreshUpdate();
@@ -362,6 +394,7 @@ $('sessionList').addEventListener('click', event => {
 $('newChat').addEventListener('click', () => showTab('chat'));
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
 $('sidebarPets').addEventListener('click', () => showTab('pets'));
+$('sidebarCompany').addEventListener('click', () => showTab('company'));
 $('sidebarSkills').addEventListener('click', () => showTab('skills'));
 api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
@@ -716,14 +749,15 @@ function toolsOn(next: AppState): number {
 let settingsSaveQueue: Promise<void> = Promise.resolve();
 let requestedSettings: SettingsPatch | null = null;
 
-function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?: AppearanceSettings } = {}): Promise<void> {
-  if (applying || !state) return Promise.resolve();
+/** Resolves true once main saved the form, false when nothing was saved (an invalid field, a refusal). */
+function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?: AppearanceSettings } = {}): Promise<boolean> {
+  if (applying || !state) return Promise.resolve(false);
 
   const previous: AppState['config'] = requestedSettings
     ? { ...state.config, ...requestedSettings }
     : state.config;
   const commandAllowlist = readCommandAllowlist();
-  if (!commandAllowlist) return Promise.resolve();
+  if (!commandAllowlist) return Promise.resolve(false);
   const capabilities = { ...previous.capabilities };
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const capability = input.dataset.cap as Capability;
@@ -758,6 +792,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       chatBrowser: $<HTMLSelectElement>('chatBrowser').value as ChatBrowser,
       cosBrowserMinimize: $<HTMLSelectElement>('cosBrowserMinimize').value === 'tray' ? 'tray' : 'taskbar',
       finishTool: $<HTMLInputElement>('finishTool').checked,
+      finishHoldOnStop: $<HTMLInputElement>('finishHoldOnStop').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
       finishLeadMinutes: Number($<HTMLSelectElement>('finishLeadMinutes').value),
       rotateTurnMinutes: Number($<HTMLSelectElement>('rotateTurnMinutes').value),
@@ -774,6 +809,8 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
+      marksSystemPromptEnabled: $<HTMLInputElement>('marksSystemPromptEnabled').checked,
+      marksPreferredName: $<HTMLInputElement>('marksPreferredName').value.trim() || undefined,
       localAppUsage: $<HTMLInputElement>('localAppUsage').checked,
       keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
       keepScreenAwake: $<HTMLSelectElement>('keepAwake').value === 'screen',
@@ -781,11 +818,14 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       developerMode: $<HTMLInputElement>('developerMode').checked,
       playfulStatus: $<HTMLInputElement>('playfulStatus').checked,
       playfulContinue: $<HTMLInputElement>('playfulContinue').checked,
+      announceTurns: $<HTMLInputElement>('announceTurns').checked,
       customContinue: $<HTMLTextAreaElement>('customContinue').value.trim() || undefined,
       followOutput: $<HTMLInputElement>('followOutput').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
+      phonePush: readPhonePush(previous.ui.phonePush),
+      secretsShield: $<HTMLInputElement>('secretsShield').checked,
       theme: over.theme ?? previous.ui.theme,
       appearance: over.appearance ?? previous.ui.appearance
     },
@@ -807,7 +847,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
   return work;
 }
 
-async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']): Promise<void> {
+async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']): Promise<boolean> {
   const toolSurfaceChanged =
     previous.multiAgent.enabled !== patch.multiAgent.enabled ||
     (Object.keys(patch.capabilities) as Capability[]).some((cap) => {
@@ -841,6 +881,7 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     } else if (toolSurfaceChanged) {
       toast(t("Tools changed. Start a new ChatGPT conversation to guarantee the new tool list is loaded."));
     }
+    return true;
   } else {
     await refresh();
     // A rejected select remains focused. Restore it even though ordinary pushes protect dirty
@@ -857,6 +898,11 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
     }
+    // And the secrets shield: an unticked switch left by a refused save must not turn it off later.
+    if (state && (!requestedSettings || requestedSettings.ui.secretsShield === patch.ui.secretsShield)) {
+      $<HTMLInputElement>('secretsShield').checked = state.config.ui.secretsShield !== false;
+    }
+    return false;
   }
 }
 
@@ -1682,6 +1728,7 @@ function apply(next: AppState): void {
   $('cosBrowserMinimizeRow').hidden = (config.ui.chatBrowser ?? 'chrome') !== 'cos';
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
   applyChecked($<HTMLInputElement>('finishTool'), config.ui.finishTool === true, previousState?.config.ui.finishTool);
+  applyChecked($<HTMLInputElement>('finishHoldOnStop'), config.ui.finishHoldOnStop === true, previousState?.config.ui.finishHoldOnStop);
   applyValue($<HTMLSelectElement>('finishLeadMinutes'), String(config.ui.finishLeadMinutes ?? 5), String(previousState?.config.ui.finishLeadMinutes ?? 5));
   $<HTMLSelectElement>('finishLeadMinutes').disabled = config.ui.finishTool !== true;
   // A value the list does not offer (set in the config) gets its own option; without one the select
@@ -1715,6 +1762,9 @@ function apply(next: AppState): void {
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
+  applyChecked($<HTMLInputElement>('marksSystemPromptEnabled'), config.ui.marksSystemPromptEnabled !== false, previousState ? previousState.config.ui.marksSystemPromptEnabled !== false : undefined);
+  applyValue($<HTMLInputElement>('marksPreferredName'), config.ui.marksPreferredName ?? '', previousState?.config.ui.marksPreferredName ?? '');
+  $('marksPromptPreview').hidden = true;
   applyChecked($<HTMLInputElement>('localAppUsage'), config.ui.localAppUsage !== false, previousState ? previousState.config.ui.localAppUsage !== false : undefined);
   // The saved switch, not the click, decides what the main process reads.
   if (previousState && (previousState.config.ui.localAppUsage !== false) !== (config.ui.localAppUsage !== false)) void refreshOtherApps(true);
@@ -1724,6 +1774,7 @@ function apply(next: AppState): void {
   applyChecked($<HTMLInputElement>('developerMode'), config.ui.developerMode === true, previousState?.config.ui.developerMode);
   applyChecked($<HTMLInputElement>('playfulStatus'), config.ui.playfulStatus === true, previousState?.config.ui.playfulStatus);
   applyChecked($<HTMLInputElement>('playfulContinue'), config.ui.playfulContinue === true, previousState?.config.ui.playfulContinue);
+  applyChecked($<HTMLInputElement>('announceTurns'), config.ui.announceTurns === true, previousState?.config.ui.announceTurns);
   applyValue($<HTMLTextAreaElement>('customContinue'), config.ui.customContinue ?? '', previousState ? previousState.config.ui.customContinue ?? '' : undefined);
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
@@ -1750,6 +1801,13 @@ function apply(next: AppState): void {
     $<HTMLInputElement>('privacyScreenshots'),
     config.ui.privacyScreenshots,
     previousState?.config.ui.privacyScreenshots
+  );
+  applyPhonePush(next);
+  // Missing means on (#1797).
+  applyChecked(
+    $<HTMLInputElement>('secretsShield'),
+    config.ui.secretsShield !== false,
+    previousState ? previousState.config.ui.secretsShield !== false : undefined
   );
   // Only macOS screenshots can show the whole screen; on Windows every capture is one window
   // already, so the switch would change nothing there.
@@ -2820,16 +2878,29 @@ for (const id of [
   'developerMode',
   'playfulStatus',
   'playfulContinue',
+  'announceTurns',
   'followOutput',
   'followUp',
   'enterSends',
   'turnNotifications',
+  'marksSystemPromptEnabled',
+  'marksPreferredName',
   'mentionCore',
   'mentionPlugins',
   'controlApiEnabled',
   'controlApiAllowActions',
   'mcpPersistentUrls',
   'privacyScreenshots',
+  'phonePushEnabled',
+  'phonePushTopic',
+  'phonePushServer',
+  'phonePushNeedsYou',
+  'phonePushFailures',
+  'phonePushFinished',
+  'phonePushAway',
+  'phonePushQuiet',
+  'phonePushDetails',
+  'secretsShield',
   'tunnelKind',
   'tunnelId',
   'desktopTunnelId',
@@ -2837,6 +2908,14 @@ for (const id of [
 ]) {
   $(id).addEventListener('change', () => void save());
 }
+$('marksPromptPreviewButton').addEventListener('click', async () => {
+  await settingsSaveQueue;
+  const prompt = await run(api.marksPromptPreview());
+  if (prompt === null) return;
+  const preview = $('marksPromptPreview');
+  preview.textContent = prompt || t('Prompt do Chat Marks desativado.');
+  preview.hidden = false;
+});
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
 
 document.addEventListener('click', (event) => {
@@ -2891,11 +2970,12 @@ initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
 
-initChat({ save: () => save(), state: () => state ,
+initChat({ save: async () => { await save(); }, state: () => state ,
   cliModules: marksModulesUi.cliModules,
   createCliSession: marksModulesUi.createSession,
   projectChatItems: marksModulesUi.projectChatItems,
-  repaintCliSessions: () => marksModulesUi.repaintSessions()
+  repaintCliSessions: () => marksModulesUi.repaintSessions(),
+  showChat: () => showTab('chat')
 });
 
 void (async () => {

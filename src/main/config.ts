@@ -1,3 +1,4 @@
+import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
 import { DEFAULT_HELPER_CHAT_MODEL, SUPERSEDED_HELPER_CHAT_MODELS } from '../shared/chat-models.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB } from '../shared/session.js';
@@ -299,6 +300,9 @@ const commandAllowlistRuleSchema = z.string().max(MAX_COMMAND_ALLOWLIST_RULE_CHA
   if (message) ctx.addIssue({ code: 'custom', message });
 });
 
+/** The damaged phone server is said once per start: the schema runs on every config read. */
+let damagedPhoneServerLogged = false;
+
 const configSchema = z.object({
   // A config written by hand — or by a build before `/skills` was reserved — must not be
   // able to claim a reserved virtual root. Renamed rather than rejected: a single bad root
@@ -334,6 +338,8 @@ const configSchema = z.object({
     tunnelId: z.string().max(128), desktopTunnelId: z.string().max(128), pluginsTunnelId: z.string().max(128)
   })).max(11).refine(rows => new Set(rows.map(row => row.id)).size === rows.length, 'Duplicate setup profile').optional(),
   ui: z.object({
+    marksSystemPromptEnabled: z.boolean().optional().default(true).catch(true),
+    marksPreferredName: z.string().trim().max(80).optional().catch(undefined),
     appearance: appearanceSchema.optional().catch(undefined),
     autoContinue: z.boolean().optional().default(true),
     defaultChatModel: z.string().trim().min(1).max(80).optional().catch(undefined),
@@ -344,6 +350,7 @@ const configSchema = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    announceTurns: z.boolean().optional(),
     // Empty, too long or damaged falls back to the built-in Continue phrases.
     customContinue: z.string().trim().min(1).max(CUSTOM_CONTINUE_MAX_CHARS).optional().catch(undefined),
     /** Keep the chat at its end while it grows, in the app and on ChatGPT, until the reader scrolls up. */
@@ -358,6 +365,7 @@ const configSchema = z.object({
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),
+    finishHoldOnStop: z.boolean().optional(),
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional().default(true),
     backgroundPlacement: z.enum(['window', 'group']).optional().default('window').catch('window'),
@@ -381,6 +389,29 @@ const configSchema = z.object({
     keepAwake: z.boolean().optional().default(true),
     keepScreenAwake: z.boolean().optional().default(false),
     privacyScreenshots: z.boolean().optional().default(false),
+    // Phone notifications through ntfy. Each field repairs on its own, so a damaged one never
+    // turns the rest off. A damaged server is the exception: it switches them off with no server,
+    // because falling back to ntfy.sh would send to a server nobody chose (a missing one is the default).
+    phonePush: z.preprocess(raw => {
+      if (!raw || typeof raw !== 'object' || !('server' in raw)) return raw;
+      const server = (raw as { server: unknown }).server;
+      if (typeof server === 'string' && server.length <= 2048) return raw;
+      // Said once per start, never with the value: it may be anything a hand edit left there.
+      if (!damagedPhoneServerLogged) { damagedPhoneServerLogged = true; logWarn('phone notifications: the saved server setting was damaged, so they are off until a server is chosen again'); }
+      return { ...raw, enabled: false, server: '' };
+    }, z.object({
+      enabled: z.boolean().catch(false),
+      server: z.string().max(2048).optional().default(DEFAULT_PHONE_PUSH.server).catch(''),
+      topic: z.string().max(64).catch(''),
+      needsYou: z.boolean().catch(true),
+      failures: z.boolean().catch(true),
+      finishedAfterMinutes: z.number().int().min(0).max(240).nullable().catch(DEFAULT_PHONE_PUSH.finishedAfterMinutes),
+      onlyWhenAway: z.boolean().catch(true),
+      quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).nullable().catch(null),
+      includeDetails: z.boolean().catch(false)
+    })).optional().catch(undefined),
+    // Masking credentials in tool output before ChatGPT sees them (#1797). On unless turned off.
+    secretsShield: z.boolean().optional().default(true),
     // Dark is the design the app is drawn for, and a config written before the theme
     // existed has no stored answer to override — so it is the default rather than the
     // fallback. An explicit `light` is somebody's own choice and is never touched.
@@ -596,7 +627,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, rotateTurnMinutes: 30, rotateStopFallback: false, localAppUsage: true, privacyScreenshots: false, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
+    ui: { marksSystemPromptEnabled: true, minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, rotateTurnMinutes: 30, rotateStopFallback: false, localAppUsage: true, privacyScreenshots: false, secretsShield: true, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },

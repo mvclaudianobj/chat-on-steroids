@@ -5,7 +5,7 @@
  */
 import { z } from 'zod';
 import { readDurable, writeDurableNow } from '../durable.js';
-import { getSecret, hasSecret, setSecret } from '../secrets.js';
+import { getSecret, hasSecret, setSecret, secureStorageStatus, storedSecretsUnreadable } from '../secrets.js';
 import { resolveApiChatBaseUrl } from './client.js';
 import {
   API_CHAT_EFFORTS, DEFAULT_API_CHAT_ENDPOINT, MAX_FAVORITE_MODELS, MAX_RECENT_MODELS,
@@ -105,12 +105,16 @@ export function noteKeyRequired(endpoint: string): void {
 
 export async function apiChatStatus(): Promise<ApiChatStatus> {
   const settings = await apiChatSettings();
-  const hasKey = await hasSecret(API_CHAT_KEY);
+  const before = await secureStorageStatus();
+  const hasKey = before.available && !storedSecretsUnreadable() && await hasSecret(API_CHAT_KEY);
+  const after = await secureStorageStatus();
+  const keyPresence = !before.available || !after.available || storedSecretsUnreadable() ? 'unavailable' : hasKey ? 'saved' : 'absent';
   return {
     ...settings,
-    hasKey,
+    hasKey: keyPresence === 'saved',
+    keyPresence,
     detected: detected.get(settings.endpoint) ?? null,
-    keyRequired: !hasKey && keyRequired.has(settings.endpoint)
+    keyRequired: keyPresence === 'absent' && keyRequired.has(settings.endpoint)
   };
 }
 

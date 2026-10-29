@@ -7,6 +7,8 @@ vi.mock('../src/main/secrets.js', () => ({
   getSecret: async (key: string) => secrets.get(key) ?? null,
   hasSecret: async (key: string) => secrets.has(key),
   setSecret: async (key: string, value: string) => { if (value.trim()) secrets.set(key, value.trim()); else secrets.delete(key); },
+  secureStorageStatus: async () => ({ available: true, detail: null }),
+  storedSecretsUnreadable: () => false,
   secretsRevision: () => 1
 }));
 
@@ -117,6 +119,26 @@ describe('API chat executor', () => {
     expect((await settings.apiChatStatus()).recents[0]).toBe('claude-opus-5-5');
     expect((await settings.modelAvailability('http://127.0.0.1:18081/v1')).get('claude-opus-5-5')).toMatchObject({ ok: true });
     expect(await readDurable(executor.API_CHAT_SESSIONS_STATE)).toEqual({ [chat.sessionId]: { model: 'claude-opus-5-5', effort: 'medium' } });
+  });
+
+  it('adds Brain context to the system message each turn only while auto-inject is on (H1c)', async () => {
+    const brain = await import('../src/main/brain/store.js');
+    const brainSettings = await import('../src/main/brain/settings.js');
+    const { default: nodePath } = await import('node:path');
+    brain.configureBrainForTests(nodePath.join(directory, `brain-${randomUUID()}.sqlite`));
+    await brain.brainSave({ content: 'The billing service is written in Go', title: 'billing' });
+    const chat = await executor.createApiChat();
+    const fetchImpl = vi.fn(async () => sse([delta('ok')]));
+    try {
+      await (await executor.sendApiChat(chat.sessionId, 'tell me about billing', fetchImpl as unknown as typeof fetch)).done;
+      expect(bodyOf(fetchImpl, 0).messages[0]!.content).not.toContain('<memory-context>');
+      await brainSettings.setBrainSettings({ autoInject: true });
+      await (await executor.sendApiChat(chat.sessionId, 'and billing again', fetchImpl as unknown as typeof fetch)).done;
+      const system = bodyOf(fetchImpl, 1).messages[0]!;
+      expect(system.role).toBe('system');
+      expect(system.content).toContain('<memory-context>');
+      expect(system.content).toContain('billing: The billing service is written in Go');
+    } finally { await brainSettings.setBrainSettings({ autoInject: false }); }
   });
 
   it('sends prior turns as context and uses a model switched for this chat', async () => {

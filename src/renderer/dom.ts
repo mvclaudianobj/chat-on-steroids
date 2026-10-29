@@ -24,12 +24,15 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-back': 'arrow-left',
   'i-ban': 'prohibit',
   'i-bolt': 'lightning',
+  'i-bookmark': 'bookmark-simple',
+  'i-bookmark-fill': 'fill:bookmark-simple',
   'i-browser': 'browser',
   'i-chart': 'chart-line',
   'i-chat': 'chat-circle',
   'i-chat-chatgpt': 'cm:fox',
   'i-check': 'check',
   'i-check-circle': 'check-circle',
+  'i-checks': 'checks',
   'i-clock': 'clock',
   'i-copy': 'copy',
   'i-dock-expand': 'corners-out',
@@ -38,6 +41,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-engine-markscode': 'cm:code',
   'i-engine-opencode': 'cm:opencode',
   'i-module-zeroclaw': 'cm:claw',
+  'i-module-ccr': 'cm:ccr',
   'i-dock-restore': 'corners-in',
   'i-export': 'download-simple',
   'i-eye': 'eye',
@@ -45,6 +49,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-file-text': 'file-text',
   'i-folder': 'folder',
   'i-gear': 'gear-six',
+  'i-group': 'folder-simple',
   'i-git-branch': 'git-branch',
   'i-git-diff': 'git-diff',
   'i-globe': 'globe-hemisphere-west',
@@ -60,6 +65,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-panel-right': 'fill:square-half',
   'i-palette': 'palette',
   'i-paw': 'paw-print',
+  'i-phone': 'device-mobile',
   'i-page-next': 'caret-right',
   'i-page-previous': 'caret-left',
   'i-pencil': 'pencil-simple',
@@ -72,6 +78,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-pulse': 'activity',
   'i-retry': 'arrow-clockwise',
   'i-search': 'magnifying-glass',
+  'i-shield': 'shield-check',
   'i-skill': 'cube',
   'i-sparkle': 'sparkle',
   'i-star': 'star',
@@ -140,18 +147,33 @@ export const $ = <T extends HTMLElement>(id: string): T => document.getElementBy
 let toastTimer: number | undefined;
 let toastWatch: ResizeObserver | undefined;
 
-export function toast(message: string): void {
+/** A button in a toast (Chat Marks): it runs once and closes the toast. */
+export interface ToastAction { label: string; run: () => void }
+
+export function toast(message: string, actions: readonly ToastAction[] = []): void {
   document.querySelector('.toast')?.remove();
   toastWatch?.disconnect();
   const node = el('div', 'toast', message);
   node.setAttribute('role', 'status');
+  if (actions.length) {
+    node.classList.add('has-actions');
+    const row = el('div', 'toast-actions');
+    for (const action of actions) {
+      const button = el('button', 'toast-action', action.label) as HTMLButtonElement;
+      button.type = 'button';
+      button.addEventListener('click', () => { node.remove(); toastWatch?.disconnect(); window.clearTimeout(toastTimer); action.run(); });
+      row.append(button);
+    }
+    node.append(row);
+  }
   document.body.append(node);
   placeToast(node);
   // The composer and its dock can grow or the window resize while the toast shows: it follows.
   toastWatch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (node.isConnected) placeToast(node); }) : undefined;
   for (const target of document.querySelectorAll('main, .card.is-session > .composer, .card.is-session > .composer-dock')) toastWatch?.observe(target);
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => { node.remove(); toastWatch?.disconnect(); }, 3200);
+  // A toast with buttons stays long enough to read it and choose one.
+  toastTimer = window.setTimeout(() => { node.remove(); toastWatch?.disconnect(); }, actions.length ? 10000 : 3200);
 }
 
 /** Shown over the content it is about: centred on the open chat's composer and just above it and

@@ -1,4 +1,5 @@
 import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
+import type { ChatGroup, ChatGroupsState } from '../shared/chat-groups.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
 import type { ApprovalCardView } from '../shared/approval-wait.js';
 import type { DictationEvent } from '../shared/dictation.js';
@@ -17,7 +18,7 @@ import type { ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../s
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
 import type { MarksAgencyCatalog } from '../shared/marks-agency-agents.js';
-import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, ToolEditReview } from '../shared/session.js';
+import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, SessionBookmark, ToolEditReview } from '../shared/session.js';
 import type { TurnTrace } from '../shared/turn-trace.js';
 import type { RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
@@ -30,7 +31,9 @@ import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '..
  */
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
-import type { AppState, Capabilities, CompanionDiagnostics, Config, Diagnosis, LogEntry } from '../shared/types.js';
+import type { AppState, Capabilities, CompanionDiagnostics, Config, Diagnosis, LogEntry, SettingsBackupChoice } from '../shared/types.js';
+import { BRAIN_IMPORT_ACTIONS } from '../shared/brain-import-actions.js';
+import type { BrainImportProgress } from '../shared/brain-import.js';
 import type {
   Handoff,
   ImageStorageClearMode,
@@ -109,10 +112,52 @@ export interface SessionDetail {
 }
 
 const api = {
+  companyObserve: () => call<import('../main/company-observability.js').CompanyObservabilityView>('marksCompany:request', {action:'observe'}),
+  company: (request: import('../main/company-ipc.js').CompanyIpcRequest) => call<import('../shared/company.js').CompanySnapshot>('marksCompany:request', request),
+  companyLocalGrants: () => call<import('../main/company-local-grants.js').CompanyLocalGrantsView>('marksCompany:request', { action: 'localGrants' }),
+  revokeCompanyLocalGrant: (id: string) => call<boolean>('marksCompany:request', { action: 'localGrantRevoke', payload: { id } }),
+  requestCompanyLocalGrant: (payload: Extract<import('../main/company-ipc.js').CompanyIpcRequest, { action: 'localGrantRequest' }>['payload']) =>
+    call<{ authorized: boolean; epoch: number; id: string | null }>('marksCompany:request', { action: 'localGrantRequest', payload }),
+  notificationWhatsAppStart: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-start' }) as Promise<
+    { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |
+    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue; setupStage?: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus['stage'] | 'unknown' }
+  >,
+  notificationWhatsAppStatus: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-status' }) as Promise<
+    { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |
+    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue; setupStage?: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus['stage'] | 'unknown' }
+  >,
+  notificationWhatsAppDisconnect: () => call<import('../main/notification-whatsapp-web.js').WhatsAppWebStatus>('marksNotify:request', { action: 'wa-disconnect' }),
+  notificationTelegramPairStart: () => call<{url:string;expires:number;qr:string}>('marksNotify:request', { action: 'tg-start' }),
+  notificationTelegramPairCheck: () => call<{state:'pending'|'paired'|'expired';chatId?:string}>('marksNotify:request', { action: 'tg-check' }),
+  notificationTelegramPairCancel: () => call<boolean>('marksNotify:request', { action: 'tg-cancel' }),
+  notificationCenterGet: () => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'get' }),
+  notificationCenterSave: (settings: import('../shared/notification-center.js').NotificationCenterSettings) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'save', settings }),
+  notificationCenterSetCredential: (channel: import('../shared/notification-center.js').NotificationChannel, credential: string, masterPassword: string) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'credential', channel, credential, masterPassword }),
+  notificationCenterTest: (channel: import('../shared/notification-center.js').NotificationChannel) =>
+    ipcRenderer.invoke('marksNotify:request', { action: 'test', channel }) as Promise<{ ok: true; data: { delivered: number } } | { ok: false; error: string; failure?: import('../shared/notification-center.js').NotificationFailure }>,
+  notificationCenterExport: () => call<boolean>('marksNotify:request', { action: 'export' }),
+  notificationCenterImport: () => call<{ imported: boolean }>('marksNotify:request', { action: 'import' }),
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
+  jarvisAudioStatus: () => call<{ models: string[]; local: boolean; windows: boolean; error: string | null }>('jarvis:audio', { action: 'status' }),
+  jarvisTranscribe: (engine: 'cliproxy' | 'local' | 'provider', model: string, language: string, mime: 'audio/webm' | 'audio/ogg' | 'audio/mp4', bytes: Uint8Array, voice?: import('../shared/jarvis-voice.js').JarvisVoiceConfig) =>
+    call<string>('jarvis:audio', { action: 'transcribe', engine, model, language, mime, bytes, ...(voice ? { voice } : {}) }),
+  jarvisCancel: () => call<null>('jarvis:audio', { action: 'cancel' }),
+  /** Jarvis J3: the voice provider's catalog and whether its Vault K keys exist (never their values). */
+  jarvisVoiceStatus: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig) => call<import('../main/jarvis-voice.js').JarvisVoiceStatus>('jarvis:audio', { action: 'voice-status', voice }),
+  jarvisVoiceSetKey: (slot: import('../shared/jarvis-voice.js').JarvisVoiceKeySlot, baseUrl: string, value: string, password: string) => call<boolean>('jarvis:audio', { action: 'voice-key', slot, baseUrl, value, password }),
+  jarvisVoiceRouteStatus: (routing: import('../shared/jarvis-voice.js').JarvisVoiceRouting) => call<{ g4f1: boolean; g4f2: boolean; error: string | null }>('jarvis:audio', { action: 'voice-route-status', routing }),
+  jarvisSpeak: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string, routing?: import('../shared/jarvis-voice.js').JarvisVoiceRouting, groupId?: string) => call<{ mime: string; bytes: Uint8Array }>('jarvis:audio', { action: 'speak', voice, text, routing, groupId }),
+  jarvisSpeakStream: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string, requestId: string, routing?: import('../shared/jarvis-voice.js').JarvisVoiceRouting, groupId?: string) =>
+    call<{ firstByteMs: number; totalMs: number; bytes: number }>('jarvis:audio', { action: 'speak-stream', voice, text, requestId, routing, groupId }),
+  onJarvisSpeechStream: (listener: (event: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }) => void): (() => void) => {
+    const wrapped = (_event: unknown, chunk: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }): void => listener(chunk);
+    ipcRenderer.on('jarvis:speech-stream', wrapped);
+    return () => ipcRenderer.removeListener('jarvis:speech-stream', wrapped);
+  },
+  jarvisSpeakCancel: () => call<null>('jarvis:audio', { action: 'speak-cancel' }),
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */
-  startDictation: () => call<{ status: 'starting' }>('dictation:start'),
+  startDictation: (language = '') => call<{ status: 'starting' }>('dictation:start', { language }),
   stopDictation: () => call<void>('dictation:stop'),
   onDictationEvent: (listener: (event: DictationEvent) => void): (() => void) => {
     const wrapped = (_event: unknown, value: DictationEvent): void => listener(value);
@@ -139,23 +184,23 @@ const api = {
   apiChatSetKey: (key: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setKey', key }),
   apiChatSetSettings: (settings: Partial<import('../shared/api-chat.js').ApiChatSettings>) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setSettings', settings }),
   /** A page of an engine's models (CLIProxy's catalog when `engine` is omitted). */
-  apiChatModels: (query = '', offset = 0, limit = 50, refresh = false, engine?: import('../shared/agent-engine.js').AgentEngineId) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit, refresh, ...(engine ? { engine } : {}) }),
+  apiChatModels: (query = '', offset = 0, limit = 50, refresh = false, engine?: import('../shared/agent-engine.js').AgentEngineId, route?: import('../shared/agent-engine.js').AgentEngineRoute) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit, refresh, ...(engine ? { engine } : {}), ...(route ? { route } : {}) }),
   /** Every chat engine with whether a new chat can use it now. */
   apiChatEngines: () => call<import('../shared/agent-engine.js').AgentEngineInfo[]>('marksApiChat:request', { action: 'engines' }),
   apiChatToggleFavorite: (model: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'toggleFavorite', model }),
   /** A minimal real request with the model (the default one when omitted); records its availability. */
   apiChatTest: (model?: string) => call<{ model: string }>('marksApiChat:request', { action: 'test', ...(model ? { model } : {}) }),
   /** A new API chat: a local session in the `cosapi-` namespace, optionally in a project, on an engine (CLIProxy by default). */
-  apiChatCreate: (options: { projectId?: string | null; model?: string; engine?: import('../shared/agent-engine.js').AgentEngineId } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
+  apiChatCreate: (options: { projectId?: string | null; model?: string; engine?: import('../shared/agent-engine.js').AgentEngineId; route?: import('../shared/agent-engine.js').AgentEngineRoute } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
   /** Records the question and starts the answer; it streams into the session's history. */
   apiChatSend: (sessionId: string, text: string, options: { takeBackTerminal?: true } = {}) =>
     call<{ turnId: string }>('marksApiChat:request', { action: 'send', sessionId, text, ...(options.takeBackTerminal ? { takeBackTerminal: true } : {}) }),
   apiChatStop: (sessionId: string) => call<{ stopped: boolean }>('marksApiChat:request', { action: 'stop', sessionId }),
   apiChatTerminal: (sessionId: string) => call<{ cliSessionId: string }>('marksApiChat:request', { action: 'terminal', sessionId }),
   apiChatChatSettings: (sessionId: string) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'chatSettings', sessionId }),
-  apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
+  apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode; route?: import('../shared/agent-engine.js').AgentEngineRoute }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
   apiChatApprove: (sessionId: string, approvalId: string, decision: import('../shared/api-chat.js').ApiChatApprovalDecision) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'approve', sessionId, approvalId, decision }),
-  cliAction: (module: import('../main/cli-modules.js').CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'stop') => call<unknown>('marksCli:request', { action, module }),
+  cliAction: (module: import('../main/cli-modules.js').CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'update-external' | 'stop', version?: string) => call<unknown>('marksCli:request', { action, module, ...(version ? { version } : {}) }),
   cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),
   /** `quickstart`: ZeroClaw's `zeroclaw quickstart` instead of its `zerocode` terminal. */
   cliCreateSession: (module: import('../main/cli-modules.js').CliId, projectId: string | null, kind?: 'quickstart') => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId, ...(kind ? { kind } : {}) }),
@@ -194,6 +239,11 @@ const api = {
     return () => ipcRenderer.removeListener('plugins:changed', wrapped);
   },
   chooseFiles: () => call<InputAttachment[]>('sessions:files'),
+  chatGroups: () => call<ChatGroupsState>('chatGroups:get'),
+  createChatGroup: (projectId: string, name: string) => call<{ group: ChatGroup; state: ChatGroupsState }>('chatGroups:create', { projectId, name }),
+  renameChatGroup: (id: string, name: string) => call<ChatGroupsState>('chatGroups:rename', { id, name }),
+  deleteChatGroup: (id: string) => call<ChatGroupsState>('chatGroups:delete', { id }),
+  assignChatGroup: (sessionId: string, groupId: string | null) => call<ChatGroupsState>('chatGroups:assign', { sessionId, groupId }),
   petsList: () => call<PetLibraryState>('pets:list'),
   petsOverlayState: () => call<PetOverlayControlState>('pets:overlayState'),
   petsSetOverlayVisible: (visible: boolean) => call<PetOverlayControlState>('pets:overlayVisible', { visible }),
@@ -202,6 +252,15 @@ const api = {
   setMainTexts: (texts: Record<string, string>) => call<void>('ui:mainTexts', texts),
   /** The interface language, kept by the app for the browser extension. */
   setUiLanguage: (language: string) => call<void>('ui:language', language),
+  /** Settings backup. Saved keys go in only with a passphrase, and never come back to the page. */
+  exportSettings: (includeKeys: boolean, passphrase?: string) =>
+    call<{ file: string; keyCount: number } | null>('settings:export', { includeKeys, ...(passphrase !== undefined ? { passphrase } : {}) }),
+  pickSettingsBackup: () => call<SettingsBackupChoice | null>('settings:importPick', undefined),
+  importSettingsBackup: (token: string, includeKeys: boolean, passphrase?: string) =>
+    // `warnings`: what went wrong after the settings were written, each a sentence of its own.
+    call<{ state: AppState; changedCount: number; keyCount: number; warnings?: string[] }>('settings:importApply', { token, includeKeys, ...(passphrase !== undefined ? { passphrase } : {}) }),
+  testPhonePush: () => call<void>('phonePush:test', undefined),
+  setPhonePushToken: (token: string) => call<AppState>('phonePush:token', { token }),
   markWhatsNewSeen: () => call<void>('ui:whatsNewSeen'),
   /** The one-time automatic plugin refresh offer: true turns it on; either answer is kept. */
   answerPluginRefreshOffer: (turnOn: boolean) => call<AppState>('pluginRefresh:offer', { turnOn }),
@@ -277,7 +336,47 @@ const api = {
   getUsage: () => call<UsageOverview>('usage:get'),
   /** Codex's and Claude Code's usage from their logs here; `fresh` skips the 30-second cache. */
   getProviderUsage: (fresh = false) => call<ProviderUsage>('usage:providers', { fresh }),
+  vault: (action: string, payload?: unknown) => {
+    const allowed = ['status', 'list', 'create', 'recover', 'put', 'remove', 'reveal', 'changePassword', 'export', 'import', 'importGpg', 'pending', 'decide'];
+    if (!allowed.includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown vault action' });
+    return call<unknown>(`vault:${action}`, payload);
+  },
+  brain: (action: string, payload?: unknown) => {
+    // Chat Marks: model memory administration is a fixed local-only IPC action list.
+    const allowed: string[] = ['status','doctor','sources','settings.get','settings.set','recall','memories.list','memories.search','memories.get','memories.save','chat.tools','chat.save','chat.saveLatestAnswer','memories.update','memories.delete','memories.export','pending.list','pending.decide','providers.test','providers.setKey','providers.importMarksCode', ...BRAIN_IMPORT_ACTIONS];
+    if (!allowed.includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown Brain action' });
+    return call<unknown>('marksBrain:request', { action, payload });
+  },
+  /** Chat Marks H2: copy, index and import progress of old history. */
+  onBrainProgress: (listener: (event: BrainImportProgress) => void): (() => void) => {
+    const handler = (_event: unknown, value: BrainImportProgress): void => listener(value);
+    ipcRenderer.on('marksBrain:progress', handler);
+    return () => ipcRenderer.removeListener('marksBrain:progress', handler);
+  },
+  onBrainApprovalsChanged: (listener: () => void): (() => void) => {
+    const handler = (): void => listener();
+    ipcRenderer.on('marksBrain:approvalsChanged', handler);
+    return () => ipcRenderer.removeListener('marksBrain:approvalsChanged', handler);
+  },
+  /** The vault's pending chat requests changed; read them again with `vault('pending')`. */
+  onVaultPendingChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('vault:pending-changed', wrapped);
+    return () => ipcRenderer.removeListener('vault:pending-changed', wrapped);
+  },
+  remoteHosts: (action: string, payload?: unknown) => {
+    if (!['list', 'save', 'delete', 'test', 'install', 'unlock', 'fingerprint', 'trust', 'project', 'preview', 'import', 'pending', 'decide'].includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown remote action' });
+    return call<unknown>(`remoteHosts:${action}`, payload);
+  },
+  onRemoteApprovalsChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('remoteHosts:pending-changed', wrapped);
+    return () => ipcRenderer.removeListener('remoteHosts:pending-changed', wrapped);
+  },
+  /** Saves the Usage page as CSV through a save dialog; `divisor` is the page's token divisor. */
+  exportUsage: (divisor: number) => call<{ saved: false } | { saved: true; name: string }>('usage:export', { divisor }),
   getState: () => call<AppState>('state:get'),
+  marksPromptPreview: () => call<string>('marks:promptPreview'),
   resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */
   startFreshCredentials: () => call<{ state: AppState; setAside: boolean }>('credentials:start-fresh'),
@@ -307,7 +406,9 @@ const api = {
   getLogText: () => call<string>('log:text'),
   getLogJson: () => call<string>('log:json'),
   writeClipboard: (text: string) => call<boolean>('clipboard:write', { text }),
-  exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file' }) =>
+  // A code block's Save: main asks where, in a native dialog, and `name` is only its suggestion.
+  saveCode: (request: { text: string; name: string }) => call<{ done: 'saved'; name: string } | { done: 'cancelled' }>('code:save', request),
+  exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file'; format?: 'markdown' | 'html' }) =>
     call<{ done: 'copied' } | { done: 'saved'; name: string } | { done: 'cancelled' }>('sessions:exportMarkdown', request),
   // `external`: the system's own browser even for a page the CoS browser would open.
   openLink: (url: string, options: { external?: boolean } = {}) => call<boolean>('link:open', { url, ...(options.external ? { external: true } : {}) }),
@@ -319,7 +420,7 @@ const api = {
   // installer runs, and the app comes back as the new version. It takes no argument because
   // there is nothing here to choose - the main process knows what is staged.
   modulesStatus: () => call<MarksModuleState[]>('modules:status'),
-  moduleAction: (id: 'cli-proxy-api', action: MarksModuleAction, managementUrl?: string) => call<MarksModuleState[]>('modules:action', { id, action, managementUrl }),
+  moduleAction: (id: MarksModuleState['id'], action: MarksModuleAction, managementUrl?: string) => call<MarksModuleState[]>('modules:action', { id, action, managementUrl }),
   // Chat Marks: CLIProxyAPI management. The password only travels in; API keys come back masked.
   cliProxyStatus: (refresh = false) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'status', refresh }),
   cliProxySetManagementKey: (key: string) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'setManagementKey', key }),
@@ -342,10 +443,33 @@ const api = {
   upstreamService: (op: import('../shared/upstream-module.js').OpenCodeServiceAction) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'service', module: 'opencode', op }),
   /** ZeroClaw's read-only key facts for its Settings page (no secrets). */
   upstreamZeroClawFacts: () => call<import('../shared/upstream-module.js').ZeroClawFacts>('marksUpstream:request', { action: 'facts', module: 'zeroclaw' }),
+  upstreamMarksClawPreview: () => call<import('../shared/upstream-module.js').MarksClawMigrationPreview>('marksUpstream:request', { action: 'marksclaw-preview', module: 'zeroclaw' }),
+  upstreamMarksClawImport: (ticket: string) => call<import('../shared/upstream-module.js').MarksClawMigrationResult>('marksUpstream:request', { action: 'marksclaw-import', module: 'zeroclaw', ticket }),
   onUpstreamProgress: (listener: (progress: import('../shared/upstream-module.js').UpstreamInstallProgress) => void): (() => void) => {
     const wrapped = (_event: unknown, progress: import('../shared/upstream-module.js').UpstreamInstallProgress): void => listener(progress);
     ipcRenderer.on('marksUpstream:progress', wrapped);
     return () => ipcRenderer.removeListener('marksUpstream:progress', wrapped);
+  },
+  // Chat Marks: Claude Code Router module (npm release into the module folder, its daemon, its web UI).
+  ccrStatus: (refresh = false) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'status', refresh }),
+  vmsView: () => call<import('../shared/vms.js').VmView>('marksVms:request', { action: 'view' }),
+  vmsInit: (name: string, box: string, memory: number, cpus: number) => call<import('../shared/vms.js').VmView>('marksVms:request', { action: 'init', name, box, memory, cpus }),
+  vmsRun: (name: string, op: import('../shared/vms.js').VmAction, confirmation?: string, dryRun = false) => call<import('../shared/vms.js').VmJob>('marksVms:request', { action: 'run', name, op, confirmation, dryRun }),
+  vmsCancel: (name: string) => call<boolean>('marksVms:request', { action: 'cancel', name }),
+  onVmsEvent: (listener: (job: import('../shared/vms.js').VmJob) => void): (() => void) => {
+    const wrapped = (_event: unknown, job: import('../shared/vms.js').VmJob): void => listener(job);
+    ipcRenderer.on('marksVms:event', wrapped);
+    return () => ipcRenderer.removeListener('marksVms:event', wrapped);
+  },
+  /** Installs or updates to `version`, the release the user confirmed; `update-external` updates the user's own copy in place. */
+  ccrInstall: (mode: import('../shared/ccr-module.js').CcrInstallMode, version: string) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'install', mode, version }),
+  ccrService: (op: import('../shared/ccr-module.js').CcrServiceAction) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'service', op }),
+  /** Opens CCR's web UI in the browser (main reads its address; it never reaches the renderer). */
+  ccrOpenUi: () => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'openUi' }),
+  onCcrProgress: (listener: (progress: import('../shared/ccr-module.js').CcrInstallProgress) => void): (() => void) => {
+    const wrapped = (_event: unknown, progress: import('../shared/ccr-module.js').CcrInstallProgress): void => listener(progress);
+    ipcRenderer.on('marksCcr:progress', wrapped);
+    return () => ipcRenderer.removeListener('marksCcr:progress', wrapped);
   },
   installUpdate: () => call<boolean>('update:install'),
   /** Check/stage/apply supported updates and request one connector refresh round. May restart. */
@@ -356,7 +480,7 @@ const api = {
 
   // Sessions, compaction and the browser bridge. Everything here is read-only or a
   // named action; there is still no channel that takes a path or a command.
-  listSessions: (options?: { cursor?: SessionListCursor; limit?: number; projectId?: string }) =>
+  listSessions: (options?: { cursor?: SessionListCursor; limit?: number; projectId?: string; archived?: boolean; search?: string }) =>
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
   addProject: () => call<LocalProject | null>('projects:add'),
@@ -364,6 +488,7 @@ const api = {
   retryChatgptProject: (id: string) => call<LocalProject | null>('projects:chatgpt-retry', { id }),
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
+  setProjectSecretsShieldOff: (id: string, off: boolean) => call<LocalProject>('projects:secrets-shield', { id, off }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
   watchProjectFiles: (projectId: string | null, directories: string[]) => call<boolean>('projectFiles:watch', { projectId, directories }),
   onProjectFilesChanged: (listener: (event: ProjectFilesChanged) => void): (() => void) => {
@@ -457,10 +582,14 @@ const api = {
   setSessionTrusted: (id: string, expectedConversationId: string, trusted: boolean) =>
     call<string[]>('sessions:trust', { id, expectedConversationId, trusted }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
+  archiveSession: (id: string, archived: boolean) => call<SessionSummary>('sessions:archive', { id, archived }),
   /** Chats matching every word of `query`, by title first, then by what was said in them. */
   searchSessions: (query: string) => call<SessionSearchReply>('sessions:search', { query }),
   locateSearchMatch: (id: string, query: string) => call<SessionSearchLocation | null>('sessions:locate-match', { id, query }),
   locateMessage: (id: string, messageId: string) => call<SessionSearchLocation | null>('sessions:locate-message', { id, messageId }),
+  listBookmarks: (id: string) => call<SessionBookmark[]>('sessions:bookmarks', { id }),
+  setBookmark: (id: string, messageId: string, excerpt: string, messageTime: number, on: boolean) =>
+    call<SessionBookmark[]>('sessions:bookmark', { id, messageId, excerpt, messageTime, on }),
   findInChat: (id: string, query: string) => call<SessionSearchLocation[]>('sessions:find', { id, query }),
   /** The chat's own name in the app; null clears it and ChatGPT's title shows again. */
   renameSession: (id: string, title: string | null) => call<boolean>('sessions:rename', { id, title }),

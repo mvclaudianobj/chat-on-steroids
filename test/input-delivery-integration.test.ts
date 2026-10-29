@@ -1,5 +1,6 @@
 import { GOAL_MARKER_INSTRUCTION } from '../src/shared/goal-templates.js';
 import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
+import { currentMarksSystemPrompt } from '../src/main/marks-system-prompt.js';
 import { prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
 import { finishInstruction } from '../src/shared/finish.js';
 import { initSkillsPath } from '../src/main/skills.js';
@@ -35,7 +36,7 @@ const { initSecretsPath } = await import('../src/main/secrets.js');
 const { initDurableStore, flushDurable, resetDurableForTests, writeDurableNow } = await import('../src/main/durable.js');
 const { createSession, getSession, rebindSession, initSessionStore, resetSessionStoreForTests } = await import('../src/main/session/store.js');
 const { registerIpc } = await import('../src/main/ipc.js');
-const { bridgePort, startBridge, stopBridge } = await import('../src/main/bridge.js');
+const { bridgePort, startBridge, stopBridge, stopRecoverySweepTimerForTests } = await import('../src/main/bridge.js');
 const input = await import('../src/main/session/input.js');
 const goal = await import('../src/main/goal.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
@@ -53,8 +54,12 @@ beforeAll(async () => {
   directory = await makeTempDir('clf-input-integration-');
   initConfigPath(directory); initSecretsPath(directory); initDurableStore(directory); initSessionStore(directory);
   await saveConfig(defaultConfig());
-  registerIpc(() => ({ isDestroyed: () => false, webContents: { send: pushed } }) as never, () => undefined);
+  registerIpc(() => ({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: pushed } }) as never, () => undefined);
   await startBridge();
+  // These tests move a mocked Date.now by minutes and call the sweep themselves. The bridge's own
+  // 30-second timer would read such a jump as the computer waking and push every deadline 90 s
+  // (a flake under load: a silence repair was missing at the step that expects it).
+  stopRecoverySweepTimerForTests();
   const paired = await post('/pair', {});
   expect(paired.status).toBe(200);
   bearer = paired.body.token;
@@ -223,6 +228,11 @@ it('says why a page withdrew a Continue and ends it after three minutes of withd
     expect((await post('/input/fail', { id: row.id, owner: 'a-document', conversationId, error: withdrawn, detail: 'send-not-ready' })).body.ok).toBe(true);
     expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')).at(-1)?.message)
       .toContain('(send-not-ready)');
+    // The page's most telling reasons name what moved the turn; they keep their words (#1787).
+    expect(await input.claimBrowserInput(row.id, 'a-document', conversationId, true)).not.toBeNull();
+    expect((await post('/input/fail', { id: row.id, owner: 'a-document', conversationId, error: withdrawn, detail: 'turn-progressed by app-tool_call' })).body.ok).toBe(true);
+    expect(getLog().filter(entry => entry.message.includes('could not send this recovery message')).at(-1)?.message)
+      .toContain('(turn-progressed by app-tool_call)');
     const firstRelease = now;
     expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ state: 'queued',
       recovery: { withdrawnSince: firstRelease } });
@@ -548,6 +558,26 @@ it('holds a message for an existing chat until a new tunnel-client has taken ove
     expect(released.body.inputs.map((row: { id: string }) => row.id)).toContain(existing.id);
     expect((await post('/input/claim', { id: existing.id, owner: 'chat-page', conversationId, requiresAuthorization: true })).body.input)
       .toMatchObject({ id: existing.id });
+  } finally { clock.mockRestore(); resetRouteSettleForTests(); }
+});
+
+it('learns a longer hold when the first message for an existing chat after a restart still took the old route (#1788)', async () => {
+  const { noteTunnelClientConnected, resetRouteSettleForTests, routeHoldMs, noteRouteRequestSighted, noteRouteRequestArrived } =
+    await import('../src/main/tunnel/route-settle.js');
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'First message after a tunnel restart', conversationId });
+    const existing = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto' });
+    noteTunnelClientConnected();
+    now += routeHoldMs();
+    expect((await post('/input/claim', { id: existing.id, owner: 'chat-page', conversationId, requiresAuthorization: true })).body.input)
+      .toMatchObject({ id: existing.id });
+    now += 2_000;
+    noteRouteRequestSighted('request-after-restart', conversationId);
+    now += 124_000;
+    noteRouteRequestArrived('request-after-restart');
+    expect(routeHoldMs(), 'the claim of an existing chat started the measurement').toBeGreaterThan(35_000);
   } finally { clock.mockRestore(); resetRouteSettleForTests(); }
 });
 
@@ -1713,7 +1743,7 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   const standing = 'ä 🐱 Complete standing guidance\n'.repeat(100) + 'FINAL_STANDING_MARKER';
   await saveConfig({ ...config, mcp: { ...config.mcp, instructions: standing } });
   const first = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'First request' });
-  const canonical = await currentCoreInstructions();
+  const canonical = [currentMarksSystemPrompt('chatgpt'), await currentCoreInstructions()].filter(Boolean).join('\n\n');
   const claim = await input.claimBrowserInput(first.id, 'exact-document', null, true);
   expect(claim?.text).toBe(prependUserPrompt('First request', canonical));
   expect(claim?.text).toContain(standing);
@@ -1723,7 +1753,8 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   await input.cancelInput(first.id);
   const second = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'Second request' });
   const next = await input.claimBrowserInput(second.id, 'next-document', null, true);
-  expect(next?.text).toBe(prependUserPrompt('Second request', await currentCoreInstructions()));
+  const updated = [currentMarksSystemPrompt('chatgpt'), await currentCoreInstructions()].filter(Boolean).join('\n\n');
+  expect(next?.text).toBe(prependUserPrompt('Second request', updated));
   expect(userPromptText(next!.text)).toBe('Second request');
 });
 

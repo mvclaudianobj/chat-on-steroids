@@ -213,6 +213,7 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Command policy | Off, in Allowlist mode, with no rules. | Missing legacy settings stay Off; a missing mode defaults to Allowlist. Rules and mode persist while Off. An enabled empty Allowlist rejects every launch; an enabled empty Denylist permits simple supported commands. |
 | Plugin auto-refresh | On. | Configs written before the setting existed read Off (schema default); conservative recovery also turns it off. While it is off and `ui.autoRefreshPluginsAsked` is not set, the window offers it once (`pluginRefresh:offer`); either answer sets `autoRefreshPluginsAsked`, which a settings save never clears. Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
 | Turn-done notifications | On (`ui.turnNotifications`, missing means on). | Codex's turn-completion notification. `turn-notifications.ts` watches session changes and notifies once per newer `lastTurnEndAt` of a top-level chat whose outcome is `completed` and has no new active turn, while the window is unfocused. Seeded from the session list at startup, so older turns never notify. Workers, helpers, chats whose Goal/Loop switch is on, and chats that got a Session-finish or stuck notice in the last 2 minutes stay quiet. The body is the answer's first paragraph as plain text (140 characters); a click opens the chat. |
+| Phone notifications | Off (`ui.phonePush`, missing means off). | ntfy (`phone-push.ts`, Settings → General → Phone notifications). Three kinds: needs you (the Session finish and stuck/approval notifiers), failures (tunnel loss), finished (the turn notifier hands every completed top-level chat over with `workedMs` from the turn's `turn_start` event, whether or not the window is focused). The phone keeps its own rules: kind switches, finished only after `finishedAfterMinutes` (null never, 0 always; an unknown length counts as long), quiet hours (local, may wrap midnight), away = `powerMonitor.getSystemIdleState(180)` is idle/locked/unknown, at most once per chat and kind in 2 min and 20 an hour; a message that did not arrive does not count. JSON publish to the server root (UTF-8 safe), optional Bearer token from secure storage (`ntfyToken`, IPC `phonePush:token`, `AppState.hasPhonePushToken`). By default a message only says what happened; `includeDetails` adds the chat's name, the answer's start and a `click` link to the ChatGPT chat. One `phone push:` log line per decision, never the message. `phonePush:test` sends now regardless of the rules. |
 | Fresh turns for long work | Every 30 minutes (`ui.rotateTurnMinutes`: 0 off, 20/30/45/60; missing or malformed means 30). | #1402. Measured: turns up to ~35 minutes ended cleanly, 37–64 minutes almost always broke; Stop + "continue" by hand never did. `turn-rotation.ts` `considerTurnRotation` runs on each attributed tool call (`noteCallAttribution`, after its `grantActivity`) for the chat's exact running turn. Once that turn's own `turn_start` is `rotateTurnMinutes` old, `input.ts` `fileRotationInput` files one `purpose: 'rotation'` direct-turn message (`rotationMessage()`, Core mention kept) into exactly that turn. The native send makes ChatGPT end the turn as interrupted and continue in a fresh one; the call in flight keeps its result. It must go in while that call still waits for its answer (#1662, measured 2026-10-18: 6/6 clean while a call ran; sent in the gap after a result ChatGPT sometimes queued it behind the reply, and a Stop during a call made the model run it again). So the kernel opens `rotation-hold.ts` `openCallHold` around recording an attributed call, rotation is considered only while `callHoldOpen`, and the bridge's `awaitRotationDelivery` holds the call's answer until the row is sent or settled; a row still unauthorized after 15 s is withdrawn (`withdrawUnsentRotation`, cancelled without an error) and the call answers. The page never stops a turn for it: offered no Send (ChatGPT shows only Stop at that moment), it sends nothing and reports `desktop_input` `fail` with `error` = `input.ts` `ROTATION_DECLINED` word for word and `detail: 'no-send'`; `failBrowserInput` cancels the row with that error, `rotationDelivery` answers `declined`, the held call answers at once, and `noteRotationDeclined` lets a tool result a minute later try again without spending one of the turn's two filings (at most six declines per turn; measured 2026-10-20 on Loop chats, where every continue fell on a Stop moment). Never for Pro, worker or helper chats, and never at the result of a Goal/Loop hold tool (`GOAL_HOLD_TOOLS`: `session_finish`, `keep_astra_on_forever`), which is Loop's next instruction. Goal and Loop chats rotate like any other (2.1.43): the rotated turn ends without a final answer, so no Goal/Loop decision is filed for it, and its continue is recorded with empty `authoredText`, which the Goal helper's transcript leaves out; never for a blocked chat, beside another pending message, or into a different turn. One per turn: a refused filing retries after 1 minute, one the page did not take after 5. A rotation row is not `manualInput`: a page that cannot take it during the turn drops it rather than keeping it for after the turn, and the timeline raises no delivery notice for it. A message of the user's own cancels a rotation that was never handed out. |
 | Stop fallback for fresh turns | Off (`ui.rotateStopFallback`, experimental; disabled while fresh turns are off). | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts after 60 s without a stopped end. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
@@ -259,7 +260,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Models/usage | `src/main/chat-models.ts`, `session/usage.ts`, `provider-usage.ts`, `usage-tool.ts`; `src/shared/{chat-models,usage,provider-usage}.ts`; `src/renderer/{chat-models,context-meter,usage}.ts`: account observations vs local estimates. |
 | External plugins | `src/main/plugins/{catalog,installer,manager,exposure,oauth}.ts`, `plugins-ipc.ts`, `plugin-refresh.ts`, `src/shared/{plugins,plugin-refresh}.ts`, `src/renderer/plugins.ts`. |
 | Renderer boundary | `src/main/ipc.ts`, `edit-context-menu.ts`, `src/preload/index.ts`; `src/renderer/{main,chat,dom,tool-result,timeline-scroll,sidebar-resize,browser-preferences,i18n}.ts`, `locales/{es,zh-CN,zh-TW,ja,tr,fr,pt-PT}.json`, `index.html`, `styles.css`. |
-| Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography, field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. |
+| Appearance | `src/shared/appearance.ts`, `src/main/appearance-schema.ts`, `src/renderer/appearance.ts`: bounded saved colors/typography (including line spacing and the bundled Atkinson Hyperlegible Next in `src/renderer/fonts/`), field-wise Settings merge, immediate semantic CSS projection. `window-layout.ts` shares native caption/backing colors. Optional `highContrast` (missing = off): `effectivePalette()` swaps in a black or white page and `paletteTokens(…, high)` draws text at 7:1 and lines at 3:1 against the hovered surface; the chosen palette stays saved underneath. `ACCENT_PRESETS` are eight light/dark accent pairs (AA as text, 3:1 as a control); a preset writes both themes' `accent`. |
 | Native Desktop | `src/main/computer/{index,helper,browser-chords,windows-api,windows-capture,windows-apps,windows-keys}.ts`, `src/shared/windows-computer.ts`, `mcp/tools-desktop-{windows,macos}.ts`, `native/macos-desktop-helper/*`, `native/macos-desktop-addon/*`. |
 | Direct browser control | `src/main/browser-control.ts`, `mcp/tools-browser.ts`, `src/shared/browser-control.ts`, `extension/browser-control{,-page}.js`: short-lived RPCs, session-owned debugger tabs, bounded DOM/diagnostics and background input. |
 | Delivery/build | `src/main/{update,extension-path,version,logger,durable}.ts`, `electron.vite.config.ts`, `electron-builder.yml`, `scripts/*`, `.github/workflows/*`, `vitest.config.ts`. |
@@ -270,6 +271,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | --- | --- | --- |
 | Permissions and settings | `config.ts` / `config.json` | Validate every load/save; enforce effective current capabilities at use. |
 | Credentials | `secrets.ts` / encrypted `secrets.bin`; plugin OAuth's encrypted installation store | Main process only; publish updated cache after the encrypted write. |
+| Named password vault | `marks-vault.ts` / authenticated `marks-vault.json`; random vault key protected by OS `secrets.bin` and independently wrapped with the master password | Admin requires master password; daily operation uses OS safeStorage. Fixed-origin `vault_use` needs exact chat authority and explicit approval (once or until app exits). `marks-vault-ipc.ts` is a guarded main-frame-only admin interface; `marks-vault-redaction.ts` keeps decrypted values in main memory for synchronous masking of logs and MCP/tool history. Neither renderer state nor model-facing tools return vault values. |
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
 | Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; new owners are written before browser ACK. Startup trusts a complete ledger and scans history only to migrate an older one. |
 | Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
@@ -343,6 +345,32 @@ read can set it; unavailable storage is the separate `secureStorage` state), and
 notice whose Start fresh asks first, then calls `credentials:start-fresh`. That tries one more read
 and, only if it still fails, renames the file to `secrets.unreadable-<UTC stamp>.bin` (kept, never
 read again) and starts an empty store. It returns whether anything was set aside.
+Settings backup (`settings-backup.ts`, Settings → General → Backup): a JSON file
+(`format: "chat-on-steroids-settings"`, `version: 1`) holding exactly what the Settings form saves
+(`settingsForBackup(settingsPatch, config)`: a setting never changed, so not stored, is written as
+`null`; on import `null` unsets a single setting where the schema allows unset and is ignored
+elsewhere, and a whole section as `null` (never set up there, e.g. `ui.phonePush`) keeps today's
+section, while a setting the file lacks, from an older backup, keeps today's value), minus per-computer parts: `connectorSuffix`, `tunnel`,
+`ui.browserBridgePort`, `mcp.persistentUrls`, `ui.browserPreferences`, `ui.cosBrowserTrayHint`,
+`ui.autoRefreshPluginsAsked`, `ui.startAtLogin` (roots, setup profiles and everything outside the form were never in it). IPC: `settings:export` { includeKeys, passphrase? } writes through a save
+dialog (atomic, mode 0600); `settings:importPick` reads and checks a file in the main process and
+returns `SettingsBackupChoice` (a one-use token, the changed dotted paths, the key count);
+`settings:importApply` { token, includeKeys, passphrase? } opens the keys first (a wrong passphrase
+changes nothing), then overlays the backup on today's settings (`overlaySettings`: a missing field
+keeps today's value, an unknown one is ignored, lists are whole) and runs the same `saveSettings`
+the form uses, with all its effects, then writes the keys with `setSecrets` in one commit. The
+preview counts only what that save really applies (`importPlan` runs `mergeSettings`), plus
+`ui.language`, which the import applies itself. A value the schema refuses refuses the whole file
+(`invalid-settings`); a preview whose `changed`/`wider` no longer match today's settings is refused
+and its token dropped. A save that fails after it wrote the settings (login item, control API,
+worker history) still gets the language and keys, and the reply carries its message in `warnings`.
+An unreadable key store refuses an import with keys before anything changes; a key write that
+still fails after the settings were written is a warning ("…could not be stored"), `keyCount` 0.
+A short export passphrase is refused before any key is read. Keys
+travel only when ticked: `openaiApiKey`, `openRouterApiKey`, `customProviderApiKey`, `ntfyToken` (#1800), `plugin:*`
+(never `bridgeToken`, `setup:*`, `mcp:path:*`), sealed with scrypt (N 2^17, r 8, p 1) and
+AES-256-GCM (16-byte tag, AAD = format/version); a crafted file's scrypt cost is bounded. Keys
+never reach the renderer. A backup's `ui.language` also switches the renderer's language.
 Settings writes fence changed tunnel IDs by profile identity/epoch; key writes name their exact
 profile. Connection lifecycle reuses the selected key and reconnects when the OpenAI profile
 epoch changes, even if its tunnel ID matches. Each Core MCP endpoint generation freezes the local
@@ -787,6 +815,13 @@ The normalized transport request ID owns its workspace, plan, terminals and prov
 family. File edits, commands, Desktop and Plugins retain their live capability/root checks;
 missing attribution never enables Read-only mode. Headerless calls keep legacy anonymous
 ordinary-tool custody but cannot invent a request plan or worker family.
+A request-owned family answers only to that request. Clients such as Codex send every tool call as a
+new request, so a later call is outside it: every refusal that would say AGENTS_BUSY (or "call spawn to
+start one") to a caller known only by its request id says AGENTS_NO_CHAT instead (`NoChatError`, a
+subclass): no ChatGPT chat identified, the run is out of reach, do not spawn again (#1841). The spawn
+reply of a request-owned prime (`primeOwnerSentence`) says the same up front and drops the "results arrive
+with later tool results" promise, and `status` from such a caller with no family refuses the same way
+instead of the empty answer that suggests spawning.
 The Identity notice is present even without a pending repair timer. It names the tools that
 remain usable, reports actual results and forbids replaying successful work to repair identity.
 One process/recipient refusal is never a global edit/terminal refusal. Code-mode children inherit
@@ -926,6 +961,19 @@ Projects may also store one optional color from the fixed `PROJECT_COLORS` palet
 sidebar presentation metadata only: changing or removing it never resolves paths, changes the
 project folder, grants permission, rebinds sessions, or changes prompt/workspace
 selection. Legacy rows without color remain unchanged. A project's color tints its folder icon.
+Secrets shield (#1797, `main/secrets-shield.ts`): `dispatch` masks the outer call's own tool result
+(and background command output appended to it) before the app adds its inbox, notices or the
+user's new messages, so ChatGPT and the recorded wire value never carry the credential. Only
+unmistakable shapes are masked: provider key prefixes (OpenAI, Anthropic, GitHub, AWS, Stripe,
+Slack, Google), JSON Web Tokens, private key blocks, and values of settings whose names end in a
+secret word (`…_API_KEY`, `…_TOKEN`, `…_PASSWORD`, …; placeholders such as `${VAR}`, `<your key>`
+or `changeme` stay). Each becomes `[<kind> hidden by Chat On Steroids]` (a setting keeps its name:
+`[value hidden by Chat On Steroids]`). Nested calls inside `exec` see the real value; files and the
+terminal are unchanged. `config.ui.secretsShield` (missing = on) turns it off everywhere; a
+project's `secretsShieldOff: true` (`LocalProject`, durable `projects`) turns it off for its chats.
+The project is looked up only after something matched, and a project that cannot be read keeps
+the shield on. Each masking writes one `secrets shield:` log line naming kinds and counts, never
+the value. Text without a trigger prefix or secret name returns at once, unchanged and unallocated.
 Every sidebar row (a project or a chat) has one quiet "⋯" button, shown on hover/focus or while its
 menu is open, and a right click on the row opens the same menu (`renderer/row-menu.ts`). The menu
 lives in the document body, outside the sidebar the activity repaints, so a repaint never closes
@@ -933,7 +981,9 @@ it; it finds its row's button again by owner (`data-row-menu`), stays inside the
 submenus beside their item, and is keyboard-driven (arrows, Right/Left for submenus, Escape gives
 focus back to the button). A project's menu: New chat in this project (`data-new-project`, which
 also shows the chat screen), Color (a submenu: None and the palette as radio items, each calling
-the same `projects:color` owner; choices wait while a save is pending) and Remove. A chat's
+the same `projects:color` owner; choices wait while a save is pending), Hide secrets from ChatGPT
+(an on/off `menuitemcheckbox`, `toggle: true`, calling `projects:secrets-shield` { id, off }; it
+shows off and disabled while Settings turns the shield off everywhere) and Remove. A chat's
 menu: Rename and Open in browser, Block/Release and, in strict mode, Trust/Untrust, then Remove;
 the Unattributed row offers only its app-wide Block/Allow (never in strict mode) and Remove.
 Choosing an item gives focus back to the row's button before the action runs, so a color save's
@@ -1090,7 +1140,21 @@ anything else. While the Project is being created, or could not be, the message 
 row says so ("Creating this project in ChatGPT…", or the unavailable line pointing at Retry). A
 deleted Project's page redirects to ChatGPT's home and drops the marker: the worker reports
 `gone` for the tab it opened for that Project, the link becomes `failed`, and nothing is sent.
+Since October 2026 ChatGPT may instead keep that page on "loading" with no composer (#1759): the
+page reports `project_unavailable` { id, project } once it is at least 30 s old, shows no composer,
+and the sidebar's open Projects section (the one holding `data-app-action-sidebar-project-create`)
+has no row `data-app-action-sidebar-project-id` for it (`CLF_DOM.sidebarListsProject`: null when
+the sidebar is closed or the section collapsed, which proves nothing). The worker passes it on as
+the same `gone` only for the tab it opened for that message, still on that Project's home.
 An opening remembers its Project, so a retry's new Project gets its own tab.
+A chat the person starts on chatgpt.com inside a linked Project joins that CoS project (#1744):
+the service worker's `events` handler reads the recording tab's URL (`tabChatgptProject`: the
+chat's own Project route, or the Project home only for a fresh chat's first, still unnamed
+observations; never a tab on another chat)
+and journals it as `chatgptProject`; `/events` sends it, and `bindChatToLinkedProject` binds a chat
+that has no project, is no worker or helper, has learned no workspace, and matches exactly one
+listed linked project. Worker-labelled batches never bind. Tests: `test/projects.test.ts`,
+`test/bridge.test.ts` and `test/extension.test.ts` (#1744).
 
 Branch in new chat (#482): the answer action under a completed reply with native ids (not in worker
 or helper chats) starts a new chat whose first message carries `branch { sessionId, conversationId,
@@ -1123,6 +1187,15 @@ turn (copied branch history, an adopted chat's history, replies to messages type
 the same actions as a turn's answer (`messageAnswerAnchors`); `sessions:exportMarkdown` names them
 by `messageId` instead of `turnId`, and refuses a turn's own answer named that way. `scope: 'latest'` names
 no answer: main picks the newest one that offers these actions (`latestAnswer`), a completed turn's or a turnless one.
+
+
+Bookmarked answers (#1719): `sessions:bookmarks { id }` → `SessionBookmark[]` (oldest answer first)
+and `sessions:bookmark { id, messageId, excerpt, messageTime, on }` → the chat's new list, in
+`src/main/session/bookmarks.ts`, kept in `bookmarks.json` in the session's folder and written serially per
+session; at most `MAX_BOOKMARKS` (200) per chat, excerpts one line of at most 160 characters. A
+missing or damaged file reads as no bookmarks; damaged entries are dropped. Nothing is sent to
+ChatGPT. The header list jumps through `sessions:locate-message`; a reply no longer in the chat
+shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`). A file holding more than the limit keeps the ones bookmarked first. Tests: `test/session-bookmarks.test.ts` (storage, limit, damaged files), the "bookmarked answers" cases in `test/renderer-timeline.test.ts` (answer action, header list, jump), and `scripts/verify-bookmark-list.cjs` (200 bookmarks in a short window, real Electron).
 
 Edit & resubmit (#365): ChatGPT keeps an edited question as a new version beside the old one, under
 the same parent, and continues from the new one. The page reports each question's place in that tree
@@ -1210,6 +1283,8 @@ custody entries; retained ids cannot be reallocated. Unread results keep their s
 Tool descriptions and result markers say what a tool does, never how its output should be treated or
 that a call is harmless: ChatGPT's safety check flagged `write_stdin`'s "including automatic delivery;
 never reruns work" as a Suspicious Instruction and held a long run on an approval card (2026-10-15).
+The connector instructions follow the same rule (#1755): they say what is enabled and what a ChatGPT
+message means, never how to treat blocks, approvals or ChatGPT's own messages (`test/mcp-user-instructions.test.ts`).
 
 The owner is the **durable local session principal**, or `request:<id>` while permitted work
 awaits correlation. Only that request can initially continue its process. Exact proof makes
@@ -1307,11 +1382,21 @@ a tab, renderer reload/destruction or app shutdown retires them. UUIDs and pendi
 prevent a late spawn after close. IPC accepts only the current main-frame sender and bounded
 named requests. Output pauses at 256 KiB until xterm parser acknowledgements drain it; scrollback
 is limited to 5,000 lines and queued input to 256 KiB. Ctrl+C interrupts unless copying a selection;
-Ctrl+Shift+C copies. Native terminal escape handling stays in xterm, not HTML rendering.
+Ctrl+Shift+C copies. While the shown shell has a selection, Send to chat (or Cmd/Ctrl+Shift+Enter)
+adds it to the composer (`terminal-selection.ts`) as a fenced block after the typed draft, keeping
+the last 400 lines and 20,000 characters with a note above when it cut; it never sends. Without a
+selection the shell gets the key. Native terminal escape handling stays in xterm, not HTML rendering.
+`renderer/terminal-memory.ts` keeps each dock's started and not-yet-restarted tabs (project id,
+title and folder; at most eight per dock) as a localStorage list, so the next launch or reload
+shows them as inert "previous session" tabs, right-dock ones as dock tabs. No shell starts by
+itself: Start shell here sends the saved project id, never the folder, so main still resolves the
+cwd and the Command permission still applies. Closed, exited and failed tabs are forgotten; no
+output or scrollback is stored.
 Appearance application refreshes all existing xterm palettes, including hidden tabs, from the
 current page/ink tokens without recreating shells; cursor colors follow the same palette.
 `scripts/verify-workspace-terminal.cjs` tests real Electron/PTY input, cwd/environment persistence,
-hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state.
+hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state;
+`test/renderer-terminal-selection.test.ts` tests the Send to chat block, caps, key and draft insert. `test/renderer-terminal-chat-wiring.test.ts` runs `initChat` and checks both the bottom and the right-dock terminal fill the real composer.
 
 ### Optional coding CLIs and durable tmux terminals
 
@@ -1454,10 +1539,13 @@ drawn by icons.css `.cm-glyph-*`, painted in `currentColor` through a CSS mask (
 themes alike): line SVGs on Phosphor's 256 grid with its 16-unit round stroke, **or a project's
 own simple logo when its licence allows it** (OpenCode: `packages/identity/mark.svg`, MIT, the
 frame plus its inner square at 40% coverage). Never a company's brand logo or a fixed colour. The
-ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark). Every
-module's management entry (the Settings sub-nav item, its Modules card heading and its page heading)
-shows the module's own icon (`chat-types.ts` `moduleIcon`/`moduleMark`: OpenCode mark, Codex
-hexagon, Claude spark, ZeroClaw and the retired MarksClaw claw, CLIProxyAPI plug; test
+ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark); the
+Claude Code Router card a line router (`cm:ccr`, `i-module-ccr`: three lines joining a router and
+leaving as one arrow, drawn after its MIT app icon, which is a coloured raster and not usable as a
+mark; not `cm:route*`, the retired CLIProxy drawing the test keeps out). Every
+module's management entry (the Settings sub-nav item, for ZeroClaw its primary sidebar item, its
+Modules card heading and its page heading) shows the module's own icon (`chat-types.ts` `moduleIcon`/`moduleMark`: OpenCode mark, Codex
+hexagon, Claude spark, ZeroClaw and the retired MarksClaw claw, CLIProxyAPI plug, Claude Code Router its router; test
 `chat-types.test.ts`, `cli-chat-ui.test.ts`). Icons are decorative (`aria-hidden`); the title or engine name stays
 the text. The sidebar learns an API chat's engine from `SessionSummary.engine`, a read-time
 projection of the ledger (`agent-engine/ledger.ts` `withChatEngines`, applied by IPC
@@ -1589,7 +1677,9 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   `source: 'mcp'` rows, so the row is placed by its turnId. Written once, it needs no revision
   and the session's tool count stays exact.
 - Codex engine (F, `codex.ts`, `codex-protocol.ts`, `jsonrpc.ts`; codex-cli 0.163, experimental
-  app-server protocol). Process model: ONE shared app-server per app instance, started lazily:
+  app-server protocol). Process model: ONE shared app-server per route (see Routes below) per app
+  instance, started lazily (direct `<hash>.sock`, router `<hash>-router.sock`; without a detected
+  router both routes use the direct one):
   `codex app-server -c approval_policy="on-request" -c sandbox_mode="workspace-write"
   -c approvals_reviewer="user" --listen unix://<userData>/codex/<sha256(userData)[:16]>.sock`
   (0700 dir, owner/symlink checked; tmp fallback when the path exceeds ~100 bytes; pidfile so a
@@ -1608,10 +1698,13 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   - `status()`: cli-modules gates (`cliEngineRuntime`: command capability, module enabled, binary
     from userData/modules, node_modules/.bin, `which`), `codex --version` gate (other major or
     older minor refused; newer minor available with a warning), `account/read` (no account and
-    `requiresOpenaiAuth` → unavailable "Codex is not signed in…"; login stays the user's). 30 s cache.
-  - `models()`: `model/list` (paged, 5 min cache) → rows with `label`, Codex's own `efforts` and
-    `defaultEffort`; the renderer disables the efforts a model lacks; an unsupported chat effort
-    is omitted from `turn/start`.
+    `requiresOpenaiAuth` → unavailable "Codex is not signed in…"; login stays the user's), asked of
+    the direct server; with a router detected the engine stays available without a direct account
+    and the detail says `direct: <account|not signed in> · Claude Code Router detected`. 30 s cache.
+  - `models({route})`: `model/list` of that route's server (paged, 5 min cache per route) → rows
+    with `label` (shown `GPT-6.1-Sol (gpt-6.1-sol)`), Codex's own `efforts` and `defaultEffort`;
+    the renderer disables the efforts a model lacks; an unsupported chat effort is omitted from
+    `turn/start`. `create` takes the route's default model.
   - `create`: `thread/start {model, cwd, approvalPolicy, approvalsReviewer:"user",
     sandbox:"workspace-write", ephemeral:false}` first (cwd = canonical local project root, else
     home; a server project is refused), then the `cosapi-` session and the ledger record
@@ -1653,16 +1746,24 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   `handover`); New chat and the project menus offer it once `status()` is available: Claude
   module active and Command on (cli-modules `cliChatRuntime`: binary, canonical cwd, `wsl.exe
   --cd … --exec` on Windows), `--version` answers and `claude auth status --json` does not say
-  `loggedIn:false` (cached 60 s; an auth-looking failure clears the cache). `models()` lists the
-  aliases `fable, opus, sonnet, haiku` plus every model a `system/init` reported; effort is the
-  shared `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
+  `loggedIn:false` (cached 60 s; an auth-looking failure clears the cache). `models({route})` is the
+  CLI's own catalog of that route: the `initialize` control answer of a probe process (`-p
+  --input-format stream-json --output-format stream-json --verbose --no-session-persistence
+  --strict-mcp-config --settings <route settings>`, sent `initialize` only and killed once it
+  answers: no prompt, no session file, no MCP server; cached 5 min per route). Each entry is
+  `{value, resolvedModel, displayName, supportedEffortLevels}` (2.1.306); the row is the alias with
+  its concrete model as label (`opus (claude-opus-5-5)`), `default` is left out (a chat without a
+  model), and models a `system/init` reported are appended; the bare aliases `fable, opus, sonnet,
+  haiku` only when the probe fails. The same answer's `account` (`tokenSource`/`apiKeySource`
+  `none` = no credential) is the direct route's sign-in check. Effort is the shared
+  `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
   `backendSessionId` (no strict-mode trust: its tools never touch the MCP kernel).
   One long-lived process per chat, spawned on send in the canonical project folder (home without
   a project) with `CLAUDECODE`/`ELECTRON_RUN_AS_NODE` removed and
   `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 CLAUDE_CODE_DISABLE_CRON=1` set: `-p --input-format stream-json
   --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio
-  --permission-mode <default|manual> --settings {"permissions":{"disableBypassPermissionsMode":"disable"}}
-  --disallowedTools ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
+  --permission-mode <default|manual> --settings <route settings: {"permissions":{"disableBypassPermissionsMode":"disable"}},
+  or router.ts CLAUDE_DIRECT_SETTINGS for a direct chat with a router detected> --disallowedTools ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
   it without `default` (2.1.306 renamed the choice). Never a bypass flag or mode; a `system/init`
   reporting `bypassPermissions` kills the process and fails the turn. User/project/local settings
   still load (auth helpers, env, MCP and the user's own rules keep working, and the terminal
@@ -1730,7 +1831,8 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   shows the module terminal by id (`cli-modules-ui` `openSession`: reload, show).
   cli-modules `cliEngineTerminal(module, {sessionId, projectId, args, title})` keeps one durable
   session per chat (`engineChat` + `args`, reused with new args); args are validated per module
-  (Claude: `--resume|--session-id <uuid>`; Codex: `resume <thread> --remote unix:///<abs>.sock`;
+  (Claude: `[--settings <exactly CLAUDE_DIRECT_SETTINGS>] --resume|--session-id <uuid>`, the
+  settings for a direct chat with a router detected; Codex: `resume <thread> --remote unix:///<abs>.sock`;
   OpenCode: `-s ses_<id> <abs cwd>`; anything else refused, also when a
   stored session is loaded). tmux starts
   `sh -c 'exec "$@"' marks-cli <bin> <args>`; every OpenCode terminal (engine or plain) runs
@@ -1742,10 +1844,77 @@ same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an 
   every OpenCode terminal, also a plain one, and starts the background service with the app's
   binary and environment, so the TUI joins it instead of starting its own). A TUI reconnects by
   itself after a service restart (checked live). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
+- **Routes: direct CLI account or Claude Code Router (`router.ts`).** Claude Code Router (CCR, a
+  third-party proxy on `127.0.0.1:3456`) configures itself into the user's own CLI files
+  (`~/.claude/settings.json` `env` `ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL`/… plus `apiKeyHelper`;
+  `~/.codex/config.toml` `model_provider = "claude-code-router"`, its provider table and its own
+  `model_catalog_json`), so every Codex and Claude Code process talks to the router, never to the
+  account the CLI is signed in with. A Codex or Claude Code chat therefore has a route (ledger
+  `route`, `shared/agent-engine.ts` `AgentEngineRoute`): `direct` (default for new chats: the
+  CLI's own account) or `router` (the CLI exactly as configured; a record without `route` is
+  `router`, as every chat ran before routes). Detection reads only those two files (plus the
+  inherited `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`/`CODEX_HOME` and the existence of CCR's
+  `settings.json.ccr-original`): Claude — a loopback base URL with CCR's port 3456, that backup or a
+  `CCR_` variable; Codex — the top-level provider is CCR's (id, table `name` or its managed-block
+  marker). A remote gateway or another custom provider is the user's own setup and never
+  overridden; without a detected router both routes are the same unmodified process
+  (`effectiveRoute`) and no choice is shown. Windows (CLIs inside WSL) detects nothing (untested).
+  **Router availability** (main/ccr, below): a router configured in those files but whose program is
+  not installed (`not_installed`) or whose gateway does not answer `/health` (`stopped`) is not
+  usable: the detection carries `unavailable` (registered by the CCR module through
+  `registerRouterAvailability`, cached 5 s, re-checked by `refreshRouterAvailability` before every
+  engine status, view, create, route change and send; without a registered provider nothing
+  changes). Then `effectiveRoute` is `direct` for both routes and the direct overrides apply to both
+  (the CLI never tries the dead router address); `chatRoutes(stored, detection)` offers both routes
+  only while the router is usable, none without a configured router, and `['direct']` plus
+  `routeNotice` (`not_installed` | `stopped`) for a chat stored on `router`, so it can move away.
+  Claude Code falls back: the same session runs with the direct settings (refused with both reasons
+  when the CLI has no account of its own). Codex cannot (a router thread keeps CCR's provider): the
+  send is refused before anything is recorded (`ROUTER_UNAVAILABLE_TEXT` + "Or switch this chat to
+  "CLI account (direct)"; Codex then starts a new thread."), and moving to direct always forgets the
+  thread (`homeRoute`). Choosing the router (a new router chat, a route change to it) is refused with
+  the same text while it is unavailable. Engine status says it (`· Claude Code Router is not
+  installed. Install it from Settings > Modules > Claude Code Router.`; `router: false`). The
+  renderer shows `routeNotice` as a row of the composer dock (`#apiChatRouteNotice`, translated by
+  code) and keeps the stored router choice visible in the route select. On a fresh machine without
+  CCR nothing is detected, no route select appears and every chat runs as before.
+  Direct overrides apply only to the processes the app starts; the user's files are never
+  written. Claude Code: precedence is flag `--settings` > local > project > user settings, and a
+  settings `env` beats the process environment, so the direct process gets `CLAUDE_DIRECT_SETTINGS`
+  (the hardening plus every router variable `CLAUDE_ROUTER_ENV_KEYS` set to `""` and `apiKeyHelper:
+  ""`). Checked live against 2.1.306: `""` reads as unset (`[gatewayDiscovery] skipped:
+  ANTHROPIC_BASE_URL is unset`, model `claude-opus-5-5`, `tokenSource: none` without a login of its
+  own, even with the router URL inherited), while `null` fails validation and Claude Code silently
+  drops the whole `--settings` layer. `claude auth status` reads the user's settings and has no
+  `--settings`, so it answers for the router route only; the direct account comes from the
+  probe's `initialize` answer. A direct send without one is refused before anything is recorded
+  ("Claude Code has no account of its own for direct chats. Run "claude auth login"…"). Codex: the
+  direct server adds `-c model_provider="openai"` (the built-in provider: `account/read` then
+  reports the ChatGPT login) and, when CCR replaced the catalog, `-c model_catalog_json="<CODEX_HOME>/
+  models_cache.json"` (Codex's own cached catalog of the account; an empty value is a directory
+  error, and a key cannot be unset with `-c`); `codexServerArgv` accepts only those two shapes.
+  Other user overrides (e.g. an `openai_base_url` of another local bridge) stay as configured.
+  Route change (IPC `setChatSettings {route}`, refused while a turn runs, Codex/Claude only):
+  Claude Code keeps its session (same session file; the next send resumes it with the other
+  route's settings; a direct `--resume` of a router-made session loads, checked live); Codex
+  threads keep the provider they started with (`Thread.modelProvider`) and their history holds
+  that provider's items, so the chat forgets its thread and the next send starts a new one on the
+  other route's server (the renderer says so; the chat's own history stays). A model the other
+  route does not list gives way to its default (Codex) or the CLI's default (Claude, `null`).
+  The hand-over Claude terminal of a direct chat runs `--settings <direct> --resume <uuid>`; a
+  Codex live terminal attaches to the server of the chat's route. Renderer: the composer's route
+  select (`apiChatComposerRoute`: "CLI account (direct)" / "Via Claude Code Router") shows only
+  when the view lists both `routes`; the model list is that route's, grouped under the route's
+  name; the header reads `Codex · GPT-6.1-Sol (gpt-6.1-sol) · direct` or `… · via Claude Code
+  Router`. `AgentEngineInfo.router` and the status detail say when a router is detected.
 Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
 `test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
 `test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,
-turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over),
+turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over; routes:
+direct settings, catalog per route with concrete models, direct sign-in refusal, route change on
+the same session), `test/agent-engine-router.test.ts` (detection with synthetic CCR files in a
+temporary HOME, negative cases, direct overrides), `test/agent-engine-codex.test.ts` (one fake
+app-server per route: overrides, models per route, new thread after a route change),
 `test/cli-modules.test.ts` (engine terminal args, open hook, attached/external state, take-back end),
 `test/api-chat-ui.test.ts` (offered engines, unavailable ones disabled with their reason, hidden ones
 absent; the terminal button; the take-back offer), `test/cli-chat-ui.test.ts` and
@@ -1883,11 +2052,18 @@ like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`up
   `zerorelay` is not installed. ZeroClaw is an autonomous agent to configure, **not a chat or
   terminal type**: it never appears in New chat, the project's New terminal submenu or the sidebar
   Terminals (`cli-modules-ui.ts` `TERMINAL_MODULE`; test `cli-chat-ui.test.ts`). It has its own
-  Settings area instead (the `module-zeroclaw` sub-nav page, shown while the module is enabled,
-  with its claw icon), like CLIProxyAPI's page: Status (state, installed/latest version; install
-  and update stay in its Modules card), Agent ("Configure agent" opens `zeroclaw quickstart`,
-  `cliCreateSession(…, 'quickstart')`, args `['quickstart']` only, in a terminal inside the page,
-  one reused session) and Settings. **This area grows with ZeroClaw settings over time**; it starts
+  page instead: the primary sidebar item **ZeroClaw** right below Pets (`#sidebarZeroClaw`,
+  `data-sidebar-page="zeroclaw"`, claw mark, shown only while the module is enabled) opens the
+  `zeroclaw` main view (`data-panel="zeroclaw"`, a `plugins-panel` beside Plugins/Skills/Pets;
+  `main.ts` `showTab` counts it as a library page; the old `module-zeroclaw` Settings sub-page is
+  gone and `normalizeTab` maps that name to it, or to Settings > Modules while disabled; disabling
+  the module while the page is open goes back to the chat). Its Modules card keeps install and
+  update and links to the page ("Open ZeroClaw"); the page links back ("Manage in Settings >
+  Modules"). Sections: Status (state, installed/latest version), Agent ("Configure agent" opens
+  `zeroclaw quickstart`, `cliCreateSession(…, 'quickstart')`, args `['quickstart']` only, in a
+  terminal inside the page, one reused session; a setup that ended is started again, one still
+  running is reattached; when it ends the page says so and the terminal keeps its last output) and
+  Settings. **This area grows with ZeroClaw settings over time**; it starts
   with read-only key facts (`zeroclaw/settings.ts`, IPC `marksUpstream` `facts`): agent aliases
   (`zeroclaw agents list`) with each one's model provider, memory backend and enabled flag, the
   runtime, the gateway address and the cost limits, each through `zeroclaw config get --json` of a
@@ -1896,7 +2072,24 @@ like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`up
   so nothing runs until ZeroClaw is configured (the page says "Not configured yet"); with a
   configuration they read without rewriting it. `zeroclaw update` is never offered (it could
   update `zeroclaw` alone). Apart from ZeroClaw's own reads, `~/.zeroclaw` (shared with the
-  retired MarksClaw fork) is never touched (only its `config.toml` existence is checked).
+  retired MarksClaw fork) is never touched (only its `config.toml` existence is checked), with one
+  exception below.
+- ZeroClaw terminals (`cli-modules.ts` `ZEROCLAW_TERMINAL_SCRIPT`, quickstart and `zerocode`):
+  `sh -c '<script>' marks-cli <bin> [quickstart]` runs ZeroClaw under `umask 077`, first removes
+  only the group/other write bits of `~/.zeroclaw` and `~/.zeroclaw/data` when each is a real
+  folder owned by the user (never through a link), and after ZeroClaw exits keeps the pane open
+  with its last output and `[<bin> exited with status N. Press Enter to close.]`. Found with 0.8.6
+  as the user (temporary HOME, tmux attached through node-pty like `cliOpen`): ZeroClaw creates
+  those folders with the session umask (002 → 775) and its daemon then refuses them ("config
+  lifecycle directory …/data is writable by other users (mode 775)"), so `zerocode` exited before
+  drawing and tmux's alternate screen took its error with it. The facts reads (`settings.ts`) run
+  under the same umask. `zeroclaw quickstart` itself drew fine in tmux.
+- "Configure agent showed nothing" (2.1.44.1): the setup terminal's mount was a block, so the
+  terminal body was 0 px high, xterm fitted 1 row and `cliOpen` asked for `rows: 1`, which the IPC
+  schema (2–200) refuses before anything starts (no tmux session, no `~/.zeroclaw/config.toml`);
+  the refusal was written into the 0 px terminal. Fixed in `settings.css` (the mount is a flex
+  column) and `workspace-terminal.ts` (sizes sent to main are clamped to 2–500 × 2–200). Proof:
+  `cli-chat-ui.test.ts`, `cli-modules.test.ts` (launcher argv, the script with a real `sh`).
 - UI (`renderer/upstream-manage-ui.ts` in the module's card): installed version (or "not installed
   by Chat Marks" for a PATH binary), latest release, "Update available", support notes, OpenCode's
   background service (running on port / stopped, starts on first use / run by another OpenCode,
@@ -1910,6 +2103,82 @@ linked member, non-ELF, wrong version); GitHub digest/SHA256SUMS, redirect hosts
 swap, with real `tar` archives). Installed through this code from the real sources on Linux
 (OpenCode 2.1.2 from npm, integrity-verified, `opencode v2.1.2`; ZeroClaw 0.8.6, `zeroclaw 0.8.6
 (c473221)`, `zerocode 0.8.6`).
+
+### Claude Code Router module (`ccr`)
+
+`main/ccr/` (Marks-owned; IPC `marksCcr:request` `status|install|service|openUi`, sender/frame
+checked; preload `ccrStatus/Install/Service/OpenUi`, progress `marksCcr:progress`) manages Claude Code
+Router (`@musistudio/claude-code-router`, MIT, `musistudio/claude-code-router`; checked against
+3.1.3), the gateway behind the "Via Claude Code Router" route. It is a module card in Settings >
+Modules (`renderer/ccr-manage-ui.ts`, created by `marks-modules-ui.ts` after the CLI modules), not a
+chat or terminal type, with no activation toggle: the route needs it installed and configured.
+- Copies (`service.ts`): Chat Marks' own copy is an npm prefix `<userData>/modules/ccr/versions/
+  v<x.y.z>-<8 hex>/`, the one in use named by `<userData>/modules/ccr/current` (replaced by rename),
+  plus the launcher `<userData>/modules/ccr/bin/ccr` (`exec <node> <cli.js> "$@"`); it takes
+  precedence over PATH. A new version is a new folder, so a running daemon keeps its files; an older
+  folder is removed only when no daemon runs from it (`pruneVersions`, by the process list). A copy
+  the user installed (the `ccr` on PATH, else `~/.local/bin`, `~/.npm-global/bin`, `~/.volta/bin`,
+  `/usr/local/bin`, `/usr/bin`) must resolve to this package's `dist/main/cli.js` (its package.json
+  name, x.y.z version and `bin.ccr`); it is shown as "Using installed <path> <version>" (home as `~`)
+  and used as it is. It can be updated in place only after confirmation and only when its npm
+  prefix (`<prefix>/lib/node_modules/…`) and package folder are writable by the user (never with
+  administrator rights; otherwise `external_not_writable`), and "Install a copy managed by Chat Marks"
+  is offered beside it.
+- Install/update (`release.ts`): CCR is a Node.js program (`engines.node >=22`) with runtime
+  dependencies, one native (`better-sqlite3`, its config store): 3.1.3 pulls 101 packages, ~110 MB.
+  So the system's own Node.js (>= the `engines` major, else `node_too_old`) and npm do the tree,
+  under these rules: the main tarball comes from the registry through `npm-release.ts` (registry
+  only, no redirect, canonical URL, latest must still be the confirmed version: `version_changed`)
+  and is used only after its SHA-512 equals `dist.integrity`; `npm install --prefix=<stage>/app
+  --ignore-scripts --omit=dev --no-save --registry=https://registry.npmjs.org/ --userconfig=<empty>
+  --no-audit --no-fund -- <verified package.tgz>` (no package runs a script; `npm_config_*` and the
+  app's Electron variables are removed from its environment); then `npm rebuild -- better-sqlite3`
+  only (`NATIVE_PACKAGES`: its `prebuild-install || node-gyp rebuild` fetches the prebuilt binding
+  from better-sqlite3's own GitHub releases); the installed package must report exactly the version
+  and the binding must open a memory database (`node -e`) before the folder is renamed into
+  `versions/`. Stage `<module>/.stage-<uuid>` (0700) is removed in every case. The gate:
+  `ccrSupport` 3.x (`ok`, `newer` above 3.1.3), anything else `unsupported` (never offered).
+  Errors: `node_missing`, `node_too_old`, `npm_missing`, `npm_failed`, `version_mismatch`,
+  `native_failed`, `checksum_mismatch`, `version_changed`, `unsupported_version`, … (translated in
+  the card).
+- Service: `node <cli.js> start --daemon --no-open` (it starts `cli.js serve --daemon-child` for the
+  web UI and a gateway child, then exits; its stdout names the web UI with its token, so it is
+  never logged or returned) and `node <cli.js> stop` (stops the daemon `~/.claude-code-router/
+  service.json` names), with the copy in use; Restart = stop, wait for the gateway to go, start,
+  wait for `/health`. State = the gateway's own `GET http://<host>:<port>/health` (200 JSON with a
+  `status`; checked: `{"runtimeId":…,"status":"ok",…}` on 3456; the web UI port answers 404 there),
+  plus `ps -eo pid=,args=` for which copy the daemon came from. The gateway address is read,
+  read-only, from CCR's store `~/.claude-code-router/config.sqlite` (`node:sqlite` with
+  `readOnly`, `app_config` row `default`, only `gateway.host`/`gateway.port`, else `HOST`/`PORT`),
+  else from the user's CLI files' loopback router URL (`routerAddressFromCliFiles`), else
+  127.0.0.1:3456. "Open router UI" opens the `url` CCR registered in `service.json` (only an http
+  loopback URL of a live pid) with `shell.openExternal`; the address never reaches the renderer.
+- No downtime: after an install or update the router restarts with the copy in use only when no
+  routed Codex/Claude Code turn runs (`routedTurnsRunning`, probes registered by both engines), else
+  `restartPending` (checked every 5 s); a stopped router stays stopped. Stop and Restart are
+  confirmed, saying when routed chats are answering.
+- The user's files: the module never writes `~/.claude/settings.json`, `~/.codex/config.toml` or
+  anything in `~/.claude-code-router` (CCR edits those itself), and never prints or copies a key or
+  token. `configured` = the router detection of those files (Claude Code, Codex).
+- Card: state (Running / Stopped / Not installed), installed version (managed / "Using installed"),
+  latest release with "Update available", router address and which copy runs it, restart pending,
+  which CLIs it is configured for (or how to configure them in the router UI), notes (newer/
+  unsupported version, why it cannot install), one confirmed Install/Update button naming the npm
+  registry, Start / Stop / Restart router, Open router UI. Linux only (`unsupported_platform`
+  elsewhere; the routes detect nothing on Windows).
+Proof: `test/ccr-module.test.ts` (version gate, registry-only metadata, moved latest, integrity
+mismatch, npm/service argv, install into a version folder with launcher and pointer, refusals before
+npm, failures keeping the old copy, an installed copy shown and updated in place, daemon process
+parsing, `/health`, the config store read-only with synthetic keys, web UI URL checks, start/stop
+through the CLI, restart only without routed turns, fresh machine, configured-but-missing/stopped
+fallback), `test/ccr-manage-ui.test.ts` (card states), `test/agent-engine-claude.test.ts` and
+`test/agent-engine-codex.test.ts` (fallback/refusal with an unavailable router), `test/api-chat-ui.test.ts`
+(route notice). Checked live as the user (2026-10-22): the installed 3.1.3 (`~/.local`) was found,
+running from that copy on 127.0.0.1:3456 (port read from its store), configured for Claude Code and
+Codex, read-only; an install of 3.1.3 through this code into a temporary prefix and HOME (integrity
+verified, 92 top-level entries, 110 MB, better-sqlite3 built, 21 s with a cold npm cache) whose
+launcher answered `--help` and whose `start --daemon --no-open --port 3497` / `stop` ran in that
+temporary HOME without touching the user's running router.
 
 ### CLIProxyAPI module management
 
@@ -1999,6 +2268,10 @@ or clicking New Chat again preserves text, staged attachments, prepared workflow
 first-message Goal/Loop objective, mode and delivery choice. Each project and unfiled New Chat
 has its own draft key. Manual deletion remains deleted; accepted openings retire the original
 draft as the outbox/session takes ownership. Navigation still fences stale async imports.
+Draft text is also written to the renderer's local storage (`composer-drafts.ts`, the newest 100
+drafts in at most 1,000,000 stored characters), so an unsent draft survives a restart; staged files and a new
+chat's Goal/Loop choices stay window-local. A chat other than the open one that holds a draft shows
+a pencil mark on its sidebar row, and removing a chat removes its saved draft.
 
 The chat composer and queued-message editor have no HTML character cap. Send and queue edits
 share the existing 96,000-character message admission ceiling; prepared delivery additionally
@@ -2274,6 +2547,19 @@ the page carries each token out once and reports `approvalResult` (`clicked`, `c
 `unavailable`) on its next poll. A new card drops an unsent answer; one nobody took within 30 s is
 `expired`. A standing card polls at the active cadence (2 s) even in a hidden tab.
 `sessions:approvalCard { id }` gives the panel the card and the last answer's outcome.
+
+A card waiting in a chat that is not on screen is named in the window's notices
+(`#approvalNotice`, renderer `paintApprovalNotice`): one line per waiting chat, "worker-1 waits for
+your approval" for a worker of the open chat (its parent's title added otherwise, a chat's own title
+for any other chat), the open chat's workers first, each with Open (shows the Chat page and that chat)
+and the same `approvalCardPanel` Deny / Allow once. Lines are kept by session id, so a repaint never
+re-reads a card or drops an answer being sent; the open chat's own card stays in its timeline only.
+Off the Chat page the catalog is not reread, so a `session:changed` there reads only the waiting set
+(`scheduleApprovalRead`). The desktop notice is retried on later polls while the notifier returns
+`false` (the window had focus), so leaving the window still tells the person. A poll that sees the
+card go keeps the episode as answered before it awaits anything, and writes "answered" only when no
+redraw took the episode back meanwhile (live 2.1.44.1, 2026-10-22: two workers of the open prime
+waited 85 minutes while the window had focus and only a folded dot said so).
 
 At ordinary silence recovery, a never-offered immediate correction takes priority over generated
 Goal/Loop work and is sent as a normal native user message. Include at most the next eligible
@@ -2744,7 +3030,150 @@ or reloading attachment previews. Old history gains badges when natively reobser
 
 Continuous recording serves the local transcript, exact identity and continuation infrastructure.
 There is no model-facing session lookup tool. `update_plan` remains recording-backed; historical
-lookup tool calls remain displayable in existing transcripts.
+lookup tool calls remain displayable in existing transcripts. Chat Marks Brain (H1a) is a
+separate, user-curated local memory store: it does not read the session archive or expose a
+general session-history lookup. H2 searches staged copies of old MarksCode/OpenCode/MarksClaw
+history for the user only; no model tool reads it.
+
+### Chat Marks Brain (H1a)
+
+`src/main/brain/store.ts` owns `<userData>/brain/brain.sqlite` with SQLite WAL and FTS5;
+`src/main/brain/settings.ts` owns `state/marks-brain-settings.json`. Neither owns Chat Marks
+session history, MarksCode/MarksClaw data or a remote synchronization stream. Memory writes
+are serialized, deduplicated by normalized content hash, and redact credential shapes and
+values loaded from the K vault before storage. A damaged existing database fails closed and
+is retained for deliberate recovery; its default file mode is 0600. The database is local
+even when no model-facing Brain tools have been enabled.
+
+Brain tools default Off separately for native ChatGPT Core and CLIProxy API chats.
+`memory_search` returns bounded, untrusted background context, never instructions;
+`memory_save` requires a proven exact local session, edit permission and a non-read-only
+context, then human approval by default. Native chats use an ephemeral exact-chat pending
+approval, and API chats reuse the existing per-turn approval gate. Validate the exact
+session and active capability after approval before writing. The settings page and the
+explicit `/remember <text>` are user-authored saves; `/recall` inserts a bounded
+`<memory-context>` draft without sending it.
+
+`/remember` memorizes the chat it is called in (`renderer/brain-ui.ts` `rememberChatContext`,
+`main/brain/chat-memory.ts`). Bare, with nothing selected or left in the composer, it asks main
+`chat.tools` whether that chat's model has `memory_save` now (ChatGPT: `chatgptTools`, edit
+permission and a `current` Core refresh; CLIProxy: `apiChatTools`; Claude Code/Codex/OpenCode:
+`enginesEnabled`, not on Windows, not MarksCode). Available: one localized instruction (review the
+conversation, one memory per decision/fact/preference/next step, title and tags, no chit-chat or
+secrets) goes through the ordinary `sendComposer` path, so each proposed memory meets the usual
+approval card. Unavailable: nothing is sent; a toast names the switch, with Open Brain and Save
+last answer buttons. `/remember-answer` (and that button) is the model-free fallback
+`chat.saveLatestAnswer`: the newest finished answer (`latestAnswer`, overflow read back, 3,600
+characters at most, redacted by `brainSave`), titled with the chat. `/remember <text>` and selected
+or drafted text in a chat go through `chat.save`. Every chat-made memory, model or user, gets
+`{source:'chat', sessionId, engine}` (`chatgpt`, `cliproxy` or the engine id) and scope
+`project:<projectId>` (`global` without a project) resolved in main; the renderer sends only the
+session id and cannot set scope or provenance. Proof: `test/brain-chat-memory.test.ts` and the
+`/remember` cases of `test/renderer-timeline.test.ts`. The `marksBrain:request` IPC is a fixed,
+Zod-validated action list guarded to the main window/frame. Its preload is not a generic
+filesystem bridge. Keep the few Core/API registration hooks marked `Chat Marks:`.
+
+### Chat Marks Brain (H1b sources)
+
+`src/main/brain/recall.ts` owns combined recall and remote sync; `providers/` holds one module
+per optional source: `ai-memory.ts` (remote MCP, minimal streamable-HTTP JSON-RPC client:
+initialize, tools/list, then `memory_query` / `memory_write_page`), `openviking.ts`
+(`/api/v1/system/status`, `/api/v1/search/find`) and `marks-remote.ts` (`/health`,
+`/memories/human/recall`, `/memories/human`, `/memories/{id}/delete`). Every provider is Off by
+default in `settings.providers`, has its own timeout and error, and is reported in Doctor/Sources.
+Nothing leaves the machine unless a provider is enabled *and* `remoteRecall` (query text) or
+`remoteSync` (saved memories) is on; queries and synced content are redacted first and imported
+memories never sync. Results are merged round-robin, de-duplicated by remote id/content hash,
+budgeted and labelled with their source in `/recall` and `memory_search`.
+
+Credentials come only from K vault entries bound to the provider's exact origin
+(`brain.ai-memory`, `brain.openviking`, `brain.marks-memories`); a missing key sends nothing.
+"Import from MarksCode" copies the one needed value (ai-memory Authorization header, Marks
+`memories_api_key`) into the vault after the user clicks and enters the master password; no value
+reaches the renderer or logs. Plain HTTP is allowed only on loopback or, for the Marks API, behind
+its explicit `insecureHttp` acknowledgement; the vault accepts an `http:` origin only with an
+entry-level `insecureHttp` flag, and model-facing `vault_use` refuses such entries. Markspanel
+bearer auth uses the main-only `markspanelBrainSession()`. Brain logs one `brain: …` line per save,
+recall, held approval and provider error, never content. Settings patches merge only sent keys
+(Zod 4 `partial()` fills defaults). ai-memory is a Brain provider, not a Plugins catalog entry:
+the curated catalog requires OAuth remotes and reviewed license inventory.
+
+H1b has no engine MCP, automatic prompt injection or MarksCode/MarksClaw archive import. Those
+are separate H phases.
+H1a has no remote Marks API, OpenViking or MarksCode/MarksClaw archive import. Those are
+later separately approved H phases.
+
+### Chat Marks Brain for agent engines (H1c)
+
+`src/main/brain/engine-mcp.ts` owns a local-only MCP route `http://127.0.0.1:<port>/mcp/brain/<secret>`
+exposing only `memory_search` and `memory_save`, Off unless `enginesEnabled`. It is its own lazily
+started loopback listener, not a path on the connector listener: that one runs only while
+ChatGPT is connected, moves port on reconnect and its origin may be published by a user's tunnel.
+Nothing hands this URL to a tunnel; the route answers 404 off its secret path, refuses a non-loopback
+Host, any Origin and forwarding headers, and needs `Authorization: Bearer <token>` (401 otherwise).
+Claude Code (one process per chat) gets a per-chat token in a 0600 `--mcp-config` file under
+`userData/brain/engine-mcp/` (0700, emptied at startup and quit) plus `--allowedTools` for the two
+tools; never `--strict-mcp-config`, so the user's own MCP servers keep loading. A changed switch
+restarts an idle host. Codex (one shared app-server) gets `-c mcp_servers.chat_marks_brain.url=…`,
+`.bearer_token_env_var="CHAT_MARKS_BRAIN_TOKEN"` and `.default_tools_approval_mode="approve"` after
+the safe overrides, the token only in the server's environment, rotated per app-server launch; a
+switch change applies at the next app-server start. OpenCode 2.1.x gets the server at runtime per
+chat location through `PUT /api/experimental/mcp/chat-marks-brain` (live on 2.1.2: no config file
+is written, a service restart forgets it), removed on quit or when the switch is off; TUI sessions
+in that location see it too. Codex and OpenCode tokens name only the engine: a save is attributed
+to the one chat whose own turn reported the same Brain call with the same arguments (`mcpToolCall`
+item, `session.tool.called`); unmatched or ambiguous saves are refused. Saves take the H1a approval,
+then re-check the chat and switch before writing with `{source:'chat', sessionId, engine}`.
+Windows/WSL engines are not wired (another loopback). Engine rows show `mcp:chat-marks-brain/<tool>`
+whichever engine spelled it (`brain/engine-names.ts`, `tool-row.ts`).
+
+`src/main/brain/context.ts` is optional automatic context (`autoInject`, Off): a `<memory-context>`
+block framed as data, at most 3,000 characters, local memories only. API chats add it to the system
+message each turn; ChatGPT gets it only in the opening message's COS_CONTEXT (`brainContext` scope
+in `prepareSessionPrompt`), so it counts against the 96k ceiling, is frozen in `deliveryText` and is
+dropped rather than failing when it does not fit. Follow-ups, workers and engines get none.
+H1a has no remote Marks API, OpenViking, engine MCP or automatic prompt injection.
+Those are later separately approved H phases.
+
+### Chat Marks Brain H2: old-history search and selective import
+
+`src/main/brain/import/` (actions `import.*`, `history.*`, `archive.*` of `marksBrain:request`,
+list in `shared/brain-import-actions.ts`; push `marksBrain:progress`, preload `onBrainProgress`;
+UI `renderer/brain-import-ui.ts`, mounted once from `main.ts` into `#brainImport`) imports
+MarksCode/OpenCode/MarksClaw history SELECTIVELY. Nothing is imported in bulk; every write
+carries `confirmed: true` from the user's click and is refused without it.
+- Originals are never opened by the app. All reads go through staged copies in
+  `~/.local/state/chat-marks/brain-import/staging/<uuid>/` (0700, `manifest.json` with each
+  source's sha256/size/mtime before and after; `unchanged` false = it moved during the copy).
+- Root sources (`sources.ts` `ADMIN_SOURCES`: root `markscode.db`, `opencode.db`,
+  `markscode-11510/-143/-1227_7.db`, `memory/*.jsonl`, legacy `storage/{session,message,part,project}`)
+  are copied by ONE `pkexec /bin/sh -c ADMIN_EXPORT_SCRIPT chat-marks-brain-export <uuid>`
+  (`admin-export.ts`, CLIProxy precedent). The constant script has no single quote (the same
+  text is offered for `sudo /bin/sh -c '…'`), takes the owner from `PKEXEC_UID`/`SUDO_UID`
+  (never 0), checks free space (2x the source sizes), opens originals only with
+  `sqlite3 -readonly` / `mode=ro&immutable=1` (a non-empty WAL: db+wal+shm are copied first and
+  only the copy is opened), creates only `session_v2`, `session_message`, `project` and v1
+  `session/message/part` for ids missing from v2 (`filteredCopyStatements` is the Node twin),
+  never `credential`/`account`/`kv`/`auth.json`, then `chown -R` to the requester.
+  `user-export.ts` does the same in-process for sources the user can read (`opencode.db` of the
+  running 2.0.25 service, MarksClaw `sessions.db` whose data is only in the WAL): db+wal+shm copied
+  together (3 tries while hashes move), only the private copy opened.
+- `indexer.ts` `buildIndex` builds `<staging>/index.sqlite` (FTS5) in a `worker_threads` worker
+  (`worker.ts` runs its source text; keep it self-contained). Cursor `(time,id)` per source/pass
+  committed with each batch: cancel/quit resumes. Dedupe by `opencode:<ses_id>` across databases
+  (v2 > v1 > legacy JSON, then more messages, then newer); sub-agent sessions fold under the parent
+  in search and are listed as children in the viewer.
+- `search.ts`/`reader.ts`: AND-of-quoted-terms FTS over every staged index and the archive;
+  reading is bounded (64k chars/message, 2k/tool output, 5 MB and 5,000 messages/conversation) and
+  redacted (`redactSecretText` + vault values).
+- Imports: "Save as memory" = text the user wrote/selected, `brainSave` with provenance
+  `import`; "Keep in archive" = `<userData>/brain/archive.sqlite` (0600, FTS, separate from
+  `brain.sqlite`, 4 GB limit, idempotent by key); "Open as read-only chat" (`materialize.ts`) =
+  a `cosapi-` session with ledger engine `markscode` (retired, view-only), reusing an existing
+  chat with the same `backendSessionId`; hybrid memories: preview with checkboxes, only selected
+  items saved, dedupe by content hash and (file, source_id). "Delete copy" removes only a staged
+  folder. Proof: `test/brain-import.test.ts` (synthetic v1/v2/mixed, credential tables, WAL-only
+  MarksClaw, legacy JSON, hybrid JSONL; originals hashed before/after).
 
 Desktop session lists use stable `(updatedAt,id)` pagination. Each session selection loads a
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;
@@ -2803,6 +3232,60 @@ window/sidebar width and zoom, tool disclosures, history controls and tail reser
 change prose width or line wrapping. `scripts/verify-chat-width.cjs` checks these transitions
 in real Electron at narrow/wide widths and multiple zoom levels.
 
+### Chat Marks Jarvis (J, J2, J3 voice provider)
+
+Jarvis is opt-in push-to-talk for a selected normal ChatGPT or CLIProxy API chat (`src/renderer/jarvis.ts`,
+Settings > Jarvis). J used Windows dictation; J2 added in-memory MediaRecorder capture on every
+OS with CLIProxy `/audio/transcriptions` and an already installed whisper.cpp
+(`src/main/jarvis-audio.ts`, IPC `jarvis:audio`, main-window/main-frame only). J3 adds:
+
+- **Voice provider** (`src/shared/jarvis-voice.ts`, `src/main/jarvis-voice.ts`): any
+  OpenAI-compatible base URL (HTTPS; plain HTTP only on loopback), STT model, TTS model and voice,
+  suggestions from `GET {base}/models`. Keys are Vault K entries `jarvis/voice-primary` and
+  `jarvis/voice-fallback`, bound to the exact origin with header `Authorization`; saving needs the
+  master password (`storeJarvisVoiceKey`), daily use reads them with `useVault` in main and never
+  returns them. Google Gemini uses its origin-bound `x-goog-api-key` header. A 401/403/429/5xx
+  with the primary key is retried once with the fallback.
+  STT is `POST /audio/transcriptions` (multipart, the recorded webm/ogg/mp4; one WAV retry through
+  an installed ffmpeg when the provider rejects the format or returns empty text) or
+  `chat-audio`: a multimodal chat model on `/chat/completions` with `input_audio` WAV (needs
+  ffmpeg). g4f.space currently answers `/audio/transcriptions` with empty text, so its preset
+  uses `chat-audio`; its `srv_…:` model ids change, so the page warns when the chosen id is not in
+  the live list. TTS is `POST /audio/speech` (`response_format: mp3`), bounded and played from a
+  blob URL. Gemini 3.5 Transcribe instead uses `/v1beta/interactions` with inline bounded audio,
+  `generation_config.transcription_config` and `output_text`/`model_output`; `generateContent`
+  cannot be used as its dedicated transcription endpoint. Gemini TTS uses Interactions WAV.
+  Renderer provider status is scoped to the exact config and latest request generation: older
+  missing-key/error checks cannot disable a newly initialized motor, and a different provider's
+  cached credential status cannot arm its microphone. Nothing is written to disk; logs carry
+  timings and statuses, never keys or text.
+- **OS permission and CSP**: the default session denies every permission request except an
+  audio-only `media` request from the main window's own main frame and page URL
+  (`src/main/jarvis-permissions.ts`); before J3 that handler denied the microphone too, so J2
+  capture could not start outside Windows. The renderer CSP adds only `media-src blob:` for the
+  in-memory speech audio.
+- **Engine order** `auto` = provider → CLIProxy → local Whisper → Windows; a recorder engine that
+  fails or returns no text hands the same bytes to the next usable one. Stored J1/J2 preferences
+  without `version: 2` migrate their old default `cliproxy` to `auto`.
+- **Turn-taking** (after JARVIS-OS-V.2): the streamed `assistant_message` rows of the voice turn
+  feed `JarvisSentenceSplitter`; complete sentences go to `JarvisSpeechQueue`
+  (`src/renderer/jarvis-speech.ts`), which synthesizes one sentence ahead while the current one
+  plays and stops everything at once on barge-in (push-to-talk while speaking or thinking, chat
+  change, blur). Typed ChatGPT replies speak only once when the corresponding recorded turn
+  finishes, with prior chat history ignored and newer questions superseding older pending replies.
+  `turn_end` flushes the rest. Optional continuous conversation listens again
+  450 ms after the spoken answer, ending on 1.4 s of silence (`JarvisSilenceGate`, Web Audio
+  level) and pausing after 8 s without speech; push-to-talk stays the default. Earcons are short
+  Web Audio tones (on by default, switchable). The composer shows `#jarvisStatus` and the button
+  `data-state`: listening / transcribing / thinking / speaking.
+- Tests: `test/jarvis-voice.test.ts` (fake OpenAI-compatible HTTP server: models, transcriptions,
+  chat-audio, speech, fallback on 401/403/429/5xx, origin binding, ffmpeg retry),
+  `test/jarvis-speech.test.ts` (splitter, queue, barge-in, silence gate, settings validation),
+  `test/jarvis-conversation.test.ts` (provider-first order, streamed sentence speech, barge-in,
+  continuous mode). Real keys are never used in tests; live checks read them from the process
+  environment only. PersonaPlex was evaluated and deferred:
+  `docs/feature-notes/jarvis-personaplex-assessment.md`.
+
 ### Context pressure and Usage are different measurements
 
 Session `contextTokens` estimates current frontend pressure and resets at durable A→B rebind.
@@ -2847,6 +3330,13 @@ with an event-loop yield between reads, and quitting cancels the warmup before c
 The loading message explains a potentially slow post-update rebuild and that the app remains usable.
 These charts are not a provider invoice, exact
 token consumption or proof of current prices/entitlements.
+**By project** (`UsageOverview.projects`) groups the same cached per-chat model totals by each
+chat's current `projectId`, largest first; `projectId: null` is the chats outside every project.
+The cache holds no project, so moving a chat moves its whole history without a reread or a cache
+version change. The renderer names rows from `listProjects()` (a sidebar-removed project keeps its
+record and name), and the usage paints without waiting for that list. An id missing from it
+shows Unknown project; a list that cannot be read keeps the names already shown. The table is
+left out when no chat has a project.
 
 The bottom **Messages and limits** section counts native user-message IDs with recorded
 model selection proof for GPT-5.6 and GPT-6. It uses provider `authoredAt`, otherwise the
@@ -2868,6 +3358,15 @@ leaving a gap; token-attribution/cache implementation notes are not persistent p
 `session-usage`, `usage-week` and `renderer-usage` tests cover evidence, boundaries and
 preference restoration. `scripts/verify-usage-week.cjs` exercises Chromium keyboard input
 and narrow/zoomed layouts with isolated data.
+
+**Export CSV**, beside Refresh, saves the page as a spreadsheet. IPC `usage:export` / preload
+`exportUsage(divisor)` takes only the page's token divisor; main reads `usageOverview()` after
+the save dialog closes and writes `shared/usage.ts::usageCsv()`: one row per recorded day with
+estimated tokens and, for the seven counted days only, verified GPT-5.6/GPT-6 sends (blank
+before them, which is not zero), then the latest limit reading. The file opens with a note that
+these are local estimates, uses English column names, local times and a UTF-8 byte-order mark,
+guards text cells against spreadsheet formulas, and holds no path, chat, account or
+conversation id. Tests: `usage-export`, `renderer-usage`.
 
 ### Other apps on this computer (#482)
 
@@ -2910,7 +3409,9 @@ The bridge projects that browser apart using the explicit `x-extension-host: bro
 its browser id. While the CoS browser is chosen and its companion present, any other companion
 takes no new work (#1516): `/status` offers it no inputs, revivals, Project creations, plugin
 refreshes or model-list requests; `/input/claim` and `/repairs/claim` refuse it and
-`/commands/redeem` answers 409 `not_chosen_browser`. It still records and stops what the person
+`/commands/redeem` answers 409 `not_chosen_browser`. A page there gets no worker or replacement
+tab to open through `/activity` or its `/compact` reply either (`opensNewWork`, #1852), which also
+holds for an out-of-date companion. It still records and stops what the person
 opens there, and works on as before once the CoS browser is gone. The chosen CoS browser takes a
 new chat's opening custody over from another browser. `browser-proof.ts` keeps, across restarts, the version last seen there and
 ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
@@ -3901,6 +4402,10 @@ a rendered error card; the existing rule stays that a live stream defers the rel
 once that error is gone. An exact no-action failure receipt releases the
 reserved reload budget; preservation after recovery spends none. Existing cooldown, claim,
 Stop/draft/tool, completion and after-turn gates continue to own action; no new timer exists.
+`clf-page-status` also carries `visibility` (`document.visibilityState`) and `hiddenForMs` (how long
+the page has been hidden, 0 while visible; a repeated hidden event does not restart it). Diagnostics
+only (#1752/#1837): the report shows them with the tab's page status, so a report can tell whether a
+hidden page explains late progress or unattributed calls. Nothing decides on them.
 The renderer keeps acknowledged Reloaded/Reopened receipts visible after tools resume, colors
 those notices with the existing accent, and explains the one-error-reload budget and subsequent
 silence wait. Trying/failed receipts do not prove a reload; only actual completion is resolved.
@@ -4611,7 +5116,13 @@ traffic cannot evict middle corrections before selection. Preserve original task
 committed handoff provenance under the message budget; user references have a larger per-message
 allowance and explicit clipping. Exact same-session outbox `finishOwner` identities label known
 automatic messages; unknown native user-role rows do not prove human authorship. Both API and
-browser receive reference data rather than the helper's own prior assistant turns. Temporary
+browser receive reference data rather than the helper's own prior assistant turns. Only when
+that effective transcript lacks the first human user message, helpers receive a supplemental
+original-request reference capped at 20,000 characters, with a visible middle clip preserving
+both ends of larger text and a warning when the recorder already truncated it. API providers
+may reject requests whose combined messages exceed their context limits. ChatGPT drops this
+supplemental block first if it exceeds the active prompt budget, before shortening transcript
+history; a large or truncated original alone does not reject the decision. Temporary
 planners retain their staged-workflow role. Browser budgeting includes prompts and JSON escaping
 inside the complete 96,000-character envelope, or the smaller size learned for this account
 (`goal-helper-size.ts`, durable `goal-helper-size`, #1471): a helper prompt ChatGPT took (exact
@@ -4647,6 +5158,13 @@ explanation in app and browser. Missing MCP evidence explains that the previous 
 local tool call, so lost tool connectivity cannot be established; Loop remains enabled. Do not
 claim login is missing or the tunnel is off without evidence. Distinguish input size, helper output
 size, provider failures and uncertain delivery. Browser error text wraps instead of truncating.
+
+The `Review Goal completion` setting is off by default. When enabled, a Goal helper reporting
+completion without proof is shown as unverified. For an ordinary Goal reply, keep the reply
+pending without retrying. At Session finish, keep the existing hold active, ask the model to keep
+the turn open, and try to show one notice; record the event as `helper_stop_unverified`.
+Missing/false keeps the prior behavior, and Loop's refusal handling is unchanged. The optional
+progress `reason` labels this event; it does not prove the Goal is complete.
 
 Provider progress updates one existing timeline row and is never sendable text. Validate the
 final bounded decision schema before publication. Goal may return stop/no reply. Loop requires
@@ -4698,12 +5216,90 @@ app cannot leave an orphan recording. `scripts/fixtures/smoke-dictation-parent-w
 parses the whole script with PowerShell and runs its loop without a microphone. No audio enters IPC or storage;
 macOS/Linux hide this Windows-only control.
 
+A code block in a rendered answer (`renderedMessage`) gets a header naming the fence's language, read
+from its `code` element's `language-*` class before the sanitizer drops classes ("Code" without one),
+and Copy, Wrap and Save. Wrap folds only that block's long lines and is not remembered. Save calls
+`saveCode({ text, name })` → `code:save`: `name` is a bare `snippet.<ext>` (the extension from the
+language, else `txt`; `ipc.ts` refuses anything else) that `main/code-file.ts` only suggests in
+Downloads; the native save dialog picks the path, the text is written beside it and renamed over it
+(a replaced file keeps its permissions from the first byte written and stays whole if the write
+fails; a file whose permissions cannot be read is not touched), and the reply is
+`{ done: 'saved', name }` or `{ done: 'cancelled' }`.
+
 Interface icons use one system: the bundled Phosphor font (`renderer/icons.css`, built from
 `@phosphor-icons/web`). Code names an icon by meaning (`icon('i-retry')`) and `dom.ts` `ICONS`
 alone picks its glyph; static markup names the glyph class. `--ico` sizes the layout box and
 `--glyph` the drawing, which stays 17px in compact controls except carets and small dismiss
 marks. Do not add hand-drawn SVG icons; the sprite keeps only the product mark.
 `test/icon-font.test.ts` checks names, package codepoints and stray SVG.
+
+Chat Marks' outbound **Notification Center** (`renderer/notification-center.ts`,
+`main/notification-{center,credentials,ipc,events,smtp}.ts`, `shared/notification-center.ts`)
+is a dedicated Settings > Notifications page, independent of native desktop notices.
+The five channels (SMTP, Telegram, local WhatsApp Web, Meta WhatsApp Cloud and Evolution API) are disabled
+by default. The main process exclusively owns delivery and credentials: validated
+non-secret channel settings live in the `marks-notification-center` durable record;
+provider credentials are entries `notification/<channel>` in Vault K's portable,
+encrypted store and **never** return through IPC. Writing/rotating a credential
+requires the administrator's master password; routine dispatch invokes Vault K's
+`useVault` in the main process and never asks for the master password. The authenticated,
+main-frame-checked `marksNotify:request` IPC supports `get`, `save`, `credential`
+(write-only), `test`, `export`, and `import`. Preload exposes typed fixed entrypoints,
+never a generic secret reader. File dialogs and IO happen only in the main process:
+the versioned JSON export contains allowlisted non-secret settings, never vault data.
+Import rejects unknown formats/keys and atomically requires credential reactivation
+per channel before applying imported preferences; the separate durable activation
+record is never included in exports. Old Vault K entries may stay encrypted but are
+inert until newly saved from Notifications with the master password.
+Renderer gets only Boolean credential-presence flags. Saved data is schema-validated;
+a missing/invalid record resolves to off-by-default settings, not a network send.
+The session ledger owns turn outcomes, approval-wait owns pending human decisions,
+and the version owners report availability; notifications only observe those events
+and never answer a permission prompt or start an update. Per-event throttling,
+per-channel hourly limits, bounded batch windows, opt-in excerpts, HTTPS/TLS
+enforcement and restricted template substitution belong to the main process.
+A failed test or send is a `NotificationDeliveryError` (`main/notification-failure.ts`) carrying
+only a `NotificationFailure` from `shared/notification-center.ts`: a code from
+`NOTIFICATION_FAILURE_CODES` (DNS, connect timeout, refused, closed, TLS untrusted or name
+mismatch, STARTTLS missing, auth/sender/recipient refused, server error; for HTTP providers
+invalid token, unknown chat/number, rate limited, 4xx/5xx), the channel, the numeric SMTP reply
+or HTTP status, a `cloudflare` flag when a resolved address is in Cloudflare's published proxy
+ranges (embedded as data; proxied records carry no SMTP), and for TLS failures the presented
+certificate's names, self-signed flag and SHA-256 fingerprint. Provider response text is read
+only to classify and is never kept; passwords, tokens, URLs and bodies never enter a failure.
+IPC returns it as `failure` beside the fixed English error, the log line names the code, and the
+renderer's `notificationFailureMessage` translates an actionable sentence per code (12 catalogs).
+`main/notification-smtp.ts` decides trust itself after the handshake (`rejectUnauthorized: false`
+plus an explicit check of `authorized`, the host name and the pin) before writing anything over
+TLS, so no AUTH or mail ever follows an unchecked certificate; replies sent in plain text before
+the STARTTLS handshake are discarded. As a documented fallback for a server without a publicly
+trusted certificate, the SMTP card offers "Trust this certificate" after a `tls_untrusted` or
+`tls_hostname_mismatch` failure: after an explicit confirm showing the fingerprint, the exact
+`fingerprint256` is stored as the non-secret SMTP setting `tlsFingerprint` (validated form).
+With a pin, only that certificate is accepted (still encrypted, STARTTLS still mandatory, host
+names no longer checked); any other one fails `tls_untrusted` with `pinned`. "Remove trust"
+deletes it. A certificate from a public authority for the configured host is the recommendation.
+`sendSmtp(..., { inspectOnly: true, connectAddress })` stops after the certificate check
+without credentials, for diagnostics.
+`test/notification-center.test.ts`, `test/notification-persistence.test.ts`,
+`test/notification-http-providers.test.ts`, `test/notification-smtp.test.ts` (local fake SMTP
+with in-memory test certificates from `test/fixtures/test-certificate.ts`),
+`test/notification-center-renderer.test.ts` and
+`scripts/verify-notification-center.cjs` cover settings import/export round trips,
+Vault K, fake transports and real Electron UI without real credentials. Real-provider
+delivery still requires separate manual homologation. This item is stacked on Vault
+K's PR: do not merge, tag or release it before the Vault contract is integrated.
+
+QR setup: Telegram pairs the user's own BotFather token (stored only in Vault K) to a
+private chat with a random, single-use `/start` code expiring after three minutes.
+`main/notification-telegram-pair.ts` owns the code and `getUpdates` polling; no webhook
+is installed or modified. WhatsApp Web is a separate channel backed by Baileys in
+`main/notification-whatsapp-web.ts`; its session is stored under
+`<userData>/notifications/whatsapp-web/` (0700), and only registered sessions reconnect
+on restart. Disconnect attempts a remote logout and removes local session files. This
+is unofficial and WhatsApp can block the number. QR images are generated locally in
+authenticated IPC. Cloud API and Evolution remain advanced options. Details and
+synthetic screenshots: `docs/feature-notes/notifications-qr.md`.
 
 `renderer/pet-machine.ts` owns the optional Tur Tur Sahur companion's gesture,
 animation and autonomous-action state. `renderer/pet.ts` projects it with Pointer
@@ -4813,6 +5409,20 @@ unpinned groups and a drag never crosses between them. Only recorded chats are p
 workers or unattributed activity. Pinned rows carry a quiet pin mark at rest (it makes way for the
 row's "⋯" on hover, focus or while its menu is open), and Pin chat/Unpin chat is the first item of
 the chat's row menu, keeping keyboard focus on the rebuilt row's menu button.
+Chat groups (#1038) are named groups inside a project, one level deep, for sorting its chats; they
+never change a chat's project, folder, permissions or anything a tool call sees. `main/chat-groups.ts`
+keeps them in the durable store `chat-groups` (`{ version: 1, groups: [{ id, projectId, name,
+createdAt }], members: { sessionId: groupId } }`; names trimmed and folded, 1–60 characters; up to
+100 groups per project and 5000 grouped chats; a corrupt store starts empty). IPC `chatGroups:get`,
+`chatGroups:create` (project must exist and not be removed; returns `{ group, state }`),
+`chatGroups:rename`, `chatGroups:delete` (its chats stay in the project, ungrouped) and
+`chatGroups:assign { sessionId, groupId | null }` (only a non-worker chat of the group's own project);
+deleting a chat forgets its membership. A membership counts only while its chat is a non-worker chat
+of the group's project (`chatGroupOf`). The sidebar draws a project's groups first, ordered with the
+drag scope `groups:<projectId>`, each with its chats in scope `group:<groupId>` (pinned first, paged
+like the project), then the project's ungrouped chats. A group holding the open chat shows open.
+Project menu: New group; chat menu: Move to group (this project's groups, New group…) and Remove
+from group. Names use the shared in-app dialog `renderer/name-dialog.ts`.
 The worker drawer is a read-only split view of the selected worker's own recorded conversation;
 opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
 current-conversation model and broker status when known, falling back to recorded session activity.
@@ -4826,14 +5436,21 @@ a completed background chat gets a static accent marker until selected, and a se
 completion is acknowledged locally without writing session metadata. The receipt advances only after
 the current selection/load generation has successfully rendered that conversation at the live tail;
 failed or stale selection loads leave it unseen. A first-run baseline prevents historical completions
-from appearing unread after an update, and the stored receipts stay bounded.
+from appearing unread after an update, and the stored receipts stay bounded. Mark all as seen
+(`markAllSeen`, one write) acknowledges every row that shows New response: the sidebar header's
+check button, shown only while one does, covers all chats, and a project's menu, holding the item only
+while one of its chats does, covers that project. A working chat has no completion to acknowledge and keeps its spinner.
 `sessions:list` (`readSessionList`, `SessionList`) carries per-chat states only the main process
 holds, as ChatGPT conversation ids, each keyed like `blocked`: `approval` (`approvalWaitingChats()`,
 the recovery hold's own 75 s freshness rule) and `recoveryStopped` (`recoveryStoppedChats()` in
 bridge.ts: exactly the chats whose `sessionRecoveryCountdowns` reads `pickup-stopped`, asked only of
 sessions with a durable stop mark, so a list with none costs nothing). The pageless verdict
 (`pagelessChats`) is deliberately not in `recoveryStopped`: it is in memory, keeps no obligation and
-lifts when the page polls. "Last turn failed and nothing followed" needs no field:
+lifts when the page polls. The selected chat's own controls (`sessions:controls`, `SessionControlsView`)
+carry it as `pageless`, and its unfinished turn's caption then reads "Stopped · open this chat's tab
+again to continue" instead of nothing (#1787). While a turn's caption counts, the window asks for the
+controls again every 20 s (`RUNNING_CONTROLS_RECHECK_MS`): an activity window can run out with nothing
+new written to the chat, and the caption had counted on for hours. "Last turn failed and nothing followed" needs no field:
 `!activeTurnId && lastTurnOutcome` is `failed` or `stalled` (`interrupted` is usually followed by a
 fresh turn: rotation, automatic Continue, a replacing message).
 The chat keeps the current input queue/plan visible alongside a
@@ -5024,6 +5641,7 @@ Captured ChatGPT HTML passes a strict allowlist; authored plain text stays text.
 citation ranges use Unicode code points and map to UTF-16 before slicing. Exact uploaded-file
 names render as plain chips; unresolved file citations do not gain invented local links.
 Plain text leaving the timeline (Markdown export, search index and snippets, turn notifications and `modelFacingText` for Goal/Loop and completed answers) passes `providerEntitiesAsMarkdown` first: the raw text's private-use entities (U+E200 name U+E202 field … U+E201) become `[label](address)` for `url` and are dropped otherwise, so a link card never reads as "urlLabelhttps://…".
+`sessions:exportMarkdown` takes an optional `format: 'markdown' | 'html'` (Markdown when left out). `html` is accepted only with `scope: 'session'` and `target: 'file'`: main saves the same transcript as one self-contained page (`shared/html-export.ts` `transcriptHtml`). What a person wrote is escaped plain text; answers are Markdown drawn with raw HTML escaped, images reduced to their alt text and only http(s)/mailto links kept. The page has inline styles only and a `default-src 'none'` policy, so it runs no script and loads nothing. Its title and texts pass `redactSecretText` first; the Markdown export stays exact.
 An assistant message may carry `references`: the sources behind its inline
 `:chatgpt-content-reference{index="N"}` citations. `extension/fiber.js` `citedSources` reads
 them from each citation pill's own props (the list its hover card pages through, plus the reply
@@ -5103,6 +5721,16 @@ layout: `'projects'`, the default project tree, or `'inbox'`) is read by `chat.t
 never browser storage; a save without it or with another value loads as `'projects'` while the
 rest of the appearance is kept, and the state push after a save repaints the sidebar. Text size
 scales the existing typography hierarchy, including code, independently of window zoom. System font retains the locale-specific fallback stack.
+Line spacing (`ui.appearance.lineSpacing`, 100–200 percent in steps of 10, default 100) multiplies
+the chat's own line heights through `--line-spacing`: messages, outbox rows and the sample chat.
+A save without it, out of range or off those steps loads as 100. The Atkinson Hyperlegible font (`font: 'legible'`)
+is Atkinson Hyperlegible Next, bundled as WOFF2 because `font-src` is `'self'`; its OFL licence is
+in `docs/licenses/atkinson-hyperlegible-next/` and the third-party notices. Reset appearance
+restores both. Appearance → Accessibility → Announce finished replies (`ui.announceTurns`, off
+unless true, not part of Reset) puts "Reply finished" in the polite `#turnAnnounce` region when a
+live delta of the open chat carries a completed `turn_end`, also when the same delta starts the
+next turn; a `user_message` or `turn_start`, and every chat switch, empty it first, and words still
+in the region are emptied and written again in a later task, unless a later clear or chat switch came first. Several completed turns in one delta are each written in turn, one second apart, and a chat switch drops the ones still waiting. A chat opened after its reply finished, or a stopped turn, says nothing.
 The Appearance sample chat reflects the same semantic color and typography tokens immediately;
 it contains no session data. The composer context dialog and accessible label identify local
 estimates; its toolbar toggles percentage/token values. Compact and Cancel remain the original
@@ -5262,9 +5890,20 @@ read-only: it strips inherited Git repository/index redirects, uses optional-loc
 subprocesses and exposes no stage, commit, reset,
 checkout or push authority. Review projects `M/A/D/R/U`, plus `C` for every unmerged index state
 (`DD/AU/UD/UA/DU/AA/UU`) so an unfinished merge is never shown as an ordinary edit; a conflicted
-file missing from the worktree diffs as empty. It also projects ancestor-folder markers and
+file missing from the worktree diffs as empty. A working-tree conflict's diff also carries
+`conflict`: index stages 1-3 (base, ours/HEAD, theirs) through the same bounded `cat-file` reads,
+null only for a stage `ls-files -u` does not list, and absent (with a log line) when a side is
+binary, too large or listed but unreadable. Review shows them
+as three read-only panes with a toggle back to the diff; Ask chat to resolve only prefills the
+composer with a request naming the file (or, while a prepared Plan waits to be sent, only says to start or cancel it first), and nothing writes, stages or marks it resolved.
+It also projects ancestor-folder markers and
 bounded unified diffs; Files may open it from its toolbar. Files and Review are alternate right
-tabs; Review does not add a second file watcher or expose file-write actions.
+tabs; Review does not add a second file watcher or expose file-write actions, with one
+exception that is a Files write, not a Git one: an untracked (`U`) working-tree row's context
+menu offers Add to .gitignore for that file or its folder. After a confirmation it appends one
+anchored, escaped line (`/dist/`) to the project folder's `.gitignore` through the existing
+`projectFiles:create`/`projectFiles:preview`/`projectFiles:save` IPC. The file is read before the
+dialog and saved against that revision, so an edit made elsewhere meanwhile is refused.
 Review also identifies the checked-out branch and offers a searchable, read-only comparison
 against locally known branch refs. Selecting a ref never switches branches or fetches remote
 data. The comparison shows committed changes from the selected ref's merge base to current
@@ -5534,12 +6173,24 @@ For a few seconds after a new OpenAI tunnel-client process connects (app start, 
 client the supervisor replaced), OpenAI still routes an existing chat's tool calls to the previous
 process, and a call sent then waits about 128 s for that lease (#1220; a new chat is not affected,
 and a reconnect of the same process after an outage changes nothing). `tunnel/route-settle.ts`
-holds such messages for `ROUTE_SETTLE_MS` (12 s) after each new process's first connected report:
+holds such messages for the current hold (`routeHoldMs()`, starting at `ROUTE_SETTLE_MS` = 35 s; 12 s until #1788) after each new process's first connected report:
 `/status` does not offer, and `/input/claim` refuses, an input whose page is an existing
 conversation; `wakeBrowserWork()` runs when the hold ends. `ConnectionStatus.routeSettlingUntil`
 lets the chat say the message is about to go. Measured on Windows: sent at once, 15 of 18 calls
 waited; held 12 s, 12 of 14 arrived in under 20 s (one still waited, one failed fast without reaching
-the app, back to back, so the takeover can occasionally outlast the hold). `test/tunnel-route-settle.test.ts`, the
+the app, back to back, so the takeover can occasionally outlast the hold). On the Mac on 2026-10-22 the
+takeover took longer (#1788): held 12 s, about half still waited; sent 22 s after connect, 2 of 3; at 32 s
+and 47 s, none of 6. The hold learns per computer (durable `route-hold` state, restored before any
+tunnel starts): after each new process, the first message for an existing chat (`/input/claim` →
+`noteRouteExistingChatSend`) is timed from the page's first sighting of its request id (recorder,
+`noteRouteRequestSighted`) to the call reaching the MCP server (`x-request-id`, `noteRouteRequestArrived`).
+The page sees the id within seconds even when the call arrives ~124 s later, so the gap measures the
+route, not thinking time. A gap ≥ 60 s grows the hold (×1.5, at least +15 s, at most 90 s); three
+restarts in a row ≤ 30 s shrink it by 5 s (never below 12 s); a gap between the two leaves the hold
+as it is and starts the fast count over. Only the first message for an existing chat after the restart is
+measured, and only when it is sent within 5 min of it (its late call may arrive after that); new chats
+and later messages are not. Every measurement writes one `route hold:` log line.
+`test/tunnel-route-settle.test.ts`, the
 `tunnel-lifecycle` and `input-delivery-integration` cases cover it.
 
 The local control API (`control-api.ts`, Settings → General → For developers, off by default) serves
@@ -5805,6 +6456,8 @@ its indexes/geometry. Late proof aliases a request's state only to its own sessi
 unresolved requests cannot borrow observations. Headerless calls retain a separate legacy
 anonymous context; opting out refuses indexed/coordinate input without exact identity.
 Explicit activation consumes observation state too; ordinary input already activates its target.
+Apps `launch_app` starts on Windows are the helper's child processes, so a retired helper (timeout,
+crash, quit) ends only itself (`terminateProcess`), never its tree; `test/computer-helper-retirement.test.ts`.
 Late observations and replaced principals cannot lend another call their state.
 Single-window capture includes the cursor only when ScreenCaptureKit reports the window on
 screen: requesting the current desktop cursor for an off-Space window fails with -3811.

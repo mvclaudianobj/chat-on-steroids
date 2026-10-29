@@ -21,3 +21,21 @@ it('forwards exact session-change ownership to the renderer and keeps catalog-on
   stop();
   expect(removeListener).toHaveBeenCalledWith('session:changed', wrapped);
 });
+
+it('exposes only validated archive and paged listing actions through the Electron preload', async () => {
+  vi.resetModules();
+  await import('../src/preload/index.js');
+  const { ipcRenderer } = await import('electron');
+  const invoke = vi.mocked(ipcRenderer.invoke);
+  invoke.mockResolvedValue({ ok: true, data: true });
+  const api = expose.mock.calls.at(-1)![1];
+  const archive = await api.archiveSession('aaaa1111-bbbb-4ccc-8ddd-eeeeeeeeeeee', true);
+  expect(archive).toEqual({ ok: true, data: true });
+  expect(invoke).toHaveBeenCalledWith('sessions:archive', {
+    id: 'aaaa1111-bbbb-4ccc-8ddd-eeeeeeeeeeee', archived: true
+  });
+  await api.listSessions({ archived: true, search: 'worker', limit: 2, cursor: { updatedAt: 5, id: 'abc12345' } });
+  expect(invoke).toHaveBeenCalledWith('sessions:list', {
+    archived: true, search: 'worker', limit: 2, cursor: { updatedAt: 5, id: 'abc12345' }
+  });
+});

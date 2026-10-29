@@ -37,10 +37,25 @@ export const MAIN_TEXTS = [
   'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.',
   // Native file dialogs and the worker checkout removal confirmation.
   'Export as Markdown',
+  'You',
+  'Export as HTML',
+  'Export usage as CSV',
+  // Phone notifications (ntfy).
+  'A chat is waiting for you.',
+  'Something failed in Chat Marks.',
+  'A chat finished.',
+  'Finished after {0} min.',
+  'This is a test from Chat Marks. Phone notifications work.',
   'Import CoS Pet folder',
+  'Export settings',
+  'Import settings',
+  'Settings backups',
   'Import SKILL.md',
   'Markdown files',
+  'HTML files',
   'Text files',
+  'CSV files',
+  'Save code',
   'Approve a folder for ChatGPT',
   'Import Skill folder',
   'Markdown skills',
@@ -62,8 +77,24 @@ export const MAIN_TEXTS = [
   'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.',
   'Keep checkout',
   'Remove checkout; preserve Git branch',
+  'Authorize Company workers',
   // The turn-completion notice when an answer has no text to show.
-  'ChatGPT finished.'
+  'ChatGPT finished.',
+  'Export encrypted Chat Marks vault',
+  'Import encrypted Chat Marks vault',
+  'Import GPG secrets',
+  'Chat Marks vault',
+  'GPG encrypted files',
+  'Export Brain memories',
+  'JSON Lines',
+  'Export notification settings',
+  'Import notification settings',
+  'Chat Marks notification settings',
+  'Select a copy of remote-targets.json',
+  'JSON files',
+  // The Goal helper stopped without evidence that the requested work is complete.
+  'Goal result needs review',
+  'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

@@ -88,4 +88,9 @@ it('draws CLIProxy with the plug everywhere, and every module\'s management entr
   expect(mark.getAttribute('aria-hidden')).toBe('true');
   expect(mark.className).toContain('cm-glyph-claw');
   expect(mark.dataset.module).toBe('zeroclaw');
+  // Claude Code Router (a module, not a chat type): its own line router, drawn in icons.css.
+  expect(moduleIcon('ccr')).toBe('i-module-ccr');
+  expect(vocabulary.get('i-module-ccr')).toBe('cm:ccr');
+  expect(iconsCss).toMatch(/\.cm-glyph-ccr \{ -webkit-mask-image: url\("data:image\/svg\+xml,[^"]+"\); mask-image: url\(/);
+  expect(moduleMark('ccr').className).toContain('cm-glyph-ccr');
 });

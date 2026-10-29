@@ -16,6 +16,9 @@ export function verifyReleaseVersion({ root = path.resolve(import.meta.dirname, 
   const builderExtraVersion = builder.match(/^extraMetadata:\s*\n\s*version:\s*(\S+)/m)?.[1];
   const builderNumber = builder.match(/^buildNumber:\s*['"]?(\d+)['"]?/m)?.[1];
   const revision = pkg.version.match(/\+(\d+)$/)?.[1];
+  // A local TEST package may have a higher Debian revision with identical app/extension bytes
+  // to avoid overwriting the installed package. A tagged release may never use that escape.
+  const localQaRebuild = builder.match(/^# localQaRebuild:\s*(\d+)\s*$/m)?.[1];
   const changelogVersion = packageOnly ? null : read('CHANGELOG.md').match(/^## \[(\d+\.\d+\.\d+(?:\.\d+)?)\]/m)?.[1];
   const values = {
     'lockfile version': lock.version,
@@ -30,7 +33,8 @@ export function verifyReleaseVersion({ root = path.resolve(import.meta.dirname, 
     const expected = name.startsWith('lockfile') ? pkg.version : version;
     if (actual !== expected) throw new Error(`${name} ${actual ?? '<missing>'} does not match ${expected}`);
   }
-  if (revision && builderNumber !== revision) {
+  if (revision && builderNumber !== revision &&
+    (tag !== null || localQaRebuild !== builderNumber || Number(builderNumber) <= Number(revision))) {
     throw new Error(`builder revision ${builderNumber ?? '<missing>'} does not match ${revision}`);
   }
   if (!packageOnly) {

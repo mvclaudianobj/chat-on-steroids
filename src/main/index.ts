@@ -1,14 +1,15 @@
 import './dev-profile.js';
 import { closeRemoteSessions } from './remote/ssh.js';
 import { stopInputStartup } from './session/start-input.js';
-import { browserExtensionRequired } from '../shared/types.js';
+import { browserExtensionRequired, isNewer } from '../shared/types.js';
 import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
 /**
  * Main process entry: window, tray, and the security posture for the renderer.
  */
 
 import path from 'node:path';
-import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
+import { randomUUID } from 'node:crypto';
+import { app, Notification, BrowserWindow, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
@@ -33,7 +34,14 @@ import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, onLog, sna
 import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
-import { initSecretsPath, keychainReadPending } from './secrets.js';
+import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
+import { installPhonePush, pushToPhone } from './phone-push.js';
+import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
+import { initRemoteHosts } from './remote/hosts.js';
+import { initMarksVault, warmVaultRedaction } from './marks-vault.js';
+import { initBrain } from './brain/store.js';
+import { initBrainSettings, loadBrainSettings } from './brain/settings.js';
+import { initBrainEngineMcp, stopBrainEngineMcp } from './brain/engine-mcp.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
@@ -41,7 +49,15 @@ import { pluginManager } from './plugins/manager.js';
 import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
 import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
+import { sendDesktopInput } from './session/start-input.js';
 import { createTurnNotifier } from './turn-notifications.js';
+import { createOutboundTurnWatcher } from './notification-events.js';
+import { getWhatsAppWebStatus, getWhatsAppWebDeliveryStatus, resumeWhatsAppWeb, sendWhatsAppWeb, setWhatsAppWebInbound, stopWhatsAppWeb } from './notification-whatsapp-web.js';
+import { createWhatsAppDuplex, lastRelayableWhatsAppAnswer, completedWhatsAppAnswers } from './whatsapp-duplex.js';
+import { redactSecretText } from './redaction.js';
+import { watchWhatsAppResumeOnGreen } from './whatsapp-resume-on-green.js';
+import { notificationSettings, queueOutboundNotice } from './notification-center.js';
+import { listProjects } from './projects.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
 import { initUvRuntime } from './plugins/uv-runtime.js';
@@ -50,6 +66,7 @@ import { shutdownPetOverlay, startPetOverlay } from './pet-overlay.js';
 import { usageOverview } from './session/usage.js';
 import {
   flushRecorder,
+  activeSessionId,
   onSessionChange,
   queueDeterministicAttributionRepair,
   setAgentBinder,
@@ -79,9 +96,13 @@ import {
 import { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } from './durable.js';
 import { loadConnectorIdentity } from './connector-identity.js';
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
+import { startMobilePanel, type MobilePanelInstance } from './mobile-panel.js';
+import { getCompany } from './company-store.js';
+import { approvalCardView, approvalWaitingChats, requestApprovalAnswer, approvalDecisionStatus } from './approval-wait.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
 import { restoreTrustedChats } from './session/trusted-chats.js';
+import { restoreRouteHold } from './tunnel/route-settle.js';
 import { stopComputerHelper } from './computer/index.js';
 import {
   GOAL_OBJECTIVES_STATE,
@@ -106,7 +127,7 @@ import {
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { restoreManagedWorktrees } from './worktrees/index.js';
-import { applyStagedUpdate, ELEVATION_ANSWER_MS, installingVersion, onInstallerTakeover, onUpdateHandoffStep, startUpdateChecks } from './update.js';
+import { applyStagedUpdate, ELEVATION_ANSWER_MS, installingVersion, onInstallerTakeover, onUpdateHandoffStep, startUpdateChecks, onUpdateChange, updateStatus } from './update.js';
 import { setUpdateProgressStep, showUpdateProgress, untilInstallerTakesOver } from './update-progress.js';
 import { resumeUpdateRefresh } from './update-all.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
@@ -124,8 +145,10 @@ import {
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath, WINDOWS_APP_USER_MODEL_ID } from './window-icon.js';
+import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
+import { allowJarvisMicrophone } from './jarvis-permissions.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
-import { showConnectionLossNotice } from './connection-loss-notice.js';
+import { connectionLossLine, showConnectionLossNotice } from './connection-loss-notice.js';
 import { requireMarkspanelLogin, startMarkspanelSessionMonitor } from './markspanel-auth.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
@@ -136,6 +159,7 @@ const WINDOW_BOUNDS_STATE = 'window-bounds';
 const MAIN_TEXTS_STATE = 'main-texts';
 
 let window: BrowserWindow | null = null;
+let mobilePanel: MobilePanelInstance | null = null;
 let savedWindowBounds: unknown = null;
 let tray: Tray | null = null;
 let quitting = false;
@@ -286,6 +310,12 @@ function createWindow(): void {
 
 /** When a Session-finish or stuck notice last went out per chat, so a turn-done notice does not repeat it. */
 const chatNoticeAt = new Map<string, number>();
+/** A chat that waits for the person, for the phone: its own rules decide whether it goes out. */
+const phoneNeedsYou = (sessionId: string): void => {
+  void getSession(sessionId).catch(() => null).then(summary => pushToPhone({ kind: 'needs-you', sessionId,
+    chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null }));
+};
+
 function showWindow(): void {
   // Defense in depth for every current or future native activation source. The explicit gate
   // below additionally protects the long pre-window startup interval, while this invariant makes
@@ -301,6 +331,7 @@ function showWindow(): void {
 }
 
 setFinishNotifier((title, body, sessionId, turnId) => {
+  phoneNeedsYou(sessionId);
   if (window?.isFocused() || !Notification.isSupported()) return false;
   chatNoticeAt.set(sessionId, Date.now());
   const write = (): void => {
@@ -323,6 +354,7 @@ setFinishNotifier((title, body, sessionId, turnId) => {
   return true;
 });
 setStuckNotifier((title, body, sessionId, opens = 'app') => {
+  phoneNeedsYou(sessionId);
   // A person looking at the app already has the timeline note this accompanies; interrupting
   // them with the same sentence is noise, exactly as the finish notice treats a focused window.
   if (window?.isFocused() || !Notification.isSupported()) return false;
@@ -342,14 +374,17 @@ setStuckNotifier((title, body, sessionId, opens = 'app') => {
   notice.show();
   return true;
 });
-setConnectionLossNotifier(surface => showConnectionLossNotice(surface, {
-  isQuitting: () => quitting,
-  isFocused: () => window?.isFocused() ?? false,
-  isSupported: () => Notification.isSupported(),
-  text: mainText,
-  create: options => new Notification(options),
-  showWindow
-}));
+setConnectionLossNotifier(surface => {
+  if (!quitting) void pushToPhone({ kind: 'failed', detail: connectionLossLine(surface, mainText) });
+  return showConnectionLossNotice(surface, {
+    isQuitting: () => quitting,
+    isFocused: () => window?.isFocused() ?? false,
+    isSupported: () => Notification.isSupported(),
+    text: mainText,
+    create: options => new Notification(options),
+    showWindow
+  });
+});
 
 setBrowserWorkArea(() => screen.getPrimaryDisplay().workArea);
 
@@ -440,6 +475,12 @@ void app.whenReady().then(async () => {
   initWorkerArchivePath(userData);
   initBrowserProofPath(userData);
   initSecretsPath(userData);
+  initMarksVault(userData);
+  // Chat Marks: initialize the local Brain paths without reading any other app's data.
+  initBrain(userData);
+  initBrainSettings(userData);
+  initBrainEngineMcp(userData);
+  initRemoteHosts(userData);
   initKeychainNotice(userData, {
     platform: process.platform,
     contents: () => (window && !window.isDestroyed() ? window.webContents : null),
@@ -451,6 +492,8 @@ void app.whenReady().then(async () => {
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
+  try { await loadBrainSettings(); }
+  catch { logWarn('Brain settings unavailable; all model-facing Brain integrations remain disabled'); }
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
   await loadConnectorIdentity();
@@ -488,6 +531,7 @@ void app.whenReady().then(async () => {
     return;
   }
   if (windowActivation.isDisabled()) return;
+  await warmVaultRedaction();
   // Refresh and revalidate the Markspanel session throughout the app lifetime.
   // A revoked token or unavailable identity service closes this runtime through
   // the existing bounded shutdown, rather than continuing to publish local tools.
@@ -523,6 +567,20 @@ void app.whenReady().then(async () => {
   onSessionChange(() => void keepAwake.refresh());
   setInterval(() => void keepAwake.refresh(), 60_000).unref();
   void keepAwake.refresh();
+  // Phone notifications (ntfy): the app's network stack (system proxy) and the system's own idle
+  // state, where three minutes without input, or a locked screen, count as away.
+  installPhonePush({
+    settings: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }),
+    // A failed read is reported, not treated as no token (phone-push.ts refuses to send).
+    token: () => getSecret('ntfyToken'),
+    now: () => Date.now(),
+    idleState: () => powerMonitor.getSystemIdleState(180),
+    post: async (url, body, headers) => {
+      const reply = await net.fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(10_000) });
+      return { ok: reply.ok, status: reply.status };
+    },
+    log: logInfo
+  });
   // Codex's turn-completion notifications: a finished answer in a background window.
   const turnNotifier = createTurnNotifier({
     getSession,
@@ -534,6 +592,11 @@ void app.whenReady().then(async () => {
     focused: () => window?.isFocused() === true,
     automated: conversationId => goalSwitchEnabledFor(conversationId),
     recentlyNotified: id => Date.now() - (chatNoticeAt.get(id) ?? 0) < 120_000,
+    turnStartedAt: async id => {
+      const [start] = await readRecentEvents(id, 1, { kinds: ['turn_start'] });
+      return start?.time ?? null;
+    },
+    phone: event => void pushToPhone({ kind: 'finished', ...event }),
     show: (title, body, sessionId) => {
       const notice = new Notification({ title, body });
       notice.on('click', () => {
@@ -548,6 +611,24 @@ void app.whenReady().then(async () => {
   });
   turnNotifier.seed(await listSessions().catch(() => []));
   onSessionChange(change => void turnNotifier.handle(change.sessionIds ?? []));
+  const outboundTurnNotifier = createOutboundTurnWatcher(getSession, queueOutboundNotice, {
+    projectName: async projectId => (await listProjects()).find(project => project.id === projectId)?.name ?? 'Chat Marks',
+    excerpt: async sessionId => {
+      const [answer] = await readRecentEvents(sessionId, 1, { kinds: ['assistant_message'] });
+      return answer?.kind === 'assistant_message' ? answer.message.text : null;
+    }
+  });
+  outboundTurnNotifier.seed(await listSessions().catch(() => []));
+  onSessionChange(change => void outboundTurnNotifier.changed(change.sessionIds ?? []).catch(() => undefined));
+  // The updater owns availability: notify only when its observed latest version changes.
+  let announcedRelease = updateStatus().latest;
+  onUpdateChange(() => {
+    const status = updateStatus();
+    const latest = status.latest;
+    if (!latest || latest === announcedRelease || !isNewer(latest, status.current)) return;
+    announcedRelease = latest;
+    void queueOutboundNotice({ event: 'app-release', title: `Chat Marks ${latest}`, project: 'Chat Marks' }).catch(() => undefined);
+  });
   // The app's own requests follow the system proxy too, not only the tunnel (#1255).
   configureAppProxy(url => session.defaultSession.resolveProxy(url), () => [
     ...(getConfig().goal.provider.kind === 'custom' ? [getConfig().goal.provider.baseUrl] : []),
@@ -584,6 +665,8 @@ void app.whenReady().then(async () => {
   // endpoints can accept work, just as blocked-chat policy is restored above.
   await restoreTrustedChats();
   if (windowActivation.isDisabled()) return;
+  // This computer's learned hold after a new tunnel-client (#1788), before any tunnel starts.
+  await restoreRouteHold();
   setAgentConversationLookup(agentConversation);
   // The prime's chat is the user's own, so no extension report can name it. It is bound
   // when the recorder manages to place the prime's first call. See recordToolCall.
@@ -669,26 +752,115 @@ void app.whenReady().then(async () => {
   // state and does not run until its first coarse interval after this point.
   startAgentRuntimeGc();
 
-  // Strict CSP for our own page. There is no remote content and no inline script.
+  // Do not let the new img-src origin permit arbitrary paths, tracking parameters,
+  // or requests of another type to that host. Redirects are checked again by CSP:
+  // an image cannot follow a Location header to a different remote origin.
+  // Electron supports only one onBeforeRequest listener per session: registering
+  // another one anywhere on defaultSession would replace this URL safety gate.
+  // Keep future request checks inside this listener rather than adding a second.
+  session.defaultSession.webRequest.onBeforeRequest({ urls: ['https://images.openai.com/*'] }, (details, callback) => {
+    const allowed = approvedChatGptImageRequest(details.url, details.resourceType, details.method);
+    if (!allowed) logWarn('static ChatGPT image request refused: unapproved URL or resource type');
+    callback({ cancel: !allowed });
+  });
+
+  // Strict CSP for our own page. Only the verified first-party static image host is
+  // remote; scripts, connections and all other capabilities remain app-local.
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
         'Content-Security-Policy': [
-          "default-src 'none'; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; form-action 'none'; base-uri 'none'; frame-ancestors 'none'"
+          RENDERER_CONTENT_SECURITY_POLICY
         ]
       }
     });
   });
 
-  // Deny every permission request; the UI needs none of them.
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  // Deny every permission request except Jarvis's audio-only microphone for the app's own page.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const main = window && !window.isDestroyed() ? window.webContents : null;
+    callback(allowJarvisMicrophone({
+      permission, fromMainWindow: !!main && contents === main, isMainFrame: details.isMainFrame === true,
+      requestingUrl: details.requestingUrl ?? '', appUrl: main?.getURL() ?? '',
+      mediaTypes: (details as { mediaTypes?: string[] }).mediaTypes
+    }));
+  });
 
   // From here on a second launch may safely focus/recreate the window: renderer security policy
   // is installed and the renderer's fixed IPC methods already have handlers before it can load.
   // The same quit the tray's Quit performs. It has to go through `quitting` for the window's
   // close-to-tray handler to let go: without it, quitting to install would hide the window and
   // leave the app running, which is exactly the trap the Install button exists to end.
+  const whatsappDuplex = createWhatsAppDuplex({
+    // Notification recipients form an explicit owner whitelist. No sender is
+    // authorized by pairing alone, and the channel is completely off by default.
+    allowed: async () => {
+      const channel = (await notificationSettings()).channels['whatsapp-web'];
+      return channel.enabled && channel.config.duplex === 'on'
+        ? channel.destinations.filter(number => /^\d{8,15}$/.test(number)) : [];
+    },
+    sessions: async () => (await listSessions()).filter(item => !item.archivedAt && item.conversationId).map(item => ({
+      id: item.id, title: item.title, conversationId: item.conversationId, updatedAt: item.updatedAt
+    })),
+    active: async () => activeSessionId(),
+    sendText: sendWhatsAppWeb,
+    deliveryStatus: getWhatsAppWebDeliveryStatus,
+    send: async (sessionId, text) => {
+      const entry = await sendDesktopInput({ id: randomUUID(), sessionId, text, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+      return { id: entry.id, state: entry.state };
+    },
+    approvals: () => approvalWaitingChats().flatMap(conversationId => {
+      const card = approvalCardView(conversationId);
+      return card ? [{ conversationId, cardId: card.id, title: 'Solicitação ChatGPT',
+        details: redactSecretText(card.lines.slice(0, 3).join(' · ')), allow: card.allow,
+        // A command awaiting the exact host acknowledgement must not reappear
+        // as a fresh approval every eight seconds.
+        outcome: card.answer?.outcome === null ? 'pending'
+          : card.answer?.outcome === 'clicked' || card.answer?.outcome === 'dismissed'
+            ? card.answer.outcome : null }] : [];
+    }),
+    approvalStatus: approvalDecisionStatus,
+    answer: (conversationId, cardId, choice) => {
+      const result = requestApprovalAnswer(conversationId, cardId, choice);
+      return result.ok ? { ok: true } : { ok: false, error: result.error };
+    },
+    latest: async sessionId => {
+      const session = await getSession(sessionId);
+      // A new streaming turn may already have started by the time the WhatsApp
+      // poll runs. The previous *completed* answer is still valid, but a
+      // streaming revision must never displace it in a limit-one query.
+      if (!session || session.lastTurnOutcome !== 'completed' || !session.lastTurnEndAt) return null;
+      const answers = await readRecentEvents(sessionId, 32, { kinds: ['assistant_message'] });
+      return lastRelayableWhatsAppAnswer(answers, session.lastTurnEndAt);
+    },
+    delivered: async (sessionId, inputId) => {
+      const events = await readRecentEvents(sessionId, 100, { kinds: ['user_message'] });
+      return events.find(event => event.kind === 'user_message' && event.inputId === inputId && event.inputDelivery !== 'offered')?.seq ?? null;
+    },
+    completedSince: async (sessionId, afterSeq) => {
+      const events = await readRecentEvents(sessionId, 200, { kinds: ['assistant_message', 'turn_end'] });
+      return completedWhatsAppAnswers(events, events, afterSeq);
+    },
+    load: () => readDurable('whatsapp-duplex-control'),
+    save: state => writeDurableNow('whatsapp-duplex-control', state)
+  });
+  setWhatsAppWebInbound((number, messageId, text) => whatsappDuplex.incoming(number, messageId, text));
+  onSessionChange(change => {
+    if (change.sessionIds?.length) void whatsappDuplex.changed(change.sessionIds).catch(() => undefined);
+  });
+  // The green connector transition is an independent opportunity to restore
+  // registered Baileys credentials. Resume is idempotent; explicit logout deletes
+  // the saved auth and cannot be undone by this listener.
+  watchWhatsAppResumeOnGreen(getStatus, onStatusChange, resumeWhatsAppWeb, () => !quitting);
+  void resumeWhatsAppWeb().catch(() => undefined);
+  setInterval(() => {
+    if (quitting) return;
+    void getWhatsAppWebStatus().then(status => {
+      if (status.state !== 'connected') return;
+      return whatsappDuplex.pollApprovals().then(() => whatsappDuplex.changed([]));
+    }).catch(() => undefined);
+  }, 8_000).unref();
   registerIpc(
     () => window,
     () => {
@@ -733,6 +905,53 @@ void app.whenReady().then(async () => {
   // when the setting changes; a failed bind is logged and leaves the rest of the app untouched.
   if (getConfig().controlApi.enabled) {
     startControlApi().catch((error: Error) => logWarn(`control API did not start: ${error.message}`));
+  }
+  // Off by default; never publish a LAN listener unless HTTPS was explicitly
+  // configured. The user's Markspanel login was verified before reaching here.
+  if (process.env.CHAT_MARKS_MOBILE_PANEL === '1') {
+    const host = process.env.CHAT_MARKS_MOBILE_HOST || '127.0.0.1';
+    const port = Number(process.env.CHAT_MARKS_MOBILE_PORT || '17893');
+    void startMobilePanel({
+      userData, host, port,
+      ...(process.env.CHAT_MARKS_MOBILE_TLS_CERT ? { tlsCert: process.env.CHAT_MARKS_MOBILE_TLS_CERT } : {}),
+      ...(process.env.CHAT_MARKS_MOBILE_TLS_KEY ? { tlsKey: process.env.CHAT_MARKS_MOBILE_TLS_KEY } : {})
+    }, {
+      snapshot: async () => {
+        const [sessions, company] = await Promise.all([listSessions(), getCompany()]);
+        const recent = sessions.slice(0, 30);
+        return {
+          sessions: recent.map(s => ({
+            id: s.id, title: s.title.slice(0, 160), updatedAt: s.updatedAt,
+            state: s.activeTurnId ? 'working' : s.endedAt ? 'finished' : 'idle',
+            conversationId: s.conversationId
+          })),
+          company: {
+            name: company.company.name, demo: company.demo,
+            seats: company.company.seats.slice(0, 20).map(seat => ({
+              seat, state: 'unverified', tickets: company.requests.filter(req => req.seat === seat && req.status !== 'done').length
+            })),
+            requests: company.requests.slice(-40).map(req => ({ title: req.title, status: req.status, seat: req.seat }))
+          },
+          approvals: approvalWaitingChats().slice(0, 40).flatMap(conversationId => {
+            const card = approvalCardView(conversationId);
+            const title = sessions.find(s => s.conversationId === conversationId)?.title ?? 'Aprovação ChatGPT';
+            return card ? [{
+              conversationId, cardId: card.id, title: title.slice(0, 160),
+              choiceEnabled: card.allow, outcome: card.answer?.outcome ?? null
+            }] : [];
+          })
+        };
+      },
+      answer: (conversationId, cardId, choice) => {
+        const result = requestApprovalAnswer(conversationId, cardId, choice);
+        return result.ok ? { ok: true } : { ok: false, error: result.error };
+      }
+    }).then(async panel => {
+      if (quitting || windowActivation.isDisabled()) { await panel.stop(); return; }
+      mobilePanel = panel;
+      logInfo('mobile panel started (opt-in, authenticated)');
+    })
+      .catch(() => logWarn('mobile panel unavailable; check opt-in listener or TLS settings'));
   }
   if (getConfig().ui.autoConnect) void connect();
   void resumeUpdateRefresh().catch((error: Error) => logWarn(`update refresh did not resume: ${error.message}`));
@@ -808,13 +1027,13 @@ app.on('will-quit', (event) => {
       {
         name: 'admission/drain',
         budgetMs: 40_000,
-        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), stopAgentRuntimeGc()]
+        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), mobilePanel ? mobilePanel.stop() : Promise.resolve(), stopAgentRuntimeGc(), stopBrainEngineMcp()]
       },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {
         name: 'process cleanup',
         budgetMs: 15_000,
-        run: () => [unifiedExecManager.terminateAllProcesses(), workspaceTerminalsExited(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close(),
+        run: () => [unifiedExecManager.terminateAllProcesses(), workspaceTerminalsExited(), stopComputerHelper(), shutdownPetOverlay(), stopWhatsAppWeb(), pluginManager.close(),
           // SFTP sessions of projects on a server (#1469): their ssh would outlive the app on Windows.
           Promise.resolve().then(() => closeRemoteSessions()),
           Promise.resolve().then(() => loadedCosBrowser()?.stop())]

@@ -132,6 +132,31 @@ describe('agent engine registry', () => {
     expect(opencode.models).toHaveBeenCalledWith({ refresh: true });
   });
 
+  it('passes a route to Codex and Claude Code only: create, models and the chat settings', async () => {
+    const cliproxy = fakeEngine('cliproxy');
+    const codex = fakeEngine('codex');
+    const claude = fakeEngine('claude');
+    for (const engine of [cliproxy, codex, claude]) registry.registerAgentEngine(engine);
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, {
+      [SESSION]: { engine: 'codex', backendSessionId: 'thread-1', model: null, effort: null, route: 'direct' },
+      'session-0002': { model: 'm', effort: null }
+    });
+    await request({ action: 'createChat', engine: 'claude', route: 'router' });
+    expect(claude.create).toHaveBeenCalledWith({ projectId: null, route: 'router' });
+    await expect(request({ action: 'createChat', route: 'direct' })).rejects.toThrow(/chats have no route/);
+    await request({ action: 'models', engine: 'codex', route: 'router' });
+    expect(codex.models).toHaveBeenCalledWith({ route: 'router' });
+    await request({ action: 'models', route: 'router' });
+    expect(cliproxy.models).toHaveBeenCalledWith({});
+    await request({ action: 'setChatSettings', sessionId: SESSION, route: 'router' });
+    expect(codex.setChatSettings).toHaveBeenCalledWith(SESSION, { route: 'router' });
+    await expect(request({ action: 'setChatSettings', sessionId: 'session-0002', route: 'router' })).rejects.toThrow(/chats have no route/);
+    expect(() => parseApiChatRequest({ action: 'setChatSettings', sessionId: SESSION, route: 'proxy' })).toThrow();
+    // The route is a durable part of the chat's record; a record without one predates routes.
+    expect(ledger.routeOf(await ledger.storedChatRecord(SESSION))).toBe('direct');
+    expect(ledger.routeOf(await ledger.storedChatRecord('session-0002'))).toBe('router');
+  });
+
   it('refuses a chat whose record this version cannot read, and keeps that record untouched', async () => {
     const stored = { engine: 'gemini', model: 'g', effort: null };
     durable.set(ledger.API_CHAT_SESSIONS_STATE, { [SESSION]: stored, 'session-0002': { model: 'm', effort: null } });

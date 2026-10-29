@@ -45,7 +45,8 @@ async function status(caller: Caller) {
     enabled();
     workers.push({ id: worker.id, runId: worker.runId ?? null, label: worker.label, state: worker.state,
       conversationId: worker.conversationId, sessionId: session?.id ?? null, revivable: worker.revivable,
-      pending: worker.pending, awaitingAck: worker.awaitingAck, contextTokens: worker.contextTokens });
+      pending: worker.pending, awaitingAck: worker.awaitingAck, contextTokens: worker.contextTokens,
+    result: worker.result ? redactSecretText(worker.result).slice(0, 1200) : null });
   }
   return { runId: current.runId, freeWorkerSlots: current.freeWorkerSlots, retainedHistory: current.state.retainedHistory === true, workers };
 }
@@ -67,7 +68,8 @@ export async function serveWorkerRead(route: string, params: URLSearchParams): P
   statusForCaller(caller); // Reject foreign/unknown run selection before any inbox offer.
   const offered = offerMessagesForCaller(caller)?.messages ?? [];
   return { messages: offered.map(message => ({ id: message.id, runId: message.runId ?? caller.runId ?? null,
-    from: message.from, time: message.time, text: redactSecretText(message.text) })) };
+    from: message.from, time: message.time, text: redactSecretText(message.text),
+    origin: message.origin === 'authenticated-worker-message' ? 'authenticated-worker-message' : 'broker-event' })) };
 }
 
 export async function serveWorkerAction(method: string, route: string, raw: unknown, authorize: () => void) {

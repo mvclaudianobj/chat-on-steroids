@@ -30,6 +30,20 @@ export type MarksModuleSource =
 
 /** Only explicitly reviewed sources appear here; no arbitrary URL/command manifests. */
 export const MARKS_MODULE_SOURCES = {
+  'firefox-vpn': {
+    kind: 'github',
+    repository: 'armanlife/firefox-vpn-client',
+    homepage: 'https://github.com/armanlife/firefox-vpn-client',
+    install: 'external-guide',
+    update: 'upstream-managed'
+  },
+  twindesk: {
+    kind: 'github',
+    repository: 'InukaAsith/TwinDesk',
+    homepage: 'https://github.com/InukaAsith/TwinDesk',
+    install: 'external-guide',
+    update: 'upstream-managed'
+  },
   'cli-proxy-api': {
     kind: 'github',
     repository: 'router-for-me/CLIProxyAPI',

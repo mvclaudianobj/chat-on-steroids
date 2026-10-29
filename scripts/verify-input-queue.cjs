@@ -11,6 +11,8 @@ const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require('./fixtures/app-
 const outputArg = process.argv.slice(1).find(arg =>
   !arg.startsWith('-') && path.resolve(root, arg) !== __filename);
 const output = outputArg ? path.resolve(root, outputArg) : path.join(root, '.tmp/message-send-20260918/ui');
+// A fresh profile each run: an earlier composer draft must not alter this run.
+fs.rmSync(path.join(output, 'runtime'), { recursive: true, force: true });
 // Electron requires userData to exist before setPath on some macOS versions.
 fs.mkdirSync(path.join(output, 'runtime'), { recursive: true });
 app.setPath('userData', path.join(output, 'runtime'));

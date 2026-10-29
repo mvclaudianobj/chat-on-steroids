@@ -1,0 +1,171 @@
+// Isolated synthetic Company UI check and screenshots in real Electron Chromium.
+const { app, BrowserWindow } = require('electron');
+const fs = require('node:fs');
+const path = require('node:path');
+const assert = require('node:assert/strict');
+const root = process.env.COS_UI_ROOT || path.resolve(__dirname, '..');
+const output = path.resolve(process.env.COS_UI_OUTPUT || path.join(root, '.tmp/company-ui'));
+const { fixtureConfigSource, BENIGN_RENDERER_ERRORS } = require(path.join(root, 'scripts/fixtures/app-defaults.cjs'));
+fs.rmSync(path.join(output, 'profile'), { recursive:true, force:true });
+app.setPath('userData', path.join(output, 'profile'));
+app.disableHardwareAcceleration();
+const pause = ms => new Promise(resolve => setTimeout(resolve,ms));
+let server, win;
+const fixture = `(() => {
+  try { localStorage.setItem('cos.ui.language','en'); } catch {}
+  const original=window.api,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
+  let company=null,demoBackup=null;
+  let localGrant={id:'33333333-3333-4333-8333-333333333333',subject:{kind:'worker',ownerId:'11111111-1111-4111-8111-111111111111',runId:'22222222-2222-4222-8222-222222222222',workerId:'worker-1',conversationId:'synthetic-worker'},scope:'company-local-read',epoch:4,at:Date.now()-10000};
+  let localEpoch=4;
+  const methods={
+    markWhatsNewSeen:()=>ok(null),
+    getState:async()=>{const reply=await original.getState();reply.data.config=fixtureMerge(fixtureDefaults,reply.data.config);reply.data.config.ui={...reply.data.config.ui,language:'en',theme:'dark'};return reply;},
+    companyLocalGrants:async()=>ok({version:1,epoch:localEpoch,grants:localGrant?[localGrant]:[],audit:[],requests:[],authority:{verified:false,subject:null,reason:'External broker identity is not locally attested. Local grants are disabled.'}}),
+    requestCompanyLocalGrant:async()=>({ok:false,error:'No locally attested Company identity'}),
+    revokeCompanyLocalGrant:async id=>{if(localGrant?.id!==id)return ok(false);localGrant=null;localEpoch++;return ok(true);},
+    company:async request=>{
+      if(request.action==='localGrants')return ok({version:1,epoch:0,grants:[],audit:[],requests:[]});
+      if(request.action==='localGrantRequest')return {ok:false,error:'Local Company identity has no independent attestation; grant refused'};
+      if(request.action==='localGrantRevoke')return ok(false);
+      if(request.action==='get')return ok(company??{version:1,company:{name:'Marks Studio',seatCount:5,roles:['marks-coo','marks-cto','marks-cio','marks-cpo','marks-cko','marks-cqo','marks-cco'],seats:['marks1','marks2','marks3','marks4','marks5']},requests:[],meetings:[],activities:[],demo:false});
+      if(request.action==='demo'){
+        const now=Date.now();
+        const statuses=['inbox','assigned','working','review','needs-ceo','done'];
+        const roles=['marks-coo','marks-cto','marks-cio','marks-cpo','marks-cko','marks-cqo','marks-cco'];
+        const projects=['Design system','Website','Infrastructure','Platform','Research','Knowledge','Quality','Communication'];
+        const titles=['Research user expectations','Build new homepage','Review service uptime','Prepare feature release','Approval for rollout','Summarize design notes','Check accessibility','Update stakeholder report'];
+        const entries=['inbox','assigned','working','review','needs-ceo','done','working','review'];
+        company={version:1,company:{name:'Marks Studio',seatCount:6,roles,seats:['marks1','marks2','marks3','marks4','marks5','marks6'],seatCount:6},demo:true,meetings:[{id:'00000000-0000-4000-8000-000000000101',title:'Leadership standup',participants:['ceo','marks-coo'],at:now,durationMinutes:20,minutes:'We reviewed priorities.',decisions:['Prepare the next review.'],brainSync:'pending'}],activities:[],requests:titles.map((title,i)=>({id:'00000000-0000-4000-8000-'+String(i+1).padStart(12,'0'),title,project:projects[i],origin:i%2===0?'ceo':'marks-coo',owner:roles[i%7],seat:entries[i]==='inbox'?null:'marks'+(i%5+1),engine:['codex','claude','chatgpt'][i%3],model:['gpt-6','sonnet','free'][i%3],acceptance:'Provide a reviewable result.',tokenBudget:12000,timeBudgetMinutes:120,tokensUsed:i*1324,minutesUsed:i*7,dueAt:now+(i-2)*86400000,status:entries[i],raci:{responsible:'marks-coo',accountable:'ceo',consulted:[],informed:[]},history:[{at:now,actor:'ceo',note:'Created'}],createdAt:now,updatedAt:now-i*12000}))};
+        company.requests.find(r=>r.status==='done').execution={mode:'simulated',phase:'reported',ownerId:'00000000-0000-4000-8000-000000000301',runId:'00000000-0000-4000-8000-000000000302',workerId:'worker-5',reportId:'fixture-report-5',result:'Synthetic result',evidence:'fixture-proof',authorizedAt:now-100000};
+        company.requests.find(r=>r.status==='done').cooConfirmation={actor:'marks-coo',at:now-1000,workerId:'worker-5',reportId:'fixture-report-5',evidence:'fixture-COO-acceptance'};
+        company.activities=company.requests.map((r,i)=>({id:'00000000-0000-4000-8000-'+String(200+i).padStart(12,'0'),at:r.updatedAt,actor:r.owner,kind:'request',requestId:r.id,message:r.title+' · '+r.status}));return ok(company);
+      }
+      if(request.action==='activateReal'){
+        demoBackup=structuredClone(company);
+        company={version:1,company:structuredClone(company.company),requests:[],meetings:[],activities:[],demo:false,
+          delegation:{mode:'manual',delegate:null,chiefTitle:null,binding:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null},
+          delegationAudit:[],demoRecovery:{backupId:'00000000-0000-4000-8000-000000000999',startedAt:Date.now()}};
+        return ok(company);
+      }
+      if(request.action==='restoreDemo'){if(company.requests.length)return {ok:false,error:'Real company has changed'};company=demoBackup;return ok(company);}
+      if(request.action==='create'){
+        const id='00000000-0000-4000-8000-000000000111',now=Date.now();
+        const payload=request.payload;
+        company.requests=[{...payload,id,seat:null,tokensUsed:0,minutesUsed:0,status:'inbox',history:[{at:now,actor:'ceo',note:'Created real ticket'}],
+          raci:{responsible:payload.owner,accountable:'ceo',consulted:[],informed:[]},createdAt:now,updatedAt:now}];
+        company.activities=[{id:'00000000-0000-4000-8000-000000000112',at:now,actor:'ceo',kind:'request',requestId:id,message:'Created real ticket'}];
+        return ok(company);
+      }
+      if(request.action==='prepare'){
+        const ticket=company.requests.find(r=>r.id===request.payload.id);
+        if(ticket?.status!=='inbox')return {ok:false,error:'Ticket not in inbox'};
+        ticket.seat=request.payload.seat;ticket.status='assigned';return ok(company);
+      }
+      if(request.action==='dispatch')return {ok:false,error:'Broker owner authorization unavailable in synthetic fixture; worker was not started'};
+      if(request.action==='move'){company.requests.find(r=>r.id===request.payload.id).status=request.payload.status;return ok(company);}
+      return ok(company);
+    }
+  };window.api=new Proxy(methods,{get:(target,key)=>key in target?target[key]:original[key]});
+})();`;
+app.whenReady().then(async()=>{
+  const {createServer}=await import('vite');
+  server=await createServer({configFile:false,root:path.join(root,'src/renderer'),cacheDir:path.join(output,'vite'),logLevel:'error',resolve:{alias:{'@phosphor-icons/web':path.join(root,'node_modules/@phosphor-icons/web/src')}},server:{host:'127.0.0.1',port:0,fs:{allow:[root,fs.realpathSync(path.join(root,'node_modules/@phosphor-icons/web/src'))]}},plugins:[{name:'company-ui-fixture',transformIndexHtml:html=>html.replace('</head>','<script src="/company-fixture.js"></script></head>'),configureServer(vite){vite.middlewares.use((req,res,next)=>{if(req.url!=='/company-fixture.js')return next();res.setHeader('Content-Type','text/javascript');res.end(fixtureConfigSource()+fs.readFileSync(path.join(root,'scripts/fixtures/composer-ui.js'),'utf8')+fixture);});}}]});
+  await server.listen();
+  win=new BrowserWindow({show:false,width:1700,height:1050,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false}});
+  const errors=[]; win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
+  const js=code=>win.webContents.executeJavaScript(code);
+  const until=async expression=>{for(const end=Date.now()+15000;Date.now()<end;){if(await js(expression))return;await pause(75);}throw new Error('Timeout: '+expression);};
+  const screenshot=async name=>{fs.mkdirSync(output,{recursive:true});await pause(250);fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage()).toPNG());};
+  await win.loadURL(server.resolvedUrls.local[0]); await until("!!document.getElementById('sidebarCompany')");
+  win.show();win.focus();win.webContents.focus();
+  await js("document.getElementById('sidebarCompany').click()");
+  await until("!document.getElementById('companyEmpty').hidden");
+  await js("document.getElementById('companyLoadDemo').click()");
+  await until("document.querySelectorAll('.company-ticket').length===8");
+  assert.equal(await js("document.querySelectorAll('.company-column').length"),6);
+  assert.equal(await js("document.querySelectorAll('.company-ticket').length"),8);
+  await screenshot('company-board-dark.png');
+  // Fail-first integration gate: a Company card is visible and explicitly unavailable when
+  // an external broker cannot attest a local principal. It must not imply ChatGPT/Plugin consent.
+  await js("document.getElementById('companySettings').click()");
+  await until("document.getElementById('companyDialog').open");
+  await until("document.getElementById('companyDialogContent').textContent.includes('ChatGPT')");
+  await until("document.querySelector('#companyLocalGrants [data-grants-authority=blocked]')!==null");
+  const permissionCard = await js("({text:document.getElementById('companyLocalGrants').textContent,controls:[...document.querySelectorAll('#companyLocalGrants div[aria-label] button')].map(b=>({text:b.textContent,disabled:b.disabled}))})");
+  assert.match(permissionCard.text,/ChatGPT/i);
+  assert.match(permissionCard.text,/operating-system/i);
+  assert.equal(permissionCard.controls.length,3,'Three local consent modes must be visible');
+  assert.ok(permissionCard.controls.every(control=>control.disabled), 'Unattested grants must remain disabled');
+  assert.equal(await js("document.querySelectorAll('#companyLocalGrants li[data-grant-id]').length"),1);
+  await js("document.querySelector('#companyLocalGrants li[data-grant-id] button').click()");
+  await until("document.querySelectorAll('#companyLocalGrants li[data-grant-id]').length===0");
+  assert.ok((await js("document.getElementById('companyLocalGrants').textContent")).includes('No active local grants'));
+  await screenshot('company-permissions-disabled.png');
+  await js("document.getElementById('companyClose').click()");
+  await js("document.getElementById('companySettings').click()");
+  await until("document.getElementById('companyLocalGrants').textContent.includes('Epoch: 5')");
+  await js("document.getElementById('companyClose').click()");
+  await js("document.getElementById('companyOfficeTab').click()");
+  await until("!document.getElementById('companyOffice').hidden");
+  assert.equal(await js("document.querySelectorAll('.company-room').length"),9);
+  assert.deepEqual(await js("[...document.querySelectorAll('.company-rest-worker')].map(node=>[node.dataset.seat,node.dataset.restKind])"),[['marks1','rest-confirmed'],['marks6','rest-free']]);
+  assert.equal(await js("document.getElementById('companyRestRoom').getAttribute('role')"),'region');
+  assert.equal(await js("document.querySelectorAll('.company-meeting').length"),1);
+  await js("document.querySelector('.company-meeting button').click()");
+  assert.equal(await js("document.getElementById('companyDialog').open"),true);
+  assert.ok((await js("document.getElementById('companyDialogContent').textContent")).includes('Leadership standup'));
+  assert.equal(await js("document.getElementById('companyDialogContent').textContent.includes('present ·')"),false);
+  await js("document.getElementById('companyClose').click()");
+  await screenshot('company-rest-dark.png');
+  await screenshot('company-office-dark.png');
+  await js("document.documentElement.dataset.theme='light'; const sheet=document.createElement('style');sheet.id='company-fixture-light';sheet.textContent=':root, :root[data-theme=dark] {--page:#f4f4f5!important;--card:#ffffff!important;--ink:#0c0c0e!important;--soft:#56565e!important;--line:#e7e7ea!important;--sunk:#f7f7f8!important;--accent:#486f9d!important;--red:#b4262c!important;}';document.head.append(sheet)");
+  await screenshot('company-office-light.png');
+  await screenshot('company-rest-light.png');
+  await js("document.getElementById('companyRpgTab').click()");
+  await until("!document.getElementById('companyRpg').hidden");
+  assert.equal(await js("document.querySelectorAll('.company-rpg-room').length"),5);
+  assert.equal(await js("document.querySelectorAll('.company-rpg-actor').length"),6);
+  assert.equal(await js("document.querySelectorAll('.company-rpg-meeting .company-rpg-actor').length"),0);
+  assert.equal(await js("document.querySelectorAll('.company-rpg-rest .company-rpg-actor').length"),0);
+  await screenshot('company-rpg-light.png');
+  await js("document.getElementById('companyOfficeTab').click()");
+  assert.equal(await js("document.getElementById('companyOffice').hidden"),false);
+  await js("document.getElementById('companyRpgTab').click()");
+  assert.equal(await js("localStorage.getItem('company:view')"),'rpg');
+  // Capture the RPG itself in the dark theme; the previous sequence saved the
+  // light Board under the RPG-dark filename, hiding a visual regression.
+  await js("window.companyFixtureLight=document.getElementById('company-fixture-light');window.companyFixtureLight.remove();document.documentElement.dataset.theme='dark'");
+  await until("!document.getElementById('companyRpg').hidden && document.documentElement.dataset.theme==='dark'");
+  await screenshot('company-rpg-dark.png');
+  await js("document.documentElement.dataset.theme='light';document.head.append(window.companyFixtureLight);document.getElementById('companyBoardTab').click()");
+  await until("!document.getElementById('companyBoard').hidden");
+  await screenshot('company-board-light.png');
+  await js("document.querySelector('.company-ticket').click()");
+  assert.equal(await js("document.getElementById('companyDialog').open"),true);
+  assert.ok((await js("document.getElementById('companyDialogContent').textContent")).includes('Acceptance criteria'));
+  assert.deepEqual(errors,[]);
+  // The real-company transition remains an explicit UI operation; fake broker denies dispatch.
+  await js("document.querySelector('#companyModeActions button').click()");
+  assert.equal(await js("document.getElementById('companyDialog').open"),true);
+  await js("document.querySelector('#companyDialogActions button').click()");
+  await until("document.getElementById('companyModeBanner').dataset.mode==='real'");
+  assert.equal(await js("document.querySelectorAll('.company-ticket').length"),0);
+  assert.ok((await js("document.getElementById('companyModeBanner').textContent")).includes('configured seats'));
+  await js("document.getElementById('companyNewRequest').click()");
+  await js("document.querySelector('#companyDialogContent input').value='Real synthetic ticket'");
+  await js("document.querySelector('#companyDialogActions button').click()");
+  await until("document.querySelectorAll('.company-ticket').length===1");
+  await js("document.querySelector('.company-ticket').click()");
+  await js("document.querySelectorAll('#companyDialogContent select')[1].value='marks2'");
+  await js("[...document.querySelectorAll('#companyDialogActions button')].find(b=>b.textContent.includes('Assign seat for real work')).click()");
+  await until("document.querySelector('.company-ticket').textContent.includes('marks2')");
+  await js("document.querySelector('.company-ticket').click()");
+  await js("[...document.querySelectorAll('#companyDialogActions button')].find(b=>b.textContent.includes('Authorize real worker')).click()");
+  await until("document.querySelector('.company-error')?.textContent.includes('Broker owner authorization unavailable')");
+  assert.equal(await js("document.querySelectorAll('.company-column[data-status=working] .company-ticket').length"),0);
+  assert.ok((await js("document.querySelector('.company-error')?.textContent")).includes('worker was not started'));
+  assert.deepEqual(errors,[]);
+  await screenshot('company-real-broker-denied.png');
+  console.log('PASS: Company synthetic board, office, rest room, meeting details, both themes, request dialog. Screenshots: '+output);
+  win.destroy();await server.close();app.exit(0);
+}).catch(async error=>{fs.mkdirSync(output,{recursive:true});if(win&&!win.isDestroyed())fs.writeFileSync(path.join(output,'company-error.png'),(await win.webContents.capturePage()).toPNG());console.error(error);await server?.close();app.exit(1);});

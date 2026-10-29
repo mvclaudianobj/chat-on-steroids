@@ -486,7 +486,7 @@ export type SessionEvent =
    * event written before this model existed, or by a page whose commentary had no readable
    * identity, is still a plain standalone caption.
    */
-  | (BaseEvent & { kind: 'progress'; message: StoredText; progressId?: string; origin?: number; finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number } })
+  | (BaseEvent & { kind: 'progress'; message: StoredText; progressId?: string; origin?: number; reason?: 'helper_stop_unverified'; finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number } })
   /**
    * Visible ChatGPT-native tool activity that never passed through this MCP server.
    *
@@ -659,6 +659,8 @@ export function originTitle(origin: SessionOrigin, source: string | null): strin
 }
 
 export interface SessionSummary {
+  /** Explicit local Chat Marks archive; absent means visible. It never changes ChatGPT's archive. */
+  archivedAt?: number;
   /** Rebuildable transcript boundaries; no message bodies or execution authority. */
   timelineTurns?: import('./chronology.js').TimelineTurns;
   /** Rebuildable request-to-turn proof from recorded MCP calls, never a caller permission. */
@@ -1076,6 +1078,9 @@ export interface AgentMessage {
   id: string;
   from: string;
   to: string;
+  /** Broker-owned sender provenance. Only a worker-scoped authenticated agents
+   * message to its prime can carry this flag. Old records must fail closed. */
+  origin?: 'authenticated-worker-message';
   /**
    * Prime-family address of the sender when a message crosses between existing prime families.
    *
@@ -1305,6 +1310,21 @@ export interface SessionSearchResult {
   /** A line of the chat around the first match, with match ranges into `text`; absent for a title match. */
   snippet?: { text: string; matches: Array<[number, number]> };
 }
+/** The longest bookmark excerpt, ellipsis included; the renderer cuts it before it is sent. */
+export const BOOKMARK_EXCERPT_MAX = 160;
+
+/** An answer you bookmarked in a chat, to jump back to it from the chat's header. */
+export interface SessionBookmark {
+  /** ChatGPT's id of the answer. */
+  messageId: string;
+  /** The start of the answer as plain text, one line, at most `BOOKMARK_EXCERPT_MAX` characters. */
+  excerpt: string;
+  /** When the answer appeared: the list is in this order, like the chat. */
+  messageTime: number;
+  /** When it was bookmarked. */
+  at: number;
+}
+
 /** The message a text match was found in, to open the chat there (`sessions:locate-match`). */
 export interface SessionSearchLocation {
   /** The message's event, as the timeline holds it. */
@@ -1329,3 +1349,13 @@ export interface SessionSearchReply {
  * window shows it in the interface language.
  */
 export const UNATTRIBUTED_SESSION_TITLE = 'Unattributed activity';
+
+/**
+ * The chat that collects unplaceable tool calls. No conversation alone does not make one: a new
+ * chat whose first message has not gone out yet has none either (#1759). The bucket is created
+ * without an origin, while such a chat starts with one, so even a chat renamed to the bucket's
+ * title stays a chat.
+ */
+export function isUnattributedSession(summary: { conversationId: string | null; title: string; origin?: SessionOrigin | null }): boolean {
+  return summary.conversationId === null && !summary.origin && summary.title === UNATTRIBUTED_SESSION_TITLE;
+}

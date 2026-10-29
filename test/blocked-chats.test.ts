@@ -7,7 +7,9 @@
  * restarted, because the turn can be.
  */
 
-import { afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { requestRemoteApproval, decideRemoteApproval, remoteApprovals, resetRemoteApprovals } from '../src/main/remote/approval.js';
+import { requestVaultApproval, decideVaultApproval, vaultApprovals, resetVaultApprovals } from '../src/main/marks-vault-approval.js';
 import { flushDurable, initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import {
   BLOCKED_CHAT_REFUSAL,
@@ -30,6 +32,7 @@ beforeEach(async () => {
   dir = await makeTempDir('clf-blocked-');
   initDurableStore(dir);
 });
+afterEach(() => { resetRemoteApprovals(); resetVaultApprovals(); });
 
 afterAll(async () => {
   resetBlockedChatsForTests();
@@ -38,6 +41,37 @@ afterAll(async () => {
 });
 
 describe('blocked chats', () => {
+  it('revokes the SSH session grant on Block and demands fresh consent after Release', async () => {
+    const first = requestRemoteApproval(ROGUE, 'tester@localhost:2200', 'pwd');
+    expect(decideRemoteApproval(remoteApprovals()[0]!.id, 'session')).toBe(true);
+    expect(await first).toBe(true);
+    expect(await requestRemoteApproval(ROGUE, 'tester@localhost:2200', 'true')).toBe(true);
+    setChatBlocked(ROGUE, true);
+    setChatBlocked(ROGUE, false);
+    const next = requestRemoteApproval(ROGUE, 'tester@localhost:2200', 'true');
+    expect(remoteApprovals()).toHaveLength(1);
+    expect(decideRemoteApproval(remoteApprovals()[0]!.id, 'deny')).toBe(true);
+    expect(await next).toBe(false);
+  });
+
+  it('revokes pending SSH prompts and scoped vault grants without affecting another chat', async () => {
+    const vault = requestVaultApproval(ROGUE, 'ssh/fixture-key', 'unlock agent');
+    expect(decideVaultApproval(vaultApprovals()[0]!.id, 'session')).toBe(true);
+    expect(await vault).toBe(true);
+    const other = requestRemoteApproval(OTHER, 'tester@localhost:2200', 'pwd');
+    const rogue = requestRemoteApproval(ROGUE, 'tester@localhost:2200', 'pwd');
+    setChatBlocked(ROGUE, true);
+    expect(await rogue).toBe(false);
+    expect(remoteApprovals()).toHaveLength(1);
+    expect(remoteApprovals()[0]!.chat).toBe(OTHER);
+    setChatBlocked(ROGUE, false);
+    const nextVault = requestVaultApproval(ROGUE, 'ssh/fixture-key', 'unlock agent');
+    expect(vaultApprovals()).toHaveLength(1);
+    expect(decideVaultApproval(vaultApprovals()[0]!.id, 'deny')).toBe(true);
+    expect(await nextVault).toBe(false);
+    expect(decideRemoteApproval(remoteApprovals()[0]!.id, 'once')).toBe(true);
+    expect(await other).toBe(true);
+  });
   it('blocks and releases exactly the conversation it was told about', () => {
     setChatBlocked(ROGUE, true);
     expect(isChatBlocked(ROGUE)).toBe(true);

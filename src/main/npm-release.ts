@@ -24,6 +24,8 @@ export interface NpmVersion {
   /** `sha512-<base64>` from `dist.integrity`. */
   integrity: string;
   optionalDependencies: Record<string, string>;
+  /** `engines` ranges (e.g. `{ node: '>=22' }`); empty when the document has none. */
+  engines: Record<string, string>;
 }
 
 /** Only https on the registry host; never credentials, another port, or a lookalike. */
@@ -80,7 +82,7 @@ export async function fetchNpmVersion(name: string, tag: string, fetchImpl: type
   const response = await registryFetch(url, { headers: { Accept: 'application/json', 'User-Agent': 'Chat-Marks' }, redirect: 'error', timeoutMs: 20_000 }, fetchImpl);
   if (!response) throw new Error('release_unavailable');
   if (!response.ok) { await response.body?.cancel(); throw new Error('release_unavailable'); }
-  let body: { name?: unknown; version?: unknown; dist?: { tarball?: unknown; integrity?: unknown }; optionalDependencies?: unknown };
+  let body: { name?: unknown; version?: unknown; dist?: { tarball?: unknown; integrity?: unknown }; optionalDependencies?: unknown; engines?: unknown };
   try { body = JSON.parse((await readBounded(response, METADATA_LIMIT)).toString('utf8')) as typeof body; }
   catch { throw new Error('release_unavailable'); }
   const version = typeof body.version === 'string' ? body.version : '';
@@ -91,7 +93,11 @@ export async function fetchNpmVersion(name: string, tag: string, fetchImpl: type
   if (body.optionalDependencies && typeof body.optionalDependencies === 'object') {
     for (const [dependency, range] of Object.entries(body.optionalDependencies as Record<string, unknown>)) if (typeof range === 'string') optional[dependency] = range;
   }
-  return { name, version, tarball: body.dist.tarball, integrity, optionalDependencies: optional };
+  const engines: Record<string, string> = {};
+  if (body.engines && typeof body.engines === 'object') {
+    for (const [engine, range] of Object.entries(body.engines as Record<string, unknown>)) if (typeof range === 'string') engines[engine] = range.slice(0, 100);
+  }
+  return { name, version, tarball: body.dist.tarball, integrity, optionalDependencies: optional, engines };
 }
 
 /** Throws `checksum_mismatch` unless the data's SHA-512 is exactly the SRI `sha512-<base64>`. */

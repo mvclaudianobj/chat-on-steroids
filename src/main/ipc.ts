@@ -4,13 +4,26 @@ import { registerCliModuleIpc } from './cli-modules.js';
 import { registerApiChatIpc } from './api-chat/ipc.js';
 import { registerCliProxyIpc } from './cliproxy/ipc.js';
 import { registerUpstreamIpc } from './upstream/ipc.js';
+import { registerCcrIpc } from './ccr/ipc.js';
+import { registerVmsIpc } from './vms.js';
 import { registerCliChatIpc } from './cli-chat.js';
+import { registerNotificationCenterIpc } from './notification-ipc.js';
 import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
 import { isApiConversationId } from '../shared/api-chat.js';
 import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
 import { registerDictationIpc } from './dictation.js';
+import { registerRemoteHostsIpc } from './remote/hosts-ipc.js';
+import { revokeRemoteChat } from './remote/approval.js';
+import { registerJarvisAudioIpc } from './jarvis-audio.js';
+import { registerVaultIpc } from './marks-vault-ipc.js';
+import { registerBrainIpc } from './brain/ipc.js';
+import { registerCompanyIpc } from './company-ipc.js';
+import { initializeCompanyObservability } from './company-observability.js';
+import { initCompanyStore } from './company-store.js';
+import { initCompanyLocalGrants } from './company-local-grants.js';
+import { revokeVaultChat } from './marks-vault-approval.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
@@ -29,6 +42,7 @@ import { listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { refreshAppProxy } from './app-proxy.js';
+import { externalModuleAction } from './external-modules.js';
 import { committedResumeAncestorsFromSummary, DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
 import { wakeBrowserWork } from './browser-wake.js';
@@ -41,17 +55,24 @@ import { stageInputAttachment, stageInputAttachments, type AttachmentSource } fr
 import { recordDeliveredInput, recordedInputImage } from './session/input-history.js';
 import { UI_BASE_ZOOM, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
 import { usageOverview } from './session/usage.js';
+import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
 import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
+import { promises as fs } from 'node:fs';
+import path from 'node:path';
+import { isValidTopic, normalizeServer, testPhonePush } from './phone-push.js';
+
+import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
 import { requestBrowserPreferences } from './browser-preferences.js';
 import { sendDesktopInput, cancelDesktopInput, retryQueuedInputBrowser } from './session/start-input.js';
 import { wakeBrowserUrl } from './browser-startup.js';
 import { registerPluginIpc } from './plugins-ipc.js';
 import { deletePet, importPet, loadPetAsset, petLibraryState, setPetEnabled, setPetFavorite } from './pet-library.js';
+import { assignChatGroup, chatGroupsState, createChatGroup, deleteChatGroup, forgetChatGroupMember, renameChatGroup } from './chat-groups.js';
 import { petOverlayControlState, refreshPetOverlayActivities, refreshPetOverlayAppearance, setPetOverlayVisible } from './pet-overlay.js';
 import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuses, onPluginRefreshChange, pluginRefreshUnreadable, resetPluginRefreshLedger } from './plugin-refresh.js';
 /**
@@ -75,13 +96,15 @@ import {
   GOAL_PROVIDERS,
   GOAL_REASONING_LEVELS,
   type AppState,
-  type Config
+  type Config,
+  type SettingsBackupChoice
 } from '../shared/types.js';
 import { MAX_GOAL_SYSTEM_PROMPT_CHARS } from '../shared/goal.js';
 import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } from '../shared/handoff.js';
 import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
+import { currentMarksSystemPrompt } from './marks-system-prompt.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { PROJECT_COLORS } from '../shared/projects.js';
 import { bridgePortSelection } from './bridge-ports.js';
@@ -100,11 +123,12 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor } from './projects.js';
+import { addProject, addRemoteProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
-import { hasSecret, isEncryptionAvailable, secureStorageStatus, setAsideUnreadableSecrets, setSecret, storedSecretsUnreadable } from './secrets.js';
+import { hasSecret, isEncryptionAvailable, readSecretsFor, secureStorageStatus, setAsideUnreadableSecrets, setSecret, setSecrets, storedSecretsUnreadable, type SecretKey } from './secrets.js';
+import { BackupError, buildBackup, changedSettings, widerAccess, exportableSecret, openSecrets, overlaySettings, passphraseLongEnough, pickByShape, readBackup, settingsForBackup, type ParsedBackup } from './settings-backup.js';
 import { setupApiKeySlot } from '../shared/setup-profile.js';
 import { addSetupProfile, removeSetupProfile, switchSetupProfile } from './setup-profiles.js';
 import { bundledVersion, locateBinary } from './tunnel/locate.js';
@@ -143,11 +167,14 @@ import {
   readToolEditReview,
   withSessionMutationFence
 } from './session/store.js';
+import { archiveSessionLocally } from './session/local-archive.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
+import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
 import { withChatEngines } from './agent-engine/ledger.js'; // Chat Marks: chat type icons
 import { exportSessionMarkdown } from './session/markdown-export.js';
+import { saveCodeFile } from './code-file.js';
 import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
 import {
@@ -178,6 +205,14 @@ import {
   onMacOSDesktopAccessChange,
   refreshMacOSDesktopAccess
 } from './computer/index.js';
+
+/** Why phone settings cannot be saved as they are, or null. Only an enabled form is checked. */
+function phonePushProblem(push: { enabled: boolean; topic: string; server: string }): string | null {
+  if (!push.enabled) return null;
+  if (!isValidTopic(push.topic)) return 'Choose a topic of letters, digits, - and _ (up to 64).';
+  if (!normalizeServer(push.server)) return 'Enter the address of an ntfy server, such as https://ntfy.sh.';
+  return null;
+}
 
 /** Fixed native Settings destinations; authored chat links use the shared web/mail policy. */
 const ALLOWED_LINKS = new Set([
@@ -234,6 +269,7 @@ const settingsPatch = z.object({
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
+    announceTurns: z.boolean().optional(),
     customContinue: z.string().trim().max(CUSTOM_CONTINUE_MAX_CHARS).optional(),
     followOutput: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
@@ -244,6 +280,7 @@ const settingsPatch = z.object({
     finishTool: z.boolean().optional(),
     planBackend: z.enum(['chatgpt', 'api']).optional(),
     finishAction: z.enum(['notify', 'goal']).optional(),
+    finishHoldOnStop: z.boolean().optional(),
     finishLeadMinutes: z.number().int().min(3).max(5).optional(),
     backgroundChats: z.boolean().optional(),
     backgroundPlacement: z.enum(['window', 'group']).optional(),
@@ -265,6 +302,13 @@ const settingsPatch = z.object({
     keepAwake: z.boolean().optional(),
     keepScreenAwake: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
+    phonePush: z.object({
+      enabled: z.boolean(), server: z.string().max(2048), topic: z.string().max(64), needsYou: z.boolean(), failures: z.boolean(),
+      finishedAfterMinutes: z.number().int().min(0).max(240).nullable(), onlyWhenAway: z.boolean(),
+      quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).strict().nullable(),
+      includeDetails: z.boolean()
+    }).strict().optional(),
+    secretsShield: z.boolean().optional(),
     theme: z.enum(['light', 'dark'])
   }),
   sessions: z.object({
@@ -362,6 +406,18 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
     throw new Error('Setup profile changed. Edit the tunnel ID in the selected profile again.');
   }
   const pick = <T>(live: T, before: T, next: T): T => (Object.is(before, next) ? live : next);
+  // Field by field, like the rest of the form: a change elsewhere never undoes one made here.
+  const mergePhonePush = (live: PhonePushSettings | undefined, before: PhonePushSettings | undefined, next: PhonePushSettings | undefined): PhonePushSettings | undefined => {
+    if (!next) return live;
+    const now = live ?? DEFAULT_PHONE_PUSH, was = before ?? DEFAULT_PHONE_PUSH;
+    const field = <K extends keyof PhonePushSettings>(key: K): PhonePushSettings[K] =>
+      JSON.stringify(was[key]) === JSON.stringify(next[key]) ? now[key] : next[key];
+    const merged: PhonePushSettings = {
+      enabled: field('enabled'), server: field('server'), topic: field('topic'), needsYou: field('needsYou'), failures: field('failures'),
+      finishedAfterMinutes: field('finishedAfterMinutes'), onlyWhenAway: field('onlyWhenAway'), quietHours: field('quietHours'), includeDetails: field('includeDetails')
+    };
+    return { ...merged, server: normalizeServer(merged.server) ?? merged.server.trim() };
+  };
   const pickRules = (live: string[], before: string[], next: string[]): string[] =>
     before.length === next.length && before.every((rule, index) => rule === next[index]) ? live : next;
   const capabilities = Object.fromEntries(
@@ -420,6 +476,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
+      announceTurns: pick(current.ui.announceTurns, base.ui.announceTurns, wanted.ui.announceTurns),
       // An emptied field means the built-in phrases again.
       customContinue: pick(current.ui.customContinue, base.ui.customContinue, wanted.ui.customContinue || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
@@ -432,6 +489,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       finishTool: pick(current.ui.finishTool, base.ui.finishTool, wanted.ui.finishTool),
       planBackend: pick(current.ui.planBackend, base.ui.planBackend, wanted.ui.planBackend),
       finishAction: pick(current.ui.finishAction, base.ui.finishAction, wanted.ui.finishAction),
+      finishHoldOnStop: pick(current.ui.finishHoldOnStop, base.ui.finishHoldOnStop, wanted.ui.finishHoldOnStop),
       finishLeadMinutes: pick(current.ui.finishLeadMinutes, base.ui.finishLeadMinutes, wanted.ui.finishLeadMinutes),
       backgroundChats: pick(current.ui.backgroundChats, base.ui.backgroundChats, wanted.ui.backgroundChats),
       backgroundPlacement: pick(current.ui.backgroundPlacement, base.ui.backgroundPlacement, wanted.ui.backgroundPlacement),
@@ -459,6 +517,9 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.ui.privacyScreenshots,
         wanted.ui.privacyScreenshots
       ),
+      phonePush: mergePhonePush(current.ui.phonePush, base.ui.phonePush, wanted.ui.phonePush),
+      // Missing means on, here as in the saved settings.
+      secretsShield: pick(current.ui.secretsShield !== false, base.ui.secretsShield !== false, wanted.ui.secretsShield ?? current.ui.secretsShield !== false),
       theme: pick(current.ui.theme, base.ui.theme, wanted.ui.theme)
     },
     sessions: {
@@ -600,6 +661,7 @@ async function buildState(): Promise<AppState> {
     hasApiKey: await hasSecret(setupApiKeySlot(config.tunnel.profileId)),
     hasGoalKey: await hasSecret('openRouterApiKey'),
     hasCustomProviderKey: await hasSecret('customProviderApiKey'),
+    hasPhonePushToken: await hasSecret('ntfyToken'),
     // After the reads above: only a read can find the file unreadable.
     credentialsUnreadable: storedSecretsUnreadable(),
     resolvedBinary: resolvedBinary(config),
@@ -652,11 +714,18 @@ export async function openSessionChat(id: string): Promise<void> {
 }
 
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  registerVmsIpc(getWindow);
+  initCompanyStore(app.getPath('userData'));
+  initCompanyLocalGrants(app.getPath('userData'));
+  initializeCompanyObservability(app.getPath('userData'));
+  registerCompanyIpc(getWindow);
+  registerNotificationCenterIpc(getWindow);
   registerWorkspaceTerminalIpc(getWindow);
   registerCliModuleIpc(getWindow);
   registerApiChatIpc(getWindow);
   registerCliProxyIpc(getWindow); // Chat Marks: CLIProxyAPI versions, install/update, management keys.
   registerUpstreamIpc(getWindow); // Chat Marks: upstream OpenCode and ZeroClaw versions and install/update.
+  registerCcrIpc(getWindow); // Chat Marks: Claude Code Router module (install/update, service, router availability for chat routes).
   registerCliChatIpc(getWindow);
   // Sign out is an application admission transition. End this process after
   // clearing its secure session so the next startup must authenticate again.
@@ -672,6 +741,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     } catch { return { ok: false, error: 'Unable to sign out securely' }; }
   });
   registerDictationIpc(getWindow);
+  registerJarvisAudioIpc(getWindow);
+  registerVaultIpc(getWindow);
+  // Chat Marks: Brain has one fixed, frame-checked, validated IPC surface.
+  registerBrainIpc(getWindow);
+  registerRemoteHostsIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
   const deletingSessionIds = new Set<string>();
@@ -710,6 +784,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('usage:get', () => usageOverview());
   handle('usage:providers', (payload) => readProviderUsage({ fresh: z.object({ fresh: z.boolean() }).parse(payload).fresh }));
+  // The page sends only its divisor, so the file's tokens match the page; main reads the numbers.
+  handle('usage:export', (payload) => {
+    const request = z.object({ divisor: z.number().finite().positive() }).safeParse(payload);
+    if (!request.success) {
+      logWarn('usage export: refused, the page sent no positive, finite token divisor');
+      throw request.error;
+    }
+    return exportUsageCsv(request.data.divisor, getWindow());
+  });
   handle('plugin-refresh:reset', async () => {
     await resetPluginRefreshLedger();
     return buildState();
@@ -727,9 +810,33 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     logInfo('renderer state ready');
     return state;
   });
+  handle('marks:promptPreview', async () => currentMarksSystemPrompt('chatgpt'));
 
-  handle('settings:save', async (payload) => {
-    const request = settingsSave.parse(payload);
+  // Phone notifications: a test message now, and the optional access token (kept in secure storage).
+  handle('phonePush:test', async () => { await testPhonePush(); });
+  handle('phonePush:token', async payload => {
+    const { token } = z.object({ token: z.string().max(512) }).strict().parse(payload);
+    const trimmed = token.trim();
+    if (trimmed && !/^[\x21-\x7e]+$/.test(trimmed)) {
+      // Never the token itself.
+      logWarn('phone push: access token not saved: it has spaces or other characters a token cannot have');
+      throw new Error('An access token is letters, digits and symbols, without spaces.');
+    }
+    await setSecret('ntfyToken', trimmed);
+    logInfo(`phone push: access token ${trimmed ? 'saved' : 'removed'}`);
+    return buildState();
+  });
+  /** One settings save: the Settings form's, and a settings backup's import. */
+  /**
+   * Saves the settings and reports, apart from the state, an error that came after they were
+   * written (worker history, login item, control API). An error before the write is thrown.
+   */
+  const saveSettingsReport = async (request: z.infer<typeof settingsSave>): Promise<{ state: AppState; lateError: unknown }> => {
+    // The phone settings are checked only when this save changes them, and only while on: a damaged
+    // stored value (hand-edited, or from an older version) must not block every other save, nor the
+    // save that repairs it or switches it off.
+    const push = request.patch.ui.phonePush;
+    const phoneChanged = !!push && JSON.stringify(push) !== JSON.stringify(request.base.ui.phonePush);
     const before = getConfig();
     const next = await updateConfig(async config => {
       if (request.patch.ui.browserBridgePort !== undefined &&
@@ -738,6 +845,15 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         throw new Error('Browser bridge port is controlled by CLF_BRIDGE_PORTS.');
       }
       const proposed = { ...config, ...mergeSettings(config, request.base, request.patch) };
+      // Checked as it will be saved: the form may be stale, and the merge keeps fields another
+      // window changed meanwhile (a cleared topic stays cleared while this save turns it on).
+      if (phoneChanged && proposed.ui.phonePush) {
+        const problem = phonePushProblem(proposed.ui.phonePush);
+        if (problem) {
+          logWarn(`settings save refused: ${problem}`);
+          throw new Error(problem);
+        }
+      }
       // If an earlier Off retirement failed, On must retry it before admission.
       if (!config.ui.finishTool && proposed.ui.finishTool) await cancelFinishInputs(false);
       else if (!config.goal.impulseMinutes && (proposed.goal.impulseMinutes ?? 0) > 0) await cancelFinishInputs(true);
@@ -808,17 +924,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         authorityPersistError = error instanceof Error ? error : new Error(String(error));
       }
     }
+    // The settings are written. A step after this that fails is reported, but never stops the
+    // steps after it: the app does not stay half-on, and an import is not left half done.
+    let runtimeError: unknown;
+    const step = async (run: () => unknown): Promise<void> => {
+      try { await run(); } catch (error) { runtimeError ??= error; }
+    };
     // Recording, workers and direct browser tools share the same extension transport.
     // Startup and settings saves use one eligibility rule.
-    if (browserExtensionRequired(next)) await startBridge();
-    else await stopBridge();
-    if (before.ui.chatBrowser !== next.ui.chatBrowser) await syncCosBrowser();
+    await step(() => browserExtensionRequired(next) ? startBridge() : stopBridge());
+    if (before.ui.chatBrowser !== next.ui.chatBrowser) await step(syncCosBrowser);
     if (before.capabilities.screen !== next.capabilities.screen || before.capabilities.control !== next.capabilities.control || before.readOnly !== next.readOnly) wakeBrowserWork('browser-control');
     // Permissions and the second tunnel id both decide whether the optional Desktop
     // connector should be published. Without this, enabling desktop access or pasting its
     // tunnel id left the connector unpublished until the user happened to reconnect, with
     // the card still saying "not published" and nothing explaining why.
-    await applySettings();
+    await step(applySettings);
     if (before.ui.autoRefreshPlugins !== next.ui.autoRefreshPlugins) wakeBrowserWork();
     logInfo('settings updated');
     // The config and runtime side effects above still complete so the app does not stay half-on,
@@ -842,22 +963,180 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // Stable connector URLs (#924): turning it on keeps the URLs running now, so nothing has to be
     // re-entered in ChatGPT; turning it off forgets them, and the next start rotates again.
     if ((before.mcp.persistentUrls === true) !== (next.mcp.persistentUrls === true)) {
-      if (next.mcp.persistentUrls === true) {
-        if (!(await rememberRunningSurfaceTokens())) logWarn('connector URLs: secure storage is unavailable, so they still change at the next start');
-        else logInfo('connector URLs: kept across restarts from now on');
-      } else {
-        await forgetSurfaceTokens();
-        logInfo('connector URLs: forgotten; the next start gives each connector a new one');
-      }
+      await step(async () => {
+        if (next.mcp.persistentUrls === true) {
+          if (!(await rememberRunningSurfaceTokens())) logWarn('connector URLs: secure storage is unavailable, so they still change at the next start');
+          else logInfo('connector URLs: kept across restarts from now on');
+        } else {
+          await forgetSurfaceTokens();
+          logInfo('connector URLs: forgotten; the next start gives each connector a new one');
+        }
+      });
     }
     // The listener reads this switch on every request, so a flip needs no restart; it is logged.
     if (before.controlApi.allowActions !== next.controlApi.allowActions) {
       logInfo('control API: actions ' + (next.controlApi.allowActions ? 'allowed' : 'refused'));
     }
-    if (authorityPersistError) throw authorityPersistError;
-    if (loginStartupError) throw loginStartupError;
-    if (controlApiError) throw controlApiError;
-    return buildState();
+    // Each of these came after the settings were written; the caller decides how to report it.
+    const lateError = authorityPersistError ?? runtimeError ?? loginStartupError ?? controlApiError ?? null;
+    if (runtimeError) logWarn(`settings saved, but a later step failed: ${runtimeError instanceof Error ? runtimeError.message : String(runtimeError)}`);
+    return { state: await buildState(), lateError };
+  };
+  const saveSettings = async (request: z.infer<typeof settingsSave>): Promise<AppState> => {
+    const { state, lateError } = await saveSettingsReport(request);
+    if (lateError) throw lateError;
+    return state;
+  };
+  handle('settings:save', async payload => saveSettings(settingsSave.parse(payload)));
+
+  // Settings backup. The file is read and checked in the main process; the renderer sees only a
+  // summary and a token, and saved keys never cross to it. Errors are sentences it translates.
+  let pendingImport: { token: string; backup: ParsedBackup; changed: string[]; wider: string[] } | null = null;
+  // What importing would change, as a save really applies it: mergeSettings keeps the fields the
+  // settings form does not own, so only changes that happen are counted. The interface language
+  // is applied beside the save, since the form never edits it.
+  const importPlan = (backup: ParsedBackup) => {
+    const config = getConfig();
+    const base = pickByShape(settingsPatch, config);
+    const merged = overlaySettings(settingsPatch, base, backup.settings);
+    const typed = settingsSave.parse({ base, patch: merged });
+    const saved = pickByShape(settingsPatch, mergeSettings(config, typed.base, typed.patch));
+    const asked = z.enum(UI_LANGUAGES).safeParse((merged.ui as { language?: unknown } | undefined)?.language);
+    const language = asked.success ? asked.data : config.ui.language;
+    const result = { ...saved, ui: { ...(saved.ui as object), language } };
+    return { base, merged, language, changed: changedSettings(base, result), wider: widerAccess(base, result) };
+  };
+  handle('settings:export', async payload => {
+    const { includeKeys, passphrase } = z.object({ includeKeys: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(payload);
+    // Checked before the keys are read, so a short passphrase never touches secure storage.
+    if (includeKeys && !passphraseLongEnough(passphrase ?? '')) {
+      logInfo('settings backup: export refused, the passphrase is too short; nothing was read or written');
+      throw new Error('Use a passphrase of at least 8 characters.');
+    }
+    const keys = includeKeys ? await readSecretsFor(exportableSecret).catch(error => {
+      logWarn(`settings backup: saved keys could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      throw new Error('The saved keys could not be read, so no backup was made. Try again, or export without them.');
+    }) : null;
+    // Its errors are sentences the renderer translates (a short passphrase).
+    const text = await buildBackup({ settings: settingsForBackup(settingsPatch, getConfig()), appVersion: app.getVersion(), now: new Date(),
+      ...(keys ? { secrets: { values: keys, passphrase: passphrase! } } : {}) });
+    const options: Electron.SaveDialogOptions = { ...dialogLabel('Export settings'),
+      defaultPath: path.join(app.getPath('documents'), `chat-on-steroids-settings-${new Date().toISOString().slice(0, 10)}.json`),
+      filters: [{ name: mainText('Settings backups'), extensions: ['json'] }] };
+    const owner = getWindow();
+    const chosen = owner && !owner.isDestroyed() ? await dialog.showSaveDialog(owner, options) : await dialog.showSaveDialog(options);
+    if (chosen.canceled || !chosen.filePath) return null;
+    // Written beside the target and renamed, so a failed write never leaves half a backup; readable
+    // by this user only, since it may hold keys.
+    const temporary = `${chosen.filePath}.${randomUUID()}.tmp`;
+    try {
+      await fs.writeFile(temporary, text, { encoding: 'utf8', mode: 0o600 });
+      await fs.rename(temporary, chosen.filePath);
+    } catch (error) {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
+    const keyCount = keys ? Object.keys(keys).length : 0;
+    logInfo(`settings backup: exported ${keyCount ? `with ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : 'without saved keys'}`);
+    return { file: path.basename(chosen.filePath), keyCount };
+  });
+  handle('settings:importPick', async (): Promise<SettingsBackupChoice | null> => {
+    const options: Electron.OpenDialogOptions = { ...dialogLabel('Import settings'), properties: ['openFile'],
+      filters: [{ name: mainText('Settings backups'), extensions: ['json'] }] };
+    const owner = getWindow();
+    const selected = owner && !owner.isDestroyed() ? await dialog.showOpenDialog(owner, options) : await dialog.showOpenDialog(options);
+    if (selected.canceled || !selected.filePaths[0]) return null;
+    const file = selected.filePaths[0];
+    // Size first: a large file is refused without reading it.
+    if ((await fs.stat(file)).size > 4_000_000) {
+      logInfo('settings backup: refused the chosen file (too-large), it was not read');
+      throw new BackupError('too-large', 'This file is too large to be a settings backup.');
+    }
+    let backup: ParsedBackup;
+    try { backup = readBackup(await fs.readFile(file, 'utf8')); } catch (error) {
+      if (error instanceof BackupError) logInfo(`settings backup: refused the chosen file (${error.code})`);
+      throw error;
+    }
+    // A value this version's settings do not accept (an edited file, or a value a later version
+    // dropped) refuses the whole file: importing the rest would leave a half-applied backup.
+    let plan: ReturnType<typeof importPlan>;
+    try { plan = importPlan(backup); } catch (error) {
+      if (!(error instanceof z.ZodError)) throw error;
+      logInfo(`settings backup: refused the chosen file (invalid-settings at ${error.issues[0]?.path.join('.') || 'settings'}); nothing changed`);
+      throw new BackupError('invalid-settings', 'This backup has a setting this version does not accept, so nothing was imported.');
+    }
+    const { changed, wider } = plan;
+    pendingImport = { token: randomUUID(), backup, changed, wider };
+    return {
+      token: pendingImport.token, file: path.basename(file), appVersion: backup.appVersion, exportedAt: backup.exportedAt,
+      changed, wider, keyCount: backup.secretCount
+    };
+  });
+  handle('settings:importApply', async payload => {
+    const { token, includeKeys, passphrase } = z.object({ token: z.string().uuid(), includeKeys: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(payload);
+    if (!pendingImport || pendingImport.token !== token) {
+      logInfo('settings backup: import refused, its choice is gone or was already used; nothing changed');
+      throw new Error('Choose the backup file again.');
+    }
+    const { backup } = pendingImport;
+    // Keys open first: a wrong passphrase changes nothing, and the dialog can ask again.
+    let keys: Record<string, string> = {};
+    if (includeKeys && backup.secrets) {
+      try { keys = await openSecrets(backup.secrets, passphrase ?? ''); } catch (error) {
+        logInfo('settings backup: import refused, the passphrase did not open the saved keys; nothing changed');
+        throw error;
+      }
+    }
+    // Against the settings as they are now. If they changed since the file was chosen (a save still
+    // on its way, another window), the person confirmed a different import: it is refused, so more
+    // access is never granted without the warning the preview showed.
+    const { base, merged, language, changed, wider } = importPlan(backup);
+    if (JSON.stringify(changed) !== JSON.stringify(pendingImport.changed) || JSON.stringify(wider) !== JSON.stringify(pendingImport.wider)) {
+      pendingImport = null;
+      logInfo('settings backup: import refused, the settings changed after the file was chosen; nothing changed');
+      throw new Error('Your settings changed after the file was chosen. Choose it again.');
+    }
+    // Checked before anything changes, so a computer without secure storage gets a clear refusal
+    // rather than its settings changed and its keys missing.
+    if (Object.keys(keys).length && !(await isEncryptionAvailable())) {
+      logInfo('settings backup: import refused, secure storage is not available for the saved keys; nothing changed');
+      throw new Error('Secure storage is not available on this computer, so the saved keys cannot be imported. Import without them.');
+    }
+    // An unreadable key store would refuse the key write after the settings changed: refused first.
+    if (Object.keys(keys).length && storedSecretsUnreadable()) {
+      logInfo('settings backup: import refused, the saved keys on this computer cannot be read; nothing changed');
+      throw new Error('The saved keys on this computer cannot be read, so the backup\'s keys cannot be added. Import without them.');
+    }
+    // A save can fail after it wrote the settings (login registration, the control API, worker
+    // history): it finishes its own work and then reports. The import does the same, so the
+    // language and keys are not left out of a backup whose settings already changed.
+    // Said after "Imported", each a sentence the renderer translates on its own.
+    const warnings: string[] = [];
+    if (changed.length) {
+      // This save's own report, never an inference from the config: another window's save may land meanwhile.
+      const { lateError } = await saveSettingsReport(settingsSave.parse({ base, patch: merged }));
+      if (lateError) {
+        const message = lateError instanceof Error ? lateError.message : String(lateError);
+        warnings.push(message);
+        logWarn(`settings backup: the settings were saved, but a later step of the save failed (${message}); the import goes on`);
+      }
+    }
+    if (language !== getConfig().ui.language) await updateConfig(config => ({ ...config, ui: { ...config.ui, language } }));
+    // The settings are written by now: a key write that still fails is reported, never as a failed
+    // import, and never by undoing settings (an undo that fails halfway would be worse).
+    let keysFailed = false;
+    if (Object.keys(keys).length) {
+      try { await setSecrets(keys as Partial<Record<SecretKey, string>>); } catch (error) {
+        keysFailed = true;
+        logWarn(`settings backup: the settings were imported, but the saved keys could not be stored (${error instanceof Error ? error.message : String(error)})`);
+        warnings.push('The settings were imported, but the saved keys could not be stored. Add them again in Settings.');
+      }
+    }
+    pendingImport = null;
+    const keyCount = keysFailed ? 0 : Object.keys(keys).length;
+    logInfo(`settings backup: imported ${changed.length} changed setting${changed.length === 1 ? '' : 's'}` +
+      `${keyCount ? ` and ${keyCount} saved key${keyCount === 1 ? '' : 's'}` : ''}${backup.appVersion ? ` from a ${backup.appVersion} backup` : ''}`);
+    return { state: await buildState(), changedCount: changed.length, keyCount, ...(warnings.length ? { warnings } : {}) };
   });
 
   /** Approves one folder by path. The picker dialog and the drop zone both end here. */
@@ -911,6 +1190,27 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // The bound follows the list: a fixed 32 refused the whole set once it grew past that.
     setMainTextTranslations(z.record(z.string().max(200), z.string().max(200))
       .refine(value => Object.keys(value).length <= MAIN_TEXTS.length).parse(payload));
+  });
+  // Chat groups (#1038): organisation inside a project only; see chat-groups.ts.
+  const groupId = z.string().min(1).max(64);
+  handle('chatGroups:get', async () => chatGroupsState());
+  handle('chatGroups:create', async payload => {
+    const { projectId, name } = z.object({ projectId: z.string().min(1).max(160), name: z.string().max(400) }).strict().parse(payload);
+    const projects = await listProjects();
+    return createChatGroup(projectId, name, id => projects.some(project => project.id === id && !project.ungrouped));
+  });
+  handle('chatGroups:rename', async payload => {
+    const { id, name } = z.object({ id: groupId, name: z.string().max(400) }).strict().parse(payload);
+    return renameChatGroup(id, name);
+  });
+  handle('chatGroups:delete', async payload => {
+    const { id } = z.object({ id: groupId }).strict().parse(payload);
+    return deleteChatGroup(id);
+  });
+  handle('chatGroups:assign', async payload => {
+    const { sessionId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id, groupId: groupId.nullable() }).strict().parse(payload);
+    const session = await getSession(sessionId);
+    return assignChatGroup(session ? { id: session.id, projectId: session.projectId ?? null, origin: session.origin ?? null } : null, target);
   });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());
@@ -1051,6 +1351,13 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
     const project = await retryProjectCreate(id);
     if (project) wakeBrowserWork();
+    push('session:changed');
+    return project;
+  });
+  handle('projects:secrets-shield', async payload => {
+    const { id, off } = z.object({ id: z.string().uuid(), off: z.boolean() }).strict().parse(payload);
+    const project = await setProjectSecretsShieldOff(id, off);
+    logInfo(`secrets shield: turned ${off ? 'off' : 'back on'} for a project's chats`);
     push('session:changed');
     return project;
   });
@@ -1326,16 +1633,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     await clipboard.writeText(text);
     return true;
   });
+  // A code block's Save: a bare `name.ext` suggestion only, so no renderer value can point outside the dialog's choice.
+  handle('code:save', async (payload) => {
+    const { text, name } = z.object({
+      text: z.string().max(1_000_000),
+      name: z.string().regex(/^[a-z0-9-]{1,40}\.[a-z0-9]{1,8}$/i)
+    }).parse(payload);
+    return saveCodeFile(text, name, getWindow());
+  });
 
-  // Copy or save a completed turn's answer, or the session transcript, as Markdown. Main reads
-  // the full text of answers that were cut in the log, so neither comes out truncated.
+  // Copy or save a completed turn's answer, or the session transcript, as Markdown, or save the
+  // transcript as an HTML page. Main reads the full text of answers that were cut in the log, so
+  // none comes out truncated.
   handle('sessions:exportMarkdown', async (payload) => {
     const request = z.object({
       id: z.string().min(8).max(64).regex(/^[0-9a-z-]+$/i),
       scope: z.enum(['answer', 'latest', 'session']),
       turnId: z.string().min(1).max(200).optional(),
       messageId: z.string().min(1).max(200).optional(),
-      target: z.enum(['clipboard', 'file'])
+      target: z.enum(['clipboard', 'file']),
+      format: z.enum(['markdown', 'html']).optional()
     }).parse(payload);
     return exportSessionMarkdown(request, getWindow());
   });
@@ -1363,7 +1680,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // reaches the window through the ordinary state push; this returns before the check does.
   handle('modules:status', async () => modulesStatus());
   handle('modules:action', async payload => {
-    const request = z.object({ id: z.literal('cli-proxy-api'), action: z.enum(['install', 'update', 'start', 'stop', 'restart', 'enable', 'disable', 'open']), managementUrl: z.string().max(256).optional() }).strict().parse(payload);
+    const request = z.object({ id: z.enum(['cli-proxy-api', 'firefox-vpn', 'twindesk']), action: z.enum(['install', 'update', 'start', 'stop', 'restart', 'enable', 'disable', 'open']), managementUrl: z.string().max(256).optional() }).strict().parse(payload);
+    if (request.id !== 'cli-proxy-api') {
+      if (request.managementUrl !== undefined) throw new Error('External modules do not accept arbitrary management URLs.');
+      await externalModuleAction(request.id, request.action);
+      return modulesStatus();
+    }
     return moduleAction(request.action, request.managementUrl);
   });
 
@@ -1430,16 +1752,18 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // ------------------------------------------------------------- sessions
 
   handle('sessions:list', async (payload) => {
-    const { cursor, limit, projectId } = z
+    const { cursor, limit, projectId, archived, search } = z
       .object({
         cursor: sessionListCursorSchema.optional(),
         // Keep one renderer payload small even when the store can index much more history.
         limit: z.number().int().min(1).max(60).optional(),
         // One project's own pages: expanding a project must not page the whole history (#1190).
         projectId: z.string().regex(/^[a-f0-9-]{36}$/i).optional()
+        ,archived: z.boolean().optional(),
+        search: z.string().trim().max(150).optional()
       })
       .parse(payload ?? {});
-    const list = await readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
+    const list = await readSessionList({ cursor, limit: limit ?? 60, archived, search, ...(projectId ? { projectId } : {}) });
     // Chat Marks: each API chat names its engine, for the sidebar's chat type icon.
     return { ...list, sessions: await withChatEngines(list.sessions) };
   });
@@ -1747,6 +2071,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { id, messageId } = sessionIdArg.extend({ messageId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i) }).parse(payload);
     return locateMessage(id, messageId);
   });
+  // Bookmarked answers: marked under an answer, listed in the chat's header to jump back to them.
+  handle('sessions:bookmarks', async (payload) => {
+    const { id } = sessionIdArg.parse(payload);
+    if (!await getSession(id)) return [];
+    return listBookmarks(id);
+  });
+  handle('sessions:bookmark', async (payload) => {
+    const { id, messageId, excerpt, messageTime, on } = sessionIdArg.extend({
+      messageId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i),
+      excerpt: z.string().max(4000),
+      messageTime: z.number().finite().nonnegative(),
+      on: z.boolean()
+    }).parse(payload);
+    if (!await getSession(id)) throw new Error('Session not found');
+    return setBookmark(id, { messageId, excerpt, messageTime }, on);
+  });
   handle('sessions:rename', async (payload) => {
     const { id, title } = sessionNameArg.parse(payload);
     if (!await getSession(id)) throw new Error('Session not found');
@@ -1755,6 +2095,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     else await clearSessionName(id);
     notifyChanged(id);
     return true;
+  });
+  handle('sessions:archive', async (payload) => {
+    const { id, archived } = sessionIdArg.extend({ archived: z.boolean() }).parse(payload);
+    const summary = await archiveSessionLocally(id, archived);
+    notifyChanged(id);
+    return summary;
   });
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
@@ -1786,6 +2132,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
         ], false);
       }
       await deleteSession(id);
+      if (summary?.conversationId) {
+        for (const conversationId of [summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)]) {
+          revokeVaultChat(conversationId);
+          revokeRemoteChat(conversationId);
+        }
+      }
+      // A deleted chat leaves its group too; the group itself stays.
+      await forgetChatGroupMember(id);
       logInfo(
         detached.length > 0
           ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
@@ -2071,7 +2425,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // checkpoints and automatic continuations already have their instructions.
       // An edit of a chat's first question (#365) replaces the message that carried its setup.
       return ((entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish') || entry.editFramed
-        ? prepareSessionPrompt(text, entry, limits, authored)
+        ? prepareSessionPrompt(text, { ...entry, brainContext: true }, limits, authored)
         : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits, entry) : text;
     },
     applyAutomation: async (conversationId, automation, phase, objective, loopAfterTurn) => {

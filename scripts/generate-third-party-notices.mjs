@@ -31,6 +31,10 @@ notices.push('='.repeat(80), 'Phosphor Icons — interface icons (Regular and Fi
   'Source: https://www.npmjs.com/package/@phosphor-icons/core/v/2.1.1',
   'CoS embeds the SVG paths of the icons it uses in its renderer sprite, scaled to a 24-unit grid.', '');
 notices.push('--- Phosphor LICENSE ---', await fs.readFile(path.join(root, 'docs/licenses/phosphor/LICENSE'), 'utf8'), '');
+notices.push('='.repeat(80), 'Atkinson Hyperlegible Next — the Appearance font "Atkinson Hyperlegible"',
+  'Source: https://www.npmjs.com/package/@fontsource-variable/atkinson-hyperlegible-next/v/5.2.6',
+  'CoS bundles its unmodified Latin and Latin Extended variable-weight WOFF2 files, upright and italic.', '');
+notices.push('--- Atkinson Hyperlegible Next LICENSE ---', await fs.readFile(path.join(root, 'docs/licenses/atkinson-hyperlegible-next/LICENSE'), 'utf8'), '');
 let count = 0;
 for (const [relative, entry] of Object.entries(lock.packages).sort(([a], [b]) => a.localeCompare(b))) {
   if (!relative || entry.dev === true) continue;
@@ -54,6 +58,10 @@ for (const [relative, entry] of Object.entries(lock.packages).sort(([a], [b]) =>
     const parent = JSON.parse(await fs.readFile(path.join(root, 'node_modules/koffi/package.json'), 'utf8'));
     if (parent.version !== manifest.version || parent.license !== manifest.license) throw new Error(`Koffi binary license/version mismatch: ${relative}`);
     files.push(path.join(root, 'node_modules/koffi/LICENSE.txt'));
+  }
+  if (['@tokenizer/token', 'whatsapp-rust-bridge'].includes(manifest.name) && !files.length && manifest.license === 'MIT') {
+    // These MIT npm tarballs omit LICENSE; preserve an explicit MIT supplement.
+    files.push(path.join(root, 'docs/licenses/whatsapp-web-MIT-LICENSE'));
   }
   if (manifest.name === 'flora-colossus' && !files.length) files.push(path.join(root, 'docs/licenses/flora-colossus-LICENSE'));
   if (manifest.name.startsWith('@napi-rs/canvas-') && !files.length) {

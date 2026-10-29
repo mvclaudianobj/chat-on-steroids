@@ -11,7 +11,7 @@
 import { z } from 'zod';
 import { readDurable, writeDurableNow } from '../durable.js';
 import { API_CHAT_APPROVAL_MODES, API_CHAT_EFFORTS, isApiConversationId } from '../../shared/api-chat.js';
-import { AGENT_ENGINE_IDS, DEFAULT_AGENT_ENGINE, type AgentEngineId } from '../../shared/agent-engine.js';
+import { AGENT_ENGINE_IDS, AGENT_ENGINE_ROUTES, DEFAULT_AGENT_ENGINE, type AgentEngineId, type AgentEngineRoute } from '../../shared/agent-engine.js';
 
 export const API_CHAT_SESSIONS_STATE = 'marks-api-chat-sessions';
 
@@ -26,6 +26,11 @@ export const chatRecordSchema = z.object({
   effort: z.enum(API_CHAT_EFFORTS).nullable(),
   /** Absent means `ask`, the default. */
   approval: z.enum(API_CHAT_APPROVAL_MODES).optional(),
+  /**
+   * Codex and Claude Code (router.ts): `direct` or `router`. Absent means `router`: every chat
+   * created before routes ran with the user's CLI configuration as it was. New chats store it.
+   */
+  route: z.enum(AGENT_ENGINE_ROUTES).optional(),
   openTurn: turnSchema.optional()
 });
 export type ChatRecord = z.infer<typeof chatRecordSchema>;
@@ -68,6 +73,8 @@ export async function storedChatRecord(sessionId: string): Promise<ChatRecord | 
 }
 
 export const engineOf = (record: ChatRecord | undefined): AgentEngineId => record?.engine ?? DEFAULT_AGENT_ENGINE;
+/** The chat's chosen route; a record without one predates routes and keeps the configured CLI. */
+export const routeOf = (record: ChatRecord | undefined): AgentEngineRoute => record?.route ?? 'router';
 
 /**
  * The engine a chat runs on: its record's, `cliproxy` without a record (the executor then

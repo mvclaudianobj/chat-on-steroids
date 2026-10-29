@@ -43,10 +43,13 @@ export function createApiChatSettingsUi(api: AppApi, after: HTMLElement): { refr
   const key = el('input', { type: 'password', autocomplete: 'off', spellcheck: false });
   key.id = 'apiChatKey';
   const saveKey = button('apiChatSaveKey', () => t('Save key'));
+  const removeKey = button('apiChatRemoveKey', () => t('Remove saved key'));
   const keyState = el('span', { className: 'modules-detail' });
   keyState.id = 'apiChatKeyState';
+  keyState.setAttribute('role', 'status');
+  key.setAttribute('aria-describedby', 'apiChatKeyState');
   const keyRow = el('span', { className: 'api-chat-key' });
-  keyRow.append(key, saveKey, keyState);
+  keyRow.append(key, saveKey, removeKey, keyState);
   const keyNeeded = el('p', { className: 'modules-error api-chat-key-needed', hidden: true });
   keyNeeded.id = 'apiChatKeyNeeded';
   ui(keyNeeded, 'textContent', () => t('CLIProxy asked for an API key. Paste it above to use its models.'));
@@ -91,7 +94,10 @@ export function createApiChatSettingsUi(api: AppApi, after: HTMLElement): { refr
     result.classList.toggle('modules-error', error);
   };
   const paintStatus = (): void => {
-    ui(keyState, 'textContent', () => status?.hasKey ? t('A key is saved') : t('No key saved'));
+    const presence = status?.keyPresence ?? (status?.hasKey ? 'saved' : 'absent');
+    key.placeholder = presence === 'saved' ? '••••••••' : '';
+    removeKey.disabled = presence !== 'saved';
+    ui(keyState, 'textContent', () => presence === 'saved' ? t('A key is saved') : presence === 'unavailable' ? t('Secure credential storage is unavailable.') : t('No key saved'));
     keyNeeded.hidden = !status?.keyRequired;
     ui(detection, 'textContent', () => !status || status.detected === null ? ''
       : status.detected ? t('Found at {0} · {1} chat models', [status.endpoint, models.length])
@@ -158,9 +164,16 @@ export function createApiChatSettingsUi(api: AppApi, after: HTMLElement): { refr
   });
   saveKey.addEventListener('click', async () => {
     const value = key.value;
+    if (!value.trim()) return;
     key.value = '';
     say('');
     if (accept(await api.apiChatSetKey(value))) await loadModels(true);
+  });
+  removeKey.addEventListener('click', async () => {
+    if (status?.keyPresence !== 'saved' || !window.confirm(t('Remove the saved API key?'))) return;
+    key.value = '';
+    say('');
+    if (accept(await api.apiChatSetKey(''))) await loadModels(true);
   });
   key.addEventListener('keydown', event => { if (event.key === 'Enter') { event.preventDefault(); saveKey.click(); } });
   test.addEventListener('click', async () => {

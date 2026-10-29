@@ -96,6 +96,9 @@ export const APP_COMMANDS = [
   { command: 'goal', name: 'Goal', description: 'Pursue a saved objective and stop when it is complete.', glyph: 'i-target' },
   { command: 'loop', name: 'Loop', description: 'Keep continuing toward the saved objective.', glyph: 'i-loop' },
   { command: 'compact', name: 'Compact', description: 'Compact this chat and resume it in a fresh conversation.', glyph: 'i-copy' },
+  { command: 'recall', name: 'Recall', description: 'Search local Brain memories and insert selected context into this draft.', glyph: 'i-search' },
+  { command: 'remember', name: 'Remember', description: 'Ask this chat to save what matters in the conversation as Brain memories, or save the text typed after /remember.', glyph: 'i-pin' },
+  { command: 'remember-answer', name: 'Remember last answer', description: 'Save the last answer in this chat as a Brain memory, without asking the model.', glyph: 'i-pin' },
   { command: 'image', name: 'Image', description: 'Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.', glyph: 'i-image' },
   // Codex's slash commands, each opening what the app already has.
   { command: 'model', name: 'Model', description: 'Choose the model for this chat.', glyph: 'i-sparkle' },
@@ -231,7 +234,7 @@ export function initSkills(options: Options) {
     .filter(file => file.entry.kind !== 'other' && file.normalizedName.includes(query))
     .map(file => file.entry);
   const stateMessage = (range: Completion, query: string): string => {
-    if (error) return error;
+    if (error) return t(error);
     if (loading && (range.kind === 'file' ? !files : !library))
       return t(range.kind === 'file' ? 'Loading files…' : 'Loading skills…');
     if (choices.length) return '';

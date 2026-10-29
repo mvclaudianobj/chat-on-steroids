@@ -8,11 +8,15 @@ import { resolvePath } from '../sandbox.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt } from '../../shared/user-prompt.js';
 import { selectedSkillInstructions, type SelectedSkill } from './skill-prompt.js';
 import { listSkillLibrary } from '../skill-library.js';
+import { brainContextBlock } from '../brain/context.js';
+import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
 import type { RoutedSkillSelection } from '../../shared/skill-routing.js';
 
 type PromptScope = { sessionId?: string | null; projectId?: string | null; autoSkills?: readonly RoutedSkillSelection[];
   /** Verified broker-owned worker checkout; the selected project is only the source of instructions. */
   workingDirectory?: string;
+  /** Chat Marks: the ChatGPT opening may carry optional Brain context (H1c, `autoInject`). */
+  brainContext?: boolean;
 };
 export type PromptLimits = { maxChars: number; maxBytes: number };
 type ProjectInstructions = { directory: string; text: string; truncated: boolean };
@@ -129,11 +133,17 @@ export async function prepareSessionPrompt(text: string, scope: PromptScope = {}
   // admission, so those Skills come from that catalog: only the selected body is read below. Every
   // other Skill the chat can use is still listed, exactly as without routing.
   const library = await listSkillLibrary(scope.autoSkills !== undefined ? { ...skillScope, managedFromCatalog: true } : skillScope);
-  const core = await currentCoreInstructions(library);
+  const core = [currentMarksSystemPrompt('chatgpt'), await currentCoreInstructions(library)].filter(Boolean).join('\n\n');
   const skills = await selectedSkillInstructions(authored, skillScope, library, scope.autoSkills);
   fitSessionPrompt(text, core, null, budget, [], scope.workingDirectory); // Only Core/task overflow is mandatory.
   const agents = await projectInstructions(scope);
   if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
+  // Chat Marks: Brain context joins the opening's COS_CONTEXT only when the whole message still fits.
+  const memory = scope.brainContext ? await brainContextBlock(authored) : '';
+  if (memory) {
+    try { return fitSessionPrompt(text, `${core}\n\n${memory}`, agents, budget, skills, scope.workingDirectory); }
+    catch { /* Without it: the memory block is optional, the instructions are not. */ }
+  }
   return fitSessionPrompt(text, core, agents, budget, skills, scope.workingDirectory);
 }
 
