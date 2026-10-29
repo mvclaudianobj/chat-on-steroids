@@ -84,7 +84,7 @@ export function registerCompanyIpc(
         const frequency = await recordLocalCompanyRequest(request.payload);
         const decision = await dialog.showMessageBox(window, { type: 'warning', title: copy.title,
           message: copy.title, detail: copy.detail + (frequency.suggestExpansion ?
-            ' Três solicitações equivalentes: você pode escolher ampliar o escopo em uma autorização futura. Nenhuma ampliação é automática.' : ''),
+            ' Quatro solicitações equivalentes: você pode escolher ampliar o escopo em uma autorização futura. Nenhuma ampliação é automática.' : ''),
           buttons: [mainText('Cancel'), mainText('Authorize')], defaultId: 0, cancelId: 0, noLink: true });
         if (decision.response !== 1 || window.isDestroyed() || event.sender !== window.webContents ||
           event.senderFrame !== window.webContents.mainFrame) return { ok: false, error: 'Explicit consent required' };

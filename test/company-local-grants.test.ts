@@ -64,20 +64,21 @@ it('expands COO only through verified explicit consent, and never removes host a
   expect(companyLocalConsentCopy('agent', 'company-local-read').title).toMatch(/ESTE agente/);
 });
 
-it('offers broader authority after three equivalent requests without ever granting it', async () => {
+it('offers broader authority only after four equivalent requests without ever granting it', async () => {
   const identities = [
     '11111111-1111-4111-8111-111111111112',
     '11111111-1111-4111-8111-111111111113',
-    '11111111-1111-4111-8111-111111111114'
+    '11111111-1111-4111-8111-111111111114',
+    '11111111-1111-4111-8111-111111111115'
   ];
   for (const [i, requestId] of identities.entries()) {
     const observation = await recordLocalCompanyRequest({ subject: worker, scope: 'company-local-read', requestId });
-    expect(observation).toEqual({ equivalent: i + 1, suggestExpansion: i === 2, epoch: 0 });
+    expect(observation).toEqual({ equivalent: i + 1, suggestExpansion: i >= 3, epoch: 0 });
     expect((await recordLocalCompanyRequest({ subject: worker, scope: 'company-local-read', requestId })).equivalent).toBe(i + 1);
   }
   expect((await readLocalCompanyGrants()).grants).toHaveLength(0);
   initCompanyLocalGrants(fake);
-  expect((await recordLocalCompanyRequest({ subject: worker, scope: 'company-local-read', requestId: identities[2]! }))
+  expect((await recordLocalCompanyRequest({ subject: worker, scope: 'company-local-read', requestId: identities[3]! }))
     .suggestExpansion).toBe(true);
 });
 

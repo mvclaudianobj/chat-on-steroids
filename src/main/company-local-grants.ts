@@ -93,7 +93,7 @@ export async function recordLocalCompanyRequest(input: { subject: Subject; scope
       await write(ledger);
     }
     const equivalent = ledger.requests.filter(item => same(item.subject, who) && item.scope === selected).length;
-    return { equivalent, suggestExpansion: equivalent >= 3, epoch: pending.epoch! };
+    return { equivalent, suggestExpansion: equivalent > 3, epoch: pending.epoch! };
   });
 }
 export async function localGrantDecision(input: { mode: 'task' | 'agent' | 'coo'; subject: Subject; scope: Scope;
