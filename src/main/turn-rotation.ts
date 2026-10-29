@@ -60,7 +60,11 @@ export async function considerTurnRotation(conversationId: string, sessionId: st
     if (startedAt === null || now - startedAt < minutes * 60_000) return false;
     const row = await deps.file(sessionId, turnId);
     const filings = (last?.turnId === turnId ? last.filings : 0) + (row !== null ? 1 : 0);
-    attempts.set(conversationId, { turnId, at: now, filed: row !== null, filings, declines: last?.turnId === turnId ? last.declines ?? 0 : 0 });
+    // An outbox write can wait behind other serialized input work. Start the
+    // retry interval when the filing settled, not when it began: otherwise a
+    // slow write immediately qualifies the same turn for another fresh-turn
+    // continue before the page has had time to act on the first.
+    attempts.set(conversationId, { turnId, at: deps.now(), filed: row !== null, filings, declines: last?.turnId === turnId ? last.declines ?? 0 : 0 });
     if (attempts.size > 500) attempts.delete(attempts.keys().next().value!);
     if (row === null) return false;
     deps.log(`turn rotation: ${conversationId} has worked ${Math.round((now - startedAt) / 60_000)} minutes in turn ${turnId} — continuing in a fresh turn after this tool result`);
