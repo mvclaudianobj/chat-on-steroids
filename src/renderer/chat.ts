@@ -8099,7 +8099,8 @@ export function chatSettingsPatch(current: Config): {
       waitForSubAgents: $<HTMLInputElement>('waitForSubAgents').checked,
       autoWorktrees: $<HTMLInputElement>('autoWorktrees').checked,
       endSleepingWorkerProcesses: $<HTMLInputElement>('endSleepingWorkerProcesses').checked,
-      archiveWorkerChats: $<HTMLInputElement>('archiveWorkerChats').checked
+      archiveWorkerChats: $<HTMLInputElement>('archiveWorkerChats').checked,
+      archiveWorkerDelayMinutes: number('archiveWorkerDelayMinutes', current.multiAgent.archiveWorkerDelayMinutes ?? 2, 1, 1440)
     },
     goal: {
       enabled: current.goal.enabled, mode: current.goal.mode,
@@ -8549,6 +8550,7 @@ const CHAT_INPUTS = [
   'autoWorktrees',
   'endSleepingWorkerProcesses',
   'archiveWorkerChats',
+  'archiveWorkerDelayMinutes',
   'autoContinue',
   'customContinue',
   'goalProvider',
@@ -8690,6 +8692,11 @@ export function chatApply(state: AppState, previous?: Config): void {
     $<HTMLInputElement>('archiveWorkerChats'),
     config.multiAgent.archiveWorkerChats === true,
     previous?.multiAgent.archiveWorkerChats
+  );
+  applyChatValue(
+    $<HTMLInputElement>('archiveWorkerDelayMinutes'),
+    String(config.multiAgent.archiveWorkerDelayMinutes ?? 2),
+    previous?.multiAgent.archiveWorkerDelayMinutes === undefined ? undefined : String(previous.multiAgent.archiveWorkerDelayMinutes)
   );
 
   // The model and reasoning selects are painted by applyChatModels above, which resolves a saved

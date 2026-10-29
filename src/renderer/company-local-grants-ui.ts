@@ -1,19 +1,46 @@
 import type { AppApi } from '../preload/index.js';
 import type { CompanyLocalGrantsView } from '../main/company-local-grants.js';
+import type { CompanyLocalSubject } from '../main/company-local-grants.js';
+import type { CompanySnapshot } from '../shared/company.js';
 import { t } from './i18n.js';
 
 /** Manage local grants; authorization is offered only when main attests the exact principal. */
-export function mountCompanyLocalGrants(host: HTMLElement, api: Pick<AppApi, 'companyLocalGrants' | 'revokeCompanyLocalGrant' | 'requestCompanyLocalGrant'>): () => Promise<void> {
+export function mountCompanyLocalGrants(host: HTMLElement, api: Pick<AppApi, 'companyLocalGrants' | 'revokeCompanyLocalGrant' | 'requestCompanyLocalGrant'>,
+  company?: CompanySnapshot): () => Promise<void> {
+  const workerSubjects: CompanyLocalSubject[] = (company?.demo ? [] : company?.requests ?? []).flatMap(ticket => {
+    const execution = ticket.execution;
+    return execution?.mode === 'live' && ['admitted', 'running'].includes(execution.phase) &&
+      execution.ownerId === ticket.id && execution.workerId && execution.runId && execution.conversationId
+      ? [{ kind: 'worker' as const, ownerId: ticket.id, runId: execution.runId,
+        workerId: execution.workerId, conversationId: execution.conversationId }] : [];
+  });
+  let selected: CompanyLocalSubject | undefined = workerSubjects[0];
   const line = (tag: 'p' | 'h3' | 'h4' | 'span', value: string): HTMLElement => {
     const node = document.createElement(tag); node.textContent = t(value); return node;
   };
   async function refresh(): Promise<void> {
-    const result = await api.companyLocalGrants();
+    const result = await api.companyLocalGrants(selected);
     host.replaceChildren();
     const heading = line('h3', 'Local Company permissions'); heading.id = 'companyLocalGrantsTitle';
     host.setAttribute('role', 'region');
     host.setAttribute('aria-labelledby', heading.id);
     host.append(heading);
+    if (company && !company.demo) {
+      const choose = document.createElement('select'); choose.setAttribute('aria-label', t('Select Company worker for local grants'));
+      const coo = document.createElement('option'); coo.value = '-1'; coo.textContent = 'marks-coo'; choose.append(coo);
+      for (const [index, subject] of workerSubjects.entries()) {
+        const option = document.createElement('option'); option.value = String(index);
+        option.textContent = subject.kind === 'worker' ? `${subject.workerId} · ${subject.ownerId}` : 'marks-coo';
+        choose.append(option);
+      }
+      choose.value = selected ? String(workerSubjects.indexOf(selected)) : '-1';
+      choose.addEventListener('change', () => {
+        selected = choose.value === '-1' ? { kind: 'coo', principal: 'marks-coo' } : workerSubjects[Number(choose.value)];
+        void refresh();
+      });
+      const label = document.createElement('label'); label.textContent = t('Select Company worker for local grants');
+      label.append(choose); host.append(label);
+    }
     if (!result.ok) {
       const error = line('p', result.error); error.setAttribute('role', 'alert'); host.append(error);
       return;

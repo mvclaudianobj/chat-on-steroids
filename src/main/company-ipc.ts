@@ -1,17 +1,21 @@
 import { dialog, ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
-import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema, companyMeetingKindSchema, companyChiefSchema, companyDelegationScopeSchema, companyChiefTitleSchema } from '../shared/company.js';
+import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema, companyMeetingKindSchema, companyChiefSchema, companyDelegationScopeSchema, companyChiefTitleSchema, cooHostApprovalTermSchema } from '../shared/company.js';
 import { activateRealCompany, restoreDemoCompany, getCompany, mutateCompany } from './company-store.js';
 import { createCompanyBroker } from './company-broker.js';
 import { createCompanyOrchestrator } from './company-orchestrator.js';
 import { createCompanyObserver } from './company-observability.js';
+import { cooHostApprover, sweepCooHostApprovals } from './company-coo-approval.js';
 import { mainText } from './main-texts.js';
-import { companyLocalConsentCopy, localGrantDecision, readLocalCompanyGrants, recordLocalCompanyRequest, revokeLocalCompanyGrant,
+import { companyLocalConsentCopy, localGrantDecision, readLocalCompanyGrants, recordLocalCompanyRequest, revokeLocalCompanyGrant, verifyLocalCompanyGrant, companyLocalSubjectSchema,
   type CompanyLocalAttestation } from './company-local-grants.js';
+import { attestCompanyLocalSubject } from './company-local-attestation.js';
 
 export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
-  z.object({ action: z.literal('localGrants') }).strict(),
+  z.object({ action: z.literal('cooHostPolicy'), payload: z.object({ enabled: z.boolean(),
+    riskTerms: z.array(cooHostApprovalTermSchema).max(64) }).strict() }).strict(),
+  z.object({ action: z.literal('localGrants'), payload: z.object({ subject: companyLocalSubjectSchema }).strict().optional() }).strict(),
   z.object({ action: z.literal('localGrantRevoke'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
   z.object({ action: z.literal('localGrantRequest'), payload: z.object({
     mode: z.enum(['task', 'agent', 'coo']), scope: z.enum(['company-local-read', 'company-local-triage', 'company-local-review']),
@@ -51,7 +55,8 @@ export type CompanyIpcRequest = z.infer<typeof companyIpcSchema>;
 export function registerCompanyIpc(
   getWindow: () => BrowserWindow | null,
   /** Only main-process, locally verified attestation can supply this. Never pass renderer/broker text. */
-  resolveLocalAttestation: () => Promise<CompanyLocalAttestation | null> = async () => null
+  resolveLocalAttestation: (subject?: CompanyLocalAttestation['subject']) => Promise<CompanyLocalAttestation | null> =
+    async (subject) => attestCompanyLocalSubject(subject ?? { kind: 'coo', principal: 'marks-coo' })
 ): void {
   const broker = createCompanyBroker();
   const observer = createCompanyObserver();
@@ -66,7 +71,7 @@ export function registerCompanyIpc(
       const request = parsed.data;
       if (request.action === 'localGrants') {
         const ledger = await readLocalCompanyGrants();
-        const proof = await resolveLocalAttestation();
+        const proof = await resolveLocalAttestation(request.payload?.subject);
         return { ok: true, data: { ...ledger, authority: {
           verified: proof?.local === true && proof.verified === true,
           subject: proof?.local === true && proof.verified === true ? proof.subject : null,
@@ -76,24 +81,30 @@ export function registerCompanyIpc(
       }
       if (request.action === 'localGrantRevoke') return { ok: true, data: await revokeLocalCompanyGrant(request.payload.id) };
       if (request.action === 'localGrantRequest') {
-        const proof = await resolveLocalAttestation();
+        const proof = await resolveLocalAttestation(request.payload.subject);
         if (!proof || proof.local !== true || proof.verified !== true ||
             JSON.stringify(proof.subject) !== JSON.stringify(request.payload.subject) ||
             (request.payload.mode === 'coo' && proof.subject.kind !== 'coo') ||
             (request.payload.mode === 'agent' && proof.subject.kind !== 'worker')) {
           return { ok: false, error: 'No locally attested Company identity; persistent grant refused' };
         }
+        if (request.payload.mode !== 'task' && await verifyLocalCompanyGrant(proof, request.payload.scope)) {
+          const ledger = await readLocalCompanyGrants();
+          const granted = ledger.grants.find(grant => grant.scope === request.payload.scope &&
+            JSON.stringify(grant.subject) === JSON.stringify(proof.subject));
+          if (granted) return { ok: true, data: { authorized: true, epoch: ledger.epoch, id: granted.id } };
+        }
         const copy = companyLocalConsentCopy(request.payload.mode, request.payload.scope);
         const frequency = await recordLocalCompanyRequest(request.payload);
         const decision = await dialog.showMessageBox(window, { type: 'warning', title: copy.title,
           message: copy.title, detail: copy.detail + (frequency.suggestExpansion ?
-            ' Três solicitações equivalentes: você pode escolher ampliar o escopo em uma autorização futura. Nenhuma ampliação é automática.' : ''),
+            ' Quatro solicitações equivalentes: você pode escolher ampliar o escopo em uma autorização futura. Nenhuma ampliação é automática.' : ''),
           buttons: [mainText('Cancel'), mainText('Authorize')], defaultId: 0, cancelId: 0, noLink: true });
         if (decision.response !== 1 || window.isDestroyed() || event.sender !== window.webContents ||
           event.senderFrame !== window.webContents.mainFrame) return { ok: false, error: 'Explicit consent required' };
         // One trusted local proof is rechecked after the native dialog because a revocation
         // or switch of worker/run while the dialog is open must invalidate the grant.
-        const stillVerified = await resolveLocalAttestation();
+        const stillVerified = await resolveLocalAttestation(request.payload.subject);
         const result = await localGrantDecision({ ...request.payload,
           attestation: stillVerified && JSON.stringify(stillVerified.subject) === JSON.stringify(proof.subject) ? stillVerified : null,
           consent: true, expectedEpoch: frequency.epoch });
@@ -101,6 +112,22 @@ export function registerCompanyIpc(
           { ok: false, error: result.epoch !== frequency.epoch ?
             'Local Company authorization changed during consent; approval refused' :
             'No locally attested Company identity; persistent grant refused' };
+      }
+      if (request.action === 'cooHostPolicy') {
+        // Any change starts a new epoch, so answers filed under the old one are taken back first,
+        // before the native dialog or the store's queue: revocation takes effect at once.
+        await cooHostApprover().revoke(request.payload.enabled ? 'COO host approval policy changed' : 'COO host approval revoked by the CEO');
+        if (request.payload.enabled) {
+          const decision = await dialog.showMessageBox(window, { type: 'warning', title: mainText('Authorize Company workers'),
+            message: mainText('Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?'),
+            detail: `Cards matching one of the ${request.payload.riskTerms.length} CEO risk terms, cards whose Allow once ChatGPT disabled, and cards in chats whose ownership is not exact stay for you. Every decision is audited. Switch it off at any time to revoke immediately.`,
+            buttons: [mainText('Cancel'), mainText('Authorize')], defaultId: 0, cancelId: 0, noLink: true });
+          if (decision.response !== 1 || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame)
+            return { ok: false, error: 'Human authorization was not granted' };
+        }
+        const data = await mutateCompany('cooHostPolicy', request.payload);
+        if (data.cooHostApproval.enabled) void sweepCooHostApprovals().catch(() => undefined);
+        return { ok: true, data };
       }
       if (request.action === 'dispatch' || request.action === 'sendInvitations' || request.action === 'reviewBroker' || request.action === 'delegationGrant' || request.action === 'delegationRevoke' || request.action === 'activateReal' || request.action === 'restoreDemo') {
         const decision = await dialog.showMessageBox(window, {

@@ -431,9 +431,11 @@ it('continues from the installed list on the path-routed settings page', async (
   const listed = `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${id}`;
   const assign = vi.fn(), replace = vi.fn(), ask = vi.fn();
   const location = { pathname: '/settings/plugins-settings', href: listed, assign };
+  const link = { tagName: 'A', isConnected: true, href: pathRouted };
   const context = vm.createContext({ URL, alive: true, generating: false, epoch: 1, ask, location, history: { replaceState: replace },
     CLF_DOM: { generating: () => false, pluginManagementIdle: () => true,
-      pluginInstalledButtons: () => [{ click: () => { location.pathname = '/settings/plugins-settings/plugin_asdk_app_synthetic'; location.href = 'https://chatgpt.com/settings/plugins-settings/plugin_asdk_app_synthetic'; } }],
+      pluginInstalledButtons: (_name: string, exactId: string | null) => exactId
+        ? [link] : [{ click: () => { location.pathname = '/settings/plugins-settings/plugin_asdk_app_synthetic'; location.href = 'https://chatgpt.com/settings/plugins-settings/plugin_asdk_app_synthetic'; } }],
       pluginRefreshView: () => ({ appId: 'asdk_app_synthetic' }) }
   });
   vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);

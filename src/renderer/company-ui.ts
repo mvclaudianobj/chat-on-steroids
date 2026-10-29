@@ -3,6 +3,7 @@ import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, companyRestingSeats, type
 import type { CompanyObservabilityView } from '../main/company-observability.js';
 import { t, onLanguageChange } from './i18n.js';
 import { mountCompanyLocalGrants } from './company-local-grants-ui.js';
+import { mountCooHostApproval } from './company-coo-approval-ui.js';
 import { createCompanyRpgWorld } from './company-rpg-world.js';
 import { companyLiveSeatState } from './company-live-presentation.js';
 
@@ -129,10 +130,14 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     content.append(el('h4','',t('Delegation audit')));
     for (const event of (snapshot.delegationAudit ?? []).slice(0,10)) content.append(el('p','company-dialog-hint',
       `${date(event.at)} · ${event.actor} · ${event.action} · ${event.scope ?? '—'} · ${event.requestId ?? ''}`));
+    const coo = el('section', 'company-coo-host');
+    coo.id = 'companyCooHost';
+    content.append(coo);
+    mountCooHostApproval(coo, snapshot, request => void change(request));
     const local = el('section', 'company-local-grants');
     local.id = 'companyLocalGrants';
     content.append(local);
-    mountCompanyLocalGrants(local, api);
+    mountCompanyLocalGrants(local, api, snapshot);
   }
   function detail(id: string): void {
     const request = snapshot?.requests.find(row => row.id === id); if (!request || !snapshot) return;

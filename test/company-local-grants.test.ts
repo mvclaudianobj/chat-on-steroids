@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { companyLocalConsentCopy, initCompanyLocalGrants, localGrantDecision, readLocalCompanyGrants,
@@ -64,20 +64,21 @@ it('expands COO only through verified explicit consent, and never removes host a
   expect(companyLocalConsentCopy('agent', 'company-local-read').title).toMatch(/ESTE agente/);
 });
 
-it('offers broader authority after three equivalent requests without ever granting it', async () => {
+it('offers broader authority only after four equivalent requests without ever granting it', async () => {
   const identities = [
     '11111111-1111-4111-8111-111111111112',
     '11111111-1111-4111-8111-111111111113',
-    '11111111-1111-4111-8111-111111111114'
+    '11111111-1111-4111-8111-111111111114',
+    '11111111-1111-4111-8111-111111111115'
   ];
   for (const [i, requestId] of identities.entries()) {
     const observation = await recordLocalCompanyRequest({ subject: worker, scope: 'company-local-read', requestId });
-    expect(observation).toEqual({ equivalent: i + 1, suggestExpansion: i === 2, epoch: 0 });
+    expect(observation).toEqual({ equivalent: i + 1, suggestExpansion: i >= 3, epoch: 0 });
     expect((await recordLocalCompanyRequest({ subject: worker, scope: 'company-local-read', requestId })).equivalent).toBe(i + 1);
   }
   expect((await readLocalCompanyGrants()).grants).toHaveLength(0);
   initCompanyLocalGrants(fake);
-  expect((await recordLocalCompanyRequest({ subject: worker, scope: 'company-local-read', requestId: identities[2]! }))
+  expect((await recordLocalCompanyRequest({ subject: worker, scope: 'company-local-read', requestId: identities[3]! }))
     .suggestExpansion).toBe(true);
 });
 
@@ -89,4 +90,16 @@ it('refuses the same consent request id retargeted to another scope, worker or r
     .rejects.toThrow('identity changed');
   expect((await readLocalCompanyGrants()).requests).toHaveLength(1);
   expect((await readLocalCompanyGrants()).grants).toHaveLength(0);
+});
+
+it('always permits revocation when the bounded audit ledger has reached 2000 entries', async () => {
+  const proof = { local: true as const, verified: true as const, subject: worker };
+  const approved = await decide({ mode: 'agent', scope: 'company-local-read', subject: worker,
+    attestation: proof, consent: true, requestId: req });
+  const ledger = await readLocalCompanyGrants();
+  ledger.audit = Array.from({ length: 2000 }, (_, index) => ({ ...ledger.audit[0]!, at: index }));
+  await writeFile(path.join(fake, 'company-local-grants', 'ledger.json'), JSON.stringify(ledger));
+  expect(await revokeLocalCompanyGrant(approved.id!)).toBe(true);
+  expect((await readLocalCompanyGrants()).audit).toHaveLength(500);
+  expect(await verifyLocalCompanyGrant(proof, 'company-local-read')).toBe(false);
 });

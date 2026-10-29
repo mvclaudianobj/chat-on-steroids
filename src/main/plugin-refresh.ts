@@ -194,6 +194,13 @@ function enrollable(tools: unknown, publication: PluginPublication): boolean {
     const expected = new Map(publication.tools.map(tool => [tool.name, hash(declaration([tool]))]));
     return tools.every(tool => expected.get(tool.name) === hash(declaration([tool])));
   }
+  // A Desktop installation created before newly enabled controls were published can expose
+  // a proper subset. Only unchanged complete declarations are evidence of that installation;
+  // an unrelated tool or a changed description/schema cannot enroll it by name alone.
+  if (publication.surface === 'desktop' && tools.length >= 2 && tools.length < publication.tools.length) {
+    const expected = new Map(publication.tools.map(tool => [tool.name, hash(declaration([tool]))]));
+    return tools.every(tool => expected.get(tool.name) === hash(declaration([tool])));
+  }
   // Enabling or disabling Core capabilities can change the set before enrollment.
   // Two unchanged full declarations identify the older known surface; names alone
   // do not, and a foreign tool cannot join that evidence through a matching name.

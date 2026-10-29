@@ -1478,9 +1478,17 @@
                   <label class="setting">
                     <span class="setting-text">
                       <b>Archive worker chats in ChatGPT when their task is done</b>
-                      <em>A couple of minutes after a worker reports its task done, its chat is archived in ChatGPT and leaves your chat list. If the main chat gives that worker more work, the app restores its chat first. Chats of cleared workers are archived too. You can restore any of them from ChatGPT's settings; this app keeps its transcript. Nothing is deleted.</em>
+                      <em>After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.</em>
                     </span>
                     <input id="archiveWorkerChats" type="checkbox" />
+                  </label>
+
+                  <label class="setting">
+                    <span class="setting-text">
+                      <b>Archive finished workers after (minutes)</b>
+                      <em>From 1 to 1440 minutes. Existing installations keep the two-minute default.</em>
+                    </span>
+                    <input id="archiveWorkerDelayMinutes" type="number" min="1" max="1440" step="1" value="2" />
                   </label>
 
                   <div id="swarmList"></div>

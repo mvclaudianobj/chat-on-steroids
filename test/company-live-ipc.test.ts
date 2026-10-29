@@ -82,12 +82,16 @@ it('does not restore a revoked worker grant from consent already pending in a na
     expect(first.ok).toBe(true);
     const id=(first.data as {id:string}).id;
     expect((await readLocalCompanyGrants()).grants).toHaveLength(1);
+    const repeated = await invoke({action:'localGrantRequest',payload:{...payload,
+      requestId:'55555555-5555-4555-8555-555555555555'}});
+    expect(repeated).toMatchObject({ok:true,data:{authorized:true,id}});
+    expect(native.prompts).toHaveLength(1); // Persistent exact-scope grant: no second dialog.
     let release!: (value:{response:number})=>void;
     native.dialogGate=new Promise(resolve=>{release=resolve;});
     let arrived!:()=>void;
     const opened=new Promise<void>(resolve=>{arrived=resolve;});
     native.dialogEntered=arrived;
-    const pending=invoke({action:'localGrantRequest',payload:{...payload,
+    const pending=invoke({action:'localGrantRequest',payload:{...payload,scope:'company-local-triage',
       requestId:'44444444-4444-4444-8444-444444444444'}});
     await opened;
     expect(await invoke({action:'localGrantRevoke',payload:{id}})).toMatchObject({ok:true,data:true});

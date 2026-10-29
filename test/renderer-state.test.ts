@@ -5417,6 +5417,12 @@ it('offers archiving retired worker chats, off by default, and saves it', async 
   archive.dispatchEvent(new w.Event('change', { bubbles: true }));
   await settle();
   expect(mounted.calls.at(-1)?.multiAgent.archiveWorkerChats).toBe(true);
+  const delay = w.document.getElementById('archiveWorkerDelayMinutes') as HTMLInputElement;
+  expect(delay.value).toBe('2');
+  delay.value = '17';
+  delay.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.multiAgent.archiveWorkerDelayMinutes).toBe(17);
 });
 
 describe('settings backup dialogs', () => {

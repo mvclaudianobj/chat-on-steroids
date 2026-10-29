@@ -11,6 +11,7 @@ export function mainTexts(): Record<MainText, string> {
   return {
     'Cancel': t('Cancel'),
     'Authorize': t('Authorize'),
+    'Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?': t('Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?'),
     'Open': t('Open'),
     'Show browser': t('Show browser'),
     'Hide browser': t('Hide browser'),

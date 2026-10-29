@@ -13964,12 +13964,17 @@
       const listUrl = new URL(location.href);
       const pathList = listUrl.pathname === '/settings/plugins-settings' && !listUrl.hash;
       if (pathList || (listUrl.pathname === '/' && listUrl.hash === '#settings/Plugins')) {
-        const installedAppId = request.observeOnly === true ? request.appId ?? null : null;
+        // A completed refresh already bound this surface to one exact installed app. Reuse
+        // that identity for the next schema, including automatic clicks: rediscovery by name
+        // can collide with another installed connector and permanently park the known one.
+        const installedAppId = request.appId ?? null;
         const installedSurface = installedAppId ? request.surface ?? null : null;
-        if (request.appId && !installedAppId) {
+        // The older hash settings page has buttons rather than exact installed links.
+        // A previously enrolled ID can navigate directly, then still has to pass the
+        // exact-ID settings and schema checks before any click is claimed.
+        if (installedAppId && !pathList) {
           const url = new URL(location.href);
-          if (pathList) url.pathname = `/settings/plugins-settings/plugin_${request.appId}`;
-          else url.hash = `settings/Plugins/plugin_${request.appId}`;
+          url.hash = `settings/Plugins/plugin_${installedAppId}`;
           if (!current()) return false;
           location.assign(url.href); return true;
         }

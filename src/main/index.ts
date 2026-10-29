@@ -13,7 +13,7 @@ import { app, Notification, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nat
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
-import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives, WORKER_ARCHIVE_AFTER_FINISH_MS } from './worker-archive.js';
+import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives, workerArchiveFinishDelayMs } from './worker-archive.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
 import { enrolledPluginSurfaces } from './plugin-refresh.js';
 import {
@@ -564,7 +564,7 @@ void app.whenReady().then(async () => {
   await loadWorkerArchive();
   // Worker chats are archived in ChatGPT when the setting is on: a little after their worker reports
   // its task done (#1701), and once the broker retired them for good (#1460).
-  onWorkerFinished((conversationId) => queueWorkerArchives([conversationId], Date.now(), WORKER_ARCHIVE_AFTER_FINISH_MS));
+  onWorkerFinished((conversationId) => queueWorkerArchives([conversationId], Date.now(), workerArchiveFinishDelayMs()));
   onWorkerChatsRetired((conversationIds) => queueWorkerArchives(conversationIds));
   await loadBrowserProof();
   // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.

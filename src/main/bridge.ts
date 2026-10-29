@@ -135,6 +135,7 @@ import {
   type PageCallEvidence
 } from './session/recorder.js';
 import { noticeApprovalWaiting, noticeChatStopped } from './stuck-notice.js';
+import { cooHostApprover } from './company-coo-approval.js';
 import { approvalAnswerFor, approvalCardWaiting, noteApprovalCard, parseApprovalCard, parseApprovalResult, resetApprovalWaits, settleApprovalAnswer, type ApprovalWaitDeps } from './approval-wait.js';
 import { APPROVAL_PROGRESS_PREFIX, APPROVAL_REPAIR_DEFERRED_TEXT, APPROVAL_WAITING_TEXT } from '../shared/approval-wait.js';
 import {
@@ -3503,7 +3504,9 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       logInfo(`bridge: ${id} approval card answer ${approvalResult.outcome}`);
     if (pageApproval === '1' || pageApproval === '0')
       void noteApprovalCard(id, pageApproval === '1', astraSession?.id ?? null, approvalWaitDeps, Date.now(),
-        pageApproval === '1' ? parseApprovalCard(url.searchParams.get('approvalCard')) : null).catch(() => undefined);
+        pageApproval === '1' ? parseApprovalCard(url.searchParams.get('approvalCard')) : null)
+        // The CEO's opt-in COO authority decides this card, or settles its answer, after the wait saw it.
+        .then(() => cooHostApprover().consider(id)).catch(() => undefined);
     // An answer waits here for this chat's page, which presses it only on the same card.
     const approvalReply = (): { approvalAnswer?: NonNullable<ReturnType<typeof approvalAnswerFor>> } => {
       const answer = approvalAnswerFor(id);

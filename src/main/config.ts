@@ -193,7 +193,8 @@ const DEFAULT_MULTI_AGENT: MultiAgentSettings = {
   // The user must opt in before sleeping-worker runtime maintenance can terminate anything.
   endSleepingWorkerProcesses: false,
   // Off: archiving changes the user's ChatGPT chat list, so it is opt-in (#1460).
-  archiveWorkerChats: false
+  archiveWorkerChats: false,
+  archiveWorkerDelayMinutes: 2
 };
 /** Fresh-install exposure. Kept separate from migration defaults on purpose. */
 const ALL_FIRST_LAUNCH_CAPABILITIES: Capabilities = Object.fromEntries(
@@ -507,7 +508,8 @@ const configSchema = z.object({
       waitForSubAgents: z.boolean().optional().default(DEFAULT_MULTI_AGENT.waitForSubAgents ?? false),
       autoWorktrees: z.boolean().optional().default(DEFAULT_MULTI_AGENT.autoWorktrees ?? false),
       endSleepingWorkerProcesses: z.boolean().optional().default(DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false),
-      archiveWorkerChats: z.boolean().optional().default(DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false)
+      archiveWorkerChats: z.boolean().optional().default(DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false),
+      archiveWorkerDelayMinutes: z.number().int().min(1).max(1440).optional().default(2)
     })
     .optional()
     .default({
@@ -520,7 +522,8 @@ const configSchema = z.object({
       waitForSubAgents: DEFAULT_MULTI_AGENT.waitForSubAgents ?? false,
       autoWorktrees: DEFAULT_MULTI_AGENT.autoWorktrees ?? false,
       endSleepingWorkerProcesses: DEFAULT_MULTI_AGENT.endSleepingWorkerProcesses ?? false,
-      archiveWorkerChats: DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false
+      archiveWorkerChats: DEFAULT_MULTI_AGENT.archiveWorkerChats ?? false,
+      archiveWorkerDelayMinutes: 2
     }),
   // An empty model id is repaired rather than rejected: the id is free text from a
   // provider listing that changes weekly, and a config that lost it must still load with

@@ -439,6 +439,8 @@ export interface MultiAgentSettings {
    * archive; nothing is deleted. Off by default.
    */
   archiveWorkerChats?: boolean;
+  /** Minutes after a verified worker finish before ChatGPT archive is attempted. */
+  archiveWorkerDelayMinutes?: number;
 }
 
 /** The user's own additions to what each MCP connector tells the model about itself. */

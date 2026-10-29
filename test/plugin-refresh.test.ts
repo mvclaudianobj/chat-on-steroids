@@ -21,6 +21,25 @@ const publish = (version = '1', declarations = tools) => { publishPluginSurface(
 const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat Marks Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
 const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Core', tools: declarations });
 const consumeStartup = consumeRequestedPluginRefreshStartup;
+it('rediscovers an enrolled Core by its exact native App ID when another connector shares its name', async () => {
+  const source = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
+  const section = source.slice(source.indexOf('  let pluginRefreshBusy = false;'), source.indexOf('  function catalogPageReady('));
+  const request = { id: '12345678-1234-4123-8123-123456789abc', appId, surface: 'core', connectorName: 'Chat Marks Core', tools };
+  const destination = `https://chatgpt.com/settings/plugins-settings/plugin_${appId}`;
+  const link = { tagName: 'A', isConnected: true, href: destination, disabled: false };
+  const location = { href: `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${request.id}`,
+    pathname: '/settings/plugins-settings', assign: vi.fn() };
+  const installed = vi.fn((_name: string, exactId: string | null, surface: string | null) =>
+    exactId === appId && surface === 'core' ? [link] : [link, { ...link, href: destination + '_foreign' }]);
+  const context = vm.createContext({ URL, location, alive: true, generating: false, epoch: 1,
+    t: (_key: string, fallback: string) => fallback,
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginInstalledButtons: installed },
+    ask: vi.fn() });
+  vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+  expect(await (context.run as Function)(request)).toBe(true);
+  expect(installed).toHaveBeenCalledWith('Chat Marks Core', appId, 'core');
+  expect(location.assign).toHaveBeenCalledWith(`${destination}?cos-plugin-refresh=${request.id}`);
+});
 it.each(['claimed', 'manual', 'completed'] as const)('keeps the scoped enrolled App ID in an explicit %s observation without another Refresh claim', async state => {
   publish(); const first = (await pendingPluginRefreshes())[0]!;
   if (state === 'manual') await requireManualPluginRefresh({ ...first, appId, connectorName: first.connectorName,
@@ -655,6 +674,18 @@ it('requires readable declarations before claiming even an enrolled exact app', 
   expect(await claimPluginRefresh({ ...next, appId, connectorName: 'Chat Marks Core', tools: null })).toBe(false);
   expect((await readDurable('plugin-refresh') as any[])[0].attempted).toBe(false);
   expect(await claim(next)).toBe(true);
+});
+it('enrolls a recognizable stale Desktop subset only when two declarations remain identical', async () => {
+  const first = { name: 'browser_tabs', description: 'Observe tabs', inputSchema: { type: 'object' } };
+  const second = { name: 'browser_snapshot', description: 'Read tab', inputSchema: { type: 'object' } };
+  const third = { name: 'browser_click', description: 'Click tab', inputSchema: { type: 'object' } };
+  publishPluginSurface('desktop', 'Chat Marks Desktop', '1', '', [first, second, third]);
+  const request = (await pendingPluginRefreshes())[0]!;
+  const attempt = (observed: PluginToolSchema[]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Desktop', tools: observed });
+  expect(await attempt([first, { ...second, description: 'Foreign declaration' }])).toBe(false);
+  expect(await attempt([first, second, { ...third, name: 'foreign_tool' }])).toBe(false);
+  expect(await attempt([first, second])).toBe(true);
+  expect(await completePluginRefresh({ ...request, appId, tools: [first, second, third] })).toBe(true);
 });
 it('enrolls an older known Core superset when a user disabled a tool, never a foreign tool', async () => {
   const plan = { name: 'update_plan', description: 'Update the displayed plan.', inputSchema: { type: 'object' } };

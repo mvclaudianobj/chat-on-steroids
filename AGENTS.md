@@ -2601,7 +2601,8 @@ page reports it on every `/activity` poll as optional `approval=1|0` (older exte
 ten-minute stall clock all wait. The chat gets one `approval-wait:` progress row (texts in
 `src/shared/approval-wait.ts`, translated by the renderer, with Open in browser) and, after 30 s, one
 stop-notice-style desktop notice whose click opens the chat in the app. The app never answers the
-card on its own. The session list carries every waiting chat as `approval`; a catalog-only
+card on its own, except marks-coo's opt-in Company authority below.
+The session list carries every waiting chat as `approval`; a catalog-only
 `session:changed` fires when a wait starts, ends, or goes stale with no poll left to say so.
 
 Since 2.1.38 the person can answer it in the app. With `approval=1` the page also sends
@@ -2619,6 +2620,20 @@ the page carries each token out once and reports `approvalResult` (`clicked`, `c
 `unavailable`) on its next poll. A new card drops an unsent answer; one nobody took within 30 s is
 `expired`. A standing card polls at the active cadence (2 s) even in a hidden tab.
 `sessions:approvalCard { id }` gives the panel the card and the last answer's outcome.
+
+Chat Marks (2026-10-29): the one other filer of that same answer is marks-coo, under the CEO's
+opt-in, revocable authority in Company settings (`cooHostApproval` in company.json: `enabled`,
+`epoch`, `riskTerms`, `audit`; off by default; enabling asks a native confirmation, IPC
+`marksCompany:request { action: 'cooHostPolicy' }`). After each `/activity` poll's
+`noteApprovalCard`, `cooHostApprover().consider(conversationId)` (`src/main/company-coo-approval.ts`)
+files Allow once through `requestApprovalAnswer` and `wakeApprovalConversation` only when
+`companyApprovalOwner` finds the conversation id on exactly one live admitted/running ticket (or the
+verified delegated chief binding), no CEO risk term matches the card's words, the card is not at the
+8-line/300-character bound, Allow once is enabled and no person's answer is pending. A chat no
+Company record names is left alone; ambiguous, risky or Allow-disabled cards are audited as
+`held-*` and the CEO is told through the notification center (`approval-pending`). Every policy
+change bumps the epoch and first calls `revoke`, which withdraws unsent answers
+(`withdrawApprovalAnswer`); the store refuses an `allowed` audit row of another epoch.
 
 A card waiting in a chat that is not on screen is named in the window's notices
 (`#approvalNotice`, renderer `paintApprovalNotice`): one line per waiting chat, "worker-1 waits for

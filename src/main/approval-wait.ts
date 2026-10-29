@@ -16,6 +16,9 @@
  * A click in the app files one answer for that card id, which the same page's next poll carries
  * back; the page presses the button only if the card it shows is still that card. A replaced card,
  * a second click or an answer nobody took within `APPROVAL_ANSWER_MS` sends nothing.
+ *
+ * Chat Marks (2026-10-29): the one other filer of that same answer is marks-coo, only for chats the
+ * Company provably owns and only while the CEO's revocable authority is on (company-coo-approval.ts).
  */
 import { randomUUID } from 'node:crypto';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
@@ -257,6 +260,21 @@ export function approvalAnswerFor(conversationId: string, now = Date.now()): { t
   expire(wait, now);
   const answer = wait.answer;
   return answer && answer.outcome === null ? { token: answer.token, cardId: answer.cardId, choice: answer.choice } : null;
+}
+
+/**
+ * Takes back an answer no page has reported on yet, so its card stays for a person: the CEO's
+ * revocation of the COO's authority (company-coo-approval.ts). A page that already took the answer
+ * from its last poll may still press it; its report then settles nothing here.
+ */
+export function withdrawApprovalAnswer(conversationId: string, token: string): boolean {
+  const wait = waits.get(conversationId);
+  const answer = wait?.answer;
+  if (!wait || !answer || answer.token !== token || answer.outcome !== null) return false;
+  wait.answer = null;
+  const key = decisionKey(conversationId, answer.cardId);
+  if (decisionReceipts.get(key)?.token === token) decisionReceipts.delete(key);
+  return true;
 }
 
 /** The page's report on an answer it was given: pressed, or why not. Unknown tokens are ignored. */
