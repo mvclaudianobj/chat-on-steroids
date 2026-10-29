@@ -146,6 +146,8 @@ const api = {
   notificationCenterImport: () => call<{ imported: boolean }>('marksNotify:request', { action: 'import' }),
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
+  jarvisMicrophoneConsent: (enabled?: boolean) => call<boolean>('jarvis:audio', enabled === undefined
+    ? { action: 'microphone-consent' } : { action: 'microphone-consent', enabled }),
   jarvisAudioStatus: () => call<{ models: string[]; local: boolean; windows: boolean; error: string | null }>('jarvis:audio', { action: 'status' }),
   jarvisTranscribe: (engine: 'cliproxy' | 'local' | 'provider', model: string, language: string, mime: 'audio/webm' | 'audio/ogg' | 'audio/mp4', bytes: Uint8Array, voice?: import('../shared/jarvis-voice.js').JarvisVoiceConfig) =>
     call<string>('jarvis:audio', { action: 'transcribe', engine, model, language, mime, bytes, ...(voice ? { voice } : {}) }),

@@ -402,6 +402,17 @@ it('only resumes with stored auth files', async () => {
   await web.resumeWhatsAppWeb();
   expect(mocks.sockets).toHaveLength(1);
 });
+it('retries boot recovery when a saved pairing encounters transient storage failure', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'creds.json'), '{"registered":true}');
+  vi.spyOn(fs, 'mkdir').mockRejectedValueOnce(Object.assign(new Error('synthetic I/O'), { code: 'EIO' }));
+  await web.resumeWhatsAppWeb();
+  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'error', reason: 'storage_unavailable' });
+  await vi.waitFor(() => expect(mocks.sockets).toHaveLength(1), { timeout: 8_000 });
+  mocks.sockets[0]!.ev.emit('connection.update', { connection: 'open' });
+  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected' });
+});
 it('does not restart a persisted WhatsApp session after shutdown wins a delayed resume read', async () => {
   const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
   await fs.mkdir(dir, { recursive: true });

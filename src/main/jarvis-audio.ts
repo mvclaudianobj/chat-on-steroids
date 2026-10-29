@@ -10,6 +10,7 @@ import { allApiModels } from './api-chat/catalog.js';
 import { apiChatKey, apiChatSettings } from './api-chat/settings.js';
 import { resolveApiChatBaseUrl } from './api-chat/client.js';
 import { isJarvisAudioModelId } from '../shared/jarvis-ptt.js';
+import { jarvisMicrophoneConsented, setJarvisMicrophoneConsent } from './jarvis-microphone-consent.js';
 import { markspanelAccessBlocked } from './markspanel-auth.js';
 import { jarvisVoiceConfigSchema, jarvisVoiceRoutingSchema } from '../shared/jarvis-voice.js';
 import { jarvisVoiceStatus, jarvisVoiceRouteStatus, speakJarvisVoice, storeJarvisVoiceKey, streamJarvisVoice, transcribeJarvisVoice } from './jarvis-voice.js';
@@ -116,6 +117,10 @@ export function registerJarvisAudioIpc(getWindow: () => BrowserWindow | null): v
       const target = getWindow();
       if (!target || target.isDestroyed() || target.webContents !== event.sender || event.senderFrame !== target.webContents.mainFrame) throw new Error('Window not authorized');
       if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
+      if (payload && typeof payload === 'object' && (payload as { action?: unknown }).action === 'microphone-consent') {
+        const command = z.object({ action: z.literal('microphone-consent'), enabled: z.boolean().optional() }).strict().parse(payload);
+        return { ok: true, data: command.enabled === undefined ? jarvisMicrophoneConsented() : await setJarvisMicrophoneConsent(command.enabled) };
+      }
       if (status.safeParse(payload).success) return { ok: true, data: await jarvisAudioStatus() };
       const action = payload && typeof payload === 'object' ? (payload as { action?: unknown }).action : undefined;
       if (action === 'cancel') { active?.abort(); active = null; return { ok: true, data: null }; }

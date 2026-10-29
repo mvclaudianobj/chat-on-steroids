@@ -155,6 +155,7 @@ import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
 import { browserWindowIconPath, WINDOWS_APP_USER_MODEL_ID } from './window-icon.js';
 import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
 import { allowJarvisMicrophone } from './jarvis-permissions.js';
+import { restoreJarvisMicrophoneConsent, jarvisMicrophoneConsented } from './jarvis-microphone-consent.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 import { connectionLossLine, showConnectionLossNotice } from './connection-loss-notice.js';
 import { requireMarkspanelLogin, startMarkspanelSessionMonitor } from './markspanel-auth.js';
@@ -825,14 +826,25 @@ void app.whenReady().then(async () => {
     });
   });
 
-  // Deny every permission request except Jarvis's audio-only microphone for the app's own page.
+  await restoreJarvisMicrophoneConsent();
+  // Both Electron permission gates enforce the same durable, app-wide consent.
+  // This never starts capture; getUserMedia is still invoked by Jarvis PTT.
   session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
     const main = window && !window.isDestroyed() ? window.webContents : null;
-    callback(allowJarvisMicrophone({
+    callback(jarvisMicrophoneConsented() && allowJarvisMicrophone({
       permission, fromMainWindow: !!main && contents === main, isMainFrame: details.isMainFrame === true,
       requestingUrl: details.requestingUrl ?? '', appUrl: main?.getURL() ?? '',
       mediaTypes: (details as { mediaTypes?: string[] }).mediaTypes
     }));
+  });
+  session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) => {
+    const main = window && !window.isDestroyed() ? window.webContents : null;
+    return jarvisMicrophoneConsented() && allowJarvisMicrophone({
+      permission, fromMainWindow: !!main && contents === main,
+      isMainFrame: details.isMainFrame === true,
+      requestingUrl: details.requestingUrl ?? '', appUrl: main?.getURL() ?? '',
+      mediaTypes: details.mediaType ? [details.mediaType] : []
+    });
   });
 
   // From here on a second launch may safely focus/recreate the window: renderer security policy
@@ -900,8 +912,11 @@ void app.whenReady().then(async () => {
   // The green connector transition is an independent opportunity to restore
   // registered Baileys credentials. Resume is idempotent; explicit logout deletes
   // the saved auth and cannot be undone by this listener.
-  watchWhatsAppResumeOnGreen(getStatus, onStatusChange, resumeWhatsAppWeb, () => !quitting);
-  void resumeWhatsAppWeb().catch(() => undefined);
+  const resumeEnabledWhatsApp = async (): Promise<void> => {
+    if ((await notificationSettings()).channels['whatsapp-web'].enabled && !quitting) await resumeWhatsAppWeb();
+  };
+  watchWhatsAppResumeOnGreen(getStatus, onStatusChange, resumeEnabledWhatsApp, () => !quitting);
+  void resumeEnabledWhatsApp().catch(() => undefined);
   setInterval(() => {
     if (quitting) return;
     void getWhatsAppWebStatus().then(status => {

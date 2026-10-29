@@ -1,4 +1,4 @@
-import { startWhatsAppWeb, disconnectWhatsAppWeb, getWhatsAppWebStatus, WhatsAppPairingError } from './notification-whatsapp-web.js';
+import { startWhatsAppWeb, disconnectWhatsAppWeb, getWhatsAppWebStatus, resumeWhatsAppWeb, stopWhatsAppWeb, WhatsAppPairingError } from './notification-whatsapp-web.js';
 import { startTelegramPairing, checkTelegramPairing, cancelTelegramPairing } from './notification-telegram-pair.js';
 import QRCode from 'qrcode';
 import { dialog, ipcMain, type BrowserWindow } from 'electron';
@@ -78,6 +78,10 @@ async function importSettings(window: BrowserWindow): Promise<{ imported: boolea
   return { imported: true };
 }
 export function registerNotificationCenterIpc(getWindow: () => BrowserWindow | null): void {
+  async function applyWhatsAppSetting(): Promise<void> {
+    if ((await notificationSettings()).channels['whatsapp-web'].enabled) await resumeWhatsAppWeb();
+    else await stopWhatsAppWeb();
+  }
   ipcMain.handle('marksNotify:request', async (event, payload: unknown) => {
     try {
       const window = getWindow();
@@ -102,11 +106,11 @@ export function registerNotificationCenterIpc(getWindow: () => BrowserWindow | n
         case 'tg-start': { const result = await startTelegramPairing(); data = { ...result, qr: await QRCode.toDataURL(result.url) }; break; }
         case 'tg-check': data = await checkTelegramPairing(); break;
         case 'tg-cancel': cancelTelegramPairing(); data = true; break;
-        case 'save': data = await saveNotificationSettings(parsed.settings); break;
+        case 'save': data = await saveNotificationSettings(parsed.settings); await applyWhatsAppSetting(); break;
         case 'credential': data = await setNotificationCredential(parsed.channel, parsed.credential, parsed.masterPassword); break;
         case 'test': data = await testNotificationChannel(parsed.channel); break;
         case 'export': data = await exportSettings(window); break;
-        case 'import': data = await importSettings(window); break;
+        case 'import': data = await importSettings(window); if ((data as { imported: boolean }).imported) await applyWhatsAppSetting(); break;
       }
       return { ok: true, data };
     } catch (error) {
