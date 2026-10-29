@@ -3,6 +3,17 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+// Baileys stores key bytes via BufferJSON ({ type: 'Buffer', data: base64 }).
+const fakeKey = { type: 'Buffer', data: Buffer.alloc(32, 1).toString('base64') };
+const pairedCreds = (registered = false) => ({
+  registered, me: { id: '5511999999999:3@s.whatsapp.net' },
+  noiseKey: { public: fakeKey, private: fakeKey },
+  signedIdentityKey: { public: fakeKey, private: fakeKey },
+  signedPreKey: { keyPair: { public: fakeKey, private: fakeKey }, signature: fakeKey, keyId: 1 },
+  advSecretKey: Buffer.alloc(32, 2).toString('base64'),
+  registrationId: 100,
+  account: { details: fakeKey, accountSignature: fakeKey, deviceSignature: fakeKey }
+});
 const mocks = vi.hoisted(() => ({
   directory: '', startError: null as Error | null, authError: null as Error | null, authStuck: false, authCalls: 0, saveStarted: false, saveBarrier: null as Promise<void> | null, registered: false,
   sockets: [] as Array<{ ev: import('node:events').EventEmitter; ws: { close: ReturnType<typeof vi.fn> }; sendMessage: ReturnType<typeof vi.fn>; logout: ReturnType<typeof vi.fn> }>
@@ -17,6 +28,8 @@ it('uses the named socket factory exported by the actual Baileys CommonJS entry'
   expect(typeof actual.useMultiFileAuthState).toBe('function');
 });
 vi.mock('electron', () => ({ app: { getPath: () => mocks.directory } }));
+const logs = vi.hoisted(() => ({ info: vi.fn(), warn: vi.fn() }));
+vi.mock('../src/main/logger.js', () => ({ logInfo: logs.info, logWarn: logs.warn }));
 vi.mock('@whiskeysockets/baileys', async () => {
   const { EventEmitter } = await import('node:events');
   return {
@@ -32,10 +45,10 @@ vi.mock('@whiskeysockets/baileys', async () => {
       if (mocks.authError) throw mocks.authError;
       if (mocks.authStuck) return new Promise(() => undefined);
       return {
-      state: { creds: { registered: mocks.registered } }, saveCreds: vi.fn(async () => {
+      state: { creds: mocks.registered ? { registered: true, me: { id: 'synthetic@s.whatsapp.net' } } : { registered: false } }, saveCreds: vi.fn(async () => {
         mocks.saveStarted = true;
         if (mocks.saveBarrier) await mocks.saveBarrier;
-        await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify({ synthetic: true, registered: mocks.registered }));
+        await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify(mocks.registered ? pairedCreds(true) : { synthetic: true, registered: false }));
       })
       };
     })
@@ -52,6 +65,7 @@ beforeEach(async () => {
   mocks.saveStarted = false;
   mocks.saveBarrier = null;
   mocks.registered = false;
+  logs.info.mockClear(); logs.warn.mockClear();
   vi.resetModules();
   web = await import('../src/main/notification-whatsapp-web.js');
 });
@@ -398,14 +412,38 @@ it('only resumes with stored auth files', async () => {
   expect(mocks.sockets).toHaveLength(0);
   const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
   await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-  await fs.writeFile(path.join(dir, 'creds.json'), '{"registered":true}');
+  await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify(pairedCreds(true)));
   await web.resumeWhatsAppWeb();
   expect(mocks.sockets).toHaveLength(1);
+});
+it('resumes QR-paired credentials with registered=false, me.id, identity keys and account', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify(pairedCreds(false)));
+  await web.resumeWhatsAppWeb();
+  expect(mocks.sockets).toHaveLength(1);
+  mocks.sockets[0]!.ev.emit('connection.update', { connection: 'open' });
+  expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected' });
+});
+it('refuses incomplete or unpaired credentials and logs no identifiers', async () => {
+  const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
+  await fs.mkdir(dir, { recursive: true });
+  for (const creds of [
+    { registered: true }, { ...pairedCreds(false), me: undefined },
+    { ...pairedCreds(false), noiseKey: undefined }, { ...pairedCreds(false), signedIdentityKey: undefined },
+    { ...pairedCreds(false), account: { details: fakeKey }, advSecretKey: '' }
+  ]) {
+    await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify(creds));
+    await web.resumeWhatsAppWeb();
+    expect(mocks.sockets).toHaveLength(0);
+  }
+  expect(logs.info).toHaveBeenCalledWith('WhatsApp resume: no valid saved pairing');
+  expect(JSON.stringify(logs.info.mock.calls)).not.toContain('5511999999999');
 });
 it('retries boot recovery when a saved pairing encounters transient storage failure', async () => {
   const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, 'creds.json'), '{"registered":true}');
+  await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify(pairedCreds(true)));
   vi.spyOn(fs, 'mkdir').mockRejectedValueOnce(Object.assign(new Error('synthetic I/O'), { code: 'EIO' }));
   await web.resumeWhatsAppWeb();
   expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'error', reason: 'storage_unavailable' });
@@ -416,7 +454,7 @@ it('retries boot recovery when a saved pairing encounters transient storage fail
 it('does not restart a persisted WhatsApp session after shutdown wins a delayed resume read', async () => {
   const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, 'creds.json'), '{"registered":true}');
+  await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify(pairedCreds(true)));
   const originalRead = fs.readFile.bind(fs);
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
@@ -438,7 +476,7 @@ it('does not restart a persisted WhatsApp session after shutdown wins a delayed 
 it('does not reconnect when shutdown supersedes an in-flight startup credential read', async () => {
   const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
   await fs.mkdir(dir, { recursive: true });
-  await fs.writeFile(path.join(dir, 'creds.json'), '{"registered":true}');
+  await fs.writeFile(path.join(dir, 'creds.json'), JSON.stringify(pairedCreds(true)));
   const original = fs.readFile.bind(fs);
   let unblock!: () => void;
   const blocked = new Promise<void>(resolve => { unblock = resolve; });
