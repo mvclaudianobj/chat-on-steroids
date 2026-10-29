@@ -162,6 +162,7 @@ it('has a row for every file that handles modifier keys, so a new shortcut canno
   const guards = new Map([
     ['skills.ts', 'the slash menu only steps aside when a modifier is held'],
     ['cli-chat-ui.ts', 'the CLI chat composer guards Alt+Enter without defining a global shortcut'],
+    ['api-chat-ui.ts', 'the existing Ctrl/Cmd+Shift+Enter shortcut is already listed under the message box; CLI chats route it to their engine'],
     ['jarvis.ts', 'the configurable hold-to-talk key already appears as Hold to dictate']
   ]);
   const renderer = new URL('../src/renderer/', import.meta.url);
