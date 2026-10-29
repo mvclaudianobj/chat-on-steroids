@@ -1,6 +1,6 @@
 import nodePath from 'node:path';
 import { getConfig } from './config.js';
-import { noteAgentContextTokens, persistCriticalSwarmNow, stageSpawn, markStagedWorkerWorktree, swarmStateForCaller, type Caller, type SpawnInput } from './agents.js';
+import { noteAgentContextTokens, persistCriticalSwarmNow, stageSpawn, stageMessages, requestWorkerRevivals, markStagedWorkerWorktree, swarmStateForCaller, statusForCaller, type Caller, type SpawnInput } from './agents.js';
 import { logWarn } from './logger.js';
 import { setWorkspaceFor } from './workspace.js';
 import { findSessionByConversation } from './session/store.js';
@@ -89,6 +89,33 @@ export async function spawnAgentWorkers(
   admission?: { validate(): Promise<void>; assertCurrent(): void; workspace?: WorkerWorkspace | null }
 ) {
   admission?.assertCurrent();
+  // An explicitly named, reusable sleeping worker retains its actual ChatGPT chat and
+  // managed checkout. A fresh spawn would lose both while filling the chat list.
+  // Only fold a complete request with unique exact labels; mixed/new requests keep the
+  // normal atomic spawn path and its quota checks.
+  const existing = statusForCaller(input.caller);
+  const chosen = input.workers.map(worker => worker.label?.trim()
+    ? existing.state.agents.filter(agent => agent.role === 'worker' && agent.label === worker.label!.trim() &&
+        agent.state === 'sleeping' && agent.revivable === true && !!agent.conversationId &&
+        (worker.model === undefined || worker.model === agent.model) &&
+        (worker.reasoning_effort === undefined || worker.reasoning_effort === agent.reasoningEffort))
+    : []);
+  if (existing.self?.role === 'prime' && chosen.length > 0 && chosen.every(matches => matches.length === 1) &&
+    new Set(chosen.map(matches => matches[0]!.id)).size === chosen.length) {
+    const messages = input.workers.map((worker, i) => ({
+      to: chosen[i]![0]!.id,
+      text: [input.context?.trim(), worker.task.trim()].filter(Boolean).join('\n\n')
+    }));
+    // Do not create hidden empty assignments or drop the shared context.
+    if (messages.every(item => item.text.trim())) {
+      const stagedReuse = stageMessages(input.caller, messages);
+      await acceptAgentMutation(stagedReuse, 'Worker reuse could not cross its durable acceptance barrier');
+      requestWorkerRevivals(stagedReuse.waking, stagedReuse.runId);
+      return { created: chosen.map(matches => ({ ...matches[0]!, state: 'waking' as const })),
+        becamePrime: false, runId: stagedReuse.runId, defaultNotes: [],
+        isolationNotes: [`Reused ${chosen.length} sleeping worker chat(s) with their existing identities and worktrees.`] };
+    }
+  }
   const staged = stageSpawn(input);
   // Newly staged admissions alone may own Git branches. A repeated spawn may show
   // existing workers in `created`, but must never reallocate their checkouts.

@@ -13,7 +13,8 @@ import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js'
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
 import { isApiConversationId } from '../shared/api-chat.js';
-import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
+import { approvalCardView, approvalCardWaiting, requestApprovalAnswer } from './approval-wait.js';
+import { queueWorkerArchives, workerArchiveFinishDelayMs } from './worker-archive.js';
 import { registerDictationIpc } from './dictation.js';
 import { registerRemoteHostsIpc } from './remote/hosts-ipc.js';
 import { revokeRemoteChat } from './remote/approval.js';
@@ -191,6 +192,7 @@ import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
 import {
   clearAgent,
+  closableWorkerConversations,
   onSwarmChange,
   pauseSwarmForDisable,
   persistAgentAuthorityNow,
@@ -966,6 +968,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     };
     // Recording, workers and direct browser tools share the same extension transport.
     // Startup and settings saves use one eligibility rule.
+    if (!before.multiAgent.archiveWorkerChats && next.multiAgent.archiveWorkerChats) {
+      // The explicit Off -> On transition is consent to migrate already finished workers.
+      // This is a reversible ChatGPT archive; their durable reports, identity and worktrees
+      // stay untouched. Active workers and unresolved host approvals are never migrated.
+      const eligible = closableWorkerConversations(0).filter(id => !approvalCardWaiting(id));
+      queueWorkerArchives(eligible, Date.now(), workerArchiveFinishDelayMs());
+      logInfo(`worker archive: user-enabled migration queued ${eligible.length} stopped worker chat(s)`);
+    }
     await step(() => browserExtensionRequired(next) ? startBridge() : stopBridge());
     if (before.ui.chatBrowser !== next.ui.chatBrowser) await step(syncCosBrowser);
     if (before.capabilities.screen !== next.capabilities.screen || before.capabilities.control !== next.capabilities.control || before.readOnly !== next.readOnly) wakeBrowserWork('browser-control');

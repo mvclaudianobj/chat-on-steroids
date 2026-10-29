@@ -117,6 +117,7 @@ const {
   workerRevivalClaimed
 } = await import('../src/main/agents.js');
 const { startMcpServer } = await import('../src/main/mcp/server.js');
+const { spawnAgentWorkers } = await import('../src/main/agent-admission.js');
 const { runningToolCalls } = await import('../src/main/mcp/call-context.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { createSession, getSession, findSessionByConversation, initSessionStore, readRecentEvents, requestTurnOwnershipCutoff, resetSessionStoreForTests } = await import(
@@ -230,6 +231,34 @@ function startWorker(id: string, conversationId = `c-${id}`): { caller: Caller }
 function fillContext(conversationId: string): void {
   noteAgentContextTokens(conversationId, WORKER_CONTEXT_CEILING_TOKENS);
 }
+
+it('recycles an exactly named sleeping worker through durable messaging, keeping its id and chat', async () => {
+  startSwarm(1);
+  const worker = startWorker('worker-1', 'c-reusable-worker');
+  finishAgent(worker.caller, 'previous report');
+  const revived: string[] = [];
+  onReviveRequest(workers => revived.push(...workers.map(item => item.id)));
+  const before = swarmStateForCaller(prime).agents.filter(info => info.role === 'worker');
+  expect(before).toHaveLength(1);
+  const result = await spawnAgentWorkers({
+    caller: prime, workers: [{ label: 'Worker 1', task: 'Do the next task' }], context: 'Preserve the project'
+  }, async () => null, () => false);
+  expect(result.created).toMatchObject([{ id: 'worker-1', state: 'waking', conversationId: 'c-reusable-worker' }]);
+  expect(swarmStateForCaller(prime).agents.filter(info => info.role === 'worker')).toHaveLength(1);
+  expect(revived).toContain('worker-1');
+  expect(offerMessages('worker-1').map(message => message.text).join(' ')).toContain('Do the next task');
+});
+
+it('reuses a named worker from parked history without opening a replacement chat', async () => {
+  startSwarm(1);
+  const worker = startWorker('worker-1', 'c-reusable-parked');
+  finishAgent(worker.caller, 'parked report');
+  expect(releaseQuiescentRun()).toBe(true);
+  const result = await spawnAgentWorkers({ caller: prime,
+    workers: [{ label: 'Worker 1', task: 'Continue in original conversation' }] }, async () => null, () => false);
+  expect(result.created).toMatchObject([{ id: 'worker-1', state: 'waking', conversationId: 'c-reusable-parked' }]);
+  expect(swarmStateForCaller(prime).agents.filter(info => info.role === 'worker')).toHaveLength(1);
+});
 
 describe('exact worker prime provenance', () => {
   it('keeps the same exact prime through active, sleeping and dormant worker states', () => {
