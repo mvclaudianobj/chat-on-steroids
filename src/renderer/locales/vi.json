@@ -2978,6 +2978,7 @@
   "Secure OS credential storage is unavailable, so nothing was changed": "Bộ lưu trữ thông tin đăng nhập an toàn của hệ thống không khả dụng nên chưa có gì thay đổi",
   "A handoff cannot be empty": "Bàn giao không được để trống",
   "That session no longer exists": "Phiên đó không còn nữa",
+  "The recorded session is unavailable for recovery": "Phiên đã ghi không khả dụng để khôi phục",
   "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "Nhóm trò chuyện, dấu trang, bản nháp chờ bạn và phần Xem lại tốt hơn.",
   "Chat groups": "Nhóm trò chuyện",
   "Sort a project's chats into groups from its ⋯ menu.": "Sắp xếp các cuộc trò chuyện của một dự án vào nhóm từ menu ⋯ của nó.",

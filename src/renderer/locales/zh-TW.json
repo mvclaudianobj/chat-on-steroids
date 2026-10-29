@@ -2978,6 +2978,7 @@
   "Secure OS credential storage is unavailable, so nothing was changed": "系統的安全憑證儲存空間無法使用，因此未做任何變更",
   "A handoff cannot be empty": "交接內容不能為空",
   "That session no longer exists": "該工作階段已不存在",
+  "The recorded session is unavailable for recovery": "無法使用已記錄的工作階段進行復原",
   "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "聊天分組、書籤、等你回來的草稿，以及更好的檢閱。",
   "Chat groups": "聊天分組",
   "Sort a project's chats into groups from its ⋯ menu.": "從專案的 ⋯ 選單把它的聊天分到各個群組。",

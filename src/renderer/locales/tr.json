@@ -3025,6 +3025,7 @@
   "Secure OS credential storage is unavailable, so nothing was changed": "Sistemin güvenli kimlik bilgisi deposu kullanılamıyor, bu yüzden hiçbir şey değiştirilmedi",
   "A handoff cannot be empty": "Devir boş olamaz",
   "That session no longer exists": "Bu oturum artık yok",
+  "The recorded session is unavailable for recovery": "Kaydedilen oturum kurtarma için kullanılamıyor",
   "Chat groups, bookmarks, drafts that wait for you, and a better Review.": "Sohbet grupları, yer imleri, sizi bekleyen taslaklar ve daha iyi bir İnceleme.",
   "Chat groups": "Sohbet grupları",
   "Sort a project's chats into groups from its ⋯ menu.": "Bir projenin sohbetlerini ⋯ menüsünden gruplara ayırın.",
