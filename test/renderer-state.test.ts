@@ -618,7 +618,7 @@ it('starts project groups collapsed and deliberately expands the project selecte
   expect(create.dataset.newProject).toBe(project.id);
   expect(create.nextElementSibling?.classList.contains('project-menu')).toBe(true);
   const item = rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')!;
-  expect([...mounted.window.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(row => row.dataset.rowAction)).toEqual(['new-chat', 'group-new', 'color', 'remove']);
+  expect([...mounted.window.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(row => row.dataset.rowAction)).toEqual(['new-chat', 'group-new', 'chatgpt-link', 'color', 'secrets-shield', 'remove']);
   expect(item.textContent).toBe('New chat in this project');
   expect(item.dataset.newProject).toBe(project.id);
   expect(mounted.window.document.activeElement).toBe(item);
@@ -1860,13 +1860,13 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   const actions = (): Array<string | undefined> => [...doc.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.dataset.rowAction);
   rowMenuItem(row(chat.id), 'rename');
   // Schedule… (#1826) sits with the chat's own actions.
-  expect(actions()).toEqual(['pin', 'rename', 'open', 'copy-link', 'share', 'schedule', 'block', 'remove']);
+  expect(actions()).toEqual(['pin', 'archive', 'rename', 'open', 'copy-link', 'share', 'schedule', 'block', 'remove']);
   expect(doc.querySelector('.row-menu [data-row-action="remove"]')!.classList.contains('is-danger')).toBe(true);
   closeRowMenus(doc);
   // A row that is not a chat offers only what applies to it.
   await waitFor(() => expect(row(loose.id)).not.toBeNull());
   rowMenuItem(row(loose.id), 'block');
-  expect(actions()).toEqual(['block', 'remove']);
+  expect(actions()).toEqual(['archive', 'block', 'remove']);
   closeRowMenus(doc);
   const shown = (id: string) => `${row(id).textContent} ${[...row(id).querySelectorAll<HTMLElement>('[title]'), row(id)].map(node => node.getAttribute('title') ?? '').join(' ')}`;
   expect(shown(loose.id)).toContain('not a chat');
@@ -1880,12 +1880,12 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(row(loose.id).closest('.session-diagnostics')).not.toBeNull();
   // Groups are kept by the chat's own id, so it can be sorted into one of its project's groups already.
   rowMenuItem(row(pending.id), 'rename');
-  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
+  expect(actions()).toEqual(['archive', 'rename', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   expect(row(renamed.id).closest('.session-diagnostics')).toBeNull();
   expect(shown(renamed.id)).not.toContain('not a chat');
   rowMenuItem(row(renamed.id), 'rename');
-  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
+  expect(actions()).toEqual(['archive', 'rename', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   // A right click opens the same menu; its items run their action.
   row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
@@ -2402,7 +2402,7 @@ it('manages CLIProxyAPI through the modules API and opens its existing console a
   (doc.getElementById('workspaceSettings') as HTMLButtonElement).click();
   (doc.querySelector('#tabs [data-tab="modules"]') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(doc.getElementById('moduleCliStatus')!.textContent).toBe('Stopped'));
-  expect(modulesStatus).toHaveBeenCalledTimes(1);
+  expect(modulesStatus).toHaveBeenCalledTimes(2);
   expect(doc.querySelector('[data-panel="modules"]')!.classList.contains('is-active')).toBe(true);
   expect([button('moduleCliStart').disabled, button('moduleCliStop').disabled, button('moduleCliInstall').disabled])
     .toEqual([false, true, true]);
@@ -2422,7 +2422,7 @@ it('manages CLIProxyAPI through the modules API and opens its existing console a
   expect(moduleAction).not.toHaveBeenCalled();
   subnav.click();
   await vi.waitFor(() => expect(doc.querySelector('[data-panel="module-cli-proxy"]')!.classList.contains('is-active')).toBe(true));
-  await vi.waitFor(() => expect(modulesStatus).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(modulesStatus).toHaveBeenCalledTimes(3));
   await vi.waitFor(() => expect(button('moduleCliStart').disabled).toBe(false));
   expect(subnav.getAttribute('aria-current')).toBe('page');
   expect(doc.querySelector('#tabs [data-tab="modules"]')!.classList.contains('is-sel')).toBe(true);
@@ -2434,7 +2434,7 @@ it('manages CLIProxyAPI through the modules API and opens its existing console a
   // Entering the subitem of a running module opens the verified console immediately,
   // in the backend-owned isolated BrowserWindow; no iframe/webview is ever embedded.
   (doc.querySelector('#tabs [data-tab="modules"]') as HTMLButtonElement).click();
-  await vi.waitFor(() => expect(modulesStatus).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect(modulesStatus).toHaveBeenCalledTimes(4));
   subnav.click();
   await vi.waitFor(() => expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'open', installed.managementUrl));
   expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'start', undefined);
@@ -2457,7 +2457,7 @@ it('manages CLIProxyAPI through the modules API and opens its existing console a
   await vi.waitFor(() => expect(button('moduleRefresh').disabled).toBe(false));
   const checkedBeforeRefresh = modulesStatus.mock.calls.length;
   button('moduleRefresh').click();
-  await vi.waitFor(() => expect(modulesStatus).toHaveBeenCalledTimes(checkedBeforeRefresh + 1));
+  await vi.waitFor(() => expect(modulesStatus).toHaveBeenCalledTimes(checkedBeforeRefresh + 2));
   expect(address.value).toBe('http://127.0.0.1:18081/management.html');
 
   button('moduleCliStop').click();
@@ -2487,11 +2487,11 @@ it('opens the CLIProxyAPI console after a pending status check, without duplicat
   (doc.querySelector('#tabs [data-tab="modules"]') as HTMLButtonElement).click();
   (doc.getElementById('moduleCliActive') as HTMLInputElement).click();
   (doc.getElementById('moduleCliNav') as HTMLButtonElement).click();
-  expect(modulesStatus).toHaveBeenCalledTimes(1);
+  expect(modulesStatus).toHaveBeenCalledTimes(2);
   expect(moduleAction).not.toHaveBeenCalled();
   finishStatus({ ok: true, data: [ready] });
   await vi.waitFor(() => expect(moduleAction).toHaveBeenCalledWith('cli-proxy-api', 'open', ready.managementUrl));
-  expect(modulesStatus).toHaveBeenCalledTimes(1);
+  expect(modulesStatus).toHaveBeenCalledTimes(2);
   expect(doc.querySelector('[data-panel="module-cli-proxy"] iframe, [data-panel="module-cli-proxy"] webview')).toBeNull();
   const reopen = doc.getElementById('moduleCliReopen') as HTMLButtonElement;
   await vi.waitFor(() => expect(reopen.disabled).toBe(false));
@@ -2528,7 +2528,7 @@ it('offers guided CLIProxyAPI installation and keeps action failures visible wit
   expect(doc.getElementById('moduleCliNav')!.hidden).toBe(false);
   (doc.getElementById('moduleCliNav') as HTMLButtonElement).click();
   await vi.waitFor(() => expect(doc.querySelector('[data-panel="module-cli-proxy"]')!.classList.contains('is-active')).toBe(true));
-  await vi.waitFor(() => expect(modulesStatus).toHaveBeenCalledTimes(2));
+  await vi.waitFor(() => expect(modulesStatus).toHaveBeenCalledTimes(3));
   expect(button('moduleCliOpen').disabled).toBe(true);
   expect(moduleAction).toHaveBeenCalledTimes(1); // Installation guide; toggling alone never opens a console.
   expect(doc.querySelector('.toast')?.textContent).toContain('Installation guide opened');

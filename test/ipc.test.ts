@@ -1012,6 +1012,9 @@ describe('turning multi-agent mode off', () => {
   });
 
   it('does not acknowledge the toggle until the parked retained history is durable', async () => {
+    // Earlier tests may already have retired workers. Disabling a run must not
+    // retire another worker, but it must also preserve the prior ledger.
+    const retiredBefore = await readDurable<any>('ipc-retired-workers');
     const prime = '11111111-2222-4333-8444-555555555555';
     const worker = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     spawn({ workers: [{ task: 'must stay fenced after disable' }], caller: { conversationId: prime } });
@@ -1042,7 +1045,8 @@ describe('turning multi-agent mode off', () => {
         })
       ]
     });
-    expect(await readDurable<any>('ipc-retired-workers')).toMatchObject({ workers: [] });
+    const retiredAfter = await readDurable<any>('ipc-retired-workers');
+    expect(retiredAfter?.workers).toEqual(retiredBefore?.workers ?? []);
   });
 
   it('survives a disabled restart and re-enable with the exact old worker chat still revivable', async () => {
