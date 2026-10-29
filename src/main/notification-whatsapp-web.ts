@@ -333,7 +333,18 @@ export async function resumeWhatsAppWeb(): Promise<void> {
     if (files.includes('creds.json')) {
       const raw = await fs.readFile(path.join(directory(), 'creds.json'), 'utf8');
       const creds = JSON.parse(raw) as { registered?: unknown };
-      if (creds.registered === true && resumeEpoch === generation && !disconnecting) await startWhatsAppWeb();
+      if (creds.registered === true && resumeEpoch === generation && !disconnecting) {
+        // A resumed pairing is already authorized. Unlike an explicit Connect
+        // failure, a transient boot/network error must retain retry intent.
+        wantConnection = true;
+        try { await beginConnect(); }
+        catch (error) {
+          if (!wantConnection) return;
+          const reason = error instanceof WhatsAppPairingError ? error.issue : 'unknown';
+          status = { state: 'error', reason, stage: status.stage };
+          if (reason !== 'session_invalid') scheduleReconnect();
+        }
+      }
     }
   } catch { /* No existing pairing. */ }
 }

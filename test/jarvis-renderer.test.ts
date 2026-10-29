@@ -48,6 +48,7 @@ async function fixture(audio = false) {
   }
   const api = {
     dictationSupported: true,
+    jarvisMicrophoneConsent: vi.fn(async (enabled?: boolean) => ({ ok: true as const, data: enabled ?? false })),
     jarvisAudioStatus: async () => ({ ok: true as const, data: { models: ['whisper-1'], local: false, windows: true, error: null } }),
     jarvisTranscribe: transcribe, jarvisCancel: async () => ({ ok: true as const, data: null }),
     startDictation: start, stopDictation: stop, apiChatSend: send,
@@ -72,7 +73,7 @@ describe('Jarvis hold-to-talk safety and actual composer routing', () => {
     f.check('jarvisEnabled');
     f.hold();
     expect(f.start).not.toHaveBeenCalled();
-    f.check('jarvisConsent');
+    f.check('jarvisConsent'); await f.flush();
     f.hold(); await f.flush();
     expect(f.start).toHaveBeenCalledTimes(1);
     f.emit({ type: 'status', status: 'listening' });
@@ -89,7 +90,7 @@ describe('Jarvis hold-to-talk safety and actual composer routing', () => {
 
   it('discards an unfinished utterance when the user changes chats', async () => {
     const f = await fixture();
-    f.check('jarvisEnabled'); f.check('jarvisConsent');
+    f.check('jarvisEnabled'); f.check('jarvisConsent'); await f.flush();
     f.hold(); await f.flush();
     f.emit({ type: 'final', text: 'sensitive draft' });
     f.select('test-jarvis-0002');
@@ -103,7 +104,7 @@ describe('Jarvis hold-to-talk safety and actual composer routing', () => {
 
   it('records synthetic audio only during hold, transcribes on release and sends recognized text', async () => {
     const f = await fixture(true);
-    f.check('jarvisEnabled'); f.check('jarvisConsent');
+    f.check('jarvisEnabled'); f.check('jarvisConsent'); await f.flush();
     f.hold(); await f.flush();
     expect(f.transcribe).not.toHaveBeenCalled();
     expect(f.send).not.toHaveBeenCalled();

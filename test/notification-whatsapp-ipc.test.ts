@@ -4,6 +4,8 @@ const mocks = vi.hoisted(() => ({
   handler: undefined as undefined | ((event: unknown, payload: unknown) => Promise<unknown>),
   start: vi.fn(),
   status: vi.fn(),
+  resume: vi.fn(),
+  stop: vi.fn(),
   warned: vi.fn()
 }));
 vi.mock('electron', () => ({
@@ -13,6 +15,8 @@ vi.mock('electron', () => ({
 vi.mock('../src/main/notification-whatsapp-web.js', () => ({
   startWhatsAppWeb: mocks.start,
   getWhatsAppWebStatus: mocks.status,
+  resumeWhatsAppWeb: mocks.resume,
+  stopWhatsAppWeb: mocks.stop,
   disconnectWhatsAppWeb: vi.fn(),
   WhatsAppPairingError: class WhatsAppPairingError extends Error {
     issue: string;
@@ -29,7 +33,7 @@ vi.mock('../src/main/notification-center.js', () => ({
 vi.mock('../src/main/logger.js', () => ({ logWarn: mocks.warned }));
 vi.mock('../src/main/main-texts.js', () => ({ dialogLabel: vi.fn(), mainText: vi.fn() }));
 
-beforeEach(() => { mocks.start.mockReset(); mocks.status.mockReset(); mocks.warned.mockReset(); });
+beforeEach(() => { mocks.start.mockReset(); mocks.status.mockReset(); mocks.warned.mockReset(); mocks.resume.mockReset(); mocks.stop.mockReset(); });
 
 it('passes only a safe issue and stage when WhatsApp initialization fails in the authorized main frame', async () => {
   const { WhatsAppPairingError } = await import('../src/main/notification-whatsapp-web.js');
@@ -63,4 +67,20 @@ it('rejects renderer subframes before invoking WhatsApp start', async () => {
   const response = await mocks.handler!({ sender: window.webContents, senderFrame: {} }, { action: 'wa-start' });
   expect(response).toMatchObject({ ok: false });
   expect(mocks.start).not.toHaveBeenCalled();
+});
+
+it('restores only the enabled WhatsApp channel after settings are saved', async () => {
+  const center = await import('../src/main/notification-center.js');
+  const { registerNotificationCenterIpc } = await import('../src/main/notification-ipc.js');
+  const window = { isDestroyed: () => false, webContents: { mainFrame: {}, isDestroyed: () => false } };
+  registerNotificationCenterIpc(() => window as never);
+  vi.mocked(center.saveNotificationSettings).mockResolvedValue({} as never);
+  vi.mocked(center.notificationSettings).mockResolvedValueOnce({ channels: { 'whatsapp-web': { enabled: true } } } as never)
+    .mockResolvedValueOnce({ channels: { 'whatsapp-web': { enabled: false } } } as never);
+  const event = { sender: window.webContents, senderFrame: window.webContents.mainFrame };
+  expect(await mocks.handler!(event, { action: 'save', settings: {} })).toMatchObject({ ok: true });
+  expect(mocks.resume).toHaveBeenCalledTimes(1);
+  expect(mocks.stop).not.toHaveBeenCalled();
+  expect(await mocks.handler!(event, { action: 'save', settings: {} })).toMatchObject({ ok: true });
+  expect(mocks.stop).toHaveBeenCalledTimes(1);
 });

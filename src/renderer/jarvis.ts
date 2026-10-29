@@ -490,7 +490,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         : native ? t('ChatGPT model: use the model selected in this chat') : t('CLIProxy model: use the model selected in this chat');
     if (readiness) {
       const checks = [!preferences.enabled ? t('Enable Jarvis to start.') : !target ? t('Select a ChatGPT or CLIProxy conversation.')
-        : !consented ? t('Allow microphone capture and audio transmission for this session.')
+        : !consented ? t('Allow microphone capture and audio transmission in Jarvis settings.')
           : stt ? t('Speech-to-text (STT) is ready.') : t('Speech-to-text (STT) is not configured or available.')];
       checks.push(!preferences.tts ? t('Spoken replies (TTS) are off. Enable Speak replies to hear ChatGPT.')
         : speaks() ? t('Spoken replies (TTS) are available.') : t('Spoken replies (TTS) need a working provider or system voice.'));
@@ -507,7 +507,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     }
     const reason = !preferences.enabled ? t('Set up Jarvis in Settings to speak with ChatGPT.') : !target
       ? t('Jarvis needs a ChatGPT or CLIProxy conversation. The voice provider configures audio, not chat.')
-      : !consented ? t('Enable microphone and audio transmission consent in Jarvis settings for this session.')
+      : !consented ? t('Enable microphone and audio transmission consent in Jarvis settings.')
       : !stt ? t('No transcription engine is ready. Check the voice provider URL, saved key and STT model, or choose a CLIProxy transcription model.')
       : !recorderAvailable && stt !== 'windows' ? t('This app cannot access microphone recording. Check system permissions and restart the app.')
       : '';
@@ -940,7 +940,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       provider: readProvider(), routing: readRouting(), version: 2
     });
     try { localStorage.setItem(KEY, JSON.stringify(preferences)); } catch { /* preferences stay for this session */ }
-    if (!preferences.enabled) { cancel(); consented = false; consent.checked = false; }
+    if (!preferences.enabled) cancel();
     if (JSON.stringify(preferences.provider) !== before) { showProvider(); refreshProvider(); }
     else if (preferences.enabled) refresh();
     if (JSON.stringify(preferences.routing) !== oldRouting) { showRouting(); refreshRouteStatus(); }
@@ -1022,12 +1022,27 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       }).catch(error => { if (providerStatus) providerStatus.textContent = error instanceof Error ? error.message.slice(0, 240) : 'Voice test failed.'; })
       .finally(() => { button.disabled = false; });
   });
+  let consentRequest = 0;
   consent.addEventListener('change', () => {
-    consented = consent.checked;
-    if (!consented) cancel();
+    const enabled = consent.checked;
+    const epoch = ++consentRequest;
+    consented = false;
+    if (!enabled) cancel();
     resetTypedWatch();
     paint();
-    if (consented) void readAnswer();
+    void api.jarvisMicrophoneConsent(enabled).then(reply => {
+      if (epoch !== consentRequest) return;
+      consented = reply.ok && reply.data === enabled && enabled;
+      consent.checked = reply.ok ? reply.data : false;
+      if (!reply.ok) status.textContent = t('Microphone consent could not be saved.');
+      paint();
+      if (consented) void readAnswer();
+    }).catch(() => {
+      if (epoch !== consentRequest) return;
+      consented = false; consent.checked = false;
+      status.textContent = t('Microphone consent could not be saved.');
+      paint();
+    });
   });
   const fillVoices = (): void => {
     if (!systemSpeech()) return;
@@ -1059,7 +1074,13 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   document.addEventListener('visibilitychange', () => { if (document.hidden) cancel(); });
   window.addEventListener('beforeunload', cancel, { once: true });
   onLanguageChange(paint);
-  // Consent and capture must never survive a page reload.
+  // Only permission survives reload. Running capture/turn ownership never does.
+  void api.jarvisMicrophoneConsent().then(reply => {
+    if (consentRequest || !reply.ok) return;
+    consented = reply.data;
+    consent.checked = reply.data;
+    paint();
+  }).catch(() => undefined);
   refresh();
   refreshRouteStatus();
   paintProvider();

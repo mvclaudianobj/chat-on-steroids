@@ -93,6 +93,7 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   const statusRejectors: Array<(error: Error) => void> = [];
   const api = {
     dictationSupported: false,
+    jarvisMicrophoneConsent: vi.fn(async (enabled?: boolean) => ({ ok: true as const, data: enabled ?? false })),
     jarvisAudioStatus: async () => ({ ok: true as const, data: { models: options.noAudioEngines ? [] : ['whisper-1'], local: false, windows: false, error: null } }),
     jarvisVoiceStatus: async () => options.deferredProviderStatus
       ? await new Promise<{ ok: true; data: { models: string[]; stt: string[]; tts: string[]; primary: boolean; fallback: boolean; ffmpeg: boolean; error: string | null } }>((resolve, reject) => {
