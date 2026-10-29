@@ -51,11 +51,11 @@ it('keeps the lines of a block of markup, and names a picture without a descript
 
 it('states its language, the date and where it came from, and names an untitled chat as asked', () => {
   const html = transcriptHtml(' ', [{ role: 'user', text: 'Hi' }], { user: 'Du', assistant: 'ChatGPT' },
-    { lang: 'de', date: '24. Oktober 2026', footer: 'Geteilt aus Chat On Steroids', untitled: 'Neuer Chat' });
+    { lang: 'de', date: '24. Oktober 2026', footer: 'Geteilt aus Chat Marks', untitled: 'Neuer Chat' });
   expect(html).toContain('<html lang="de">');
   expect(html).toContain('<title>Neuer Chat</title>');
   expect(html).toContain('<h1>Neuer Chat</h1>\n<p class="date">24. Oktober 2026</p>');
-  expect(html).toContain('<footer>Geteilt aus Chat On Steroids</footer>');
+  expect(html).toContain('<footer>Geteilt aus Chat Marks</footer>');
 });
 
 describe('hidden details', () => {

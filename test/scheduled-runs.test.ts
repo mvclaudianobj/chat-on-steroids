@@ -194,7 +194,7 @@ it('starts empty without a saved file, keeps the good schedules of a damaged one
   await durable.writeDurableNow('scheduled-runs', { version: 2, schedules: 'x' });
   expect(await runs.listSchedules()).toEqual([]);
   await expect(runs.saveSchedule({ sessionId: SESSION, text: 'x', repeat: { kind: 'daily', at: '09:00' }, until: null }, local('2026-10-25T08:00:00')))
-    .rejects.toThrow('These schedules were saved by a newer version of Chat On Steroids. Update the app to change them.');
+    .rejects.toThrow('These schedules were saved by a newer version of Chat Marks. Update the app to change them.');
   expect(await durable.readDurable('scheduled-runs')).toEqual({ version: 2, schedules: 'x' });
 });
 
