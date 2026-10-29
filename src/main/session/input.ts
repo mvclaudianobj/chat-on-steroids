@@ -1213,6 +1213,33 @@ export function cancelInput(id: string): Promise<boolean> {
   });
 }
 
+/** Retire every delivery owned by a deleted session before deleting its metadata.
+ * Tombstones survive restart, so load() cannot materialize a withdrawn opening again.
+ * Browser sends with ambiguous receipts remain marked unconfirmed; they are never replayed.
+ */
+export function cancelSessionInputs(sessionId: string): Promise<number> {
+  return serial(async () => {
+    const current = await load();
+    const owned = current.filter(row => (row.sessionId === sessionId || row.deliveredSessionId === sessionId) && !terminal(row));
+    if (!owned.length) return 0;
+    const ids = new Set(owned.map(row => row.id));
+    const now = Date.now();
+    await commit(current.map(row => ids.has(row.id) ? {
+      ...row, state: 'cancelled' as const, cancelledByUser: true, owner: null,
+      error: row.sendAuthorizedAt !== undefined || row.state === 'tool'
+        ? 'Session deleted; delivery to ChatGPT may already have occurred.'
+        : 'Session deleted before delivery.',
+      pickupFailedAt: now
+    } : row));
+    for (const id of ids) {
+      decisionWaiters.get(id)?.reject(new Error('goal_browser_cancelled'));
+      decisionWaiters.delete(id);
+      offered.delete(id);
+    }
+    return owned.length;
+  });
+}
+
 /** Only explicit withdrawal of a provably unsent opening retires its empty reservation.
  * The cancelled outbox row remains the tombstone; timeout/failure never grants deletion.
  * Runs under the input queue, which also owns initial provider binding and Send authority. */
@@ -1771,12 +1798,13 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         const conversationId = await target(entry);
         // A worker chat this app archived in ChatGPT has no message box until it is restored (#1701).
         if (conversationId && !readyForWake(conversationId)) continue;
-        // A new chat of a project with a native ChatGPT Project opens in that Project and nowhere
-        // else: it waits while the Project is being created or could not be, never the root.
+        // While a native Project is being created, wait for its identity. Once ChatGPT
+        // explicitly rejects that Project, the local project still owns the chat and
+        // its work: open a regular ChatGPT conversation instead of blocking forever.
         // A branch is made where its source chat lives in ChatGPT, never on a Project's page.
         const chatgptProject = !conversationId && entry.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch
           ? (await getProject(entry.projectId))?.chatgpt : undefined;
-        if (chatgptProject && chatgptProject.state !== 'linked') continue;
+        if (chatgptProject && chatgptProject.state !== 'linked' && chatgptProject.state !== 'failed') continue;
         const [end] = !entry.silenceBoundary && manualInput(entry) && entry.sessionId
           ? await readRecentEvents(entry.sessionId, 1, { kinds: ['turn_start', 'turn_end'] }) : [];
         const silenceTurnId = entry.silenceBoundary?.turnId ?? (end?.kind === 'turn_end' && end.outcome === 'failed' &&

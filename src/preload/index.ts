@@ -619,6 +619,7 @@ const api = {
     call<string[]>('sessions:trust', { id, expectedConversationId, trusted }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   archiveSession: (id: string, archived: boolean) => call<SessionSummary>('sessions:archive', { id, archived }),
+  setSessionPins: (ids: string[]) => call<boolean>('sessions:setPins', { ids }),
   /** Chats matching every word of `query`, by title first, then by what was said in them. */
   searchSessions: (query: string) => call<SessionSearchReply>('sessions:search', { query }),
   locateSearchMatch: (id: string, query: string) => call<SessionSearchLocation | null>('sessions:locate-match', { id, query }),

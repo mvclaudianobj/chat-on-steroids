@@ -565,7 +565,7 @@ function syncRetentionPins(): void {
   const bridge = api as typeof api & { setSessionPins?: (ids: string[]) => Promise<void> };
   if (sidebarPins && bridge.setSessionPins) {
     const ids = sidebarPins.ids();
-    retentionPinsWrite = retentionPinsWrite.then(() => bridge.setSessionPins!(ids)).catch(() => {
+    retentionPinsWrite = retentionPinsWrite.then(async () => { await bridge.setSessionPins!(ids); }).catch(() => {
       // Main keeps its fail-closed retention gate until the pin set is durably saved.
     });
   }

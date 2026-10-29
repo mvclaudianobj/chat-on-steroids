@@ -893,7 +893,7 @@ describe('cancelling', () => {
     }
   });
 
-  it('leaves to the app whatever cancelling would do beyond the one message', async () => {
+  it('cancels an unsent opening but keeps paired messages and worker ownership guarded', async () => {
     const reserved = randomUUID();
     const opening = row({ id: reserved, sessionId: reserved, text: 'first message of a new chat', opening: true });
     const pairedSession = await makeSession('Paired', 'chat-paired');
@@ -905,19 +905,20 @@ describe('cancelling', () => {
     const cancels = vi.spyOn(startInput, 'cancelDesktopInput');
     try {
       const refusals = await Promise.all([opening, first, second].map((entry) => post('/v1/inputs/' + (entry as { id: string }).id + '/cancel')));
-      expect(refusals.map((reply) => reply.status)).toEqual([409, 409, 409]);
-      expect(refusals.map((reply) => reply.body.error)).toEqual(['not_cancellable', 'not_cancellable', 'not_cancellable']);
-      expect(refusals[0]!.body.detail).toContain('new chat');
+      expect(refusals.map((reply) => reply.status)).toEqual([200, 409, 409]);
+      expect(refusals[0]!.body.cancelled).toBe(true);
+      expect(refusals.slice(1).map((reply) => reply.body.error)).toEqual(['not_cancellable', 'not_cancellable']);
       expect(refusals[1]!.body.detail).toContain('paired');
       const forWorker = await post('/v1/inputs/' + (workers as { id: string }).id + '/cancel');
       expect(forWorker.status).toBe(409);
       expect(forWorker.body.error).toBe('session_not_controllable');
-      expect(cancels).not.toHaveBeenCalled();
+      expect(cancels).toHaveBeenCalledTimes(1);
     } finally {
       cancels.mockRestore();
     }
     const rows = await outbox();
-    expect(rows.every((entry) => entry.state === 'queued')).toBe(true);
+    expect(rows.find(entry => entry.id === reserved)?.state).toBe('cancelled');
+    expect(rows.filter(entry => entry.id !== reserved).every(entry => entry.state === 'queued')).toBe(true);
     // The reserved chat of the opening message is still there.
     const { getSession } = await import('../src/main/session/store.js');
     expect(await getSession(chatSession)).not.toBeNull();

@@ -28,7 +28,8 @@ import {
 } from './connection.js';
 import { setSystemProxyResolver } from './tunnel/index.js';
 import { configureAppProxy, refreshAppProxy } from './app-proxy.js';
-import { openSessionChat, registerIpc } from './ipc.js';
+import { openSessionChat, registerIpc, deleteRecordedSession } from './ipc.js';
+import { runArchiveRetentionSweep } from './session/archive-retention.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, onLog, snapshotLogOnCrash } from './logger.js';
 import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
@@ -916,6 +917,13 @@ void app.whenReady().then(async () => {
       app.quit();
     }
   );
+  const archiveRetentionSweep = () => {
+    if (quitting || windowActivation.isDisabled()) return;
+    void runArchiveRetentionSweep(async id => { await deleteRecordedSession(id); })
+      .catch(error => logWarn(`archive retention: sweep failed: ${error instanceof Error ? error.message : String(error)}`));
+  };
+  archiveRetentionSweep();
+  setInterval(archiveRetentionSweep, 6 * 60 * 60_000).unref();
   // Chats are restored here; the window, once enabled, can ask for its state before the pet overlay is ready.
   markStartup('restored');
   windowActivation.enable();

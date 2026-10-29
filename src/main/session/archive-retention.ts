@@ -95,7 +95,14 @@ export async function runArchiveRetentionSweep(deleteSafely: (id: string) => Pro
             (row.state === 'sent' && row.deliveredAt === undefined) ||
             (row.state === 'cancelled' && row.sendAuthorizedAt && !row.deliveredAt)));
       },
-      deleteSafely,
+      deleteSafely: async id => {
+        // Settings and pins may change during an asynchronous scan; recheck
+        // immediately before entering the shared destructive path.
+        const latest = getConfig().ui;
+        if (latest.archiveRetentionPinsReady !== true || (latest.archiveRetentionDays ?? 30) === 0 ||
+            (latest.archiveRetentionPins ?? []).includes(id)) throw new Error('retention settings or pins changed during scan');
+        await deleteSafely(id);
+      },
       log: logInfo
     });
   } finally {

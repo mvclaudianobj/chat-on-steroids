@@ -6,7 +6,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
-  fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
+  fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, cancelSessionInputs, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
   noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck
@@ -93,6 +93,18 @@ afterEach(async () => {
 });
 
 describe('durable user input ownership', () => {
+  it('retires all unsent deliveries of a deleted chat and never rematerializes its opening after restart', async () => {
+    const opening = await enqueueInput(input({ sessionId: null }));
+    const other = await enqueueInput(input({ sessionId: 'session-two' }));
+    expect(openings.has(opening.id)).toBe(true);
+    expect(await cancelSessionInputs(opening.id)).toBe(1);
+    openings.delete(opening.id);
+    resetInputForTests();
+    const rows = await listInputs();
+    expect(rows.find(row => row.id === opening.id)).toMatchObject({ state: 'cancelled', cancelledByUser: true });
+    expect(rows.find(row => row.id === other.id)?.state).toBe('queued');
+    expect(openings.has(opening.id)).toBe(false);
+  });
   it.each([
     ['held for Setup', 'Message queued. Finish Setup to send: Enter a tunnel ID that looks like tunnel_ followed by 32 hex characters.', 'queued'],
     ['held after a failed browser start', 'Message queued. Browser startup failed: Chrome refused startup', 'queued'],

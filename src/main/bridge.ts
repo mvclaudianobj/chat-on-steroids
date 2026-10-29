@@ -3071,7 +3071,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
       const entry = (await listInputs()).find(row => row.id === body.id);
       // A branch (#482) is made where its source chat lives in ChatGPT, never on a Project's page.
       const link = entry?.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch ? (await getProject(entry.projectId))?.chatgpt : undefined;
-      if (link && (link.state !== 'linked' || body.project !== link.id)) return json(res, 200, { input: null }, origin);
+      // A confirmed failed Project has no native destination. Its queued local
+      // chat must remain deliverable on the regular new-chat page; uncertain
+      // creation still waits so we cannot produce an accidental duplicate.
+      if (link && link.state !== 'failed' && (link.state !== 'linked' || body.project !== link.id))
+        return json(res, 200, { input: null }, origin);
     }
     // #1794: an automatic send is first checked with the person's send check, outside the queue's lock.
     const automatic = (await listInputs()).find(row => row.id === body.id && row.state === 'queued');

@@ -3392,6 +3392,26 @@ it('lets a branch from a chat of a linked project be claimed on its draft, not o
   expect(await claim(branch.id)).toMatchObject({ id: branch.id, branch: { conversationId, messageId } });
 });
 
+it('releases a new chat to standalone delivery when its native ChatGPT Project was removed', async () => {
+  const folder = path.join(directory, 'gone-project-' + randomUUID());
+  await fs.mkdir(folder);
+  const config = defaultConfig();
+  await saveConfig({ ...config, roots: [{ name: 'project', path: folder }] });
+  const projects = await import('../src/main/projects.js');
+  const project = await addProject(folder);
+  const request = (project.chatgpt as { requestId: string }).requestId;
+  expect(await projects.claimProjectCreate(request, 'page-a')).toBe(true);
+  expect(await projects.armProjectCreate(request, 'page-a')).toBe(true);
+  const projectId = `g-p-${'b'.repeat(32)}`;
+  expect(await projects.completeProjectCreate(request, 'page-a', projectId)).toBe(true);
+  const first = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id });
+  expect((await input.pendingBrowserInputs()).some(row => row.id === first.id && row.project === projectId)).toBe(true);
+  expect(await projects.markProjectGone(project.id, projectId)).toBe(true);
+  expect((await input.pendingBrowserInputs()).find(row => row.id === first.id)).toMatchObject({ id: first.id, conversationId: null });
+  expect((await post('/input/claim', { id: first.id, owner: 'home-page', conversationId: null, requiresAuthorization: true })).body.input)
+    .toMatchObject({ id: first.id });
+});
+
 it('gives a branch the history it was branched from before its first question, without duplicates (#482)', async () => {
   // Live 2.1.41 (VM): the first question was recorded at Send, the copied history only after the
   // page knew its new id, so the question sat above the history it continues.
