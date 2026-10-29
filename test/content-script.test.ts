@@ -23104,7 +23104,7 @@ describe('the goal loop', () => {
       expect(view.mode).toMatchObject({ value: '', note: 'waiting for the app', warn: false, disabled: true });
       expect(view.rows[0]).toMatchObject({ key: 'autoCompact', note: 'waiting for the app', disabled: true });
       expect(view.tip).toBe('Auto-compaction: waiting for the app\nGoal and Loop: waiting for the app');
-      expect(view.objective).toMatchObject({ available: false, unavailable: 'Waiting for Chat On Steroids to answer.' });
+      expect(view.objective).toMatchObject({ available: false, unavailable: 'Waiting for Chat Marks to answer.' });
       expect(JSON.stringify(view)).not.toMatch(/OpenRouter|API key/);
     });
 
