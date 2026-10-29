@@ -440,7 +440,8 @@ it('allows unattributed file edits through code mode while preserving permission
     await saveConfig({ ...config, multiAgent: { ...config.multiAgent, enabled: true } });
     const spawn = await call(undefined, 'text(await tools.agents({action:"spawn",workers:[{task:"Must never start"}]}));');
     expect(JSON.parse(emittedText(spawn)).isError).toBe(true);
-    expect(text(spawn)).toContain('UNIDENTIFIED_CALLER');
+    // The broker now raises the exact proof failure before generic caller fallback.
+    expect(text(spawn)).toContain('WORKER_IDENTITY_LOST');
   } finally {
     await saveConfig(config);
   }
