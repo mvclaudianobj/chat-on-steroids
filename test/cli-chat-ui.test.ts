@@ -69,6 +69,28 @@ it('routes standalone Codex to managed copy and npm Claude to explicit external 
     expect(confirm).toHaveBeenCalledTimes(2);
   } finally { confirm.mockRestore(); }
 });
+it('offers explicit reinstall at the latest version for Codex and Claude', async () => {
+  const actions = vi.fn(async () => ({ok:true,data:[]}));
+  const states = ['codex','claude'].map(id=>({
+    id,name:id,version:'1.2.3',latest:'1.2.3',installed:true,enabled:true,running:true,
+    supported:true,detail:'ready',managed:true,external:false,updateAvailable:false
+  }));
+  const confirm = vi.spyOn(dom.window,'confirm').mockReturnValue(true);
+  try {
+    createCliModulesUi({
+      cliStatus:async()=>({ok:true,data:states}),cliSessions:async()=>({ok:true,data:[]}),
+      listProjects:async()=>({ok:true,data:[]}),cliAction:actions
+    } as any,{showTab:()=>{},openChatView:()=>{},workspace:()=>null});
+    await vi.waitFor(()=>expect(dom.window.document.getElementById('codexInstall')?.hasAttribute('hidden')).toBe(false));
+    for(const id of ['codex','claude']) {
+      const button=dom.window.document.getElementById(id+'Install') as HTMLButtonElement;
+      expect(button.textContent).toContain('1.2.3');
+      button.click();
+    }
+    await vi.waitFor(()=>expect(actions).toHaveBeenCalledWith('codex','update','1.2.3'));
+    await vi.waitFor(()=>expect(actions).toHaveBeenCalledWith('claude','update','1.2.3'));
+  } finally {confirm.mockRestore();}
+});
 
 it('shows enabled modules in the terminal details section without a backend selector', async () => {
   const open = async () => ({ ok: true as const, data: { id: 'module', cwd: '/approved', session: 'marks_opencode' } });
