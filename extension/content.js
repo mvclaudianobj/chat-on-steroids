@@ -777,6 +777,7 @@
   /** Exact request id -> one durable local turn, null when the retained stream conflicts. */
   const streamRequestTurnOwners = new Map();
   let pulling = false;
+  let approvalPullQueued = false;
 
   /**
    * `'resume' | 'worker' | null` — whether this chat was opened by the app, and how.
@@ -7392,6 +7393,12 @@
       armNextActivityPull();
     } finally {
       pulling = false;
+      if (approvalPullQueued) {
+        approvalPullQueued = false;
+        // A wake that raced an in-flight poll must not be lost until the 2-30s
+        // periodic timer. Re-check the same document after the older read settles.
+        queueMicrotask(() => { if (current() && CLF_DOM.conversationId() === forId) void pullActivity(); });
+      }
     }
     // Outside the guard, and last: startCompact runs for tens of seconds and polls this
     // same endpoint while it works, so firing it with `pulling` still set would deadlock
@@ -14271,6 +14278,16 @@
         if (recorderHandle.healthy()) {
           try { observe(); } catch { /* The regular tick observes again. */ }
         }
+        sendResponse({ ok: true });
+        return false;
+      }
+      if (message.type === 'clf-approval-pull') {
+        const id = message.conversationId;
+        if (typeof id !== 'string' || !/^[0-9a-f-]{8,64}$/i.test(id) || conversationId !== id || CLF_DOM.conversationId() !== id) {
+          sendResponse({ ok: false }); return false;
+        }
+        if (pulling) approvalPullQueued = true;
+        else void pullActivity();
         sendResponse({ ok: true });
         return false;
       }

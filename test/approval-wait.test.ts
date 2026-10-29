@@ -341,6 +341,57 @@ describe('answering the card from the app', () => {
     deps = { record: async () => ({ seq: 1, time: 1 }), notify: () => undefined, log: () => undefined };
   });
 
+  it('publishes the first card before the initial session-list update, so approval works without opening chat', async () => {
+    const snapshots: Array<ReturnType<typeof approvalCardView>> = [];
+    deps.changed = () => { snapshots.push(approvalCardView('chat', 1_000)); };
+    await noteApprovalCard('chat', true, 'worker-session', deps, 1_000, card('first-card'));
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({ id: 'first-card', answer: null });
+    const asked = requestApprovalAnswer('chat', 'first-card', 'allow', 1_010);
+    expect(asked.ok).toBe(true);
+    if (!asked.ok) return;
+    expect(approvalAnswerFor('chat', 1_020)).toMatchObject({ token: asked.token, choice: 'allow' });
+  });
+
+  it('notifies the interface of a replaced card before its old approval can be replayed', async () => {
+    const snapshots: Array<ReturnType<typeof approvalCardView>> = [];
+    deps.changed = () => { snapshots.push(approvalCardView('chat', 1_050)); };
+    await noteApprovalCard('chat', true, 'worker-session', deps, 1_000, card('first-card'));
+    const first = requestApprovalAnswer('chat', 'first-card', 'allow', 1_010);
+    if (!first.ok) throw new Error('initial card missing');
+    await noteApprovalCard('chat', true, 'worker-session', deps, 1_050, card('replacement-card'));
+    expect(snapshots.map(view => view?.id)).toEqual(['first-card', 'replacement-card']);
+    expect(approvalAnswerFor('chat', 1_060)).toBeNull();
+    expect(approvalDecisionStatus('chat', 'first-card', 1_060)).toBe('card_changed');
+    expect(requestApprovalAnswer('chat', 'first-card', 'allow', 1_060)).toEqual({ ok: false, error: 'card_changed' });
+  });
+
+  it('isolates concurrent worker approvals, refusals, reconnection and cancellation', async () => {
+    const a = card('worker-a'), b = card('worker-b');
+    await Promise.all([
+      noteApprovalCard('chat-a', true, 'session-a', deps, 1_000, a),
+      noteApprovalCard('chat-b', true, 'session-b', deps, 1_000, b)
+    ]);
+    const first = requestApprovalAnswer('chat-a', a.id, 'deny', 1_100);
+    const second = requestApprovalAnswer('chat-b', b.id, 'allow', 1_100);
+    if (!first.ok || !second.ok) throw new Error('Concurrent requests were not created');
+    expect(requestApprovalAnswer('chat-a', a.id, 'allow', 1_150)).toEqual({ ok: false, error: 'answer_pending' });
+    expect(approvalAnswerFor('chat-b', 1_200)?.token).toBe(second.token);
+    expect(settleApprovalAnswer('chat-a', second.token, 'dismissed')).toBe(false);
+    expect(settleApprovalAnswer('chat-a', first.token, 'dismissed')).toBe(true);
+    await noteApprovalCard('chat-a', false, 'session-a', deps, 1_300);
+    expect(approvalAnswerFor('chat-a', 1_310)).toBeNull();
+    expect(approvalAnswerFor('chat-b', 1_310)?.token).toBe(second.token);
+    // A reconnect sees the same pending request, never an additional consent.
+    await noteApprovalCard('chat-b', true, 'session-b', deps, 1_400, b);
+    expect(approvalAnswerFor('chat-b', 1_410)?.token).toBe(second.token);
+    // The page disappears before delivery: a later session cannot inherit that answer.
+    resetApprovalWaits();
+    await noteApprovalCard('chat-b', true, 'session-b', deps, 2_000, card('new-session-card'));
+    expect(approvalAnswerFor('chat-b', 2_010)).toBeNull();
+    expect(settleApprovalAnswer('chat-b', second.token, 'dismissed')).toBe(false);
+  });
+
   it('shows the card the page reported and relays one answer for exactly that card', async () => {
     await noteApprovalCard('chat', true, 'session', deps, 1_000, card('c1'));
     expect(approvalCardView('chat', 1_000)).toMatchObject({ id: 'c1', lines: ['Gmail', 'Allow ChatGPT to use Gmail?', 'Creates a draft.'], allow: true, answer: null });

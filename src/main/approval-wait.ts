@@ -123,6 +123,7 @@ export async function noteApprovalCard(
   card?: ApprovalCardFacts | null
 ): Promise<void> {
   let wait = waits.get(conversationId);
+  let changedCard = false;
   if (wait && (!waiting || now - wait.seenAt >= APPROVAL_FRESH_MS)) {
     waits.delete(conversationId);
     if (wait.stale) clearTimeout(wait.stale);
@@ -154,15 +155,15 @@ export async function noteApprovalCard(
     wait = before.wait;
     wait.seenAt = now;
     waits.set(conversationId, wait);
+    changedCard = true;
     deps.log(`bridge: ${conversationId} shows the same tool approval card again; it was redrawn, not answered`);
-    try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
     if (before.anchor && wait.sessionId) await deps.record(wait.sessionId, wait.progressId, APPROVAL_WAITING_TEXT, before.anchor).catch(() => null);
   }
   if (!wait) {
     wait = { since: now, seenAt: now, noticed: false, progressId: `${APPROVAL_PROGRESS_PREFIX}${conversationId}:${now}`, sessionId: null, row: null, card: null, answer: null, stale: null };
     waits.set(conversationId, wait);
+    changedCard = true;
     deps.log(`bridge: ${conversationId} waits for the user to answer ChatGPT's tool approval card`);
-    try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
   }
   wait.seenAt = now;
   if (deps.changed) {
@@ -184,12 +185,18 @@ export async function noteApprovalCard(
     arm(APPROVAL_FRESH_MS);
   }
   if (card) {
+    if (wait.card?.id !== card.id || !sameWords(wait.card, card) || wait.card.allow !== card.allow) changedCard = true;
     // Another card replaces this one: an answer filed for the old card must never reach it.
     if (wait.card && wait.card.id !== card.id) {
       if (wait.answer?.outcome === null) receiptOutcome(conversationId, wait.answer, 'card_changed');
       wait.answer = null;
     }
     wait.card = card;
+  }
+  // Publish an atomic snapshot: the list says "needs approval" only after its exact
+  // card is available. A replacement also wakes already-rendered home/worker controls.
+  if (changedCard) {
+    try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
   }
   if (sessionId && !wait.sessionId) {
     wait.sessionId = sessionId;

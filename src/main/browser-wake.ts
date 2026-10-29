@@ -3,11 +3,18 @@ import type http from 'node:http';
 import { WebSocket, WebSocketServer } from 'ws';
 import { logInfo } from './logger.js';
 
-const subscribers = new Set<(topic: 'wake' | 'browser-control') => void>();
+type WakeTopic = 'wake' | 'browser-control' | `approval:${string}`;
+const subscribers = new Set<(topic: WakeTopic) => void>();
 /** The CoS browser's own copy of the extension, or the one in the person's browser. */
 export type WakeHost = 'cos' | 'browser';
-export function wakeBrowserWork(topic: 'wake' | 'browser-control' = 'wake'): void {
+export function wakeBrowserWork(topic: WakeTopic = 'wake'): void {
   for (const wake of subscribers) wake(topic);
+}
+
+/** Prompt the already-owned ChatGPT document to check its pending approval immediately.
+ * Wake is only a hint; the exact-card decision still comes from authenticated /activity. */
+export function wakeApprovalConversation(conversationId: string): void {
+  if (/^[0-9a-f-]{8,64}$/i.test(conversationId)) wakeBrowserWork(`approval:${conversationId}`);
 }
 
 /** `changed` hears an authenticated channel open or close: whether the browser is there at all. */
@@ -68,7 +75,7 @@ export function attachBrowserWake(server: http.Server, allowed: (request: http.I
     });
   };
   server.on('upgrade', upgrade);
-  const wake = (topic: 'wake' | 'browser-control') => {
+  const wake = (topic: WakeTopic) => {
     for (const client of authorized.keys()) {
       if (client.readyState === WebSocket.OPEN && client.bufferedAmount < 1024) client.send(topic);
       else drop(client, client.readyState === WebSocket.OPEN ? 'its wake messages backed up' : 'its socket was no longer open');

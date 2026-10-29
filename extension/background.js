@@ -2947,6 +2947,20 @@ function closeWakeSocket() {
   const previous = wakeSocket; wakeSocket = null;
   if (previous) previous.close();
 }
+/** Nudge only the already-registered, currently owned document for this chat.
+ * It pulls an authenticated /activity reply itself; no click or permission crosses WS. */
+function wakeApprovalPage(conversationId) {
+  for (const [key, bound] of Object.entries(tabConversations)) {
+    if (bound !== conversationId) continue;
+    const tab = Number(key);
+    const source = { tab, documentId: tabDocuments[key], navigationEpoch: tabEpochs[key] };
+    if (!ownsDocument(source)) continue;
+    void currentConversationDocument(source, conversationId).then(current => {
+      if (!current || !ownsDocument(source)) return;
+      return chrome.tabs.sendMessage(tab, { type: 'clf-approval-pull', conversationId }, { documentId: source.documentId });
+    }).catch(() => undefined);
+  }
+}
 function connectWakeSocket() {
   if (!token || disconnected || !port || typeof WebSocket === 'undefined') return;
   // Which copy this is, never a credential: the token goes in the first message, below.
@@ -2967,6 +2981,10 @@ function connectWakeSocket() {
     else if (event.data === 'wake') {
       void pumpBrowserControl().catch(() => undefined);
       void maintain(true).catch(() => undefined);
+    }
+    else if (typeof event.data === 'string' && event.data.startsWith('approval:')) {
+      const id = cleanConversationId(event.data.slice('approval:'.length));
+      if (id) wakeApprovalPage(id);
     }
   };
   connection.onerror = () => connection.close();

@@ -2,7 +2,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
-import { attachBrowserWake, wakeBrowserWork } from '../src/main/browser-wake.js';
+import { attachBrowserWake, wakeApprovalConversation, wakeBrowserWork } from '../src/main/browser-wake.js';
 import * as logger from '../src/main/logger.js';
 
 const cleanup: Array<() => Promise<void>> = [];
@@ -21,6 +21,13 @@ async function setup(auth: (token: string) => Promise<boolean> = async token => 
   return { bridge, client };
 }
 describe('authenticated wake-only browser transport', () => {
+  it('wakes the exact conversation after an explicit app approval without sending the decision or credentials', async () => {
+    const h = await setup(); const client = h.client(); await once(client, 'open');
+    const ready = once(client, 'message'); client.send('paired'); await ready;
+    const notice = once(client, 'message');
+    wakeApprovalConversation('11111111-1111-4111-8111-111111111111');
+    expect(String((await notice)[0])).toBe('approval:11111111-1111-4111-8111-111111111111');
+  });
   it('signals current and newly published work without carrying input text', async () => {
     const h = await setup(); const client = h.client(); await once(client, 'open');
     expect(h.bridge.connected()).toBe(false); // an unauthenticated socket is not delivery reachability

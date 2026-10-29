@@ -47,7 +47,7 @@ import { refreshAppProxy } from './app-proxy.js';
 import { externalModuleAction } from './external-modules.js';
 import { committedResumeAncestorsFromSummary, DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
-import { wakeBrowserWork } from './browser-wake.js';
+import { wakeApprovalConversation, wakeBrowserWork } from './browser-wake.js';
 import { refreshKeepAwake } from './keep-awake.js';
 import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
@@ -2165,6 +2165,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const answer = requestApprovalAnswer(conversationId, cardId, choice);
     if (answer.ok) {
       logInfo(`approval card: the user chose ${choice} in the app for ${conversationId}`);
+      wakeApprovalConversation(conversationId);
       return { ok: true as const };
     }
     return answer;
