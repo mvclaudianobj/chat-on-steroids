@@ -271,6 +271,9 @@ interface Continuation {
 
 /** At most one continuation per session, and at most one open per prime chat. */
 const byToken = new Map<string, Continuation>();
+// A restored claimant existed in the previous process. Only the durable pre-Send
+// checkpoint proves its page did not dispatch, so a new command can take over.
+const recoveredPreSendClaims = new Set<string>();
 const openingBySession = new Map<string, Promise<ContinuationView>>();
 const commitLocks = new Map<string, { to: string; promise: Promise<ContinuationCommitResult> }>();
 const checkpointLocks = new Map<string, Promise<unknown>>();
@@ -526,12 +529,14 @@ function sweep(): void {
     // to *waiting*, and once the durable phase starts there is nothing left to wait for.
     if (entry.state === 'committing' || commitLocks.has(entry.token) || checkpointLocks.has(entry.token)) continue;
     if (entry.state === 'committed' || entry.state === 'aborted') {
+      recoveredPreSendClaims.delete(entry.token);
       // Kept briefly so a repeated ack can be answered with "already done" rather than with
       // a fresh transaction, then forgotten.
       if (Date.now() - entry.touchedAt > CONTINUATION_TTL_MS * 2) byToken.delete(entry.token);
       continue;
     }
     if (expired(entry)) {
+      recoveredPreSendClaims.delete(entry.token);
       abortContinuation(
         entry.token,
         entry.automatic ? 'the handover never landed and was given up on' : 'it took too long and was given up on'
@@ -1301,7 +1306,15 @@ export async function claimContinuationNow(token: string, claimant: string): Pro
     const entry = byToken.get(token);
     if (!entry || !isOpen(entry)) return null;
     if (entry.state === 'awaiting-summary') return null;
-    if (entry.claimedBy !== null && entry.claimedBy !== claimant) return null;
+    if (entry.claimedBy !== null && entry.claimedBy !== claimant) {
+      if (!recoveredPreSendClaims.has(token) || entry.state !== 'claimed' ||
+          !['not-attempted', 'attempted-unresolved'].includes(entry.destinationSend.state)) return null;
+      await transitionNow(entry, current => ({ ...current, claimedBy: claimant,
+        destinationSend: { state: 'not-attempted', conversationId: null, messageId: null } }));
+      recoveredPreSendClaims.delete(token);
+      endResumeClaim(token);
+    }
+    if (entry.claimedBy === claimant) recoveredPreSendClaims.delete(token);
     if (entry.state === 'awaiting-chat') {
       await transitionNow(entry, (current) => ({ ...current, claimedBy: claimant, state: 'claimed' }));
     } else if (entry.state === 'claimed' && entry.claimedBy === null) {
@@ -1708,6 +1721,7 @@ const SEND_STATES = new Set<ContinuationSendState>([
  */
 export async function restoreContinuations(snapshot: ContinuationSnapshot | null): Promise<void> {
   byToken.clear();
+  recoveredPreSendClaims.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.entries)) return;
   const now = Date.now();
   const validStates = new Set<ContinuationState>([
@@ -1917,6 +1931,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       if (entry.destinationSend.state === 'dispatched-unresolved' || entry.destinationSend.state === 'sent') {
         noteResumeDispatch(entry.token, entry.sessionId);
       } else {
+        if (entry.claimedBy) recoveredPreSendClaims.add(entry.token);
         noteResumeClaim(entry.token);
       }
     }
@@ -1934,6 +1949,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
 /** Test seam. */
 export function resetContinuationsForTests(): void {
   byToken.clear();
+  recoveredPreSendClaims.clear();
   openingBySession.clear();
   commitLocks.clear();
   checkpointLocks.clear();

@@ -752,6 +752,39 @@ describe('committing', () => {
     expect(await claimContinuationNow(token, 'new-command')).toBeNull();
   });
 
+  it.each(['not-attempted', 'attempted-unresolved'] as const)('reclaims a restored %s destination once, without reviving the old claimant', async state => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'before-restart');
+    if (state === 'attempted-unresolved') expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    const snapshot = snapshotContinuations();
+    expect(snapshot.entries.find(row => row.token === token)?.claimedBy).toBe('before-restart');
+    resetContinuationsForTests();
+    await restoreContinuations(snapshot);
+    expect(continuationByToken(token)?.state).toBe('claimed');
+    expect(snapshotContinuations().entries.find(row => row.token === token)?.claimedBy).toBe('before-restart');
+    expect((await claimContinuationNow(token, 'after-restart'))?.summary).toContain(SAMPLE_BRIEF);
+    expect(snapshotContinuations().entries.find(row => row.token === token)?.claimedBy).toBe('after-restart');
+    expect(continuationByToken(token)).toMatchObject({ destinationSend: { state: 'not-attempted' } });
+    expect(await claimContinuationNow(token, 'before-restart')).toBeNull();
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await claimContinuationNow(token, 'another-new-command')).toBeNull();
+  });
+
+  it('keeps a restored dispatched destination exclusively bound to its original claimant', async () => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'before-restart');
+    await beginContinuationDestinationSendNow(token);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    const snapshot = snapshotContinuations();
+    expect(snapshot.entries.find(row => row.token === token)?.claimedBy).toBe('before-restart');
+    resetContinuationsForTests();
+    await restoreContinuations(snapshot);
+    expect(continuationByToken(token)?.state).toBe('claimed');
+    expect(snapshotContinuations().entries.find(row => row.token === token)?.claimedBy).toBe('before-restart');
+    expect(await claimContinuationNow(token, 'after-restart')).toBeNull();
+    expect(continuationByToken(token)).toMatchObject({ destinationSend: { state: 'dispatched-unresolved' } });
+  });
+
   it('re-proves the exact destination message after the continuation already committed', async () => {
     const { token } = await readyContinuation();
     await claimContinuationNow(token, 'tab-1');
