@@ -1103,11 +1103,11 @@ export function listInputs(): Promise<InputEntry[]> {
 }
 export interface PickupRecoveryState { attempts: number; nextAt?: number; stoppedAt?: number }
 
-async function rowsForPickupSource(current: InputEntry[], sessionId: string, sourceTurnId: string): Promise<InputEntry[]> {
+async function rowsForPickupSource(current: InputEntry[], sessionId: string, sourceTurnId: string, policy = policyOnce()): Promise<InputEntry[]> {
   const matching: InputEntry[] = [];
   for (const entry of current) {
     if (entry.sessionId !== sessionId || entry.purpose === 'decision' || entry.opening) continue;
-    if (await eligibleStageEnd(entry) === sourceTurnId) matching.push(entry);
+    if (await eligibleStageEnd(entry, policy) === sourceTurnId) matching.push(entry);
   }
   return matching;
 }
@@ -1129,8 +1129,9 @@ export function syncQueuedPickupRecoveryNow(inputId: string, sourceTurnId: strin
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === inputId && entry.state === 'queued');
-    if (!row?.sessionId || row.purpose === 'decision' || await eligibleStageEnd(row) !== sourceTurnId) return null;
-    const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId);
+    const policy = policyOnce();
+    if (!row?.sessionId || row.purpose === 'decision' || await eligibleStageEnd(row, policy) !== sourceTurnId) return null;
+    const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId, policy);
     const merged = mergedPickupState(matches, state);
     const next = current.map(entry => matches.includes(entry) && !samePickupState(entry.pickupRecovery, merged)
       ? { ...entry, pickupRecovery: merged } : entry);
@@ -1148,11 +1149,12 @@ export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: stri
   return serial(async () => {
     const current = await load();
     const row = current.find(entry => entry.id === inputId);
+    const policy = policyOnce();
     if (!row || !row.sessionId || row.purpose === 'decision' || row.state !== 'queued' ||
-        await eligibleStageEnd(row) !== sourceTurnId) return null;
+        await eligibleStageEnd(row, policy) !== sourceTurnId) return null;
     const session = await getSession(row.sessionId);
     if (!session || session.conversationId !== row.conversationId || session.browserRecoveryDismissedAt !== undefined) return null;
-    const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId);
+    const matches = await rowsForPickupSource(current, row.sessionId, sourceTurnId, policy);
     const prior = mergedPickupState(matches, inherited);
     if (prior.stoppedAt || prior.attempts >= BROWSER_PICKUP_MAX_ATTEMPTS) {
       const next = current.map(entry => matches.includes(entry) && !samePickupState(entry.pickupRecovery, prior)
@@ -1374,8 +1376,22 @@ export function noteInputStartupError(id: string, error: string | null): Promise
     return { ...next };
   });
 }
+type InputPolicy = Awaited<ReturnType<typeof sessionInputPolicy>>;
+/**
+ * One policy read per chat for a pass over many outbox rows. The policy is the chat's, not the
+ * row's, and each read goes to its recorded history: asked once per row, a chat with 38 retained
+ * rows spent 3.4 s per pass (2.1.47.1).
+ */
+function policyOnce(): (sessionId: string) => Promise<InputPolicy> {
+  const read = new Map<string, Promise<InputPolicy>>();
+  return sessionId => {
+    let policy = read.get(sessionId);
+    if (!policy) read.set(sessionId, policy = sessionInputPolicy(sessionId));
+    return policy;
+  };
+}
 /** The same exact source boundary must still apply at claim and final Send authorization. */
-async function eligibleStageEnd(entry: InputEntry): Promise<string | null> {
+async function eligibleStageEnd(entry: InputEntry, policy: (sessionId: string) => Promise<InputPolicy> = sessionInputPolicy): Promise<string | null> {
   if (!entry.sessionId) return null;
   if (entry.recovery) return await recoveryCurrent(entry) &&
     ['ready', 'resumed'].includes(entry.recovery.phase) && (entry.silenceBoundary?.listenUntil ?? 0) <= Date.now()
@@ -1420,7 +1436,7 @@ async function eligibleStageEnd(entry: InputEntry): Promise<string | null> {
   const queuedHere = (entry.queuedTurn?.conversationId === session.conversationId && entry.queuedTurn?.turnId === end.turnId) ||
     (entry.silenceBoundary?.conversationId === session.conversationId && entry.silenceBoundary.turnId === end.turnId);
   if (!queuedHere && end.time < entry.createdAt) return null;
-  if (!(await sessionInputPolicy(entry.sessionId)).settled) return null;
+  if (!(await policy(entry.sessionId)).settled) return null;
   return end.turnId;
 }
 const INPUT_WORK_KINDS: import('../../shared/session.js').SessionEvent['kind'][] =
@@ -1438,41 +1454,45 @@ export async function hasQueuedAfterTurnInput(sessionId: string): Promise<boolea
 }
 
 /** Read the same visible head as claims, including its still-running listening window.
- * Historical restored tickets without an acceptance timestamp never arm browser recovery. */
-export function pendingQueuedPickups(): Promise<Array<{ inputId: string; conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean; pickupAttempts: number; pickupNextAt?: number; pickupStoppedAt?: number }>> {
-  return serial(async () => {
-    const rows = await load();
-    const result: Array<{ inputId: string; conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean; pickupAttempts: number; pickupNextAt?: number; pickupStoppedAt?: number }> = [];
-    const pending = ordered(rows).filter(row => row.sessionId && row.purpose !== 'decision' && ['queued', 'browser', 'tool'].includes(row.state));
-    for (const sessionId of new Set(pending.map(row => row.sessionId))) {
-      const candidates = pending.filter(row => row.sessionId === sessionId);
-      const row = candidates.find(row => manualInput(row) && row.silenceBoundary) ?? candidates[0]!;
-      if (!row.sessionId) continue;
-      if (row.state !== 'queued' || (!queuedFollowup(row) && !manualInput(row)) || row.dueAt > Date.now()) continue;
-      // A held send is waiting for the send check, not for a page that failed to pick it up.
-      if (heldBySendCheck(row)) continue;
-      const session = await getSession(row.sessionId);
-      if (!session?.conversationId || !queuedAfterTurn(row, session)) continue;
-      const probe = row.silenceBoundary ? { ...row, silenceBoundary: { ...row.silenceBoundary, listenUntil: undefined } } : row;
-      const sourceTurnId = await eligibleStageEnd(probe);
-      if (!sourceTurnId || rows.some(other => other.sessionId === row.sessionId &&
-          (consumedTurn(other, sourceTurnId) || other.state === 'browser' || other.state === 'tool'))) continue;
-      const [end] = await readRecentEvents(row.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
-      const completed = end?.kind === 'turn_end' && end.outcome === 'completed';
-      const acceptedAt = row.silenceBoundary?.acceptedAt ?? (!row.silenceBoundary && completed ? end.time : undefined);
-      if (acceptedAt === undefined) continue;
-      const selection = session.selectedModel;
-      const sourceOwners = await rowsForPickupSource(rows, row.sessionId, sourceTurnId);
-      const pickupRecovery = mergedPickupState(sourceOwners);
-      result.push({ inputId: row.id, conversationId: session.conversationId, sessionId: row.sessionId, sourceTurnId, acceptedAt,
-        listenUntil: completed && !row.silenceBoundary?.nativeBusy ? 0 : row.silenceBoundary?.listenUntil ?? 0,
-        pro: selection?.conversationId === session.conversationId && isProModel(selection.model, selection.reasoningEffort),
-        pickupAttempts: pickupRecovery.attempts,
-        ...(pickupRecovery.nextAt ? { pickupNextAt: pickupRecovery.nextAt } : {}),
-        ...(pickupRecovery.stoppedAt ? { pickupStoppedAt: pickupRecovery.stoppedAt } : {}) });
-    }
-    return result;
-  });
+ * Historical restored tickets without an acceptance timestamp never arm browser recovery.
+ *
+ * A read of a snapshot, outside the outbox queue: it reads every owed chat's recorded history, and
+ * the sidebar, chat state, browser poll and repair handout all ask it. Under the queue those reads
+ * held every send, claim and control API read behind them until none answered (2.1.47.1). Nothing
+ * here writes; whatever acts on a pickup checks its row again under the queue. */
+export async function pendingQueuedPickups(): Promise<Array<{ inputId: string; conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean; pickupAttempts: number; pickupNextAt?: number; pickupStoppedAt?: number }>> {
+  const rows = await serial(load);
+  const policy = policyOnce();
+  const result: Array<{ inputId: string; conversationId: string; sessionId: string; sourceTurnId: string; acceptedAt: number; listenUntil: number; pro: boolean; pickupAttempts: number; pickupNextAt?: number; pickupStoppedAt?: number }> = [];
+  const pending = ordered(rows).filter(row => row.sessionId && row.purpose !== 'decision' && ['queued', 'browser', 'tool'].includes(row.state));
+  for (const sessionId of new Set(pending.map(row => row.sessionId))) {
+    const candidates = pending.filter(row => row.sessionId === sessionId);
+    const row = candidates.find(row => manualInput(row) && row.silenceBoundary) ?? candidates[0]!;
+    if (!row.sessionId) continue;
+    if (row.state !== 'queued' || (!queuedFollowup(row) && !manualInput(row)) || row.dueAt > Date.now()) continue;
+    // A held send is waiting for the send check, not for a page that failed to pick it up.
+    if (heldBySendCheck(row)) continue;
+    const session = await getSession(row.sessionId);
+    if (!session?.conversationId || !queuedAfterTurn(row, session)) continue;
+    const probe = row.silenceBoundary ? { ...row, silenceBoundary: { ...row.silenceBoundary, listenUntil: undefined } } : row;
+    const sourceTurnId = await eligibleStageEnd(probe, policy);
+    if (!sourceTurnId || rows.some(other => other.sessionId === row.sessionId &&
+        (consumedTurn(other, sourceTurnId) || other.state === 'browser' || other.state === 'tool'))) continue;
+    const [end] = await readRecentEvents(row.sessionId, 1, { kinds: ['turn_start', 'turn_end'] });
+    const completed = end?.kind === 'turn_end' && end.outcome === 'completed';
+    const acceptedAt = row.silenceBoundary?.acceptedAt ?? (!row.silenceBoundary && completed ? end.time : undefined);
+    if (acceptedAt === undefined) continue;
+    const selection = session.selectedModel;
+    const sourceOwners = await rowsForPickupSource(rows, row.sessionId, sourceTurnId, policy);
+    const pickupRecovery = mergedPickupState(sourceOwners);
+    result.push({ inputId: row.id, conversationId: session.conversationId, sessionId: row.sessionId, sourceTurnId, acceptedAt,
+      listenUntil: completed && !row.silenceBoundary?.nativeBusy ? 0 : row.silenceBoundary?.listenUntil ?? 0,
+      pro: selection?.conversationId === session.conversationId && isProModel(selection.model, selection.reasoningEffort),
+      pickupAttempts: pickupRecovery.attempts,
+      ...(pickupRecovery.nextAt ? { pickupNextAt: pickupRecovery.nextAt } : {}),
+      ...(pickupRecovery.stoppedAt ? { pickupStoppedAt: pickupRecovery.stoppedAt } : {}) });
+  }
+  return result;
 }
 
 function consumedTurn(row: InputEntry, turnId: string): boolean {

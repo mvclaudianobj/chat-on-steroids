@@ -16,7 +16,7 @@ import { editReplacement } from '../src/main/session/edits.js';
 import * as logger from '../src/main/logger.js';
 import { noteChatOrigin } from '../src/main/session/recorder.js';
 import { stageInputAttachment } from '../src/main/session/input-attachments.js';
-import { listUsageSessions, turnHasMcpCall } from '../src/main/session/store.js';
+import { listUsageSessions, readCompletedFinal, turnHasMcpCall } from '../src/main/session/store.js';
 import { trackInFlight, emptyEvidence, type CallContext } from '../src/main/mcp/call-context.js';
 // Ownership tests inspect messages; batch-specific assertions use the complete delivery below.
 const offerToolInput = async (...args: Parameters<typeof offerToolInputBatch>) => (await offerToolInputBatch(...args)).messages;
@@ -2367,5 +2367,41 @@ describe('edit and resubmit (#365)', () => {
     const edited = randomUUID();
     expect(await acknowledgeBrowserInput(entry.id, claim!.owner!, 'conversation-a', edited)).toBe(true);
     expect(editReplacement(edited)).toBe(later);
+  });
+});
+
+// 2.1.47.1: a chat with a stopped pickup and 38 retained outbox rows read its history once per row
+// while holding the outbox queue (3.4 s per pass). The sidebar, chat state, browser poll and repair
+// handout all asked for it, so sends, claims and every control API read waited until none answered.
+describe('pickup reads do not hold the outbox', () => {
+  async function seedPickup(retained: number): Promise<InputEntry[]> {
+    const row = (state: InputEntry['state']): InputEntry => ({ ...input({ mode: 'after-turn' }), state, owner: null, createdAt: now, conversationId: binding.conversationId });
+    const rows = [...Array.from({ length: retained }, () => row('sent')), row('queued')];
+    await writeDurableNow('session-input', rows);
+    resetInputForTests();
+    binding.end = { kind: 'turn_end', outcome: 'completed', turnId: 'answered-turn', time: now + 1, seq: 20 };
+    now += 2;
+    return rows;
+  }
+  afterEach(() => { vi.mocked(readCompletedFinal).mockImplementation(async () => null); });
+
+  it('reads the chat policy once per pass, however many rows the chat retains', async () => {
+    const rows = await seedPickup(30);
+    vi.mocked(readCompletedFinal).mockClear();
+    expect(await pendingQueuedPickups()).toEqual([expect.objectContaining({ inputId: rows.at(-1)!.id, sourceTurnId: 'answered-turn' })]);
+    expect(readCompletedFinal).toHaveBeenCalledTimes(1);
+  });
+
+  it('answers the outbox while a pickup pass still waits on chat history', async () => {
+    const rows = await seedPickup(1);
+    let release: (() => void) | undefined;
+    vi.mocked(readCompletedFinal).mockImplementation(() => new Promise(resolve => { release = () => resolve(null); }));
+    const pickups = pendingQueuedPickups();
+    await vi.waitFor(() => expect(release).toBeDefined());
+    const listed = await Promise.race([listInputs().then(list => list.length),
+      new Promise(resolve => setTimeout(() => resolve('outbox blocked behind the pickup pass'), 1000))]);
+    expect(listed).toBe(rows.length);
+    release!();
+    expect(await pickups).toHaveLength(1);
   });
 });
