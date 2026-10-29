@@ -1787,6 +1787,13 @@ var CLF_DOM = (() => {
    * recording "Chat Marks Desktop is now connected" as a ChatGPT failure.
    */
   const acknowledgedAccessNotices = new WeakSet();
+  // The last access-limit notice read, kept past its acknowledgement: one read and closed while the
+  // model picker ran is still the reason a delivery stopped (CodeRabbit on #1900).
+  let lastAccessNotice = null;
+  /** The access-limit notice read at or after `since` (ms), or '' when none was. */
+  function accessNoticeSince(since) {
+    return lastAccessNotice && lastAccessNotice.at >= since ? lastAccessNotice.text : '';
+  }
   function errors() {
     return safe(() => {
       const out = [];
@@ -1803,6 +1810,7 @@ var CLF_DOM = (() => {
         if (value.length >= 500 || (!english && !korean)) continue;
         const notice = value.startsWith(headingText) ? `${headingText} ${value.slice(headingText.length).trim()}` : value;
         out.push({ text: notice, node, turnId: null, recoverable: false, blocking: true });
+        lastAccessNotice = { text: notice, at: Date.now() };
         texts.add(value);
         // Acknowledge this identified informational notice once. The returned
         // blocking diagnostic survives the click; it grants no retry authority.
@@ -3712,6 +3720,30 @@ var CLF_DOM = (() => {
       .map(link => projectHomeId(new URL(link.href, location.href).pathname)).filter(Boolean))], []);
   }
 
+  /**
+   * The Projects ChatGPT's sidebar lists right now, in its order (#1756). Each Project row carries
+   * its id and label as attributes, collapsed or not (measured 2026-10-21:
+   * `data-app-action-sidebar-project-id`, `-label`); an expanded one also links to its home, which
+   * older pages only have. A collapsed sidebar lists none, which says nothing about the account.
+   */
+  function projectsShown() {
+    return safe(() => {
+      const out = [];
+      const add = (rawId, rawName) => {
+        const id = String(rawId || '').toLowerCase();
+        const name = String(rawName || '').split('\n').map(part => part.trim()).find(Boolean) || '';
+        if (/^g-p-[0-9a-f]{32}$/.test(id) && name && !out.some(project => project.id === id) && out.length < 200) out.push({ id, name: name.slice(0, 200) });
+      };
+      for (const row of document.querySelectorAll('[data-app-action-sidebar-project-id]')) {
+        add(row.getAttribute('data-app-action-sidebar-project-id'), row.getAttribute('data-app-action-sidebar-project-label'));
+      }
+      for (const link of document.querySelectorAll('nav a[href], aside a[href]')) {
+        add(projectHomeId(new URL(link.href, location.href).pathname), link.innerText || link.textContent);
+      }
+      return out;
+    }, []);
+  }
+
   /** ChatGPT's open "Create project" dialog: its name field and its one submit button. */
   function projectCreateForm() {
     return safe(() => {
@@ -3783,6 +3815,7 @@ var CLF_DOM = (() => {
     projectCreateForm,
     revealSidebar,
     projectIdsShown,
+    projectsShown,
     fillProjectName,
     projectHomeId,
     sidebarListsProject,
@@ -3869,6 +3902,7 @@ var CLF_DOM = (() => {
     thoughtActivityRows,
     toolLabel,
     errors,
+    accessNoticeSince,
     composer,
     composerSubmitReady,
     clearRevivalResidue,

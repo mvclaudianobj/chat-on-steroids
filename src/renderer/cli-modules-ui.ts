@@ -426,9 +426,13 @@ export function createCliModulesUi(api: AppApi, hooks: {
           installed.textContent = `${t('Installed version')}: ${status.version ?? t('Not installed')}${status.external ? ` · ${t('Using installed')} (${t('not installed by Chat Marks')})` : ''}`;
           latest.textContent = `${t('Latest release')}: ${status.latest ?? '—'}`;
           badge.hidden = !status.updateAvailable;
-          button.hidden = !status.latest || (status.installed && !status.updateAvailable);
+        // Reinstall is an explicit repair action even when publisher and installed
+        // versions are identical. It must not silently touch the external copy.
+        button.hidden = !status.latest;
           button.textContent = status.installed && status.external && !status.externalNpmWritable
             ? t('Install with Chat Marks ({0})', [status.latest ?? ''])
+          : status.installed && !status.updateAvailable
+            ? t('Reinstall {0}', [status.latest ?? ''])
             : status.installed ? t('Update to {0}', [status.latest ?? '']) : t('Install {0}', [status.latest ?? '']);
           if (status.restartPending) row.detail.textContent += ` · ${t('Restarts with the new version when nothing is running')}`;
         }

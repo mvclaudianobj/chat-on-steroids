@@ -15,7 +15,9 @@ const deps: MobilePanelDeps = {
       requests: [{ title: 'synthetic request', status: 'assigned', seat: 'marks1' }] },
     approvals: [{ conversationId: 'test-convo-123', cardId: 'card-synth-123', title: 'Synthetic project', choiceEnabled: true, outcome: null }]
   })),
-  answer: vi.fn(() => ({ ok: true as const }))
+  answer: vi.fn(() => ({ ok: true as const })),
+  history: vi.fn(async () => [{ seq: 5, kind: 'assistant' as const, text: 'Resposta sintética' }]),
+  send: vi.fn(async () => ({ id: 'queued-test', state: 'queued' }))
 };
 beforeEach(async () => { root = await fs.mkdtemp(path.join(tmpdir(), 'marks-mobile-qa-')); vi.clearAllMocks(); });
 afterEach(async () => { if (instance) await instance.stop(); instance = null; await fs.rm(root, { recursive: true, force: true }); });
@@ -73,4 +75,28 @@ it('deletes its temporary token on stop and does not retain credentials between 
   expect(await fs.readFile(file,'utf8')).not.toBe(old);
   expect((await fetch(instance.address+'/api/status',{headers:{Authorization:'Bearer '+old.trim()}})).status).toBe(401);
   expect(url).toContain('127.0.0.1');
+});
+it('FAIL-FIRST: mobile chat history and text dispatch require the exact listed session, token, origin and explicit send', async () => {
+  const url = await init();
+  const token = (await fs.readFile(path.join(root,'mobile-panel','access.token'),'utf8')).trim();
+  const auth = {Authorization:'Bearer '+token};
+  const valid = 'synthetic-s1';
+  const other = 'other-session-123';
+  expect((await fetch(url+'/api/chat/'+valid)).status).toBe(401);
+  expect((await fetch(url+'/api/chat/'+other,{headers:auth})).status).toBe(404);
+  const chat = await fetch(url+'/api/chat/'+valid,{headers:auth});
+  expect(chat.status).toBe(200);
+  expect(await chat.json()).toEqual({sessionId:valid,messages:[{seq:5,kind:'assistant',text:'Resposta sintética'}]});
+  const post = (body:unknown, origin=url) => fetch(url+'/api/chat/send',{
+    method:'POST',headers:{...auth,'Content-Type':'application/json',Origin:origin},
+    body:JSON.stringify(body)
+  });
+  expect((await post({sessionId:other,text:'synthetic outbound'})).status).toBe(404);
+  expect((await post({sessionId:valid,text:'synthetic outbound'},'https://invalid.example')).status).toBe(403);
+  expect((await post({sessionId:valid,text:' ' })).status).toBe(400);
+  expect(deps.send).not.toHaveBeenCalled();
+  const receipt = await post({sessionId:valid,text:'synthetic outbound'});
+  expect(receipt.status).toBe(202);
+  expect(await receipt.json()).toEqual({id:'queued-test',state:'queued'});
+  expect(deps.send).toHaveBeenCalledExactlyOnceWith(valid,'synthetic outbound');
 });

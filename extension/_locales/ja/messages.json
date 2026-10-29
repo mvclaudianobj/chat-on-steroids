@@ -692,6 +692,9 @@
   "content_turn_stop_requested": {
     "message": "停止を要求しました。ネイティブページでは生成中の表示がなくなりました。"
   },
+  "content_turn_stop_unseen": {
+    "message": "ここで停止しました。ChatGPT にはこの回答が実行中と表示されなくなっていました。"
+  },
   "content_unknown_error": {
     "message": "不明なエラー"
   },
@@ -911,6 +914,9 @@
   "popup_pipeline_waiting_first_message": {
     "message": "最初のメッセージを待っています。"
   },
+  "popup_pipeline_not_a_chat": {
+    "message": "この ChatGPT ページはチャットではないため、アプリが追跡するものはありません。チャットを開くか開始してください。"
+  },
   "popup_pipeline_waiting_latest_request_id": {
     "message": "チャットを記録しました。最新ターンのリクエスト ID を待っています。"
   },
@@ -979,6 +985,9 @@
   },
   "popup_status_new_chat": {
     "message": "新しいチャット"
+  },
+  "popup_status_not_a_chat": {
+    "message": "チャットではありません"
   },
   "popup_status_none_open": {
     "message": "開いていません"

@@ -40,6 +40,7 @@ export function createExternalModulesUi(api: AppApi, parent: Element): { refresh
         try {
           const response = await api.moduleAction(id as MarksModuleId, action);
           if (!response.ok) throw new Error(response.error);
+          if (!Array.isArray(response.data)) throw new Error(t('Status unavailable'));
           statuses = response.data;
           error.hidden = true;
         } catch (cause) {
@@ -56,7 +57,7 @@ export function createExternalModulesUi(api: AppApi, parent: Element): { refresh
   function paint(): void {
     for (const id of external) {
       const view = elements.get(id)!;
-      const state = statuses.find(item => item.id === id);
+      const state = statuses.find(item => item && item.id === id);
       view.badge.dataset.state = !state ? 'unknown' : !state.installed ? 'missing' : 'stopped';
       view.badge.textContent = !state ? t('Status unavailable') : state.installed ? t('Installed') : t('Not installed');
       view.detail.textContent = state?.detail ?? '';
@@ -67,8 +68,13 @@ export function createExternalModulesUi(api: AppApi, parent: Element): { refresh
   }
   async function refresh(): Promise<void> {
     if (busy) return;
-    const reply = await api.modulesStatus();
-    if (reply.ok) { statuses = reply.data; paint(); }
+    try {
+      const reply = await api.modulesStatus();
+      statuses = reply.ok && Array.isArray(reply.data) ? reply.data : [];
+    } catch {
+      statuses = [];
+    }
+    paint();
   }
   paint();
   return { refresh };

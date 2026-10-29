@@ -44,13 +44,10 @@ app.on('web-contents-created', (_event, contents) => {
   contents.session.webRequest.onBeforeRequest({ urls: ['https://*/*', 'http://*/*'] }, (_details, callback) => callback({ cancel: true }));
   contents.on('console-message', details => { if (details.level === 'error') errors.push(details.message); });
 });
-const deadline = setTimeout(() => {
-  console.error('Pet toggle timed out', { stage, observedDocuments, ownerLoaded: !!owner,
-    overlayLoaded: !!overlay, login: assertPetLogin.status(), errors });
-  app.exit(1);
-}, 45000);
-async function until(predicate, label) {
-  const end = Date.now() + 5000;
+const PET_RENDER_TIMEOUT_MS = 15000;
+const deadline = setTimeout(() => { console.error('Pet toggle timed out', { stage, observedDocuments, ownerLoaded: !!owner, overlayLoaded: !!overlay, login: assertPetLogin.status(), errors }); app.exit(1); }, 90000);
+async function until(predicate, label, timeoutMs = 5000) {
+  const end = Date.now() + timeoutMs;
   while (Date.now() < end) { if (await predicate()) return; await sleep(40); }
   throw new Error(`Timed out: ${label}; ${errors.join('; ')}`);
 }
@@ -59,6 +56,21 @@ async function petRect(id) {
     const pet = document.querySelector('[data-pet-id="${id}"].pet-shell');
     return pet ? { ...pet.getBoundingClientRect().toJSON(), frame: pet.dataset.frame } : null;
   })()`);
+}
+async function waitForPet(id) {
+  try {
+    await until(async () => overlay && await petRect(id), `visible ${id}`, PET_RENDER_TIMEOUT_MS);
+  } catch (error) {
+    // Distinguish a slow asset/renderer from an overlay that loaded but never got a pet.
+    const state = !overlay || overlay.isDestroyed() ? { overlay: 'missing' } : {
+      overlayVisible: overlay.isVisible(),
+      document: await overlay.webContents.executeJavaScript(`(() => ({
+        readyState: document.readyState,
+        petIds: [...document.querySelectorAll('.pet-shell')].map(pet => pet.dataset.petId)
+      }))()`).catch(reason => String(reason))
+    };
+    throw new Error(`${error.message}; state=${JSON.stringify(state)}`);
+  }
 }
 async function enable(id, enabled) {
   const result = await owner.webContents.executeJavaScript(`window.api.petsSetEnabled(${JSON.stringify(id)}, ${enabled})`);
@@ -148,7 +160,7 @@ async function nativeMenu(id) {
   console.log(`Native context menu: ${id} hidden by left click`);
 }
 async function drag(id) {
-  await until(async () => overlay && await petRect(id), `visible ${id}`);
+  await waitForPet(id);
   const rect = await petRect(id), area = overlay.getContentBounds();
   const x = Math.round(rect.x + 80), y = Math.round(rect.y + 80);
   if (nativePointer) {
@@ -239,7 +251,7 @@ app.on('browser-window-created', (_event, win) => {
         await drag('capy');
         stage = 'enabling both pets and checking idle decodes';
         await enable('hammy', true);
-        await until(async () => !!await petRect('hammy'), 'both pets');
+        await until(async () => !!await petRect('hammy') && !!await petRect('capy'), 'both pets', PET_RENDER_TIMEOUT_MS);
         await sleep(150);
         const count = decodes, cpu = process.cpuUsage(), start = performance.now();
         await sleep(1100);

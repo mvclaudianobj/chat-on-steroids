@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.47': {
+    lead: () => t("Scheduled runs, changed files under each answer, commit and pull request from Review, and your own chat style."),
+    highlights: [
+      { icon: 'i-clock', title: () => t("Scheduled runs"), text: () => t("A chat can send itself a message every few hours, daily or weekly.") },
+      { icon: 'i-git-diff', title: () => t("Changed files"), text: () => t("Each answer that edited files shows what it changed.") },
+      { icon: 'i-git-branch', title: () => t("Commit from Review"), text: () => t("Commit the chosen files, then push and open a pull request.") },
+      { icon: 'i-pencil', title: () => t("Your own chat style"), text: () => t("Rewrite how ChatGPT talks and writes in new chats.") }
+    ]
+  },
   '2.1.45.3': {
     lead: () => t('Jarvis voice now works with normal ChatGPT chats, with clear setup and microphone consent.'),
     highlights: [
@@ -285,14 +294,14 @@ const RELEASES: Readonly<Record<string, Release>> = {
 };
 
 export function hasHighlights(version: string): boolean {
-  return version === '2.1.46.1' || Object.hasOwn(RELEASES, version);
+  return version === '2.1.46.1' || version === '2.1.47.1' || Object.hasOwn(RELEASES, version);
 }
 
 /** Paints the dialog for one version; separate from showing it so a check can paint any entry. */
 export function paintWhatsNew(version: string): boolean {
-  // The Marks patch release retains 2.1.46 highlights while showing its own version
+  // The Marks patch releases retain community highlights while showing their own version
   // and opening its own release notes.
-  const release = RELEASES[version === '2.1.46.1' ? '2.1.46' : version];
+  const release = RELEASES[version === '2.1.47.1' ? '2.1.47' : version === '2.1.46.1' ? '2.1.46' : version];
   if (!release) return false;
   ui($('whatsNewVersion'), 'textContent', () => t('Version {0}', [version]));
   ui($('whatsNewLead'), 'textContent', release.lead);

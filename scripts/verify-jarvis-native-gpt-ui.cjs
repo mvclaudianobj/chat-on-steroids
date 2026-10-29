@@ -50,7 +50,8 @@ const fixture = `(() => {
       const reply=await orig.sendInput(input);
       setTimeout(()=>{
         f.events.push({seq:200,kind:'assistant_message',turnId:'unrelated-turn',messageId:'other',message:{text:'Other turn must not speak.',truncated:false,chars:26},final:false});
-        f.events.push({seq:201,kind:'user_message',inputId:input.id,inputDelivery:'confirmed',turnId:'native-jarvis-turn',message:{text:input.text,truncated:false,chars:input.text.length}});
+        f.summary.timelineTurns={...(f.summary.timelineTurns??{}),'native-jarvis-turn':{origin:201,time:Date.now(),questionId:'native-jarvis-question'}};
+        f.events.push({seq:201,kind:'user_message',messageId:'native-jarvis-question',inputId:input.id,inputDelivery:'confirmed',turnId:'native-jarvis-turn',message:{text:input.text,truncated:false,chars:input.text.length}});
         f.events.push({seq:202,kind:'assistant_message',turnId:'native-jarvis-turn',messageId:'jarvis-answer',message:{text:'Correct native answer. Continues',truncated:false,chars:30},final:false});
         f.notify();
       },150);
