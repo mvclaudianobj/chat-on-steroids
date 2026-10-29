@@ -10674,6 +10674,14 @@
       renderControl();
       return 'committed';
     }
+    if (bound.data?.retryBrief === true && bound.data?.prompt && bound.data?.token) {
+      if (bound.data.job) job = bound.data.job;
+      nativeRun++;
+      const retryRun = nativeRun;
+      void runNativeCompaction(String(bound.data.prompt), String(bound.data.token),
+        conversationId, epoch, retryRun);
+      return 'committed';
+    }
     // The answer turn, not the prompt's — see answerTurnFor. Its calls are the ones that have
     // to be finished, too: a brief cut while the compaction turn is still running a tool
     // describes a machine that is still changing.
@@ -10695,6 +10703,14 @@
     renderControl();
     const delivered = await ask({ type: 'compact', conversationId, token: marked.token, summary });
     if (!delivered || delivered.ok !== true) return false;
+    if (delivered.data?.retryBrief === true && delivered.data?.prompt && delivered.data?.token) {
+      if (delivered.data.job) job = delivered.data.job;
+      nativeRun++;
+      const retryRun = nativeRun;
+      void runNativeCompaction(String(delivered.data.prompt), String(delivered.data.token),
+        conversationId, epoch, retryRun);
+      return 'committed';
+    }
     if (delivered.data && delivered.data.job) job = delivered.data.job;
     nativePhase = '';
     localError = '';

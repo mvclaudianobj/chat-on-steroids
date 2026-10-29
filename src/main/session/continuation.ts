@@ -234,6 +234,8 @@ interface Continuation {
   sourceProgress: number;
   /** Auto-compaction ticket: survives page/retry clocks until commit or explicit Off/cancel. */
   automatic: boolean;
+  /** Number of rejected incomplete briefs in this Compact & Resume chain. */
+  briefRetries: number;
   /** When the brief request first went on its way; the automatic clock starts here. */
   askedAt: number | null;
   state: ContinuationState;
@@ -294,6 +296,7 @@ interface ContinuationRecord {
   sourceProgress?: number;
   /** Absent in records written before durable auto-compaction tickets existed. */
   automatic?: boolean;
+  briefRetries?: number;
   /** Absent in records written before automatic handovers had a deadline. */
   askedAt?: number | null;
   /** Absent in records written before Project affinity was carried; null means the site root. */
@@ -328,6 +331,7 @@ function durableRecord(entry: Continuation): ContinuationRecord {
     touchedAt: entry.touchedAt,
     sourceProgress: entry.sourceProgress,
     automatic: entry.automatic,
+    briefRetries: entry.briefRetries,
     askedAt: entry.askedAt,
     project: entry.project,
     state: entry.state,
@@ -383,6 +387,7 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
   entry.touchedAt = Math.max(entry.touchedAt, record.touchedAt ?? record.openedAt);
   entry.sourceProgress = record.sourceProgress ?? 0;
   entry.automatic = record.automatic === true;
+  entry.briefRetries = record.briefRetries ?? 0;
   entry.state = record.state;
   entry.summary = record.summary;
   entry.handoffId = record.handoffId;
@@ -462,6 +467,7 @@ export interface ContinuationView {
   error: string | null;
   openedAt: number;
   automatic: boolean;
+  briefRetries: number;
   /** When the brief request first went on its way, or null while it has not. */
   askedAt: number | null;
   /** The Project the replacement chat belongs in, or null for the site root. */
@@ -482,6 +488,7 @@ const view = (entry: Continuation): ContinuationView => ({
   error: entry.error,
   openedAt: entry.openedAt,
   automatic: entry.automatic,
+  briefRetries: entry.briefRetries,
   askedAt: entry.askedAt,
   project: entry.project,
   sourceSend: { ...entry.sourceSend },
@@ -783,6 +790,7 @@ function makeContinuation(sessionId: string, fromConversationId: string, automat
     touchedAt: Date.now(),
     sourceProgress: 0,
     automatic,
+    briefRetries: 0,
     askedAt: null,
     state: 'awaiting-summary',
     summary: '',
@@ -838,6 +846,49 @@ export async function openContinuationNow(
   } finally {
     if (openingBySession.get(sessionId) === work) openingBySession.delete(sessionId);
   }
+}
+
+/**
+ * Replace a rejected source request with a NEW marked turn in the SAME chat. Persist the
+ * retirement and fresh token together: after a crash neither a duplicate Send nor an
+ * abandoned source can be resurrected. Concurrent reports of the old final all get the
+ * same successor. The source request was already answered; this is never a transport retry.
+ */
+export async function retryIncompleteHandoffNow(
+  token: string,
+  reason: string,
+  maxRetries: number
+): Promise<{ next: ContinuationView | null; exhausted: boolean } | null> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry) return null;
+    if (entry.state === 'aborted') {
+      const successor = [...byToken.values()].find(other => other.sessionId === entry.sessionId &&
+        other.from === entry.from && isOpen(other) && other.briefRetries === entry.briefRetries + 1);
+      return successor ? { next: view(successor), exhausted: false } : null;
+    }
+    if (entry.state !== 'awaiting-summary' || entry.handoffId || entry.capture) return null;
+    if (entry.briefRetries >= maxRetries) return { next: null, exhausted: true };
+    const next = makeContinuation(entry.sessionId, entry.from, entry.automatic, entry.project);
+    next.briefRetries = entry.briefRetries + 1;
+    next.requestedModel = entry.requestedModel;
+    next.sourceTurnId = entry.sourceTurnId;
+    const old = { ...durableRecord(entry), state: 'aborted' as const, error: reason, touchedAt: Date.now() };
+    const snapshot = snapshotContinuations();
+    snapshot.entries = snapshot.entries.map(record => record.token === token ? old : record);
+    snapshot.entries.push(durableRecord(next));
+    try {
+      await writeDurableNow(CONTINUATIONS_STATE, snapshot);
+    } catch (err) {
+      writeDurableSoon(CONTINUATIONS_STATE, snapshotContinuations());
+      throw err;
+    }
+    publishRecord(entry, old);
+    byToken.set(next.token, next);
+    // The prime transfer remains reserved for the same source; do not cancel it between turns.
+    logInfo(`continuation ${token.slice(0, 8)} rejected incomplete brief; requesting attempt ${next.briefRetries + 1} with ${next.token.slice(0, 8)}`);
+    return { next: view(next), exhausted: false };
+  });
 }
 
 async function withCheckpointLock<T>(token: string, work: () => Promise<T>): Promise<T> {
@@ -1130,6 +1181,21 @@ export async function attachSummary(token: string, text: string): Promise<Handof
       sourceTurnId: entry.sourceTurnId
     })
   );
+}
+
+/** The internal durable fallback uses the same WAL/provenance gate, with no model-content floor. */
+export async function attachDurableFallback(token: string, text: string): Promise<Handoff | null> {
+  const brief = text.trim();
+  if (!brief) return null;
+  return capture(token, brief, async entry => prepareHandoff({
+    sessionId: entry.sessionId,
+    text: brief,
+    continuationToken: entry.token,
+    sourceConversationId: entry.from,
+    sourceTurnId: entry.sourceTurnId,
+    durableFallback: true,
+    notes: ['App-generated fallback from the durable session history; model brief incomplete']
+  }));
 }
 
 /** The plan notice prepareHandoff appends; a reused brief gets the current one instead. */
@@ -1764,6 +1830,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       sourceProgress: Number.isSafeInteger(raw.sourceProgress) && raw.sourceProgress! >= 0 && raw.sourceProgress! <= 4_000_000 ? raw.sourceProgress! : 0,
       touchedAt: Number.isFinite(raw.touchedAt) && raw.touchedAt! >= raw.openedAt && raw.touchedAt! <= now ? Number(raw.touchedAt) : raw.openedAt,
       automatic: raw.automatic === true,
+      briefRetries: Number.isSafeInteger(raw.briefRetries) && raw.briefRetries! >= 0 && raw.briefRetries! <= 8 ? raw.briefRetries! : 0,
       askedAt: null,
       state: raw.state,
       summary: typeof raw.summary === 'string' ? raw.summary.slice(0, 512 * 1024) : '',

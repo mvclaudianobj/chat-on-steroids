@@ -159,7 +159,7 @@ import {
 import { inFlightMcpRequests, inFlightToolCalls, runningToolCalls, runningToolProgress, sentResults, settlingToolCalls } from './mcp/call-context.js';
 import { nativeHandoffPrompt } from './session/handoff-prompt.js';
 import { DEFAULT_HANDOFF_PROMPT } from '../shared/handoff.js';
-import { briefShortfall, resumeBootstrapText } from './session/handoff.js';
+import { briefShortfall, durableRecoveryBrief, resumeBootstrapText } from './session/handoff.js';
 import { ownCoreHint,
   PRIME_ID,
   agentConversation,
@@ -219,6 +219,8 @@ import {
   abortContinuationNow,
   abortContinuationSourceBeforeSendNow,
   attachSummary,
+  attachDurableFallback,
+  retryIncompleteHandoffNow,
   beginContinuationDestinationSendNow,
   beginContinuationSourceSendNow,
   bindContinuationDestinationMessageNow,
@@ -4289,6 +4291,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
               getConfig().goal.includeToolCalls === true,
               getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
               getConfig().compaction.handoffLength
+              , already.briefRetries + 1
             )
           : null;
       return json(
@@ -4333,6 +4336,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
           getConfig().goal.includeToolCalls === true,
           getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
           getConfig().compaction.handoffLength
+          , opened.briefRetries + 1
         ),
         job: resumeJobFor(sessionId)
       },
@@ -6993,7 +6997,34 @@ async function captureCompactionBrief(
   if (shortfall) {
     logWarn(`bridge: refused the compaction brief for ${sessionId} — ${shortfall}`);
     try {
-      await cancelResumeNow(sessionId);
+      const retry = await retryIncompleteHandoffNow(token, shortfall, 2);
+      if (retry?.next) {
+        rememberToken(sessionId, retry.next.token);
+        changed();
+        return { status: 200, body: {
+          retryBrief: true, sessionId, token: retry.next.token,
+          attempt: retry.next.briefRetries + 1,
+          prompt: nativeHandoffPrompt(retry.next.token, getConfig().goal.includeToolCalls === true,
+            getConfig().compaction.handoffPrompt ?? DEFAULT_HANDOFF_PROMPT,
+            getConfig().compaction.handoffLength, retry.next.briefRetries + 1),
+          job: resumeJobFor(sessionId)
+        } };
+      }
+      if (retry?.exhausted) {
+        const fallback = await durableRecoveryBrief(sessionId);
+        const saved = await attachDurableFallback(token, fallback);
+        if (!saved) throw new Error('fallback handoff was not stored');
+        logWarn(`bridge: compaction ${sessionId} exhausted model briefs; using durable recovery summary`);
+        void recordNote(sessionId,
+          'Compact & Resume: ChatGPT produced three incomplete handoffs. The app saved a recovery brief from the recorded session history and is opening the next chat.', token);
+        queueResumeCommand(sessionId, token);
+        placementCollector = conversationId;
+        try { await deliver(); } finally { placementCollector = null; }
+        return { status: 200, body: { stored: true, fallback: true, sessionId,
+          handoffId: saved.id, placement: collectPlacement ? pendingBrowserPlacement(conversationId) : null,
+          job: resumeJobFor(sessionId) } };
+      }
+      return { status: 409, body: { error: 'brief_not_current', sessionId, job: resumeJobFor(sessionId) } };
     } catch (err) {
       // The semantic refusal is terminal only once its matching abort is durable. Returning
       // 409 here used to make content.js discard the generation-bound brief even though the

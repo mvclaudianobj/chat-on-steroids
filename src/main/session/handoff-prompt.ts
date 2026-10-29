@@ -33,7 +33,8 @@ export function nativeHandoffPrompt(
   token = '',
   includeToolCalls = true,
   handoffPrompt = DEFAULT_HANDOFF_PROMPT,
-  length: HandoffLength = DEFAULT_HANDOFF_LENGTH
+  length: HandoffLength = DEFAULT_HANDOFF_LENGTH,
+  retryAttempt = 1
 ): string {
   const identity = sourceContinuationMarker(token);
   const briefInstructions = handoffPromptForLength(handoffPrompt.trim() || DEFAULT_HANDOFF_PROMPT, length);
@@ -47,6 +48,7 @@ export function nativeHandoffPrompt(
       'messages and your own replies, including interim updates — is the ') +
     'material. Write it so an agent who reads only your brief can carry on correctly.\n\n' +
     `${briefInstructions}\n\n` +
+    (retryAttempt > 1 ? `A previous attempt produced an incomplete brief and was refused. This is attempt ${retryAttempt} of 3 in the same conversation. Include the TASK, USER SPECIFICATION, CURRENT STATE, DONE, IN PROGRESS, FAILED / UNRESOLVED, FILES, VERIFICATION, ENVIRONMENT, NEXT and DO NOT sections whenever applicable. Supply at least 1,000 characters of substantive, concrete recorded context (more when the chat is long). Finish the whole brief before ending the answer.\n\n` : '') +
     (includeToolCalls ? '' : 'Tool-detail setting: preserve verified outcomes and distinguish them from claims, but omit raw tool-call arguments and result bodies from the brief. Do not copy tool transcripts. This setting controls the brief, not the history you already saw.\n\n') +
     'Your reply to this message must be the brief itself and nothing else: no preamble, no closing remark, no ' +
     'question back, and no tool calls. The app reads this reply, stores it, and opens the fresh chat with it.'

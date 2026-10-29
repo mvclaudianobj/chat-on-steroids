@@ -71,6 +71,8 @@ const {
   openContinuationNow,
   releaseContinuationDestinationSendNow,
   reopenWithHandoffNow,
+  retryIncompleteHandoffNow,
+  attachDurableFallback,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
   restoreContinuations,
@@ -79,7 +81,7 @@ const {
   supersededSourceConversations
 } = await import('../src/main/session/continuation.js');
 const { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } = await import('../src/main/session/resume-gate.js');
-const { briefShortfall, handoffContinuationId, prepareHandoff, resumeBootstrapText } = await import('../src/main/session/handoff.js');
+const { briefShortfall, durableRecoveryBrief, handoffContinuationId, prepareHandoff, resumeBootstrapText } = await import('../src/main/session/handoff.js');
 const { createSession, getSession, initSessionStore, resetSessionStoreForTests, sessionsRoot } = await import(
   '../src/main/session/store.js'
 );
@@ -206,6 +208,42 @@ describe('reopening from a saved summary (#1215)', () => {
 });
 
 describe('capturing the brief', () => {
+  it('retries a short handoff in the same source and accepts a complete next answer after restart', async () => {
+    const session = await createSession({ title: 'uninterrupted work', conversationId: CHAT_A });
+    const first = await openContinuationNow(session.id, CHAT_A);
+    const retried = await retryIncompleteHandoffNow(first.token, 'too short', 2);
+    expect(retried?.next).toMatchObject({ briefRetries: 1, from: CHAT_A, state: 'awaiting-summary' });
+    expect((await retryIncompleteHandoffNow(first.token, 'same report', 2))?.next?.token).toBe(retried!.next!.token);
+    expect(continuationForSession(session.id)?.token).toBe(retried!.next!.token);
+    const snapshot = snapshotContinuations();
+    resetContinuationsForTests();
+    await restoreContinuations(snapshot);
+    expect(continuationForSession(session.id)?.briefRetries).toBe(1);
+    expect(await attachSummary(retried!.next!.token, SAMPLE_BRIEF)).not.toBeNull();
+    expect(await claimContinuationNow(retried!.next!.token, 'next-page')).not.toBeNull();
+    expect(await commitContinuation(retried!.next!.token, CHAT_B)).toBe(true);
+    expect(await attachedChat(session.id)).toBe(CHAT_B);
+  });
+
+  it('uses a recorded fallback after three incomplete model answers and resumes in chat B', async () => {
+    const session = await createSession({ title: 'unresolved task', conversationId: CHAT_A });
+    await store.appendEvent(session.id, { kind: 'user_message', source: 'extension', time: 10,
+      message: { text: 'Fix a difficult bug in src/main/bridge.ts; preserve my changes.', truncated: false, chars: 68 } });
+    let token = (await openContinuationNow(session.id, CHAT_A)).token;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const retry = await retryIncompleteHandoffNow(token, 'brief too small', 2);
+      expect(retry?.next?.briefRetries).toBe(attempt + 1);
+      token = retry!.next!.token;
+    }
+    expect(await retryIncompleteHandoffNow(token, 'brief still too small', 2)).toMatchObject({ exhausted: true, next: null });
+    const fallback = await durableRecoveryBrief(session.id);
+    expect(fallback).toContain('Fix a difficult bug in src/main/bridge.ts');
+    expect(fallback).toContain('DURABLE RECOVERY BRIEF');
+    expect(await attachDurableFallback(token, fallback)).not.toBeNull();
+    expect(await claimContinuationNow(token, 'fallback-page')).not.toBeNull();
+    expect(await commitContinuation(token, CHAT_B)).toBe(true);
+    expect(await attachedChat(session.id)).toBe(CHAT_B);
+  });
   it('freezes exact source model intent across selection changes and durable restore', async () => {
     const summary = await createSession({ title: 'model transfer', conversationId: CHAT_A });
     await store.observeSessionModel(summary.id, CHAT_A, 'gpt-5.6-sol', 10, 'high');
