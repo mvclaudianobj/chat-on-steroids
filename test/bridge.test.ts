@@ -9875,6 +9875,11 @@ describe('unattributed activity recovery', () => {
         } else {
           // The page reports approval=0 both after an answer and when the card disappears.
           await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+          // A one-poll disappearance is not an answer: React can redraw the same
+          // permission card. The disappearance becomes authoritative after its grace.
+          const { APPROVAL_GONE_MS } = await import('../src/main/approval-wait.js');
+          await vi.advanceTimersByTimeAsync(APPROVAL_GONE_MS);
+          await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
         }
         const repair = await maintenance();
         expect(repair).toMatchObject({ conversationId: PRIME, reason: 'unattributed' });

@@ -4573,5 +4573,16 @@
   "These schedules were saved by a newer version of Chat Marks. Update the app to change them.": "這些排程由較新版本的 Chat Marks 儲存。請更新應用程式後再變更。",
   "Authorize": "授權",
   "Reinstall {0}": "重新安裝 {0}",
-  "External modules do not accept arbitrary management URLs.": "外部模組不接受任意管理網址。"
+  "External modules do not accept arbitrary management URLs.": "外部模組不接受任意管理網址。",
+  "Delete archived chats after": "封存聊天刪除期限",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "自動刪除在此期間未使用的本機封存聊天。作用中的聊天、釘選聊天、工作代理及公司員工皆受到保護。刪除也會取消待送出的訊息並撤銷授權。",
+  "{0} days": "{0} 天",
+  "Browser pickup stopped after {0} attempts": "瀏覽器接收在嘗試 {0} 次後停止",
+  "7 days": "7 天",
+  "14 days": "14 天",
+  "30 days": "30 天",
+  "60 days": "60 天",
+  "90 days": "90 天",
+  "180 days": "180 天",
+  "365 days": "365 天"
 }

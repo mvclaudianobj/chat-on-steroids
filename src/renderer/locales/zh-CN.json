@@ -4573,5 +4573,16 @@
   "These schedules were saved by a newer version of Chat Marks. Update the app to change them.": "这些计划由更新版本的 Chat Marks 保存。请更新应用后再更改。",
   "Authorize": "授权",
   "Reinstall {0}": "重新安装 {0}",
-  "External modules do not accept arbitrary management URLs.": "外部模块不接受任意管理网址。"
+  "External modules do not accept arbitrary management URLs.": "外部模块不接受任意管理网址。",
+  "Delete archived chats after": "归档聊天删除期限",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "自动删除在此期间未使用的本地归档聊天。活跃聊天、置顶聊天、工作代理和公司员工受到保护。删除操作也会取消待发送消息并撤销授权。",
+  "{0} days": "{0} 天",
+  "Browser pickup stopped after {0} attempts": "浏览器接收在尝试 {0} 次后停止",
+  "7 days": "7 天",
+  "14 days": "14 天",
+  "30 days": "30 天",
+  "60 days": "60 天",
+  "90 days": "90 天",
+  "180 days": "180 天",
+  "365 days": "365 天"
 }

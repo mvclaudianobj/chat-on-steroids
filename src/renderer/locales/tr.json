@@ -4640,5 +4640,16 @@
   "These schedules were saved by a newer version of Chat Marks. Update the app to change them.": "Bu zamanlamalar Chat Marks'in daha yeni bir sürümüyle kaydedildi. Değiştirmek için uygulamayı güncelle.",
   "Authorize": "Yetkilendir",
   "Reinstall {0}": "{0} yeniden yükle",
-  "External modules do not accept arbitrary management URLs.": "Harici modüller rastgele yönetim URL’lerini kabul etmez."
+  "External modules do not accept arbitrary management URLs.": "Harici modüller rastgele yönetim URL’lerini kabul etmez.",
+  "Delete archived chats after": "Arşivlenen sohbetleri şu süreden sonra sil",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "Bu süre boyunca kullanılmayan yerel arşivlenmiş sohbetleri otomatik sil. Aktif, sabitlenmiş sohbetler, çalışan aracılar ve Şirket personeli korunur. Silme işlemi bekleyen mesajları da iptal eder ve izinleri kaldırır.",
+  "{0} days": "{0} gün",
+  "Browser pickup stopped after {0} attempts": "Tarayıcı alma işlemi {0} denemeden sonra durdu",
+  "7 days": "7 gün",
+  "14 days": "14 gün",
+  "30 days": "30 gün",
+  "60 days": "60 gün",
+  "90 days": "90 gün",
+  "180 days": "180 gün",
+  "365 days": "365 gün"
 }

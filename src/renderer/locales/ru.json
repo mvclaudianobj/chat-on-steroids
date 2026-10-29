@@ -4774,5 +4774,16 @@
   "These schedules were saved by a newer version of Chat Marks. Update the app to change them.": "Эти расписания сохранены более новой версией Chat Marks. Обновите приложение, чтобы их изменить.",
   "Authorize": "Разрешить",
   "Reinstall {0}": "Переустановить {0}",
-  "External modules do not accept arbitrary management URLs.": "Внешние модули не принимают произвольные URL управления."
+  "External modules do not accept arbitrary management URLs.": "Внешние модули не принимают произвольные URL управления.",
+  "Delete archived chats after": "Удалять архивные чаты через",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "Автоматически удалять локально архивированные чаты, не использовавшиеся в течение этого срока. Активные и закреплённые чаты, агенты и сотрудники компании защищены. При удалении также отменяются ожидающие сообщения и отзываются разрешения.",
+  "{0} days": "{0} дней",
+  "Browser pickup stopped after {0} attempts": "Получение через браузер остановлено после {0} попыток",
+  "7 days": "7 дней",
+  "14 days": "14 дней",
+  "30 days": "30 дней",
+  "60 days": "60 дней",
+  "90 days": "90 дней",
+  "180 days": "180 дней",
+  "365 days": "365 дней"
 }

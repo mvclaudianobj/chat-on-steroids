@@ -4573,5 +4573,16 @@
   "These schedules were saved by a newer version of Chat Marks. Update the app to change them.": "이 일정은 더 새로운 버전의 Chat Marks에서 저장되었습니다. 바꾸려면 앱을 업데이트하세요.",
   "Authorize": "승인",
   "Reinstall {0}": "{0} 다시 설치",
-  "External modules do not accept arbitrary management URLs.": "외부 모듈에서는 임의의 관리 URL을 사용할 수 없습니다."
+  "External modules do not accept arbitrary management URLs.": "외부 모듈에서는 임의의 관리 URL을 사용할 수 없습니다.",
+  "Delete archived chats after": "보관된 채팅 삭제 기간",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "이 기간 동안 사용하지 않은 로컬 보관 채팅을 자동으로 삭제합니다. 활성 채팅, 고정된 채팅, 작업자, 회사 직원은 보호됩니다. 삭제하면 대기 중인 메시지도 취소되고 권한이 철회됩니다.",
+  "{0} days": "{0}일",
+  "Browser pickup stopped after {0} attempts": "브라우저 수신이 {0}번 시도한 후 중단되었습니다",
+  "7 days": "7일",
+  "14 days": "14일",
+  "30 days": "30일",
+  "60 days": "60일",
+  "90 days": "90일",
+  "180 days": "180일",
+  "365 days": "365일"
 }

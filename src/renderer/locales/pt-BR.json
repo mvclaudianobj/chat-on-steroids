@@ -4707,5 +4707,16 @@
   "These schedules were saved by a newer version of Chat Marks. Update the app to change them.": "Estas programações foram salvas por uma versão mais nova do Chat Marks. Atualize o app para alterá-las.",
   "Authorize": "Autorizar",
   "Reinstall {0}": "Reinstalar {0}",
-  "External modules do not accept arbitrary management URLs.": "Os módulos externos não aceitam URLs de gerenciamento arbitrárias."
+  "External modules do not accept arbitrary management URLs.": "Os módulos externos não aceitam URLs de gerenciamento arbitrárias.",
+  "Delete archived chats after": "Excluir conversas arquivadas após",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "Excluir automaticamente conversas arquivadas localmente que não tenham sido usadas durante esse período. Conversas ativas, fixadas, workers e funcionários da Empresa ficam protegidos. A exclusão também cancela mensagens pendentes e revoga permissões.",
+  "{0} days": "{0} dias",
+  "Browser pickup stopped after {0} attempts": "A retomada pelo navegador parou após {0} tentativas",
+  "7 days": "7 dias",
+  "14 days": "14 dias",
+  "30 days": "30 dias",
+  "60 days": "60 dias",
+  "90 days": "90 dias",
+  "180 days": "180 dias",
+  "365 days": "365 dias"
 }
