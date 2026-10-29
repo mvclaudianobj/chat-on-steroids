@@ -29,7 +29,8 @@ describe('portable browser-backed feature parity', () => {
         waitForSubAgents: false,
         autoWorktrees: false,
         endSleepingWorkerProcesses: false,
-        archiveWorkerChats: false
+        archiveWorkerChats: false,
+        archiveWorkerDelayMinutes: 2
       });
       expect(browserExtensionRequired(config)).toBe(true);
     }
