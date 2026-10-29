@@ -12,6 +12,7 @@ export interface CompanyRpgObservation {
   state: string;
   source: string;
   error: boolean;
+  taskTitle?: string | null;
 }
 export function companyRpgRoom(state: CompanyRpgState): CompanyRpgRoom {
   if (state === 'meeting-present') return 'meeting';
@@ -88,7 +89,8 @@ export function createCompanyRpgWorld(
         pixel.setAttribute('aria-hidden', 'true');
         const name = document.createElement('span'); name.className = 'company-rpg-name';
         const stateLabel = document.createElement('span'); stateLabel.className = 'company-rpg-state';
-        button.append(pixel, name, stateLabel); actor.append(button); actors.set(seat, actor);
+        const task = document.createElement('span'); task.className = 'company-rpg-task';
+        button.append(pixel, name, stateLabel, task); actor.append(button); actors.set(seat, actor);
       }
       const priorRoom = actor.parentElement;
       const destination = containers.get(room)!;
@@ -99,8 +101,13 @@ export function createCompanyRpgWorld(
       actor.dataset.source = demo ? 'demo' : (observation?.source ?? 'unverified');
       actor.querySelector<HTMLElement>('.company-rpg-name')!.textContent = seat;
       actor.querySelector<HTMLElement>('.company-rpg-state')!.textContent = translate(state);
+      // The task title comes from the durable ticket identified by the broker's
+      // observation. A configured seat alone cannot claim active work.
+      const taskTitle = !demo && state === 'working' && observation?.source === 'broker'
+        ? observation.taskTitle?.trim().slice(0, 160) : null;
+      actor.querySelector<HTMLElement>('.company-rpg-task')!.textContent = taskTitle ?? '';
       const button = actor.querySelector<HTMLButtonElement>('button')!;
-      button.setAttribute('aria-label', `${seat} · ${translate(state)}`);
+      button.setAttribute('aria-label', `${seat} · ${translate(state)}${taskTitle ? ` · ${taskTitle}` : ''}`);
       if (changedRoom && priorRect && !reducedMotion()) move(actor, priorRect, actor.getBoundingClientRect());
     }
   } };

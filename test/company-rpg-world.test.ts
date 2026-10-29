@@ -29,16 +29,21 @@ it('keeps six distinct worker actors and moves the SAME node through broker-conf
   expect(scene.querySelectorAll('.company-rpg-actor')).toHaveLength(6);
   const mark = scene.querySelector<HTMLElement>('[data-seat="marks1"]')!;
   expect(mark.closest('.company-rpg-offline')).not.toBeNull();
-  actor.update(seats, [{ seat: 'marks1', state: 'working', source: 'broker', error: false }], false);
+  actor.update(seats, [{ seat: 'marks1', state: 'working', source: 'broker', error: false, taskTitle:'Review the product roadmap' }], false);
   expect(scene.querySelector('[data-seat="marks1"]')).toBe(mark);
   expect(mark.closest('.company-rpg-desks')).not.toBeNull();
+  expect(mark.querySelector('.company-rpg-task')?.textContent).toBe('Review the product roadmap');
+  expect(mark.querySelector('button')?.getAttribute('aria-label')).toContain('Review the product roadmap');
   actor.update(seats, [{ seat: 'marks1', state: 'meeting-present', source: 'meeting', error: false }], false);
   expect(mark.closest('.company-rpg-meeting')).not.toBeNull();
+  expect(mark.querySelector('.company-rpg-task')?.textContent).toBe('');
   actor.update(seats, [{ seat: 'marks1', state: 'available-confirmed', source: 'company', error: false }], false);
   expect(mark.closest('.company-rpg-rest')).not.toBeNull();
   actor.update(seats, [{ seat: 'marks1', state: 'working', source: 'error', error: true }], false);
   expect(mark.closest('.company-rpg-offline')).not.toBeNull();
   expect(mark.dataset.state).toBe('unverified');
+  actor.update(seats,[{seat:'marks1',state:'working',source:'error',error:true,taskTitle:'Invented task'}],false);
+  expect(mark.querySelector('.company-rpg-task')?.textContent).toBe('');
 });
 it('retains actor identity for 30 observations and does not animate an unchanged state', () => {
   const scene = host();
