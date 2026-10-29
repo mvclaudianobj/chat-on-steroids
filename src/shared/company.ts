@@ -49,6 +49,42 @@ export const companyDelegationAuditSchema = z.object({
   requestId: z.string().uuid().nullable(), reason: z.enum(['explicit-ceo', 'authenticated-coo', 'revoked', 'invalid-identity', 'policy-mismatch', 'expired', 'stale-session']).nullable()
 }).strict();
 const actor = z.union([z.literal('ceo'), companyRoleSchema, companySeatSchema]);
+/**
+ * The CEO's opt-in, revocable authority for marks-coo to press Allow once on ChatGPT's tool
+ * approval card in a chat the Company provably owns (company-coo-approval.ts). Off by default.
+ * A card matching a risk term, or one in a chat whose ownership is not exact, stays for the CEO.
+ */
+export const COO_HOST_APPROVAL_DEFAULT_RISKS = [
+  // Deleting data.
+  'rm -r', 'rm -f', 'rmdir', 'unlink', 'delete', 'remove-item', 'drop table', 'drop database', 'truncate', 'git clean', 'git reset --hard',
+  // Force operations.
+  '--force', 'push -f', 'force-with-lease',
+  // Release, tag, publish.
+  'release', 'git tag', 'publish', 'deploy',
+  // Credentials, secrets, vault.
+  'credential', 'secret', 'vault', 'password', 'token', 'api key', 'api_key', 'private key', '.env', 'ssh-key',
+  // External network and remote hosts.
+  'git push', 'curl', 'wget', 'ssh', 'scp', 'rsync', 'http://', 'https://', 'ftp', 'invoke-webrequest'
+] as const;
+export const COO_HOST_APPROVAL_DECISIONS = ['allowed', 'clicked', 'dismissed', 'unconfirmed', 'held-risk', 'held-unattributed', 'held-unavailable', 'revoked'] as const;
+export const cooHostApprovalTermSchema = z.string().trim().min(2).max(80);
+export const cooHostApprovalAuditSchema = z.object({
+  at: tick, actor: z.literal('marks-coo'), conversationId: safeText(160), sessionId: safeText(160).nullable(),
+  requestId: z.string().uuid().nullable(), seat: companySeatSchema.nullable(),
+  cardId: safeText(64), fingerprint: z.string().regex(/^[0-9a-f]{16}$/), tool: safeText(80),
+  decision: z.enum(COO_HOST_APPROVAL_DECISIONS), reason: safeText(160), epoch: z.number().int().nonnegative()
+}).strict();
+export const cooHostApprovalSchema = z.object({
+  enabled: z.boolean(), epoch: z.number().int().nonnegative(),
+  riskTerms: z.array(cooHostApprovalTermSchema).max(64),
+  changedAt: tick.nullable(),
+  audit: z.array(cooHostApprovalAuditSchema).max(300)
+}).strict();
+export type CooHostApproval = z.infer<typeof cooHostApprovalSchema>;
+export type CooHostApprovalAudit = z.infer<typeof cooHostApprovalAuditSchema>;
+export function defaultCooHostApproval(): CooHostApproval {
+  return { enabled: false, epoch: 0, riskTerms: [...COO_HOST_APPROVAL_DEFAULT_RISKS], changedAt: null, audit: [] };
+}
 export const companySchema = z.object({
   name: safeText(100),
   seatCount: z.number().int().min(1).max(99).default(5),
@@ -79,6 +115,7 @@ export const companyMeetingSchema = z.object({
 }).strict();
 export const companyActivitySchema = z.object({ id: z.string().uuid(), at: tick, actor, kind: z.enum(['request', 'move', 'seat', 'meeting', 'company']), requestId: z.string().uuid().optional(), message: safeText(400) }).strict();
 export const companySnapshotSchema = z.object({ version: z.literal(1), company: companySchema, requests: z.array(companyRequestSchema).max(500), meetings: z.array(companyMeetingSchema).max(150), activities: z.array(companyActivitySchema).max(1000), demo: z.boolean(),
+  cooHostApproval: cooHostApprovalSchema.default(defaultCooHostApproval),
   demoRecovery: z.object({ backupId: z.string().uuid(), startedAt: tick }).strict().optional(),
   delegation: companyDelegationSchema.default({mode:'manual',delegate:null,chiefTitle:null,binding:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null}),
   delegationAudit: z.array(companyDelegationAuditSchema).max(300).default([])
@@ -145,6 +182,7 @@ export function companyRestingSeats(snapshot: CompanySnapshot, now = Date.now())
 
 export function emptyCompany(): CompanySnapshot {
   return { version: 1, company: { name: 'Chat Marks', seatCount: 5, roles: [...COMPANY_ROLES], seats: companySeats(5) }, requests: [], meetings: [], activities: [], demo: false,
+    cooHostApproval: defaultCooHostApproval(),
     delegation: {mode:'manual',delegate:null,chiefTitle:null,binding:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null},delegationAudit:[] };
 }
 export function companySeats(count: number): string[] { return Array.from({ length: count }, (_, i) => `marks${i + 1}`); }

@@ -11,6 +11,7 @@
 export const MAIN_TEXTS = [
   'Cancel',
   'Authorize',
+  'Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?',
   'Open',
   'Show browser',
   'Hide browser',

@@ -1,15 +1,18 @@
 import { dialog, ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
-import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema, companyMeetingKindSchema, companyChiefSchema, companyDelegationScopeSchema, companyChiefTitleSchema } from '../shared/company.js';
+import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema, companyMeetingKindSchema, companyChiefSchema, companyDelegationScopeSchema, companyChiefTitleSchema, cooHostApprovalTermSchema } from '../shared/company.js';
 import { activateRealCompany, restoreDemoCompany, getCompany, mutateCompany } from './company-store.js';
 import { createCompanyBroker } from './company-broker.js';
 import { createCompanyObserver } from './company-observability.js';
+import { cooHostApprover, sweepCooHostApprovals } from './company-coo-approval.js';
 import { mainText } from './main-texts.js';
 import { companyLocalConsentCopy, localGrantDecision, readLocalCompanyGrants, recordLocalCompanyRequest, revokeLocalCompanyGrant,
   type CompanyLocalAttestation } from './company-local-grants.js';
 
 export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
+  z.object({ action: z.literal('cooHostPolicy'), payload: z.object({ enabled: z.boolean(),
+    riskTerms: z.array(cooHostApprovalTermSchema).max(64) }).strict() }).strict(),
   z.object({ action: z.literal('localGrants') }).strict(),
   z.object({ action: z.literal('localGrantRevoke'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
   z.object({ action: z.literal('localGrantRequest'), payload: z.object({
@@ -98,6 +101,22 @@ export function registerCompanyIpc(
           { ok: false, error: result.epoch !== frequency.epoch ?
             'Local Company authorization changed during consent; approval refused' :
             'No locally attested Company identity; persistent grant refused' };
+      }
+      if (request.action === 'cooHostPolicy') {
+        // Any change starts a new epoch, so answers filed under the old one are taken back first,
+        // before the native dialog or the store's queue: revocation takes effect at once.
+        await cooHostApprover().revoke(request.payload.enabled ? 'COO host approval policy changed' : 'COO host approval revoked by the CEO');
+        if (request.payload.enabled) {
+          const decision = await dialog.showMessageBox(window, { type: 'warning', title: mainText('Authorize Company workers'),
+            message: mainText('Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?'),
+            detail: `Cards matching one of the ${request.payload.riskTerms.length} CEO risk terms, cards whose Allow once ChatGPT disabled, and cards in chats whose ownership is not exact stay for you. Every decision is audited. Switch it off at any time to revoke immediately.`,
+            buttons: [mainText('Cancel'), mainText('Authorize')], defaultId: 0, cancelId: 0, noLink: true });
+          if (decision.response !== 1 || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame)
+            return { ok: false, error: 'Human authorization was not granted' };
+        }
+        const data = await mutateCompany('cooHostPolicy', request.payload);
+        if (data.cooHostApproval.enabled) void sweepCooHostApprovals().catch(() => undefined);
+        return { ok: true, data };
       }
       if (request.action === 'dispatch' || request.action === 'sendInvitations' || request.action === 'reviewBroker' || request.action === 'delegationGrant' || request.action === 'delegationRevoke' || request.action === 'activateReal' || request.action === 'restoreDemo') {
         const decision = await dialog.showMessageBox(window, {

@@ -2,7 +2,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs, constants } from 'node:fs';
 import path from 'node:path';
-import { companySnapshotSchema, companySeats, demoCompany, emptyCompany, type CompanySnapshot, type CompanyRequest } from '../shared/company.js';
+import { companySnapshotSchema, companySeats, demoCompany, emptyCompany, type CompanySnapshot, type CompanyRequest, type CooHostApprovalAudit } from '../shared/company.js';
 
 let root = '';
 let queue: Promise<void> = Promise.resolve();
@@ -101,7 +101,7 @@ export function restoreDemoCompany(): Promise<CompanySnapshot> {
     return original;
   });
 }
-export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'confirmDelegated' | 'delegationGrant' | 'delegationRevoke' | 'delegationDeny' | 'delegationTriage' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered', payload: unknown): Promise<CompanySnapshot> {
+export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare' | 'move' | 'seat' | 'authorize' | 'report' | 'confirm' | 'confirmDelegated' | 'delegationGrant' | 'delegationRevoke' | 'delegationDeny' | 'delegationTriage' | 'meeting' | 'attendance' | 'minutes' | 'reserve' | 'bind' | 'progress' | 'inviteReserve' | 'inviteDelivered' | 'cooHostPolicy' | 'cooHostAudit', payload: unknown): Promise<CompanySnapshot> {
   return serialized(async () => {
     const current = await load();
     if (action === 'demo') {
@@ -109,7 +109,34 @@ export function mutateCompany(action: 'demo' | 'configure' | 'create' | 'prepare
       const demo = demoCompany(); await save(demo); return demo;
     }
     const now = Date.now();
-    if (action === 'prepare') {
+    if (action === 'cooHostPolicy') {
+      if (current.demo) throw new Error('COO host approval requires a real company');
+      const fields = payload as { enabled: boolean; riskTerms: string[] };
+      const terms = [...new Set(fields.riskTerms.map(term => term.trim().toLowerCase()).filter(term => term.length >= 2))];
+      const policy = current.cooHostApproval;
+      // Every change is a new epoch: an answer authorized under the previous one is never sent.
+      current.cooHostApproval = { ...policy, enabled: fields.enabled, riskTerms: terms, epoch: policy.epoch + 1, changedAt: now };
+      current.activities.unshift({ id: randomUUID(), at: now, actor: 'ceo', kind: 'company',
+        message: `COO host approval ${fields.enabled ? 'enabled' : 'revoked'} · ${terms.length} risk terms (epoch ${policy.epoch + 1})` });
+      current.activities = current.activities.slice(0, 1000);
+      await save(current); return current;
+    } else if (action === 'cooHostAudit') {
+      if (current.demo) throw new Error('COO host approval requires a real company');
+      const entry = payload as CooHostApprovalAudit;
+      const policy = current.cooHostApproval;
+      // Only an Allow needs the authority it claims, checked here under the store's own queue.
+      if (entry.decision === 'allowed' && (!policy.enabled || policy.epoch !== entry.epoch))
+        throw new Error('COO host approval authority changed');
+      if (policy.audit.some(row => row.conversationId === entry.conversationId && row.cardId === entry.cardId && row.decision === entry.decision))
+        return current;
+      policy.audit.unshift(entry);
+      policy.audit = policy.audit.slice(0, 300);
+      if (entry.decision !== 'clicked')
+        current.activities.unshift({ id: randomUUID(), at: now, actor: 'marks-coo', kind: 'company', ...(entry.requestId ? { requestId: entry.requestId } : {}),
+          message: `Host approval ${entry.decision}: ${entry.tool} · ${entry.seat ?? entry.conversationId} · ${entry.reason}`.slice(0, 400) });
+      current.activities = current.activities.slice(0, 1000);
+      await save(current); return current;
+    } else if (action === 'prepare') {
       if (current.demo) throw new Error('Convert the demonstration before assigning real workers');
       const fields = payload as { id: string; seat: string };
       const request = current.requests.find(row => row.id === fields.id);
