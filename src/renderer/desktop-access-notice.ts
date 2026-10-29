@@ -40,7 +40,7 @@ export function paintDesktopAccessNotice(next: AccessState, actions: { repair():
   if (!problem?.missing) return;
   document.getElementById('desktopAccessNoticeText')!.textContent = problem.stale
     ? t('Desktop access stopped working after the update: macOS still shows it as allowed, but has to be asked again.')
-    : t('Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.');
+    : t('Desktop access is on, but macOS has not given Chat Marks the permission it needs.');
   const repair = document.getElementById('desktopAccessNoticeRepair') as HTMLButtonElement;
   // Offered whether or not an earlier grant is remembered: resetting this app's own entry and
   // asking again is harmless, and the first version that remembers grants knows of none.

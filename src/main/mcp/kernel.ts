@@ -1060,7 +1060,7 @@ async function dispatchTracked(
             fail(
               'CONVERSATION_SUPERSEDED: Compact & Resume replaced this ChatGPT conversation. Its transcript remains readable, but it can no longer execute local tools. ' +
                 (replacement
-                  ? `The work continues in https://chatgpt.com/c/${replacement.conversationId}${replacement.title.trim() ? `, shown in Chat On Steroids as ${JSON.stringify(replacement.title.trim())}` : ''}. Tell the user to continue there; no local tool was run.`
+                  ? `The work continues in https://chatgpt.com/c/${replacement.conversationId}${replacement.title.trim() ? `, shown in Chat Marks as ${JSON.stringify(replacement.title.trim())}` : ''}. Tell the user to continue there; no local tool was run.`
                   : 'Continue only in the replacement chat; no local tool was run.')
             )
           )

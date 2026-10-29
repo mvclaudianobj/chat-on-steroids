@@ -185,14 +185,14 @@ export function describeMacOSDesktopAccess(
     checks.push(check(
       'macOS Screen Recording',
       'screen',
-      'Screen Recording permission preflight did not pass in the current Desktop process. Check this installed Chat On Steroids.app in Privacy & Security → Screen & System Audio Recording (or Device Control and Data Access).'
+      'Screen Recording permission preflight did not pass in the current Desktop process. Check this installed Chat Marks.app in Privacy & Security → Screen & System Audio Recording (or Device Control and Data Access).'
     ));
   }
   if (caps.control) {
     checks.push(check(
       'macOS Accessibility',
       'accessibility',
-      'Accessibility permission preflight did not pass in the current Desktop process. Check this installed Chat On Steroids.app in Privacy & Security → Accessibility (Device Control and Data Access on newer macOS).'
+      'Accessibility permission preflight did not pass in the current Desktop process. Check this installed Chat Marks.app in Privacy & Security → Accessibility (Device Control and Data Access on newer macOS).'
     ));
   }
   return checks;

@@ -16,8 +16,8 @@
 type Kind = 'private key' | 'OpenAI key' | 'Anthropic key' | 'GitHub token' | 'AWS access key' | 'Stripe key' |
   'Slack token' | 'Google API key' | 'JSON Web Token' | 'secret setting';
 
-const marker = (kind: string): string => `[${kind} hidden by Chat On Steroids]`;
-const VALUE_MARKER = '[value hidden by Chat On Steroids]';
+const marker = (kind: string): string => `[${kind} hidden by Chat Marks]`;
+const VALUE_MARKER = '[value hidden by Chat Marks]';
 
 /** Prefixes and names any maskable value contains; text without one is returned untouched at once. */
 const TRIGGER = /sk-|gh[pousr]_|github_pat_|AKIA|ASIA|[sr]k_(?:live|test)_|xox[abprs]-|AIza|eyJ|PRIVATE KEY|(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|PASS|CREDENTIALS?|AUTH)["']?\s*[:=]/;

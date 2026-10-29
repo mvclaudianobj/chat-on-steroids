@@ -59,7 +59,7 @@ beforeEach(() => {
 it('masks a key in what a tool returns and logs what it hid', async () => {
   const result = await tool(output)('req-chat-a');
   expect(text(result)).not.toContain(KEY);
-  expect(text(result)).toContain('OPENAI_API_KEY=[OpenAI key hidden by Chat On Steroids]');
+  expect(text(result)).toContain('OPENAI_API_KEY=[OpenAI key hidden by Chat Marks]');
   expect(text(result)).toContain('PORT=3000');
   expect(state.log).toHaveBeenCalledWith('secrets shield: hid 1 OpenAI key in the read result');
 });
@@ -117,7 +117,7 @@ it('masks a background command\'s output that rides along with a later result', 
   const result = text(await tool('all 12 tests passed')('req-chat-a'));
   expect(result).toContain('all 12 tests passed');
   expect(result).toContain('--- Background command results ---');
-  expect(result).toContain('DEPLOY_TOKEN=[value hidden by Chat On Steroids]');
+  expect(result).toContain('DEPLOY_TOKEN=[value hidden by Chat Marks]');
   expect(result).not.toContain('Q7wQ7w');
   expect(state.log).toHaveBeenCalledWith('secrets shield: hid 1 secret setting in the read background command result');
 });

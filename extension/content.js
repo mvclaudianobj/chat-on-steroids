@@ -7817,7 +7817,7 @@
             : blocked === 'blocked'
               ? t('content_task_blocked_unavailable', 'This chat is blocked in the app. Release it there to drive it again.')
               : goalUnknown
-              ? t('content_task_waiting_app', 'Waiting for Chat On Steroids to answer.')
+              ? t('content_task_waiting_app', 'Waiting for Chat Marks to answer.')
               : !hasKey
               ? t('content_task_api_key_unavailable', 'Add an OpenRouter API key in the app first.')
               : ''

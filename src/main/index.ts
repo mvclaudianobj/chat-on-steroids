@@ -322,7 +322,7 @@ const chatNoticeAt = new Map<string, number>();
 const phoneNeedsYou = (sessionId: string): void => {
   soundCue('needs-you', sessionId);
   void getSession(sessionId).catch(() => null).then(summary => pushToPhone({ kind: 'needs-you', sessionId,
-    chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null }));
+    chatTitle: summary?.title || 'Chat Marks', conversationId: summary?.conversationId ?? null }));
 };
 
 function showWindow(): void {

@@ -45,7 +45,7 @@ it('offers Repair and Settings when no earlier grant is remembered', async () =>
   paintDesktopAccessNotice(state({ accessibility: 'missing', grantedBefore: { screen: true, accessibility: false } }), actions);
   const notice = document.getElementById('desktopAccessNotice')!;
   expect(notice.hidden).toBe(false);
-  expect(notice.textContent).toContain('has not given Chat On Steroids');
+  expect(notice.textContent).toContain('has not given Chat Marks');
   expect((document.getElementById('desktopAccessNoticeRepair') as HTMLButtonElement).hidden).toBe(false);
   (document.getElementById('desktopAccessNoticeRepair') as HTMLButtonElement).click();
   expect(actions.repair).toHaveBeenCalledOnce();
