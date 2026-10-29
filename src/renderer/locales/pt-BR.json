@@ -4740,5 +4740,16 @@
   "Held for the CEO: ownership not exact": "Retido para o CEO: propriedade não exata",
   "Held for the CEO: Allow unavailable": "Retido para o CEO: Permitir indisponível",
   "Withdrawn by revocation": "Retirado por revogação",
-  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "Permitir que o marks-coo pressione Permitir uma vez nos cartões de aprovação de ferramentas em chats comprovadamente da Empresa?"
+  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "Permitir que o marks-coo pressione Permitir uma vez nos cartões de aprovação de ferramentas em chats comprovadamente da Empresa?",
+  "Delete archived chats after": "Excluir conversas arquivadas após",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "Excluir automaticamente conversas arquivadas localmente que não tenham sido usadas durante esse período. Conversas ativas, fixadas, workers e funcionários da Empresa ficam protegidos. A exclusão também cancela mensagens pendentes e revoga permissões.",
+  "{0} days": "{0} dias",
+  "Browser pickup stopped after {0} attempts": "A retomada pelo navegador parou após {0} tentativas",
+  "7 days": "7 dias",
+  "14 days": "14 dias",
+  "30 days": "30 dias",
+  "60 days": "60 dias",
+  "90 days": "90 dias",
+  "180 days": "180 dias",
+  "365 days": "365 dias"
 }

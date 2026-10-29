@@ -71,6 +71,8 @@ const {
   openContinuationNow,
   releaseContinuationDestinationSendNow,
   reopenWithHandoffNow,
+  retryIncompleteHandoffNow,
+  attachDurableFallback,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
   restoreContinuations,
@@ -79,7 +81,7 @@ const {
   supersededSourceConversations
 } = await import('../src/main/session/continuation.js');
 const { RESUME_CLAIM_WINDOW_MS, resumeOpeningChat } = await import('../src/main/session/resume-gate.js');
-const { briefShortfall, handoffContinuationId, prepareHandoff, resumeBootstrapText } = await import('../src/main/session/handoff.js');
+const { briefShortfall, durableRecoveryBrief, handoffContinuationId, prepareHandoff, resumeBootstrapText } = await import('../src/main/session/handoff.js');
 const { createSession, getSession, initSessionStore, resetSessionStoreForTests, sessionsRoot } = await import(
   '../src/main/session/store.js'
 );
@@ -206,6 +208,42 @@ describe('reopening from a saved summary (#1215)', () => {
 });
 
 describe('capturing the brief', () => {
+  it('retries a short handoff in the same source and accepts a complete next answer after restart', async () => {
+    const session = await createSession({ title: 'uninterrupted work', conversationId: CHAT_A });
+    const first = await openContinuationNow(session.id, CHAT_A);
+    const retried = await retryIncompleteHandoffNow(first.token, 'too short', 2);
+    expect(retried?.next).toMatchObject({ briefRetries: 1, from: CHAT_A, state: 'awaiting-summary' });
+    expect((await retryIncompleteHandoffNow(first.token, 'same report', 2))?.next?.token).toBe(retried!.next!.token);
+    expect(continuationForSession(session.id)?.token).toBe(retried!.next!.token);
+    const snapshot = snapshotContinuations();
+    resetContinuationsForTests();
+    await restoreContinuations(snapshot);
+    expect(continuationForSession(session.id)?.briefRetries).toBe(1);
+    expect(await attachSummary(retried!.next!.token, SAMPLE_BRIEF)).not.toBeNull();
+    expect(await claimContinuationNow(retried!.next!.token, 'next-page')).not.toBeNull();
+    expect(await commitContinuation(retried!.next!.token, CHAT_B)).toBe(true);
+    expect(await attachedChat(session.id)).toBe(CHAT_B);
+  });
+
+  it('uses a recorded fallback after three incomplete model answers and resumes in chat B', async () => {
+    const session = await createSession({ title: 'unresolved task', conversationId: CHAT_A });
+    await store.appendEvent(session.id, { kind: 'user_message', source: 'extension', time: 10,
+      message: { text: 'Fix a difficult bug in src/main/bridge.ts; preserve my changes.', truncated: false, chars: 68 } });
+    let token = (await openContinuationNow(session.id, CHAT_A)).token;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const retry = await retryIncompleteHandoffNow(token, 'brief too small', 2);
+      expect(retry?.next?.briefRetries).toBe(attempt + 1);
+      token = retry!.next!.token;
+    }
+    expect(await retryIncompleteHandoffNow(token, 'brief still too small', 2)).toMatchObject({ exhausted: true, next: null });
+    const fallback = await durableRecoveryBrief(session.id);
+    expect(fallback).toContain('Fix a difficult bug in src/main/bridge.ts');
+    expect(fallback).toContain('DURABLE RECOVERY BRIEF');
+    expect(await attachDurableFallback(token, fallback)).not.toBeNull();
+    expect(await claimContinuationNow(token, 'fallback-page')).not.toBeNull();
+    expect(await commitContinuation(token, CHAT_B)).toBe(true);
+    expect(await attachedChat(session.id)).toBe(CHAT_B);
+  });
   it('freezes exact source model intent across selection changes and durable restore', async () => {
     const summary = await createSession({ title: 'model transfer', conversationId: CHAT_A });
     await store.observeSessionModel(summary.id, CHAT_A, 'gpt-5.6-sol', 10, 'high');
@@ -750,6 +788,39 @@ describe('committing', () => {
     await expect(releaseContinuationDestinationSendNow(token, 'old-command')).rejects.toThrow('disk full');
     expect(snapshotContinuations().entries.find(row => row.token === token)?.claimedBy).toBe('old-command');
     expect(await claimContinuationNow(token, 'new-command')).toBeNull();
+  });
+
+  it.each(['not-attempted', 'attempted-unresolved'] as const)('reclaims a restored %s destination once, without reviving the old claimant', async state => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'before-restart');
+    if (state === 'attempted-unresolved') expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    const snapshot = snapshotContinuations();
+    expect(snapshot.entries.find(row => row.token === token)?.claimedBy).toBe('before-restart');
+    resetContinuationsForTests();
+    await restoreContinuations(snapshot);
+    expect(continuationByToken(token)?.state).toBe('claimed');
+    expect(snapshotContinuations().entries.find(row => row.token === token)?.claimedBy).toBe('before-restart');
+    expect((await claimContinuationNow(token, 'after-restart'))?.summary).toContain(SAMPLE_BRIEF);
+    expect(snapshotContinuations().entries.find(row => row.token === token)?.claimedBy).toBe('after-restart');
+    expect(continuationByToken(token)).toMatchObject({ destinationSend: { state: 'not-attempted' } });
+    expect(await claimContinuationNow(token, 'before-restart')).toBeNull();
+    expect((await beginContinuationDestinationSendNow(token))?.allowed).toBe(true);
+    expect(await claimContinuationNow(token, 'another-new-command')).toBeNull();
+  });
+
+  it('keeps a restored dispatched destination exclusively bound to its original claimant', async () => {
+    const { token } = await readyContinuation();
+    await claimContinuationNow(token, 'before-restart');
+    await beginContinuationDestinationSendNow(token);
+    expect(await dispatchContinuationDestinationSendNow(token)).toBe(true);
+    const snapshot = snapshotContinuations();
+    expect(snapshot.entries.find(row => row.token === token)?.claimedBy).toBe('before-restart');
+    resetContinuationsForTests();
+    await restoreContinuations(snapshot);
+    expect(continuationByToken(token)?.state).toBe('claimed');
+    expect(snapshotContinuations().entries.find(row => row.token === token)?.claimedBy).toBe('before-restart');
+    expect(await claimContinuationNow(token, 'after-restart')).toBeNull();
+    expect(continuationByToken(token)).toMatchObject({ destinationSend: { state: 'dispatched-unresolved' } });
   });
 
   it('re-proves the exact destination message after the continuation already committed', async () => {

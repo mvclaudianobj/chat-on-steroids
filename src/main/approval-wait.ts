@@ -59,6 +59,8 @@ export interface ApprovalWaitDeps {
 interface Wait {
   since: number;
   seenAt: number;
+  /** The first report without a card; a transient React remount does not dismiss consent. */
+  missingSince: number | null;
   noticed: boolean;
   /** Chat Marks: the Notification center was told of this wait (once, unlike the desktop notice). */
   outboundNoticed?: boolean;
@@ -127,14 +129,23 @@ export async function noteApprovalCard(
 ): Promise<void> {
   let wait = waits.get(conversationId);
   let changedCard = false;
-  if (wait && (!waiting || now - wait.seenAt >= APPROVAL_FRESH_MS)) {
+  const stale = !!wait && now - wait.seenAt >= APPROVAL_FRESH_MS;
+  const replacedAfterGap = !!wait && waiting && wait.missingSince !== null && !!card &&
+    (wait.answer?.outcome === 'dismissed' || !sameWords(wait.card, card));
+  if (wait && !waiting && !stale && wait.card && wait.answer?.outcome !== 'dismissed') {
+    // A disappearing card is often just an intermediate React frame. Preserve the
+    // consent episode and its actionable app card through that short gap.
+    wait.missingSince ??= now;
+    if (now - wait.missingSince < APPROVAL_GONE_MS) return;
+  }
+  if (wait && (!waiting || stale || replacedAfterGap)) {
     waits.delete(conversationId);
     if (wait.stale) clearTimeout(wait.stale);
     deps.log(`bridge: ${conversationId} no longer shows ChatGPT's tool approval card`);
     try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
     // Kept before anything is awaited: the redrawn card's poll can come while the row is still
     // being written, and must find this episode rather than start a new one with a new notice.
-    const gone = waiting ? null : { wait, at: now, anchor: null as { seq: number; time: number } | null };
+    const gone = waiting ? null : { wait, at: wait.missingSince ?? now, anchor: null as { seq: number; time: number } | null };
     if (gone) {
       for (const [id, entry] of answered) if (now - entry.at >= APPROVAL_GONE_MS) answered.delete(id);
       answered.set(conversationId, gone);
@@ -163,12 +174,13 @@ export async function noteApprovalCard(
     if (before.anchor && wait.sessionId) await deps.record(wait.sessionId, wait.progressId, APPROVAL_WAITING_TEXT, before.anchor).catch(() => null);
   }
   if (!wait) {
-    wait = { since: now, seenAt: now, noticed: false, progressId: `${APPROVAL_PROGRESS_PREFIX}${conversationId}:${now}`, sessionId: null, row: null, card: null, answer: null, stale: null };
+    wait = { since: now, seenAt: now, missingSince: null, noticed: false, progressId: `${APPROVAL_PROGRESS_PREFIX}${conversationId}:${now}`, sessionId: null, row: null, card: null, answer: null, stale: null };
     waits.set(conversationId, wait);
     changedCard = true;
     deps.log(`bridge: ${conversationId} waits for the user to answer ChatGPT's tool approval card`);
   }
   wait.seenAt = now;
+  wait.missingSince = null;
   if (deps.changed) {
     // A page that stops reporting ends the wait with no poll left to say so.
     const current = wait;

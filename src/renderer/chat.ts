@@ -559,6 +559,17 @@ const PROJECT_TASK_PAGE_SIZE = 5;
 const PROJECT_TASK_PAGE_INCREMENT = 8;
 let sidebarOrder: ReturnType<typeof createSidebarOrder> | undefined;
 let sidebarPins: ReturnType<typeof createSidebarPins> | undefined;
+/** The localStorage sidebar preference must be copied before retention can safely run. */
+let retentionPinsWrite: Promise<void> = Promise.resolve();
+function syncRetentionPins(): void {
+  const bridge = api as typeof api & { setSessionPins?: (ids: string[]) => Promise<void> };
+  if (sidebarPins && bridge.setSessionPins) {
+    const ids = sidebarPins.ids();
+    retentionPinsWrite = retentionPinsWrite.then(async () => { await bridge.setSessionPins!(ids); }).catch(() => {
+      // Main keeps its fail-closed retention gate until the pin set is durably saved.
+    });
+  }
+}
 /** Only a person's own recorded chats can be pinned; workers live inside their task's row. */
 const pinnable = (entry: SessionSummary): boolean => !!entry.conversationId && entry.origin?.kind !== 'worker';
 const pinnedChat = (entry: SessionSummary): boolean => pinnable(entry) && sidebarPins?.has(entry.id) === true;
@@ -1377,6 +1388,7 @@ function sessionRow(summary: SessionSummary): HTMLElement {
         title: () => pinned ? t("Unpin this chat") : t("Pin this chat to the top of its list"),
         run: () => {
           sidebarPins?.toggle(summary.id);
+          syncRetentionPins();
           paintSessions();
           // The row moved: keep the keyboard on the same chat's menu button. Its button shows only
           // while the row has focus, so the row takes focus first.
@@ -1525,6 +1537,7 @@ function runSlashCommand(name: string): void {
   else if (name === 'rename' && chat) startRename(chat);
   else if (name === 'pin' && chat && pinnable(chat)) {
     sidebarPins?.toggle(chat.id);
+    syncRetentionPins();
     paintSessions();
     toast(sidebarPins?.has(chat.id) ? t('Chat pinned') : t('Chat unpinned'));
   } else if (name === 'pin') toast(t('This chat cannot be pinned yet.'));
@@ -9076,6 +9089,22 @@ async function refreshInputQueue(): Promise<void> {
           void refreshInputQueue();
         } else cancel.disabled = false;
       };
+      if (entry.pickupRecovery?.stoppedAt) {
+        card.classList.add('is-delivery-error');
+        const paused = el('span', 'pending-message-status', () =>
+          t('Browser pickup stopped after {0} attempts', [entry.pickupRecovery!.attempts]));
+        card.append(paused);
+        const retry = dockAction(() => t('Retry delivery'), 'i-retry', () => {});
+        retry.classList.add('delivery-retry');
+        retry.onclick = async () => {
+          if (retry.disabled || !card.isConnected || selection !== selectionGeneration) return;
+          retry.disabled = true;
+          const restarted = await run(api.retryQueuedPickup(entry.id));
+          if (restarted === false) toast(t('The queue changed during the move. Try again.'));
+          void refreshInputQueue();
+        };
+        card.append(retry);
+      }
       if (entry.recovery) { card.append(cancel); return card; }
       // Like Codex's Steer: send a message that waits for the end of the turn into the turn now.
       if (entry.mode === 'after-turn' && !entry.attachments?.length && !entry.images?.length && !entry.stages?.length) {
@@ -9550,6 +9579,7 @@ export function initChat(next: Deps): void {
   initialized = true;
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();
+  syncRetentionPins();
   sidebarOrder = createSidebarOrder($('sessionList'), () => [
     ...projectSortEntries(),
     ...chatGroups.groups.map(group => ({ id: group.id, scope: chatGroupsScope(group.projectId) })),

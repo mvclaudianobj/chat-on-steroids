@@ -7111,11 +7111,28 @@
   const approvalCardIds = new WeakMap();
   const approvalTokensDone = new Set();
   let approvalResult = null;
+  let latestApprovalCard = null;
+  const APPROVAL_REDRAW_MS = 4_000;
   function currentApprovalCard() {
     const card = CLF_DOM.approvalCard();
-    if (!card) return null;
-    if (!approvalCardIds.has(card.node)) approvalCardIds.set(card.node, crypto.randomUUID());
-    return { id: approvalCardIds.get(card.node), lines: card.lines, allow: card.allow, node: card.node };
+    const now = Date.now();
+    if (!card) {
+      // React briefly removes the card while rebuilding it. Report the last observed
+      // consent for the redraw window, so an activity poll cannot close/reopen its row.
+      if (latestApprovalCard && now - latestApprovalCard.seenAt < APPROVAL_REDRAW_MS)
+        return latestApprovalCard;
+      latestApprovalCard = null;
+      return null;
+    }
+    if (!approvalCardIds.has(card.node)) {
+      const before = latestApprovalCard;
+      const sameRedraw = before && before.node !== card.node && !before.node.isConnected &&
+        now - before.seenAt < APPROVAL_REDRAW_MS && before.allow === card.allow &&
+        before.lines.length === card.lines.length && before.lines.every((line, index) => line === card.lines[index]);
+      approvalCardIds.set(card.node, sameRedraw ? before.id : crypto.randomUUID());
+    }
+    latestApprovalCard = { id: approvalCardIds.get(card.node), lines: card.lines, allow: card.allow, node: card.node, seenAt: now };
+    return latestApprovalCard;
   }
   async function answerApproval(answer) {
     if (!answer || typeof answer.token !== 'string' || approvalTokensDone.has(answer.token)) return;
@@ -7123,6 +7140,9 @@
     const card = currentApprovalCard();
     const outcome = card && card.id === answer.cardId ? await CLF_DOM.answerApprovalCard(card.node, answer.choice) : 'card_changed';
     approvalResult = { token: answer.token, outcome };
+    // A confirmed host dismissal ends this consent. A new identical request
+    // must get a new identity and an independent decision.
+    if (outcome === 'dismissed') latestApprovalCard = null;
     setTimeout(() => void pullActivity(), 400);
   }
 
@@ -10654,6 +10674,14 @@
       renderControl();
       return 'committed';
     }
+    if (bound.data?.retryBrief === true && bound.data?.prompt && bound.data?.token) {
+      if (bound.data.job) job = bound.data.job;
+      nativeRun++;
+      const retryRun = nativeRun;
+      void runNativeCompaction(String(bound.data.prompt), String(bound.data.token),
+        conversationId, epoch, retryRun);
+      return 'committed';
+    }
     // The answer turn, not the prompt's — see answerTurnFor. Its calls are the ones that have
     // to be finished, too: a brief cut while the compaction turn is still running a tool
     // describes a machine that is still changing.
@@ -10675,6 +10703,14 @@
     renderControl();
     const delivered = await ask({ type: 'compact', conversationId, token: marked.token, summary });
     if (!delivered || delivered.ok !== true) return false;
+    if (delivered.data?.retryBrief === true && delivered.data?.prompt && delivered.data?.token) {
+      if (delivered.data.job) job = delivered.data.job;
+      nativeRun++;
+      const retryRun = nativeRun;
+      void runNativeCompaction(String(delivered.data.prompt), String(delivered.data.token),
+        conversationId, epoch, retryRun);
+      return 'committed';
+    }
     if (delivered.data && delivered.data.job) job = delivered.data.job;
     nativePhase = '';
     localError = '';

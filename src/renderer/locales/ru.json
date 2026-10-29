@@ -4807,5 +4807,16 @@
   "Held for the CEO: ownership not exact": "Оставлено CEO: владелец не установлен точно",
   "Held for the CEO: Allow unavailable": "Оставлено CEO: «Разрешить» недоступно",
   "Withdrawn by revocation": "Отозвано",
-  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "Разрешить marks-coo нажимать «Разрешить один раз» на карточках подтверждения инструментов в чатах, доказуемо принадлежащих компании?"
+  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "Разрешить marks-coo нажимать «Разрешить один раз» на карточках подтверждения инструментов в чатах, доказуемо принадлежащих компании?",
+  "Delete archived chats after": "Удалять архивные чаты через",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "Автоматически удалять локально архивированные чаты, не использовавшиеся в течение этого срока. Активные и закреплённые чаты, агенты и сотрудники компании защищены. При удалении также отменяются ожидающие сообщения и отзываются разрешения.",
+  "{0} days": "{0} дней",
+  "Browser pickup stopped after {0} attempts": "Получение через браузер остановлено после {0} попыток",
+  "7 days": "7 дней",
+  "14 days": "14 дней",
+  "30 days": "30 дней",
+  "60 days": "60 дней",
+  "90 days": "90 дней",
+  "180 days": "180 дней",
+  "365 days": "365 дней"
 }

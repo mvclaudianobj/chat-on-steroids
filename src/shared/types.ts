@@ -215,6 +215,11 @@ export interface UiPrefs {
   startAtLogin?: boolean;
   /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
   turnNotifications?: boolean;
+  /** Days without activity after local archive before safe deletion; 0 disables it. */
+  archiveRetentionDays?: number;
+  /** Last renderer-confirmed pin set. Retention stays paused until this authority is initialized. */
+  archiveRetentionPins?: string[];
+  archiveRetentionPinsReady?: boolean;
   /** #1802: a short sound when a chat needs you, something failed or a chat finished in the background. Missing means off. */
   sounds?: boolean;
   /**

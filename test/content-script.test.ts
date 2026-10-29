@@ -19640,6 +19640,39 @@ describe('one live isolated-world recorder per document', () => {
     expect(await live.runtimeMessage({ type: 'clf-recorder-ping' })).toMatchObject({ busy: false });
   });
 
+  it('keeps one reported approval id across a brief React redraw, then retires it after a real absence', async () => {
+    live = await harness();
+    const addCard = () => {
+      const card = live!.document.createElement('div');
+      card.setAttribute('data-codex-approval-surface', 'true');
+      card.innerHTML = '<p>Allow ChatGPT to use Chat Marks Core?</p><button>Deny<kbd>Esc</kbd></button><button>Allow once<kbd>⏎</kbd></button>';
+      card.getClientRects = () => [{ width: 600, height: 200 }] as unknown as DOMRectList;
+      live!.document.body.append(card);
+      return card;
+    };
+    const report = async () => {
+      await live!.hook.pullActivity();
+      return live!.sent.filter(message => message.type === 'activity').at(-1);
+    };
+    const initial = addCard();
+    const first = await report();
+    expect(first?.approval).toBe(true);
+    expect(first?.approvalCard?.id).toMatch(/^[0-9a-f-]{36}$/);
+    initial.remove();
+    const missing = await report();
+    expect(missing?.approvalCard?.id).toBe(first!.approvalCard.id);
+    expect(missing?.approval).toBe(true);
+    const redrawn = addCard();
+    const same = await report();
+    expect(same?.approvalCard?.id).toBe(first!.approvalCard.id);
+    redrawn.remove();
+    live.advance(4_001);
+    expect((await report())?.approval).toBe(false);
+    addCard();
+    const distinct = await report();
+    expect(distinct?.approvalCard?.id).not.toBe(first!.approvalCard.id);
+  });
+
   it('reports the recorder protocol version rather than the unrelated Fiber protocol version', async () => {
     live = await harness();
 

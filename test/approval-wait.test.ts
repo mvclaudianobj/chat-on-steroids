@@ -62,6 +62,31 @@ describe('approval card episodes', () => {
     expect(deps.rows[1]).toEqual(['session', deps.rows[0]![1], APPROVAL_ANSWERED_TEXT, { seq: 7, time: 1 }]);
   });
 
+  it('does not close and reopen one unresolved approval on short missing-card polls', async () => {
+    const original = { id: 'render-one', lines: ['Allow ChatGPT to use Core?', 'Run a command'], allow: true };
+    const logs: string[] = [];
+    const changes: string[] = [];
+    deps.log = value => logs.push(value);
+    deps.changed = () => changes.push(approvalCardView('chat', 1_000)?.id || 'absent');
+    await noteApprovalCard('chat', true, 'session', deps, 1_000, original);
+    const progressId = deps.rows[0]![1];
+    for (let now = 2_000; now < 12_000; now += 2_000) {
+      await noteApprovalCard('chat', false, 'session', deps, now);
+      expect(approvalCardWaiting('chat', now)).toBe(true);
+      await noteApprovalCard('chat', true, 'session', deps, now + 500,
+        { ...original, id: `render-${now}` });
+    }
+    expect(deps.rows).toHaveLength(1);
+    expect(deps.rows[0]![1]).toBe(progressId);
+    expect(logs.filter(line => line.includes('no longer shows'))).toEqual([]);
+    expect(logs.filter(line => line.includes('redrawn, not answered'))).toEqual([]);
+    expect(changes).not.toContain('absent');
+    await noteApprovalCard('chat', false, 'session', deps, 13_000);
+    await noteApprovalCard('chat', false, 'session', deps, 13_000 + APPROVAL_GONE_MS);
+    expect(approvalCardWaiting('chat', 13_000 + APPROVAL_GONE_MS)).toBe(false);
+    expect(deps.rows.at(-1)![2]).toBe(APPROVAL_ANSWERED_TEXT);
+  });
+
   it('answered before the grace: no notice at all', async () => {
     await noteApprovalCard('chat', true, 'session', deps, 1_000);
     await noteApprovalCard('chat', false, 'session', deps, 1_000 + APPROVAL_NOTICE_GRACE_MS - 1);
@@ -97,8 +122,10 @@ describe('approval card episodes', () => {
 
     // A real answer later still reads as answered.
     await noteApprovalCard('chat', false, 'session', deps, 60_000);
+    expect(approvalCardWaiting('chat', 60_000)).toBe(true);
+    await noteApprovalCard('chat', false, 'session', deps, 60_000 + APPROVAL_GONE_MS);
     expect(deps.rows.at(-1)![2]).toBe(APPROVAL_ANSWERED_TEXT);
-    expect(approvalCardWaiting('chat', 60_000)).toBe(false);
+    expect(approvalCardWaiting('chat', 60_000 + APPROVAL_GONE_MS)).toBe(false);
   });
 
   it('FAIL-FIRST: a fresh same-word host card after observed dismissal starts a new consent episode', async () => {
@@ -182,10 +209,13 @@ describe('approval card episodes', () => {
     await noteApprovalCard('chat', false, 'session', deps, 2_000);
     await noteApprovalCard('chat', true, 'session', deps, 3_000, second);
     await noteApprovalCard('chat', false, 'session', deps, 4_000);
-    await noteApprovalCard('chat', true, 'session', deps, 4_000 + APPROVAL_GONE_MS, { ...second, id: 'c' });
+    await noteApprovalCard('chat', false, 'session', deps, 4_000 + APPROVAL_GONE_MS);
+    await noteApprovalCard('chat', true, 'session', deps, 4_000 + APPROVAL_GONE_MS + 1, { ...second, id: 'c' });
     const episodes = new Set(deps.rows.map(row => row[1]));
     expect(episodes.size).toBe(3);
-    expect(deps.rows.filter(row => row[2] === APPROVAL_ANSWERED_TEXT)).toHaveLength(2);
+    // A settled missing-card gap closes the second wait; the new third wait must
+    // use its own row even if the UI presents identical words.
+    expect(deps.rows.filter(row => row[2] === APPROVAL_ANSWERED_TEXT)).toHaveLength(1);
   });
 
   it('takes over the row an earlier app run left waiting instead of adding another', async () => {
@@ -243,7 +273,7 @@ describe('approval card episodes', () => {
     expect(deps.rows.at(-1)![2]).toBe(APPROVAL_WAITING_TEXT);
     expect(deps.notices).toEqual(['worker-session']);
     expect(logs.filter(line => line.includes('waits for the user'))).toHaveLength(1);
-    expect(logs.filter(line => line.includes('redrawn, not answered'))).toHaveLength(1);
+    expect(logs.filter(line => line.includes('redrawn, not answered'))).toHaveLength(0);
   });
 
   it('keeps the episode when the redrawn card comes while "answered" is still being written', async () => {

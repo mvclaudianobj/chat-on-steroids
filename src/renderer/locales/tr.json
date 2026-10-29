@@ -4673,5 +4673,16 @@
   "Held for the CEO: ownership not exact": "CEO için bekletildi: sahiplik kesin değil",
   "Held for the CEO: Allow unavailable": "CEO için bekletildi: İzin ver kullanılamıyor",
   "Withdrawn by revocation": "İptal ile geri çekildi",
-  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "marks-coo, Şirkete ait olduğu kanıtlanmış sohbetlerdeki araç onay kartlarında Bir kez izin ver düğmesine basabilsin mi?"
+  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "marks-coo, Şirkete ait olduğu kanıtlanmış sohbetlerdeki araç onay kartlarında Bir kez izin ver düğmesine basabilsin mi?",
+  "Delete archived chats after": "Arşivlenen sohbetleri şu süreden sonra sil",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "Bu süre boyunca kullanılmayan yerel arşivlenmiş sohbetleri otomatik sil. Aktif, sabitlenmiş sohbetler, çalışan aracılar ve Şirket personeli korunur. Silme işlemi bekleyen mesajları da iptal eder ve izinleri kaldırır.",
+  "{0} days": "{0} gün",
+  "Browser pickup stopped after {0} attempts": "Tarayıcı alma işlemi {0} denemeden sonra durdu",
+  "7 days": "7 gün",
+  "14 days": "14 gün",
+  "30 days": "30 gün",
+  "60 days": "60 gün",
+  "90 days": "90 gün",
+  "180 days": "180 gün",
+  "365 days": "365 gün"
 }

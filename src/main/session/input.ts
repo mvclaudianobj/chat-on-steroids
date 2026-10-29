@@ -37,6 +37,7 @@ import { autoSelectManagedSkills } from '../skill-routing.js';
 import { SEND_CHECK_RETRY_MS, type SendCheckKind } from '../send-check.js';
 import { asksForImage } from './image-request.js';
 import { readyForWake } from '../worker-archive.js';
+import { promisesImmediateNextStep } from '../../shared/next-step-continue.js';
 
 /** ChatGPT's own conversation and message ids; synthetic interim ids never name a branch point. */
 const NATIVE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -115,6 +116,8 @@ const entrySchema = inputArgs.extend({
   companionInputId: z.string().uuid().optional(),
   /** `rotation`: the app's automatic continue that starts a fresh turn in a long one (#1402). */
   purpose: z.enum(['user', 'decision', 'rotation']).optional(),
+  /** A final answer's promise to do work, admitted once from an exact completed MCP turn. */
+  promisedStep: z.object({ sourceTurnId: z.string().min(1).max(256), finalMessageId: z.string().min(1).max(256) }).optional(),
   lifetime: z.literal('temporary-planner').optional(),
   decisionSourceSessionId: z.string().min(8).max(64).optional(),
   response: z.string().max(16000).optional(),
@@ -303,6 +306,12 @@ async function browserInputAllowed(entry: InputEntry): Promise<boolean> {
   // Silence can leave the recorder's original turn open. Its durable ticket
   // proves the exact unchanged work; the native page must still be idle for Send.
   if (entry.silenceBoundary) return await eligibleStageEnd(entry) === entry.silenceBoundary.turnId;
+  if (entry.promisedStep) {
+    const session = await getSession(entry.sessionId);
+    const final = await readCompletedFinal(entry.sessionId, entry.conversationId!, entry.promisedStep.sourceTurnId);
+    return !!session && !session.activeTurnId && session.conversationId === entry.conversationId &&
+      final?.messageId === entry.promisedStep.finalMessageId && (await sessionInputPolicy(entry.sessionId)).browserAllowed;
+  }
   const policy = await sessionInputPolicy(entry.sessionId);
   if (entry.completedTurnId && await eligibleStageEnd(entry) !== entry.completedTurnId) return false;
   if (entry.directTurn) {
@@ -920,6 +929,45 @@ export function fileRotationContinueAfterStop(sessionId: string, turnId: string)
   });
 }
 
+/** A final answer can still explicitly promise an immediate next step.
+ * The existing fresh-turn outbox owns it, once per MCP-backed source turn.
+ */
+export function filePromisedStepContinue(sessionId: string, conversationId: string,
+  source: { turnId: string | null; messageId: string; text: string }): Promise<InputEntry | null> {
+  return serial(async () => {
+    if (!source.turnId || !promisesImmediateNextStep(source.text) || getConfig().ui.autoContinue === false) return null;
+    const current = await load();
+    if (current.some(row => row.sessionId === sessionId && !terminal(row))) return null;
+    if (current.some(row => row.sessionId === sessionId && row.promisedStep?.sourceTurnId === source.turnId)) return null;
+    const session = await getSession(sessionId);
+    if (!session || session.conversationId !== conversationId || session.activeTurnId ||
+        session.origin?.kind === 'worker' || session.origin?.kind === 'helper' ||
+        session.browserRecoveryDismissedAt !== undefined || isChatBlocked(conversationId)) return null;
+    const [final, attributable] = await Promise.all([
+      readCompletedFinal(sessionId, conversationId, source.turnId),
+      turnHasMcpCall(sessionId, conversationId, source.turnId)
+    ]);
+    if (!final || !attributable || final.messageId !== source.messageId || !promisesImmediateNextStep(final.text)) return null;
+    // A new authored instruction re-arms this budget; repeated empty promises do not.
+    const lastUser = current.findLastIndex(row => row.sessionId === sessionId &&
+      !row.promisedStep && row.purpose !== 'rotation' && !row.recovery);
+    if (current.slice(lastUser + 1).filter(row => row.sessionId === sessionId && row.promisedStep).length >= 8) return null;
+    const latest = await getSession(sessionId);
+    if (!latest || latest.activeTurnId || latest.conversationId !== conversationId ||
+        (await readCompletedFinal(sessionId, conversationId, source.turnId))?.messageId !== source.messageId) return null;
+    const now = Date.now();
+    const entry: InputEntry = { id: randomUUID(), sessionId, conversationId, owner: null, state: 'queued',
+      text: 'Continue the unfinished task now. Your last answer promised the next step. Carry it out and verify the result before concluding. Check existing work so no action is duplicated.',
+      mode: 'auto', dueAt: now, createdAt: now, model: null, reasoningEffort: null,
+      authoredSource: 'none', purpose: 'rotation', transportIntent: 'browser',
+      promisedStep: { sourceTurnId: source.turnId, finalMessageId: source.messageId },
+      queuedTurn: { conversationId, turnId: source.turnId } };
+    await commit(append(current, entry));
+    logInfo(`input: Automatic Continue filed for promised next step in ${conversationId} (turn ${source.turnId})`);
+    return { ...entry };
+  });
+}
+
 /**
  * Where a fresh-turn continue (#1402) stands, for the tool call held for it (#1662): not yet sent,
  * being sent (Send is authorized), or settled either way.
@@ -1171,6 +1219,29 @@ export function recordQueuedPickupAttemptNow(inputId: string, sourceTurnId: stri
       ...('stoppedAt' in pickupRecovery && pickupRecovery.stoppedAt ? { stoppedAt: pickupRecovery.stoppedAt } : {}) };
   });
 }
+
+/** Explicit user retry after the bounded automatic pickup budget has stopped.
+ * The budget belongs to one source turn, so every sibling stage must be reset
+ * together; neither text nor any potentially sent delivery is replayed here.
+ */
+export function retryStoppedQueuedPickup(id: string): Promise<boolean> {
+  return serial(async () => {
+    const rows = await load();
+    const head = rows.find(row => row.id === id && row.state === 'queued' && row.pickupRecovery?.stoppedAt &&
+      row.sessionId && row.conversationId && row.queuedTurn);
+    if (!head) return false;
+    const session = await getSession(head.sessionId!);
+    if (!session || session.conversationId !== head.conversationId || session.browserRecoveryDismissedAt !== undefined) return false;
+    const stoppedAt = head.pickupRecovery!.stoppedAt;
+    const next = rows.map(row => row.state === 'queued' && row.sessionId === head.sessionId &&
+      row.queuedTurn?.conversationId === head.queuedTurn?.conversationId &&
+      row.queuedTurn?.turnId === head.queuedTurn?.turnId && row.pickupRecovery?.stoppedAt === stoppedAt
+      ? { ...row, pickupRecovery: undefined, error: undefined } : row);
+    if (next.every((row, index) => row === rows[index])) return false;
+    await commit(next);
+    return true;
+  });
+}
 /** A sent receipt survives a recorder failure. Existing outbox reads retry publication,
  * never transport; the stable canonical key makes a lost recording ACK idempotent. */
 async function publishHistory(): Promise<void> {
@@ -1210,6 +1281,33 @@ export function cancelInput(id: string): Promise<boolean> {
     decisionWaiters.delete(id);
     await removeWithdrawnOpening(entries!.find(row => row.id === found.id)!, entries!);
     return true;
+  });
+}
+
+/** Retire every delivery owned by a deleted session before deleting its metadata.
+ * Tombstones survive restart, so load() cannot materialize a withdrawn opening again.
+ * Browser sends with ambiguous receipts remain marked unconfirmed; they are never replayed.
+ */
+export function cancelSessionInputs(sessionId: string): Promise<number> {
+  return serial(async () => {
+    const current = await load();
+    const owned = current.filter(row => (row.sessionId === sessionId || row.deliveredSessionId === sessionId) && !terminal(row));
+    if (!owned.length) return 0;
+    const ids = new Set(owned.map(row => row.id));
+    const now = Date.now();
+    await commit(current.map(row => ids.has(row.id) ? {
+      ...row, state: 'cancelled' as const, cancelledByUser: true, owner: null,
+      error: row.sendAuthorizedAt !== undefined || row.state === 'tool'
+        ? 'Session deleted; delivery to ChatGPT may already have occurred.'
+        : 'Session deleted before delivery.',
+      pickupFailedAt: now
+    } : row));
+    for (const id of ids) {
+      decisionWaiters.get(id)?.reject(new Error('goal_browser_cancelled'));
+      decisionWaiters.delete(id);
+      offered.delete(id);
+    }
+    return owned.length;
   });
 }
 
@@ -1771,12 +1869,13 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         const conversationId = await target(entry);
         // A worker chat this app archived in ChatGPT has no message box until it is restored (#1701).
         if (conversationId && !readyForWake(conversationId)) continue;
-        // A new chat of a project with a native ChatGPT Project opens in that Project and nowhere
-        // else: it waits while the Project is being created or could not be, never the root.
+        // While a native Project is being created, wait for its identity. Once ChatGPT
+        // explicitly rejects that Project, the local project still owns the chat and
+        // its work: open a regular ChatGPT conversation instead of blocking forever.
         // A branch is made where its source chat lives in ChatGPT, never on a Project's page.
         const chatgptProject = !conversationId && entry.projectId && entry.purpose !== 'decision' && !entry.lifetime && !entry.branch
           ? (await getProject(entry.projectId))?.chatgpt : undefined;
-        if (chatgptProject && chatgptProject.state !== 'linked') continue;
+        if (chatgptProject && chatgptProject.state !== 'linked' && chatgptProject.state !== 'failed') continue;
         const [end] = !entry.silenceBoundary && manualInput(entry) && entry.sessionId
           ? await readRecentEvents(entry.sessionId, 1, { kinds: ['turn_start', 'turn_end'] }) : [];
         const silenceTurnId = entry.silenceBoundary?.turnId ?? (end?.kind === 'turn_end' && end.outcome === 'failed' &&

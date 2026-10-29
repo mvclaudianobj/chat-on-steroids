@@ -217,9 +217,8 @@ async function cancel(id: string, rawBody: unknown): Promise<ActionReply> {
     return { status: 200, body: already };
   }
   if (deliveryProof(row) !== 'pending') return notCancellable(row, 'Send was authorized; it may already be in ChatGPT');
-  // A new chat's first message owns a reserved local chat that cancelling deletes, and a pair of
-  // rows is cancelled together. Both are decisions for the person at the app.
-  if (row.opening) return notCancellable(row, 'a new chat is opening; cancel it in the app');
+  // The opening reservation is withdrawn by the same serialized outbox owner as an app cancel.
+  // Its empty local chat is retired only after the never-authorized tombstone is durable.
   if (row.companionInputId || (await listInputs()).some((other) => other.companionInputId === row.id)) {
     return notCancellable(row, 'it is paired with another message; cancel it in the app');
   }

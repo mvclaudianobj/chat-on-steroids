@@ -4606,5 +4606,16 @@
   "Held for the CEO: ownership not exact": "CEO에게 보류: 소유권이 정확하지 않음",
   "Held for the CEO: Allow unavailable": "CEO에게 보류: 허용 불가",
   "Withdrawn by revocation": "취소로 철회됨",
-  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "회사 소유가 입증된 채팅에서 marks-coo가 도구 승인 카드의 '한 번 허용'을 누르도록 허용할까요?"
+  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "회사 소유가 입증된 채팅에서 marks-coo가 도구 승인 카드의 '한 번 허용'을 누르도록 허용할까요?",
+  "Delete archived chats after": "보관된 채팅 삭제 기간",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "이 기간 동안 사용하지 않은 로컬 보관 채팅을 자동으로 삭제합니다. 활성 채팅, 고정된 채팅, 작업자, 회사 직원은 보호됩니다. 삭제하면 대기 중인 메시지도 취소되고 권한이 철회됩니다.",
+  "{0} days": "{0}일",
+  "Browser pickup stopped after {0} attempts": "브라우저 수신이 {0}번 시도한 후 중단되었습니다",
+  "7 days": "7일",
+  "14 days": "14일",
+  "30 days": "30일",
+  "60 days": "60일",
+  "90 days": "90일",
+  "180 days": "180일",
+  "365 days": "365일"
 }

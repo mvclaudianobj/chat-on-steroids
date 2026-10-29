@@ -4606,5 +4606,16 @@
   "Held for the CEO: ownership not exact": "CEO 向けに保留: 所有者が正確でない",
   "Held for the CEO: Allow unavailable": "CEO 向けに保留: 許可が使用不可",
   "Withdrawn by revocation": "取り消しにより撤回",
-  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "会社が所有していることが証明されたチャットで、marks-coo がツール承認カードの「1 回だけ許可」を押せるようにしますか?"
+  "Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?": "会社が所有していることが証明されたチャットで、marks-coo がツール承認カードの「1 回だけ許可」を押せるようにしますか?",
+  "Delete archived chats after": "アーカイブしたチャットの削除まで",
+  "Automatically delete locally archived chats that have not been used for this long. Active chats, pinned chats, workers and Company employees are protected. Deletion also cancels pending messages and revokes grants.": "この期間使用されなかったローカルのアーカイブ済みチャットを自動削除します。アクティブなチャット、ピン留めしたチャット、ワーカー、会社の従業員は保護されます。削除すると保留中のメッセージは取り消され、権限も失効します。",
+  "{0} days": "{0} 日",
+  "Browser pickup stopped after {0} attempts": "ブラウザーの受信は {0} 回試行して停止しました",
+  "7 days": "7 日",
+  "14 days": "14 日",
+  "30 days": "30 日",
+  "60 days": "60 日",
+  "90 days": "90 日",
+  "180 days": "180 日",
+  "365 days": "365 日"
 }

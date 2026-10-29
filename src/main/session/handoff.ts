@@ -12,7 +12,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Handoff } from '../../shared/session.js';
 import { continuationMarkerOf, unescapeMarkdown } from '../../shared/session.js';
 import { logInfo } from '../logger.js';
-import { getSession, readSessionPlan, saveHandoff } from './store.js';
+import { getSession, readEvents, readSessionPlan, saveHandoff } from './store.js';
 import { destinationContinuationMarker } from './handoff-prompt.js';
 import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt, userPromptText } from '../../shared/user-prompt.js';
@@ -31,6 +31,75 @@ export interface PrepareHandoffInput {
   /** Exact frontend/turn that authored this continuation brief. */
   sourceConversationId?: string | null;
   sourceTurnId?: string | null;
+  /** Only the app's own recovery text assembled from durable session records may bypass the model-brief floor. */
+  durableFallback?: boolean;
+}
+
+/**
+ * Last resort when ChatGPT repeatedly finishes a handoff with an incomplete brief. This
+ * is evidence, not a model-authored synthesis: preserve the original user's instructions,
+ * verified tool outcomes, unresolved work, and provenance without inventing a completion.
+ * Bounded output keeps the same replacement-message budget as an ordinary handoff.
+ */
+export async function durableRecoveryBrief(sessionId: string): Promise<string> {
+  const session = await getSession(sessionId);
+  if (!session) throw new Error('The recorded session is unavailable for recovery');
+  const events = await readEvents(sessionId);
+  const users: string[] = [];
+  const reports: string[] = [];
+  const results: string[] = [];
+  const excerpts = (s: string, limit: number) => s.length <= limit ? s :
+    `${s.slice(0, Math.floor(limit * 0.7))}\n[Excerpt cut; full record remains in the local session.]\n${s.slice(-(limit - Math.floor(limit * 0.7)))}`;
+  for (const event of events) {
+    if (event.kind === 'user_message') {
+      const text = event.authoredText ?? event.message.text;
+      if (!/^\s*\[\[CLF-(?:HANDOFF|RESUME):/.test(text) && !event.automatic) {
+        users.push(`[seq ${event.seq}] ${excerpts(text, 5000)}`);
+      }
+    } else if (event.kind === 'agent_message') {
+      reports.push(`[seq ${event.seq}] ${event.from} → ${event.to} (${event.delivery}): ${excerpts(event.message.text, 2400)}`);
+    } else if (event.kind === 'tool_call') {
+      const c = event.call;
+      results.push(`[seq ${event.seq}] ${c.tool} (${c.outcome}, ${c.summary.title}): arguments ${excerpts(c.args.text, 900)}; result ${excerpts(c.result.text, 1100)}`);
+    } else if (event.kind === 'assistant_message' && event.final && event.message.text.trim()) {
+      reports.push(`[seq ${event.seq}] Assistant final (claim; verify against tool results): ${excerpts(event.message.text, 1700)}`);
+    } else if (event.kind === 'chat_error') {
+      reports.push(`[seq ${event.seq}] Chat error: ${excerpts(event.message.text, 1300)}`);
+    }
+  }
+  // Keep the earliest original specification and the latest corrections; split a section's
+  // space between its beginning and end instead of silently dropping all late messages.
+  const section = (title: string, items: string[], budget: number) => {
+    const before = Math.ceil(budget * 0.35);
+    let head = '', tail = '';
+    for (const item of items) {
+      if (head.length + item.length + 2 > before) break;
+      head += `${item}\n\n`;
+    }
+    for (const item of [...items].reverse()) {
+      if (tail.length + item.length + 2 > budget - head.length) break;
+      tail = `${item}\n\n${tail}`;
+    }
+    const omitted = items.length && (head + tail).length < items.join('\n\n').length
+      ? '[Some middle records omitted from this bounded brief; the full session journal remains available.]\n\n'
+      : '';
+    return `\n\n## ${title}\n${head}${omitted}${tail}`;
+  };
+  return `DURABLE RECOVERY BRIEF — assembled by Chat Marks after three incomplete model handoffs.\n` +
+    `The original session and its complete recorded history remain available in Chat Marks. ` +
+    `This is a bounded extraction of durable evidence, not a claim that all work succeeded. ` +
+    `Continue the latest unfinished user request; inspect the repository and logs for anything omitted.\n\n` +
+    `## CURRENT STATE / ENVIRONMENT\nSession ${session.id}, current source chat ${session.conversationId ?? 'unknown'}, ` +
+    `title ${JSON.stringify(session.title)}, project ${session.projectId ?? 'unrecorded'}, ` +
+    `${session.events} recorded events, ~${session.estimatedTokens} estimated tokens, ` +
+    `${session.userMessages} user messages, ${session.toolCalls} tool calls. ` +
+    `Latest local tool: ${session.lastToolActivity?.title ?? 'unrecorded'}.\n\n` +
+    `## NEXT / DO NOT\nUse the newest user corrections as the specification. Verify Git status, active work and pending ` +
+    `agents/queues before changing anything. Preserve unrelated worktrees, uncommitted files and user approvals. ` +
+    `Recorded assistant claims are not proof of completion.\n` +
+    section('USER SPECIFICATION (original and latest corrections)', users, 43_000) +
+    section('EXECUTION EVIDENCE (tool calls, inputs and results)', results, 23_000) +
+    section('ASSISTANT, WORKERS, ERRORS AND PENDING WORK', reports, 18_000);
 }
 
 /** A public, non-authority id for provenance. The raw continuation token is never persisted here. */
@@ -198,7 +267,7 @@ export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handof
   // because this is the one function that writes a handoff to disk. A stub that reaches the
   // store is indistinguishable from a real brief for the rest of its life.
   const shortfall = briefShortfall(text, input.sourceTokens ?? summary.estimatedTokens);
-  if (shortfall) throw new Error(shortfall);
+  if (shortfall && !input.durableFallback) throw new Error(shortfall);
   const sourceConversationId = input.sourceConversationId === undefined
     ? summary.conversationId
     : input.sourceConversationId;

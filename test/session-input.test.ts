@@ -6,10 +6,10 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { flushDurable, initDurableStore, readDurable, resetDurableForTests, writeDurableNow } from '../src/main/durable.js';
 import {
-  fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, claimBrowserInput, completeBrowserDecision, enqueueInput,
+  fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, cancelSessionInputs, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, retryStoppedQueuedPickup
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
@@ -93,6 +93,18 @@ afterEach(async () => {
 });
 
 describe('durable user input ownership', () => {
+  it('retires all unsent deliveries of a deleted chat and never rematerializes its opening after restart', async () => {
+    const opening = await enqueueInput(input({ sessionId: null }));
+    const other = await enqueueInput(input({ sessionId: 'session-two' }));
+    expect(openings.has(opening.id)).toBe(true);
+    expect(await cancelSessionInputs(opening.id)).toBe(1);
+    openings.delete(opening.id);
+    resetInputForTests();
+    const rows = await listInputs();
+    expect(rows.find(row => row.id === opening.id)).toMatchObject({ state: 'cancelled', cancelledByUser: true });
+    expect(rows.find(row => row.id === other.id)?.state).toBe('queued');
+    expect(openings.has(opening.id)).toBe(false);
+  });
   it.each([
     ['held for Setup', 'Message queued. Finish Setup to send: Enter a tunnel ID that looks like tunnel_ followed by 32 hex characters.', 'queued'],
     ['held after a failed browser start', 'Message queued. Browser startup failed: Chrome refused startup', 'queued'],
@@ -2374,6 +2386,28 @@ describe('edit and resubmit (#365)', () => {
 // while holding the outbox queue (3.4 s per pass). The sidebar, chat state, browser poll and repair
 // handout all asked for it, so sends, claims and every control API read waited until none answered.
 describe('pickup reads do not hold the outbox', () => {
+  it('rearms only the selected completed-turn group after the user retries exhausted pickup', async () => {
+    const turn = { conversationId: binding.conversationId, turnId: 'answered-turn' };
+    const stopped = { attempts: 3, stoppedAt: now };
+    const row = (overrides: Partial<InputEntry>): InputEntry => ({
+      ...input({ mode: 'finish' }), state: 'queued', owner: null, createdAt: now,
+      conversationId: binding.conversationId, queuedTurn: turn, pickupRecovery: stopped, ...overrides
+    });
+    const first = row({});
+    const sibling = row({});
+    const otherTurn = row({ queuedTurn: { ...turn, turnId: 'another-turn' } });
+    const alreadySent = row({ state: 'sent' });
+    await writeDurableNow('session-input', [first, sibling, otherTurn, alreadySent]);
+    resetInputForTests();
+    expect(await retryStoppedQueuedPickup(first.id)).toBe(true);
+    resetInputForTests();
+    const rows = await listInputs();
+    expect(rows.find(entry => entry.id === first.id)?.pickupRecovery).toBeUndefined();
+    expect(rows.find(entry => entry.id === sibling.id)?.pickupRecovery).toBeUndefined();
+    expect(rows.find(entry => entry.id === otherTurn.id)?.pickupRecovery).toEqual(stopped);
+    expect(rows.find(entry => entry.id === alreadySent.id)?.pickupRecovery).toEqual(stopped);
+    expect(await retryStoppedQueuedPickup(first.id)).toBe(false);
+  });
   async function seedPickup(retained: number): Promise<InputEntry[]> {
     const row = (state: InputEntry['state']): InputEntry => ({ ...input({ mode: 'after-turn' }), state, owner: null, createdAt: now, conversationId: binding.conversationId });
     const rows = [...Array.from({ length: retained }, () => row('sent')), row('queued')];

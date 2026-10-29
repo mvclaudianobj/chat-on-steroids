@@ -60,7 +60,7 @@ import { UI_BASE_ZOOM, titleBarOverlayForTheme, windowBackgroundForTheme } from 
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
+import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, cancelSessionInputs, retryStoppedQueuedPickup } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
@@ -316,6 +316,9 @@ const settingsPatch = z.object({
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional(),
     turnNotifications: z.boolean().optional(),
+    archiveRetentionDays: z.number().int().min(0).max(3650).optional(),
+    archiveRetentionPins: z.array(z.string().uuid()).max(500).optional(),
+    archiveRetentionPinsReady: z.boolean().optional(),
     sounds: z.boolean().optional(),
     rotateTurnMinutes: z.number().int().min(0).max(120).optional(),
     rotateStopFallback: z.boolean().optional(),
@@ -542,6 +545,10 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
+      archiveRetentionDays: pick(current.ui.archiveRetentionDays ?? 30, base.ui.archiveRetentionDays ?? 30, wanted.ui.archiveRetentionDays ?? 30),
+      // The sidebar owns pin migration. An unrelated Settings save cannot undo it.
+      archiveRetentionPins: current.ui.archiveRetentionPins,
+      archiveRetentionPinsReady: current.ui.archiveRetentionPinsReady,
       sounds: pick(current.ui.sounds === true, base.ui.sounds === true, wanted.ui.sounds ?? current.ui.sounds === true),
       rotateTurnMinutes: pick(current.ui.rotateTurnMinutes, base.ui.rotateTurnMinutes, wanted.ui.rotateTurnMinutes),
       rotateStopFallback: pick(current.ui.rotateStopFallback === true, base.ui.rotateStopFallback === true, wanted.ui.rotateStopFallback ?? current.ui.rotateStopFallback === true),
@@ -749,6 +756,46 @@ export async function openSessionChat(id: string): Promise<void> {
   if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
 }
 
+// Shared by explicit deletion and archive expiration. One fence covers outbox,
+// trust, recorder identity, persistent history and external grants.
+const deletingSessionIds = new Set<string>();
+export async function deleteRecordedSession(id: string): Promise<boolean> {
+  if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
+  deletingSessionIds.add(id);
+  try {
+    const summary = await getSession(id);
+    await cancelSessionInputs(id);
+    if (summary?.conversationId) {
+      await setChatsTrusted([summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)], false);
+    }
+    // Stop engine work while the session is still addressable: a deleted Codex chat must not keep
+    // a live turn or be picked up by the next startup recovery sweep.
+    if (summary && isApiConversationId(summary.conversationId)) {
+      const record = await storedChatRecord(id);
+      if (record) await agentEngine(record.engine ?? 'cliproxy').stop(id);
+    }
+    const detached = forgetSession(id);
+    if (summary?.conversationId) {
+      setChatsBlocked([summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)], false);
+    }
+    await deleteSession(id);
+    // The ledger goes only after the session did; serialized updates keep a queued turn write
+    // from restoring a stale entry.
+    if (summary && isApiConversationId(summary.conversationId)) await forgetChatRecord(id);
+    if (summary?.conversationId) {
+      for (const conversationId of [summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)]) {
+        revokeVaultChat(conversationId);
+        revokeRemoteChat(conversationId);
+      }
+    }
+    await forgetChatGroupMember(id);
+    logInfo(detached.length > 0
+      ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
+      : `session ${id} deleted`);
+    return true;
+  } finally { deletingSessionIds.delete(id); }
+}
+
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
   registerVmsIpc(getWindow);
   initCompanyStore(app.getPath('userData'));
@@ -784,7 +831,6 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   registerRemoteHostsIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
-  const deletingSessionIds = new Set<string>();
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -2142,6 +2188,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (sent) wakeBrowserWork();
     return sent;
   });
+  handle('sessions:retryPickup', async (payload) => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const retried = await retryStoppedQueuedPickup(id);
+    if (retried) wakeBrowserWork();
+    return retried;
+  });
   handle('sessions:editInput', async (payload) => { const { id, text, afterTurn } = z.object({ id: z.string().uuid(), text: inputArgs.shape.text, afterTurn: z.boolean().optional() }).parse(payload); return editQueuedInput(id, text, afterTurn); });
   handle('sessions:cancelInput', async (payload) => cancelDesktopInput(z.object({ id: z.string().uuid() }).parse(payload).id));
   handle('sessions:inputAutomation', async payload => {
@@ -2332,65 +2384,16 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     notifyChanged(id);
     return summary;
   });
+  handle('sessions:setPins', async (payload) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).max(500) }).strict().parse(payload);
+    await updateConfig(config => ({ ...config, ui: { ...config.ui,
+      archiveRetentionPins: [...new Set(ids)], archiveRetentionPinsReady: true
+    } }));
+    return true;
+  });
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
-    if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
-    deletingSessionIds.add(id);
-    try {
-      const summary = await getSession(id);
-      // Trust is permission. Revoke it durably before any other deletion side effect; otherwise
-      // a failed disk commit could leave this chat both trusted and newly unblocked, with its row
-      // already gone and no user control left to repair that authority.
-      if (summary?.conversationId) {
-        await setChatsTrusted([
-          summary.conversationId,
-          ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
-        ], false);
-      }
-      // Stop engine work while the session is still addressable. In particular, a deleted Codex
-      // chat must not keep a live turn or be picked up by the next startup recovery sweep.
-      if (summary && isApiConversationId(summary.conversationId)) {
-        const record = await storedChatRecord(id);
-        if (record) {
-          const engine = agentEngine(record.engine ?? 'cliproxy');
-          await engine.stop(id);
-        }
-      }
-      // Detach first. The recorder maps live ChatGPT conversations to session ids, so
-      // deleting the folder underneath a live one left it appending to a session that no
-      // longer existed — the events went to a resurrected half-session with no summary.
-      // Forgetting the mapping makes the next observation open a fresh session instead.
-      const detached = forgetSession(id);
-      // Release first. The current resumed row is also the only UI handle for a Block on one of
-      // its committed predecessors, so deleting the row must clear that whole policy lineage.
-      // Otherwise a hidden source block survives with no remaining row that can release it.
-      if (summary?.conversationId) {
-        setChatsBlocked([
-          summary.conversationId,
-          ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
-        ], false);
-      }
-      await deleteSession(id);
-      // Delete the ledger only after the session was deleted successfully. Serialized updates
-      // prevent a previously queued turn write from restoring a stale entry.
-      if (summary && isApiConversationId(summary.conversationId)) await forgetChatRecord(id);
-      if (summary?.conversationId) {
-        for (const conversationId of [summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)]) {
-          revokeVaultChat(conversationId);
-          revokeRemoteChat(conversationId);
-        }
-      }
-      // A deleted chat leaves its group too; the group itself stays.
-      await forgetChatGroupMember(id);
-      logInfo(
-        detached.length > 0
-          ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
-          : `session ${id} deleted`
-      );
-      return true;
-    } finally {
-      deletingSessionIds.delete(id);
-    }
+    return deleteRecordedSession(id);
   });
 
   handle('handoff:get', async (payload) => {

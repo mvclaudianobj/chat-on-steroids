@@ -841,6 +841,30 @@ async function attributedMcp(conversationId: string): Promise<void> {
     outcome: 'ok', durationMs: 1, startedAt: Date.now(), requestId });
 }
 
+it('continues an MCP-backed turn that ends by promising the next step, once', async () => {
+  await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+  const conversationId = randomUUID(), turnId = randomUUID();
+  const session = await createSession({ title: 'Long task step', conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'user_message', messageId: randomUUID(), text: 'Reproduce the bug and fix it', authoredNow: true, time: Date.now() },
+    { kind: 'turn_start', turnId, time: Date.now() }
+  ] });
+  await attributedMcp(conversationId);
+  const messageId = randomUUID();
+  await post('/events', { conversationId, events: [
+    { kind: 'assistant_message', turnId, messageId, text: 'Vou reproduzir o erro e executar os testes.', state: 'final', final: true, time: Date.now() },
+    { kind: 'turn_end', turnId, outcome: 'completed', time: Date.now() }
+  ] });
+  const rows = (await input.listInputs()).filter(row => row.sessionId === session.id && row.promisedStep);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ state: 'queued', promisedStep: { sourceTurnId: turnId, finalMessageId: messageId } });
+  expect((await input.pendingBrowserInputs()).some(row => row.id === rows[0]!.id)).toBe(true);
+  await post('/events', { conversationId, events: [
+    { kind: 'assistant_message', turnId, messageId, text: 'Vou reproduzir o erro e executar os testes.', state: 'final', final: true, time: Date.now() }
+  ] });
+  expect((await input.listInputs()).filter(row => row.promisedStep?.sourceTurnId === turnId)).toHaveLength(1);
+});
+
 it.each(['interim', 'native-tool', 'mcp', 'final', 'replay'] as const)('releases failed input immediately and reconciles later %s', async activity => {
   const bridge = await import('../src/main/bridge.js');
   const store = await import('../src/main/session/store.js');
@@ -3390,6 +3414,26 @@ it('lets a branch from a chat of a linked project be claimed on its draft, not o
   const claim = async (id: string) => (await post('/input/claim', { id, owner: 'a-document', conversationId: null, requiresAuthorization: true })).body.input;
   expect(await claim(plain.id)).toBeNull();
   expect(await claim(branch.id)).toMatchObject({ id: branch.id, branch: { conversationId, messageId } });
+});
+
+it('releases a new chat to standalone delivery when its native ChatGPT Project was removed', async () => {
+  const folder = path.join(directory, 'gone-project-' + randomUUID());
+  await fs.mkdir(folder);
+  const config = defaultConfig();
+  await saveConfig({ ...config, roots: [{ name: 'project', path: folder }] });
+  const projects = await import('../src/main/projects.js');
+  const project = await addProject(folder);
+  const request = (project.chatgpt as { requestId: string }).requestId;
+  expect(await projects.claimProjectCreate(request, 'page-a')).toBe(true);
+  expect(await projects.armProjectCreate(request, 'page-a')).toBe(true);
+  const projectId = `g-p-${'b'.repeat(32)}`;
+  expect(await projects.completeProjectCreate(request, 'page-a', projectId)).toBe(true);
+  const first = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id });
+  expect((await input.pendingBrowserInputs()).some(row => row.id === first.id && row.project === projectId)).toBe(true);
+  expect(await projects.markProjectGone(project.id, projectId)).toBe(true);
+  expect((await input.pendingBrowserInputs()).find(row => row.id === first.id)).toMatchObject({ id: first.id, conversationId: null });
+  expect((await post('/input/claim', { id: first.id, owner: 'home-page', conversationId: null, requiresAuthorization: true })).body.input)
+    .toMatchObject({ id: first.id });
 });
 
 it('gives a branch the history it was branched from before its first question, without duplicates (#482)', async () => {

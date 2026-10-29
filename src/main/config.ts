@@ -405,6 +405,9 @@ const configSchema = z.object({
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional().default(false),
     turnNotifications: z.boolean().optional().default(true),
+    archiveRetentionDays: z.number().int().min(0).max(3650).optional().default(30).catch(30),
+    archiveRetentionPins: z.array(z.string().uuid()).max(500).optional().default([]).catch([]),
+    archiveRetentionPinsReady: z.boolean().optional().default(false).catch(false),
     // #1802: a short sound when a chat needs you, fails or finishes. Missing means off.
     sounds: z.boolean().optional().default(false),
     // #1402: a fresh turn after this many minutes of one (0 = off). A malformed value keeps the default.
@@ -666,7 +669,7 @@ export function defaultConfig(platform: NodeJS.Platform = process.platform, rele
     // Fresh installs refresh changed connector tools on their own: a permission chosen in Setup
     // changes the tool list, and nothing else tells a new user to refresh the plugin in ChatGPT.
     // Older configs keep the schema default (off).
-    ui: { marksSystemPromptEnabled: true, minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, sounds: false, rotateTurnMinutes: 30, rotateStopFallback: false, localAppUsage: true, privacyScreenshots: false, secretsShield: true, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', followUp: 'steer', enterSends: true, browserBridgePort: 'auto', autoContinue: true, followOutput: true, mentionCore: true, mentionPlugins: false,
+    ui: { marksSystemPromptEnabled: true, minimizeToTray: true, autoConnect: false, startAtLogin: false, keepAwake: true, keepScreenAwake: false, cosBrowserMinimize: 'taskbar', turnNotifications: true, archiveRetentionDays: 30, archiveRetentionPins: [], archiveRetentionPinsReady: false, sounds: false, rotateTurnMinutes: 30, rotateStopFallback: false, localAppUsage: true, privacyScreenshots: false, secretsShield: true, theme: 'dark', autoRefreshPlugins: true, autoSelectSkills: false, backgroundChats: true, backgroundPlacement: 'window', autoContinue: true, followUp: 'steer', enterSends: true, browserBridgePort: 'auto', followOutput: true, mentionCore: true, mentionPlugins: false,
       // The built-in browser is opt-in: Chrome with the companion stays the default for new and
       // existing installs alike, and the built-in one runs only once someone chooses it.
       chatBrowser: 'chrome' },

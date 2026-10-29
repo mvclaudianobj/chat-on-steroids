@@ -603,6 +603,7 @@ const api = {
   retryHelper: (id: string, sourceSessionId: string) => call<boolean>('sessions:retryHelper', { id, sourceSessionId }),
   editQueuedInput: (id: string, text: string, afterTurn?: boolean) => call<boolean>('sessions:editInput', { id, text, afterTurn }),
   sendQueuedInputNow: (id: string) => call<boolean>('sessions:sendQueuedNow', { id }),
+  retryQueuedPickup: (id: string) => call<boolean>('sessions:retryPickup', { id }),
   reorderQueuedInputs: (sessionId: string, ids: string[]) => call<boolean>('sessions:reorderInputs', { sessionId, ids }),
   cancelInput: (id: string) => call<boolean>('sessions:cancelInput', { id }),
   setInputAutomation: (id: string, mode: 'off' | 'goal' | 'loop', loopAfterTurn?: boolean) => call<boolean>('sessions:inputAutomation', { id, mode, loopAfterTurn }),
@@ -623,6 +624,7 @@ const api = {
     call<string[]>('sessions:trust', { id, expectedConversationId, trusted }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
   archiveSession: (id: string, archived: boolean) => call<SessionSummary>('sessions:archive', { id, archived }),
+  setSessionPins: (ids: string[]) => call<boolean>('sessions:setPins', { ids }),
   /** Chats matching every word of `query`, by title first, then by what was said in them. */
   searchSessions: (query: string) => call<SessionSearchReply>('sessions:search', { query }),
   locateSearchMatch: (id: string, query: string) => call<SessionSearchLocation | null>('sessions:locate-match', { id, query }),
