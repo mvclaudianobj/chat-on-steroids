@@ -9590,6 +9590,7 @@ export function initChat(next: Deps): void {
     },
     loadActivity: async id => (await run(api.getSession(id, { limit: 400, actions: true })))?.events ?? null,
     openMain: selectSession, working: sessionWorking,
+    approvalPanel: approvalCardPanel,
     modelLabel: chatModelName,
     slotLimit: () => workerSlotLimit(deps.state()?.config.multiAgent),
     agent: worker => [...(swarm?.agents ?? []), ...(swarm?.retainedWorkers ?? [])].find(entry => entry.role === 'worker' && entry.id === worker.origin?.agentId &&

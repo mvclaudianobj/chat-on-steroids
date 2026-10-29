@@ -53,6 +53,8 @@ export function createAgentPanel(options: {
   /** A worker's tool calls for its Activity view (#105); without it a worker opens on its conversation. */
   loadActivity?: (id: string) => Promise<SessionEvent[] | null>;
   openMain: (id: string) => void;
+  /** The same exact-session approval control used by the chat and global notice. */
+  approvalPanel?: (sessionId: string) => HTMLElement;
   working: (summary: SessionSummary) => boolean;
   agent?: (summary: SessionSummary) => (Pick<AgentInfo, 'state' | 'task'> & Partial<Pick<AgentInfo, 'label'>> & { conversationId?: string | null }) | null;
   /** The model as the composer names it ("GPT-6 Sol · Instant"); the raw id without a catalog. */
@@ -224,6 +226,14 @@ export function createAgentPanel(options: {
         else row.title = `${identity} · ${task}`;
         row.onclick = () => void open(worker.id);
         body.append(row);
+        // Keep the approval controls outside the row button: nested buttons are invalid
+        // and otherwise the first click opens the worker instead of answering the card.
+        if (!done && worker.approvalWaitingAt != null && options.approvalPanel && worker.conversationId) {
+          const approval = el('div', 'agent-panel-approval');
+          approval.dataset.approvalSession = worker.id;
+          approval.append(options.approvalPanel(worker.id));
+          body.append(approval);
+        }
       }
     }
     arriving = false;
