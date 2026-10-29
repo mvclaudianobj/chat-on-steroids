@@ -724,9 +724,9 @@ function paintDesktopAccess(next: AppState): void {
   // earlier grant is remembered; the first version that remembers grants knows of none.
   const repairable = problem?.missing === true;
   ui($('desktopAccessTitle'), 'textContent', () => t("Desktop access needs attention"));
-  ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat On Steroids. ", [missing.join(' · ')]) +
+  ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat Marks. ", [missing.join(' · ')]) +
     (stale
-      ? t("macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.")
+      ? t("macOS still shows Chat Marks as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.")
       : repairable
         ? t("Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.")
         : t("Grant the missing macOS permission, then fully quit and reopen the app.")));
