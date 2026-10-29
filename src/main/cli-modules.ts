@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { constants as fsConstants } from 'node:fs';
 import { UPSTREAM_VERSION } from '../shared/upstream-module.js';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -203,12 +204,12 @@ async function executable(name: string): Promise<string | null> {
   if (module && manifest[module].legacy) return null;
   if (module) {
     const compiled = path.join(installedRoot(), module, 'bin', process.platform === 'win32' ? `${name}.exe` : name);
-    try { const { access } = await import('node:fs/promises'); await access(compiled); return compiled; } catch {}
+    try { const { access } = await import('node:fs/promises'); await access(compiled, fsConstants.X_OK); return compiled; } catch {}
     const local = path.join(installedRoot(), module, 'node_modules', '.bin', process.platform === 'win32' ? `${name}.cmd` : name);
-    try { const { access } = await import('node:fs/promises'); await access(local); return local; } catch {}
+    try { const { access } = await import('node:fs/promises'); await access(local, fsConstants.X_OK); return local; } catch {}
     if ((module === 'codex' || module === 'claude') && process.platform !== 'win32') {
       const personal = path.join(app.getPath('home'), '.local', 'bin', name);
-      try { const { access } = await import('node:fs/promises'); await access(personal); return personal; } catch {}
+      try { const { access } = await import('node:fs/promises'); await access(personal, fsConstants.X_OK); return personal; } catch {}
     }
   }
   const locate = process.platform === 'win32' ? 'where.exe' : '/usr/bin/env';

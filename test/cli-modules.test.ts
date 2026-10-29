@@ -14,7 +14,8 @@ const fixture = vi.hoisted(() => ({
   durable: ['codex'] as unknown,
   probes: [] as string[][],
   tmuxCreated: 0,
-  save: vi.fn()
+  save: vi.fn(),
+  managedNonExecutable: false
 }));
 vi.mock('electron', () => ({
   app: { getPath: (name: string) => name === 'home' ? '/home/test' : '/home/test/.config/chat-marks', on: vi.fn() },
@@ -25,7 +26,17 @@ vi.mock('node:fs/promises', async importOriginal => {
   const real = await importOriginal<typeof import('node:fs/promises')>();
   // Upstream binaries "exist" on PATH for the version probe's stat; everything else is real.
   const fake = (file: unknown) => typeof file === 'string' && /^\/usr\/local\/bin\/(opencode|zeroclaw)$/.test(file);
-  return { ...real, stat: async (file: string, ...rest: unknown[]) => fake(file) ? { isFile: () => true, size: 1, mtimeMs: 1 } : (real.stat as any)(file, ...rest) };
+  return {
+    ...real,
+    stat: async (file: string, ...rest: unknown[]) => fake(file) ? { isFile: () => true, size: 1, mtimeMs: 1 } : (real.stat as any)(file, ...rest),
+    access: async (file: string, mode?: number) => {
+      if (fixture.managedNonExecutable && file === '/home/test/.config/chat-marks/modules/codex/bin/codex') {
+        if (mode === (await import('node:fs')).constants.X_OK) throw new Error('EACCES');
+        return;
+      }
+      return real.access(file, mode);
+    }
+  };
 });
 vi.mock('node:child_process', () => {
   const execFile = (file: string, args: string[], _options: unknown, callback: (error: Error | null, stdout: string, stderr: string) => void) => {
@@ -86,7 +97,7 @@ import {
   OPENCODE_TERMINAL_SCRIPT, ZEROCLAW_TERMINAL_SCRIPT, registerCliEngineOpenHook, registerCliModuleIpc, registerCliModuleStopHook
 } from '../src/main/cli-modules.js';
 
-beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.clients = ''; fixture.resumeHasSession = null; fixture.commands.length = 0; vi.clearAllMocks(); });
+beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.clients = ''; fixture.resumeHasSession = null; fixture.commands.length = 0; fixture.managedNonExecutable = false; vi.clearAllMocks(); });
 
 describe('Codex standalone and Claude npm update routes (synthetic)', () => {
   it('does not advertise npm in-place update for a standalone external Codex', async () => {
@@ -108,6 +119,13 @@ describe('Codex standalone and Claude npm update routes (synthetic)', () => {
     const results = await cliStatus();
     expect(results.find(row => row.id === 'claude')).toMatchObject({ external: true, updateAvailable: true, externalNpmWritable: true });
     expect(results.find(row => row.id === 'codex')?.externalNpmWritable).toBe(false);
+  });
+
+  it('does not select a managed launcher without executable permission', async () => {
+    fixture.managedNonExecutable = true;
+    const result = await cliModuleState('codex');
+    expect(result.binary).toBe('/usr/local/bin/codex');
+    expect(result.managed).toBe(false);
   });
 });
 

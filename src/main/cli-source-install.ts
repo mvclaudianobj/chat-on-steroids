@@ -192,6 +192,24 @@ async function installWsl(id: PublishedId, expected: string, mode: InstallMode, 
         ...npmInstallArgv(prefix, `${stage}/release.tgz`, `${stage}/npmrc`, global)], 180_000);
     };
     await install(`${stage}/app`);
+    if (id === 'claude') {
+      // npm intentionally runs with --ignore-scripts. Claude's verified package
+      // needs its own native installer before the --version probe can succeed.
+      const packageDir = `${stage}/app/node_modules/@anthropic-ai/claude-code`;
+      const details = (await run('/usr/bin/env', ['-i', `HOME=${stage}/probe`,
+        'PATH=/usr/local/bin:/usr/bin:/bin', 'node', '-p',
+        'JSON.stringify({name:require(process.argv[1]).name,version:require(process.argv[1]).version})',
+        `${packageDir}/package.json`])).stdout.trim();
+      let packageMeta: { name?: string; version?: string };
+      try { packageMeta = JSON.parse(details) as typeof packageMeta; }
+      catch { throw new Error('version_mismatch'); }
+      if (packageMeta.name !== PACKAGES.claude || packageMeta.version !== expected) throw new Error('version_mismatch');
+      await run('/usr/bin/test', ['-f', `${packageDir}/install.cjs`]);
+      await run('/usr/bin/test', ['!', '-L', `${packageDir}/install.cjs`]);
+      await run('/usr/bin/env', ['-i', `HOME=${stage}/probe`,
+        'PATH=/usr/local/bin:/usr/bin:/bin', 'NO_COLOR=1', 'DISABLE_AUTOUPDATER=1',
+        'node', `${packageDir}/install.cjs`], 120_000);
+    }
     const verified = await verifiedVersion(id, `${stage}/app/node_modules/.bin/${id}`, `${stage}/probe`);
     if (verified !== expected) throw new Error('version_mismatch');
     if (mode === 'update-external') {

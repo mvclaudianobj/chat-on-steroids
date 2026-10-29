@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const fixture = vi.hoisted(() => ({
   home: '', fail: false, latest: '1.2.3', commands: [] as string[][],
-  claudeNativeReady: false, claudePostinstallCalls: 0
+  claudeNativeReady: false, claudePostinstallCalls: 0, wslCommands: [] as string[][]
 }));
 vi.mock('electron', () => ({ app: { getPath: () => fixture.home } }));
 vi.mock('../src/main/npm-release.js', () => ({
@@ -22,7 +22,21 @@ vi.mock('../src/main/upstream/install.js', () => ({
     stderr: args.at(-1) === '--version' && args.at(-2)?.endsWith('/claude') && !fixture.claudeNativeReady
       ? 'Error: claude native binary not installed (postinstall did not run)\n' : ''
   })) },
-  wslRunner: { run: vi.fn() }, probeEnvironment: (home: string) => [`HOME=${home}`, 'PATH=/usr/bin:/bin']
+  wslRunner: { run: vi.fn(async (file: string, args: string[]) => {
+    fixture.wslCommands.push([file, ...args]);
+    if (args.includes('printenv') && args.includes('HOME')) return { stdout: '/home/test\n', stderr: '' };
+    if (args.includes('printenv') && args.includes('PATH')) return { stdout: '/usr/bin:/bin\n', stderr: '' };
+    if (file === '/usr/bin/wslpath') return { stdout: '/mnt/c/fixture/release.tgz\n', stderr: '' };
+    if (file === '/usr/bin/sha512sum') {
+      const { createHash } = await import('node:crypto');
+      return { stdout: createHash('sha512').update('verified fixture').digest('hex') + '  release.tgz\n', stderr: '' };
+    }
+    if (args.includes('-p') && args.some(arg => arg.endsWith('/package.json')))
+      return { stdout: '{"name":"@anthropic-ai/claude-code","version":"1.2.3"}\n', stderr: '' };
+    if (args.some(arg => arg.endsWith('/install.cjs'))) fixture.claudeNativeReady = true;
+    if (args.at(-1) === '--version') return { stdout: fixture.claudeNativeReady ? '1.2.3 (Claude Code)\n' : '', stderr: '' };
+    return { stdout: '', stderr: '' };
+  }) }, probeEnvironment: (home: string) => [`HOME=${home}`, 'PATH=/usr/bin:/bin']
 }));
 vi.mock('node:child_process', () => {
   const execFile = vi.fn();
@@ -52,8 +66,8 @@ vi.mock('node:child_process', () => {
 import { installPublishedCli, publishedLatest, publishedUpdateAvailable } from '../src/main/cli-source-install.js';
 
 describe.skipIf(process.platform !== 'linux')('published CLI module updates', () => {
-  beforeEach(() => { fixture.home = mkdtempSync(path.join(os.tmpdir(), 'marks-cli-test-')); fixture.fail = false; fixture.latest = '1.2.3'; fixture.commands = []; fixture.claudeNativeReady = false; fixture.claudePostinstallCalls = 0; });
-  afterEach(() => { if (fixture.home) rmSync(fixture.home, { recursive: true, force: true }); });
+  beforeEach(() => { fixture.home = mkdtempSync(path.join(os.tmpdir(), 'marks-cli-test-')); fixture.fail = false; fixture.latest = '1.2.3'; fixture.commands = []; fixture.wslCommands = []; fixture.claudeNativeReady = false; fixture.claudePostinstallCalls = 0; });
+  afterEach(() => { vi.restoreAllMocks(); if (fixture.home) rmSync(fixture.home, { recursive: true, force: true }); });
 
   it('requires an exact official version and preserves the installed launcher on failure', async () => {
     expect(await publishedLatest('codex')).toBe('1.2.3');
@@ -98,5 +112,17 @@ describe.skipIf(process.platform !== 'linux')('published CLI module updates', ()
     await expect(installPublishedCli('claude', '@anthropic-ai/claude-code', '1.2.3', 'update-external',
       path.join(os.homedir(), '.local'))).rejects.toThrow('synthetic npm failure');
     expect(fixture.commands.some(row => row.includes('--global'))).toBe(false);
+  });
+
+  it('prepares Claude native installer inside WSL before probing and publishing its launcher', async () => {
+    vi.spyOn(process, 'platform', 'get').mockReturnValue('win32');
+    await installPublishedCli('claude', '@anthropic-ai/claude-code', '1.2.3', 'install');
+    const installIndex = fixture.wslCommands.findIndex(row => row.includes('node') && row.some(arg => arg.endsWith('/install.cjs')));
+    const versionIndex = fixture.wslCommands.findIndex(row => row.at(-1) === '--version');
+    const publishIndex = fixture.wslCommands.findIndex(row => row[0] === '/bin/mv' && row.includes('-f') && row.some(arg => arg.includes('/bin/.next-')));
+    expect(installIndex).toBeGreaterThan(-1);
+    expect(versionIndex).toBeGreaterThan(installIndex);
+    expect(publishIndex).toBeGreaterThan(versionIndex);
+    expect(fixture.wslCommands[installIndex]!.some(arg => arg.startsWith('HOME=/home/test/.local/share/chat-marks-modules/claude/.stage-'))).toBe(true);
   });
 });
