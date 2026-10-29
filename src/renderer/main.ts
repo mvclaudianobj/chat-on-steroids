@@ -822,6 +822,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
+      archiveRetentionDays: Number($<HTMLSelectElement>('archiveRetentionDays').value),
       marksSystemPromptEnabled: $<HTMLInputElement>('marksSystemPromptEnabled').checked,
       marksPreferredName: $<HTMLInputElement>('marksPreferredName').value.trim() || undefined,
       sounds: $<HTMLInputElement>('soundCues').checked,
@@ -1803,6 +1804,15 @@ function apply(next: AppState): void {
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
+  const retention = $<HTMLSelectElement>('archiveRetentionDays');
+  const retentionDays = String(config.ui.archiveRetentionDays ?? 30);
+  if (![...retention.options].some(option => option.value === retentionDays)) {
+    retention.querySelector('option[data-configured]')?.remove();
+    const option = document.createElement('option');
+    option.value = retentionDays; option.textContent = t('{0} days', [retentionDays]); option.dataset.configured = '';
+    retention.add(option);
+  }
+  applyValue(retention, retentionDays, previousState ? String(previousState.config.ui.archiveRetentionDays ?? 30) : undefined);
   applyChecked($<HTMLInputElement>('marksSystemPromptEnabled'), config.ui.marksSystemPromptEnabled !== false, previousState ? previousState.config.ui.marksSystemPromptEnabled !== false : undefined);
   applyValue($<HTMLInputElement>('marksPreferredName'), config.ui.marksPreferredName ?? '', previousState?.config.ui.marksPreferredName ?? '');
   $('marksPromptPreview').hidden = true;
@@ -2967,6 +2977,7 @@ for (const id of [
   'followUp',
   'enterSends',
   'turnNotifications',
+  'archiveRetentionDays',
   'marksSystemPromptEnabled',
   'marksPreferredName',
   'soundCues',
