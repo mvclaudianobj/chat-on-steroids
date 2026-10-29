@@ -387,8 +387,10 @@ const dormantRuns = new Map<string, DormantRun>();
  * A family older than this, or beyond the newest MAX_DORMANT_RUNS, is dropped and its worker
  * chats become ordinary retired leases; its prime spawns afresh if it ever comes back.
  */
-const DORMANT_RUN_TTL_MS = 7 * 24 * 60 * 60_000;
-const MAX_DORMANT_RUNS = 16;
+// An archived worker remains revivable for the same 30-day retention window as its
+// archived ChatGPT identity. Earlier seven-day eviction stranded otherwise reusable chats.
+const DORMANT_RUN_TTL_MS = 30 * 24 * 60 * 60_000;
+const MAX_DORMANT_RUNS = 128;
 
 /**
  * The earliest instant this process can honestly claim to have been watching a conversation.
@@ -4704,6 +4706,21 @@ export function closableWorkerConversations(keep: number): string[] {
   stopped.sort((a, b) => a.usedAt - b.usedAt);
   const surplus = Math.max(0, stopped.length - Math.max(0, keep));
   return stopped.slice(0, surplus).map((entry) => entry.conversationId);
+}
+
+/** One-time archive migration: only a verified completed assignment, with no inbox debt. */
+export function completedIdleWorkerConversations(): string[] {
+  const conversations = new Set<string>();
+  for (const owner of [...runs.values(), ...dormantRuns.values()]) {
+    for (const agent of owner.agents.values()) {
+      const info = agent.info;
+      if (info.role !== 'worker' || !info.conversationId || unpublishedAgents.has(agent) ||
+          (info.state !== 'sleeping' && info.state !== 'finished') ||
+          !info.result?.trim() || info.silenceParked || info.pending > 0 || info.awaitingAck > 0) continue;
+      conversations.add(info.conversationId);
+    }
+  }
+  return [...conversations];
 }
 
 /** Any dormant worker conversation remains an identity fence, reusable or terminal. */

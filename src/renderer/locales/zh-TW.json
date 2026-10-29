@@ -1,4 +1,5 @@
 {
+  "Select Company worker for local grants": "選擇要授予本機權限的公司員工",
   "Archive finished workers after (minutes)": "完成任務後封存工作者聊天的延遲（分鐘）",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1 至 1440 分鐘。現有安裝保留預設的兩分鐘。",
   "After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.": "經過設定的延遲後，已完成任務的工作者聊天會在 ChatGPT 中封存。對話與歷史紀錄將保留，並在新任務前還原。已清除的工作者聊天會立即封存。不會刪除任何內容。",

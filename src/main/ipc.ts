@@ -192,7 +192,7 @@ import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
 import {
   clearAgent,
-  closableWorkerConversations,
+  completedIdleWorkerConversations,
   onSwarmChange,
   pauseSwarmForDisable,
   persistAgentAuthorityNow,
@@ -972,7 +972,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       // The explicit Off -> On transition is consent to migrate already finished workers.
       // This is a reversible ChatGPT archive; their durable reports, identity and worktrees
       // stay untouched. Active workers and unresolved host approvals are never migrated.
-      const eligible = closableWorkerConversations(0).filter(id => !approvalCardWaiting(id));
+      const eligible = completedIdleWorkerConversations().filter(id => !approvalCardWaiting(id));
       queueWorkerArchives(eligible, Date.now(), workerArchiveFinishDelayMs());
       logInfo(`worker archive: user-enabled migration queued ${eligible.length} stopped worker chat(s)`);
     }

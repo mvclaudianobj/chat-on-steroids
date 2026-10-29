@@ -1,4 +1,5 @@
 {
+  "Select Company worker for local grants": "Chọn nhân viên Công ty để cấp quyền cục bộ",
   "Archive finished workers after (minutes)": "Lưu trữ nhân viên đã hoàn tất sau (phút)",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "Từ 1 đến 1440 phút. Bản cài đặt hiện có vẫn dùng mặc định hai phút.",
   "After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.": "Sau thời gian đã đặt, cuộc trò chuyện của nhân viên đã hoàn thành được lưu trữ trong ChatGPT. Cuộc trò chuyện và lịch sử được giữ lại và khôi phục trước nhiệm vụ mới. Cuộc trò chuyện của nhân viên đã xóa được lưu trữ ngay. Không có gì bị xóa.",

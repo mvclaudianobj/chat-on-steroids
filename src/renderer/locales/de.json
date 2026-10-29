@@ -1,4 +1,5 @@
 {
+  "Select Company worker for local grants": "Company-Mitarbeiter für lokale Berechtigungen auswählen",
   "Archive finished workers after (minutes)": "Fertige Worker nach (Minuten) archivieren",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1 bis 1440 Minuten. Bestehende Installationen behalten den Standardwert von zwei Minuten.",
   "After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.": "Nach der eingestellten Zeit wird der fertige Worker-Chat in ChatGPT archiviert. Unterhaltung und Verlauf bleiben erhalten und werden vor neuer Arbeit wiederhergestellt. Chats gelöschter Worker werden sofort archiviert. Nichts wird gelöscht.",

@@ -1,4 +1,5 @@
 {
+  "Select Company worker for local grants": "Выбрать работника компании для локальных разрешений",
   "Archive finished workers after (minutes)": "Архивировать завершивших работу агентов через (минут)",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "От 1 до 1440 минут. В существующих установках сохраняется значение по умолчанию — две минуты.",
   "After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.": "По истечении заданного времени чат завершившего работу агента архивируется в ChatGPT. Разговор и история сохраняются и восстанавливаются перед новой задачей. Чаты удалённых из группы агентов архивируются немедленно. Ничего не удаляется.",

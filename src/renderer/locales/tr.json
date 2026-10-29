@@ -1,4 +1,5 @@
 {
+  "Select Company worker for local grants": "Yerel izinler için şirket çalışanını seç",
   "Archive finished workers after (minutes)": "Tamamlanan çalışanları şu süre sonra arşivle (dakika)",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1–1440 dakika. Mevcut kurulumlarda varsayılan iki dakika korunur.",
   "After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.": "Ayarlanan süre dolunca tamamlanan çalışanın sohbeti ChatGPT’de arşivlenir. Sohbet ve geçmişi korunur, yeni görevden önce geri yüklenir. Temizlenen çalışanların sohbetleri hemen arşivlenir. Hiçbir şey silinmez.",

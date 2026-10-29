@@ -100,18 +100,34 @@ export async function spawnAgentWorkers(
         (worker.model === undefined || worker.model === agent.model) &&
         (worker.reasoning_effort === undefined || worker.reasoning_effort === agent.reasoningEffort))
     : []);
+  // Once a family has accumulated its configured worker count, prefer the oldest idle
+  // member for one new task. Only an exact owner may recycle it. Company ticket workers
+  // carry a broker-bound label and must never be reassigned outside Company admission.
+  if (existing.self?.role === 'prime' && input.workers.length === 1 &&
+      chosen[0]?.length === 0 && existing.state.agents.filter(a => a.role === 'worker').length >= getConfig().multiAgent.maxWorkers) {
+    const worker = input.workers[0]!;
+    const idle = existing.state.agents.filter(agent => agent.role === 'worker' && agent.state === 'sleeping' &&
+      agent.revivable === true && !!agent.conversationId && agent.pending === 0 && agent.awaitingAck === 0 &&
+      !/^marks(?:\d+|-[a-z]+):/i.test(agent.label) &&
+      (worker.model === undefined || worker.model === agent.model) &&
+      (worker.reasoning_effort === undefined || worker.reasoning_effort === agent.reasoningEffort))
+      .sort((a, b) => (a.sleptAt ?? a.createdAt) - (b.sleptAt ?? b.createdAt));
+    if (idle.length) chosen[0] = [idle[0]!];
+  }
   if (existing.self?.role === 'prime' && chosen.length > 0 && chosen.every(matches => matches.length === 1) &&
     new Set(chosen.map(matches => matches[0]!.id)).size === chosen.length) {
     const messages = input.workers.map((worker, i) => ({
       to: chosen[i]![0]!.id,
-      text: [input.context?.trim(), worker.task.trim()].filter(Boolean).join('\n\n')
+      text: [input.context?.trim(), worker.task.trim()].filter(Boolean).join('\n\n'),
+      ...(worker.label?.trim() && worker.label.trim() !== chosen[i]![0]!.label ? { label: worker.label.trim() } : {})
     }));
     // Do not create hidden empty assignments or drop the shared context.
     if (messages.every(item => item.text.trim())) {
       const stagedReuse = stageMessages(input.caller, messages);
       await acceptAgentMutation(stagedReuse, 'Worker reuse could not cross its durable acceptance barrier');
       requestWorkerRevivals(stagedReuse.waking, stagedReuse.runId);
-      return { created: chosen.map(matches => ({ ...matches[0]!, state: 'waking' as const })),
+      return { created: chosen.map((matches, index) => ({ ...matches[0]!,
+        label: input.workers[index]!.label?.trim() || matches[0]!.label, state: 'waking' as const })),
         becamePrime: false, runId: stagedReuse.runId, defaultNotes: [],
         isolationNotes: [`Reused ${chosen.length} sleeping worker chat(s) with their existing identities and worktrees.`] };
     }

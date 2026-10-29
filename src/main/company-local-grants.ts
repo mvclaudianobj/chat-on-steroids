@@ -4,12 +4,13 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 
-const subject = z.discriminatedUnion('kind', [
+export const companyLocalSubjectSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('coo'), principal: z.literal('marks-coo') }).strict(),
   z.object({ kind: z.literal('worker'), ownerId: z.string().uuid(), runId: z.string().uuid(),
     workerId: z.string().regex(/^worker-[1-9]\d*$/), conversationId: z.string().min(8).max(160) }).strict()
 ]);
 const scope = z.enum(['company-local-read', 'company-local-triage', 'company-local-review']);
+const subject = companyLocalSubjectSchema;
 const grant = z.object({ id: z.string().uuid(), subject, scope, epoch: z.number().int().nonnegative(), at: z.number().int().nonnegative() }).strict();
 const audit = z.object({ id: z.string().uuid(), at: z.number().int().nonnegative(), action: z.enum(['authorize', 'revoke', 'deny']),
   subject, scope, epoch: z.number().int().nonnegative(), reason: z.string().max(120) }).strict();
@@ -38,7 +39,9 @@ async function read(): Promise<Ledger> {
   if (!directory) throw new Error('Local Company grants unavailable');
   try {
     const stat = await fs.lstat(path.join(directory, 'ledger.json'));
-    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 512_000) throw new Error('Unsafe grant ledger');
+    // Historical ledgers may be larger than the new compact write limit. Read them
+    // under a bounded size so the next authorized mutation can compact them safely.
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2_000_000) throw new Error('Unsafe grant ledger');
     return ledgerSchema.parse(JSON.parse(await fs.readFile(path.join(directory, 'ledger.json'), 'utf8')));
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return blank();
@@ -50,7 +53,10 @@ async function write(value: Ledger): Promise<void> {
   if ((await fs.lstat(directory)).isSymbolicLink()) throw new Error('Unsafe grant directory');
   const tmp = path.join(directory, `.${randomUUID()}.tmp`);
   try {
-    await fs.writeFile(tmp, JSON.stringify(ledgerSchema.parse(value)), { flag: 'wx', mode: 0o600 });
+    // A full audit (2,000) together with historical requests could exceed the read
+    // bound and make revocation impossible. Keep the newest entries, never active grants.
+    const bounded = ledgerSchema.parse({ ...value, audit: value.audit.slice(-500), requests: value.requests.slice(-300) });
+    await fs.writeFile(tmp, JSON.stringify(bounded), { flag: 'wx', mode: 0o600 });
     await fs.rename(tmp, path.join(directory, 'ledger.json'));
   } finally { await fs.rm(tmp, { force: true }); }
 }
@@ -89,10 +95,10 @@ export async function recordLocalCompanyRequest(input: { subject: Subject; scope
     if (!pending) {
       pending = { requestId, subject: who, scope: selected, at: Date.now(), epoch: ledger.epoch };
       ledger.requests.push(pending);
-      ledger.requests = ledger.requests.slice(-1000);
+      ledger.requests = ledger.requests.slice(-300);
       await write(ledger);
     }
-    const equivalent = ledger.requests.filter(item => same(item.subject, who) && item.scope === selected).length;
+    const equivalent = ledger.requests.filter(item => item.epoch === pending.epoch && same(item.subject, who) && item.scope === selected).length;
     return { equivalent, suggestExpansion: equivalent > 3, epoch: pending.epoch! };
   });
 }

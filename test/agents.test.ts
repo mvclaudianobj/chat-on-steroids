@@ -260,6 +260,18 @@ it('reuses a named worker from parked history without opening a replacement chat
   expect(swarmStateForCaller(prime).agents.filter(info => info.role === 'worker')).toHaveLength(1);
 });
 
+it('recycles the oldest idle member at the family limit and preserves its conversation', async () => {
+  await setEnabled(true, 1);
+  startSwarm(1);
+  const worker = startWorker('worker-1', 'c-cap-reusable');
+  finishAgent(worker.caller, 'first assignment complete');
+  const answer = await spawnAgentWorkers({ caller: prime,
+    workers: [{ label: 'New assignment', task: 'Continue the next assignment' }] }, async () => null, () => false);
+  expect(answer.created).toMatchObject([{ id: 'worker-1', state: 'waking', label: 'New assignment', conversationId: 'c-cap-reusable' }]);
+  expect(swarmStateForCaller(prime).agents.filter(row => row.role === 'worker')).toHaveLength(1);
+  await setEnabled(true);
+});
+
 describe('exact worker prime provenance', () => {
   it('keeps the same exact prime through active, sleeping and dormant worker states', () => {
     startSwarm(1);
@@ -2528,7 +2540,7 @@ describe('a worker that is sleeping', () => {
 });
 
 describe('restart', () => {
-  it('drops parked histories beyond the newest sixteen or older than a week, retiring their worker chats', async () => {
+  it('retains parked workers for thirty days while bounding history to 128 families', async () => {
     vi.useFakeTimers();
     try {
       await setEnabled(true, 1);
@@ -2539,22 +2551,26 @@ describe('restart', () => {
         expect(releaseQuiescentRun()).toBe(true);
         vi.setSystemTime(Date.now() + 1_000);
       };
-      for (let n = 1; n <= 17; n++) park(n);
-      expect(snapshotSwarm()!.dormantRuns).toHaveLength(16);
+      for (let n = 1; n <= 129; n++) park(n);
+      expect(snapshotSwarm()!.dormantRuns).toHaveLength(128);
       expect(dormantWorkerNotice('c-worker-1')).toBeNull();
       expect(retiredWorkerForConversation('c-worker-1')?.id).toBe('worker-1');
       expect(dormantWorkerNotice('c-worker-2')).toContain('WORKER_SLEEPING');
 
-      // A week later the rest are history too, on the next parking and on a restart alike.
+      // A full month later the rest expire on the next parking and on restart alike.
       const saved = snapshotSwarm()!;
-      vi.setSystemTime(Date.now() + 7 * 24 * 60 * 60_000);
-      park(18);
-      expect(snapshotSwarm()!.dormantRuns?.map((entry) => entry.primeConversationId)).toEqual(['c-prime-18']);
+      vi.setSystemTime(Date.now() + 29 * 24 * 60 * 60_000);
+      resetAgentsForTests();
+      restoreSwarm(saved);
+      expect(snapshotSwarm()?.dormantRuns).toHaveLength(128);
+      vi.setSystemTime(saved.savedAt + 30 * 24 * 60 * 60_000 + 1);
+      park(130);
+      expect(snapshotSwarm()!.dormantRuns?.map((entry) => entry.primeConversationId)).toEqual(['c-prime-130']);
 
       resetAgentsForTests();
       restoreSwarm(saved);
       expect(snapshotSwarm()?.dormantRuns ?? []).toHaveLength(0);
-      expect(retiredWorkerForConversation('c-worker-17')?.id).toBe('worker-1');
+      expect(retiredWorkerForConversation('c-worker-129')?.id).toBe('worker-1');
     } finally {
       vi.useRealTimers();
       await setEnabled(true);
@@ -3189,7 +3205,7 @@ describe('restart', () => {
     resetAgentsForTests();
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      vi.setSystemTime(saved!.savedAt + 31 * 24 * 60 * 60_000);
       restoreSwarm(saved);
       expect(managedWorktreeCleanupOffers()).toEqual([
         expect.objectContaining({ runId: staged.runId, agentId: 'worker-1', reason: 'evicted' })
@@ -3246,7 +3262,7 @@ describe('restart', () => {
     resetAgentsForTests();
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      vi.setSystemTime(saved!.savedAt + 31 * 24 * 60 * 60_000);
       restoreSwarm(saved);
       expect(managedWorkerRecoveryIdentities()).toEqual([]);
       expect(managedWorkerAllocationIdentity({ conversationId })).toBeNull();
@@ -3339,7 +3355,7 @@ describe('restart', () => {
     resetAgentsForTests();
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(dormant!.savedAt + 8 * 24 * 60 * 60_000);
+      vi.setSystemTime(dormant!.savedAt + 31 * 24 * 60 * 60_000);
       restoreSwarm(dormant);
       expect(managedWorkerRecoveryIdentities()).toEqual([]);
       const evicted = structuredClone(snapshotSwarm());
@@ -5618,7 +5634,7 @@ it('archives accepted renamed assignments before broker expiry and restores save
   resetAgentsForTests();
   vi.useFakeTimers();
   try {
-    vi.setSystemTime(saved.savedAt + 8 * 24 * 60 * 60_000);
+    vi.setSystemTime(saved.savedAt + 31 * 24 * 60 * 60_000);
     // Startup projects the last accepted disk snapshot before restoring/pruning authority.
     await archiveWorkerAssignments(saved);
     restoreSwarm(saved);
@@ -5690,7 +5706,7 @@ describe('retired worker chats', () => {
     expect(retired).toEqual([['c-worker-1']]);
   });
 
-  it('names the workers of a parked run when its history expires after a week (polish 2.1.37)', () => {
+  it('names the workers of a parked run when its history expires after thirty days', () => {
     const retired: string[][] = [];
     startSwarm(1);
     const worker = startWorker('worker-1');
@@ -5703,7 +5719,7 @@ describe('retired worker chats', () => {
     onWorkerChatsRetired((ids) => retired.push([...ids]));
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      vi.setSystemTime(saved!.savedAt + 31 * 24 * 60 * 60_000);
       restoreSwarm(saved);
       expect(retired).toEqual([['c-worker-1']]);
     } finally { vi.useRealTimers(); }

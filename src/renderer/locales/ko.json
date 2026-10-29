@@ -1,4 +1,5 @@
 {
+  "Select Company worker for local grants": "로컬 권한을 부여할 회사 작업자 선택",
   "Archive finished workers after (minutes)": "완료된 작업자 보관 지연 시간(분)",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1~1440분. 기존 설치에는 기본값 2분이 유지됩니다.",
   "After the configured delay, the finished worker chat is archived in ChatGPT. Its conversation and transcript stay available and are restored before new work. Cleared worker chats are archived immediately. Nothing is deleted.": "설정한 시간이 지나면 완료된 작업자의 채팅이 ChatGPT에 보관됩니다. 대화와 기록은 유지되며 새 작업 전에 복원됩니다. 정리한 작업자의 채팅은 즉시 보관됩니다. 삭제되지 않습니다.",

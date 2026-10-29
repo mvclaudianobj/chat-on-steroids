@@ -65,3 +65,24 @@ it('displays grant options only for attested matching worker; COO choice stays d
   expect(host.querySelectorAll('div[aria-label] button:disabled')).toHaveLength(1);
   expect(host.querySelectorAll('select option')).toHaveLength(3);
 });
+
+it('selects the exact Company ticket worker for main-process attestation', async () => {
+  const host = mockWindow();
+  const get = vi.fn(async (selected?: typeof worker | {kind:'coo';principal:'marks-coo'}) =>
+    ({ ok: true as const, data: view(selected?.kind === 'worker') }));
+  const company = { demo: false, requests: [{ id: worker.ownerId, execution: {
+    mode: 'live', phase: 'running', ownerId: worker.ownerId, runId: worker.runId,
+    workerId: worker.workerId, conversationId: worker.conversationId } }] } as never;
+  mountCompanyLocalGrants(host, {
+    companyLocalGrants: get, revokeCompanyLocalGrant: vi.fn() as never,
+    requestCompanyLocalGrant: vi.fn() as never
+  }, company);
+  await tick();
+  expect(get).toHaveBeenCalledWith(worker);
+  const selector = host.querySelector<HTMLSelectElement>('select[aria-label="Select Company worker for local grants"]')!;
+  expect(selector.options).toHaveLength(2);
+  selector.value = '-1'; selector.dispatchEvent(new host.ownerDocument.defaultView!.Event('change'));
+  await tick();
+  expect(get).toHaveBeenLastCalledWith({ kind: 'coo', principal: 'marks-coo' });
+  expect(host.querySelectorAll('div[aria-label] button:disabled')).toHaveLength(3);
+});

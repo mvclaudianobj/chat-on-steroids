@@ -130,7 +130,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     const local = el('section', 'company-local-grants');
     local.id = 'companyLocalGrants';
     content.append(local);
-    mountCompanyLocalGrants(local, api);
+    mountCompanyLocalGrants(local, api, snapshot);
   }
   function detail(id: string): void {
     const request = snapshot?.requests.find(row => row.id === id); if (!request || !snapshot) return;

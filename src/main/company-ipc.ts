@@ -6,14 +6,15 @@ import { createCompanyBroker } from './company-broker.js';
 import { createCompanyObserver } from './company-observability.js';
 import { cooHostApprover, sweepCooHostApprovals } from './company-coo-approval.js';
 import { mainText } from './main-texts.js';
-import { companyLocalConsentCopy, localGrantDecision, readLocalCompanyGrants, recordLocalCompanyRequest, revokeLocalCompanyGrant,
+import { companyLocalConsentCopy, localGrantDecision, readLocalCompanyGrants, recordLocalCompanyRequest, revokeLocalCompanyGrant, verifyLocalCompanyGrant, companyLocalSubjectSchema,
   type CompanyLocalAttestation } from './company-local-grants.js';
+import { attestCompanyLocalSubject } from './company-local-attestation.js';
 
 export const companyIpcSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('get') }).strict(),
   z.object({ action: z.literal('cooHostPolicy'), payload: z.object({ enabled: z.boolean(),
     riskTerms: z.array(cooHostApprovalTermSchema).max(64) }).strict() }).strict(),
-  z.object({ action: z.literal('localGrants') }).strict(),
+  z.object({ action: z.literal('localGrants'), payload: z.object({ subject: companyLocalSubjectSchema }).strict().optional() }).strict(),
   z.object({ action: z.literal('localGrantRevoke'), payload: z.object({ id: z.string().uuid() }).strict() }).strict(),
   z.object({ action: z.literal('localGrantRequest'), payload: z.object({
     mode: z.enum(['task', 'agent', 'coo']), scope: z.enum(['company-local-read', 'company-local-triage', 'company-local-review']),
@@ -51,7 +52,8 @@ export type CompanyIpcRequest = z.infer<typeof companyIpcSchema>;
 export function registerCompanyIpc(
   getWindow: () => BrowserWindow | null,
   /** Only main-process, locally verified attestation can supply this. Never pass renderer/broker text. */
-  resolveLocalAttestation: () => Promise<CompanyLocalAttestation | null> = async () => null
+  resolveLocalAttestation: (subject?: CompanyLocalAttestation['subject']) => Promise<CompanyLocalAttestation | null> =
+    async (subject) => attestCompanyLocalSubject(subject ?? { kind: 'coo', principal: 'marks-coo' })
 ): void {
   const broker = createCompanyBroker();
   const observer = createCompanyObserver();
@@ -66,7 +68,7 @@ export function registerCompanyIpc(
       const request = parsed.data;
       if (request.action === 'localGrants') {
         const ledger = await readLocalCompanyGrants();
-        const proof = await resolveLocalAttestation();
+        const proof = await resolveLocalAttestation(request.payload?.subject);
         return { ok: true, data: { ...ledger, authority: {
           verified: proof?.local === true && proof.verified === true,
           subject: proof?.local === true && proof.verified === true ? proof.subject : null,
@@ -76,12 +78,18 @@ export function registerCompanyIpc(
       }
       if (request.action === 'localGrantRevoke') return { ok: true, data: await revokeLocalCompanyGrant(request.payload.id) };
       if (request.action === 'localGrantRequest') {
-        const proof = await resolveLocalAttestation();
+        const proof = await resolveLocalAttestation(request.payload.subject);
         if (!proof || proof.local !== true || proof.verified !== true ||
             JSON.stringify(proof.subject) !== JSON.stringify(request.payload.subject) ||
             (request.payload.mode === 'coo' && proof.subject.kind !== 'coo') ||
             (request.payload.mode === 'agent' && proof.subject.kind !== 'worker')) {
           return { ok: false, error: 'No locally attested Company identity; persistent grant refused' };
+        }
+        if (request.payload.mode !== 'task' && await verifyLocalCompanyGrant(proof, request.payload.scope)) {
+          const ledger = await readLocalCompanyGrants();
+          const granted = ledger.grants.find(grant => grant.scope === request.payload.scope &&
+            JSON.stringify(grant.subject) === JSON.stringify(proof.subject));
+          if (granted) return { ok: true, data: { authorized: true, epoch: ledger.epoch, id: granted.id } };
         }
         const copy = companyLocalConsentCopy(request.payload.mode, request.payload.scope);
         const frequency = await recordLocalCompanyRequest(request.payload);
@@ -93,7 +101,7 @@ export function registerCompanyIpc(
           event.senderFrame !== window.webContents.mainFrame) return { ok: false, error: 'Explicit consent required' };
         // One trusted local proof is rechecked after the native dialog because a revocation
         // or switch of worker/run while the dialog is open must invalidate the grant.
-        const stillVerified = await resolveLocalAttestation();
+        const stillVerified = await resolveLocalAttestation(request.payload.subject);
         const result = await localGrantDecision({ ...request.payload,
           attestation: stillVerified && JSON.stringify(stillVerified.subject) === JSON.stringify(proof.subject) ? stillVerified : null,
           consent: true, expectedEpoch: frequency.epoch });
