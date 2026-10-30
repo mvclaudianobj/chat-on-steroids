@@ -497,7 +497,12 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       readiness.textContent = checks.join(' ');
     }
     if (createChat) {
-      createChat.hidden = !preferences.enabled || !!target || !actions;
+      // Jarvis speaks with ChatGPT and CLIProxy chats only; in a Codex, Claude or OpenCode chat the offer
+      // to open another chat was clutter drawn over that chat's own route control.
+      // A CLIProxy chat is already a target, so any app-run chat that is not one is an engine chat
+      // (the selection does not always carry its engine).
+      const engineChat = !!chat?.conversationId && isApiConversationId(chat.conversationId);
+      createChat.hidden = !preferences.enabled || !!target || !actions || engineChat;
       createChat.disabled = creating;
       createChat.textContent = t(creating ? 'Creating CLIProxy chat…' : 'Open optional CLIProxy chat');
       createChat.title = t('Jarvis needs a ChatGPT or CLIProxy conversation. The voice provider configures audio, not chat.');

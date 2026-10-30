@@ -81,4 +81,8 @@
 .jarvis-chat-target p { flex: 1 1 240px; min-width: 0; margin: 0; overflow-wrap: anywhere; }
 .jarvis-readiness { margin: 8px 0; color: var(--soft); line-height: 1.5; overflow-wrap: anywhere; }
 .jarvis-chat-action { flex: none; white-space: nowrap; }
+/* A Codex, Claude or OpenCode chat shows its own controls; Jarvis does not speak there (a CLIProxy
+   chat is already Jarvis's target, so its offer is hidden anyway). */
+.composer:has(#apiChatControls:not([hidden])) .jarvis-chat-action,
+.composer:has(#apiChatControls:not([hidden])) .jarvis-state { display: none; }
 .jarvis-chat-action[hidden] { display: none; }
