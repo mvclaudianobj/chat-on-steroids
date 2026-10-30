@@ -13,7 +13,7 @@ const pause = ms => new Promise(resolve => setTimeout(resolve,ms));
 let server, win;
 const fixture = `(() => {
   try { localStorage.setItem('cos.ui.language','en'); } catch {}
-  const original=window.api,ok=data=>Promise.resolve({ok:true,data:structuredClone(data)});
+  const original=window.api,ok=data=>Promise.resolve({ok:true,data:structuredClone(data&&data.company&&data.requests&& !data.cooHostApproval ? {...data,cooHostApproval:{enabled:false,epoch:0,riskTerms:['delete'],changedAt:null,audit:[]}} : data)});
   let company=null,demoBackup=null;
   let localGrant={id:'33333333-3333-4333-8333-333333333333',subject:{kind:'worker',ownerId:'11111111-1111-4111-8111-111111111111',runId:'22222222-2222-4222-8222-222222222222',workerId:'worker-1',conversationId:'synthetic-worker'},scope:'company-local-read',epoch:4,at:Date.now()-10000};
   let localEpoch=4;

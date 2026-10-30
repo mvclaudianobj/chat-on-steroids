@@ -1,4 +1,9 @@
 {
+  "Current task": "Mevcut görev",
+  "Last report": "Son rapor",
+  "COO approvals": "COO onayları",
+  "No approvals recorded": "Kayıtlı onay yok",
+  "approval-wait": "Onay bekleniyor",
   "Select Company worker for local grants": "Yerel izinler için şirket çalışanını seç",
   "Archive finished workers after (minutes)": "Tamamlanan çalışanları şu süre sonra arşivle (dakika)",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1–1440 dakika. Mevcut kurulumlarda varsayılan iki dakika korunur.",

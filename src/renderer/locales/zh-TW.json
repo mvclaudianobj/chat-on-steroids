@@ -1,4 +1,9 @@
 {
+  "Current task": "目前任務",
+  "Last report": "最新報告",
+  "COO approvals": "COO 核准",
+  "No approvals recorded": "沒有核准紀錄",
+  "approval-wait": "等待核准",
   "Select Company worker for local grants": "選擇要授予本機權限的公司員工",
   "Archive finished workers after (minutes)": "完成任務後封存工作者聊天的延遲（分鐘）",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1 至 1440 分鐘。現有安裝保留預設的兩分鐘。",

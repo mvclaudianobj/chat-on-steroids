@@ -1,4 +1,9 @@
 {
+  "Current task": "Tarea actual",
+  "Last report": "Último informe",
+  "COO approvals": "Aprobaciones del COO",
+  "No approvals recorded": "No hay aprobaciones registradas",
+  "approval-wait": "Esperando aprobación",
   "Select Company worker for local grants": "Seleccionar trabajador de la empresa para permisos locales",
   "Archive finished workers after (minutes)": "Archivar trabajadores finalizados después de (minutos)",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "De 1 a 1440 minutos. Las instalaciones existentes mantienen los dos minutos predeterminados.",

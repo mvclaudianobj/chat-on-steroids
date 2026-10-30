@@ -1,4 +1,9 @@
 {
+  "Current task": "Текущая задача",
+  "Last report": "Последний отчет",
+  "COO approvals": "Одобрения COO",
+  "No approvals recorded": "Нет зарегистрированных одобрений",
+  "approval-wait": "Ожидание одобрения",
   "Select Company worker for local grants": "Выбрать работника компании для локальных разрешений",
   "Archive finished workers after (minutes)": "Архивировать завершивших работу агентов через (минут)",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "От 1 до 1440 минут. В существующих установках сохраняется значение по умолчанию — две минуты.",

@@ -9,7 +9,8 @@ import type { CompanyRequest, CompanySnapshot } from '../shared/company.js';
 const workerId = z.string().regex(/^worker-[1-9][0-9]*$/);
 const uuid = z.string().uuid();
 const workerStatus = z.object({ id: workerId, runId: uuid.nullable(), label: z.string(), state: z.string(),
-  result: z.string().nullable().optional(), conversationId: z.string().nullable().optional() });
+  result: z.string().nullable().optional(), conversationId: z.string().nullable().optional(),
+  sessionId: uuid.nullable().optional(), needsUserApproval: z.boolean().optional() });
 const fleetStatus = z.object({ runId: uuid.nullable(), workers: z.array(workerStatus) });
 const reportSchema = z.object({ id: z.string().min(1).max(100), from: z.string(), runId: uuid.nullable(), time: z.number().int().nonnegative(), text: z.string(),
   origin: z.enum(['authenticated-worker-message','broker-event']).optional() });

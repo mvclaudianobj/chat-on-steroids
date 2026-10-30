@@ -7,6 +7,7 @@ import { RequestError } from './control-reads.js';
 import { projectWorkspace } from './projects.js';
 import { redactSecretText } from './redaction.js';
 import { findSessionByConversation } from './session/store.js';
+import { approvalCardWaiting } from './approval-wait.js';
 
 const uuid = z.string().uuid().refine(value => value === value.toLowerCase());
 const routePattern = /^\/v1\/workers\/([0-9a-f-]{36})(?:\/(spawn|message|reports|ack))?$/;
@@ -46,6 +47,7 @@ async function status(caller: Caller) {
     workers.push({ id: worker.id, runId: worker.runId ?? null, label: worker.label, state: worker.state,
       conversationId: worker.conversationId, sessionId: session?.id ?? null, revivable: worker.revivable,
       pending: worker.pending, awaitingAck: worker.awaitingAck, contextTokens: worker.contextTokens,
+      needsUserApproval: !!worker.conversationId && approvalCardWaiting(worker.conversationId),
     result: worker.result ? redactSecretText(worker.result).slice(0, 1200) : null });
   }
   return { runId: current.runId, freeWorkerSlots: current.freeWorkerSlots, retainedHistory: current.state.retainedHistory === true, workers };

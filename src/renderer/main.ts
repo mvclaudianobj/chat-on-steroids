@@ -103,7 +103,7 @@ initLayoutPreviews();
 initMarksVaultUi(api);
 // Chat Marks: the local Brain page shares the Settings navigation and app IPC.
 const brainUi = initBrainUi(api);
-const companyUi = initCompanyUi(api);
+const companyUi = initCompanyUi(api, sessionId => { showTab('chat'); void selectChatSession(sessionId); });
 // Chat Marks H2: old-history search and confirmed imports on the Brain page.
 const brainImportUi = mountBrainImport(api, { showTab: name => showTab(name), selectChat: selectChatSession });
 initRemoteHostsUi(api);

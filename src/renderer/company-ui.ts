@@ -1,11 +1,12 @@
 import type { AppApi } from '../preload/index.js';
-import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, companyRestingSeats, type CompanyRequest, type CompanySeatState, type CompanySnapshot } from '../shared/company.js';
+import { COMPANY_AREAS, COMPANY_ROLES, COMPANY_STATES, type CompanyRequest, type CompanySeatState, type CompanySnapshot } from '../shared/company.js';
 import type { CompanyObservabilityView } from '../main/company-observability.js';
 import { t, onLanguageChange } from './i18n.js';
 import { mountCompanyLocalGrants } from './company-local-grants-ui.js';
 import { mountCooHostApproval } from './company-coo-approval-ui.js';
 import { createCompanyRpgWorld } from './company-rpg-world.js';
 import { companyLiveSeatState } from './company-live-presentation.js';
+import { companyOfficeEmployees } from './company-office-model.js';
 
 const names: Record<string, string> = { inbox: 'Inbox', assigned: 'Assigned', working: 'Working', review: 'Review', 'needs-ceo': 'Needs CEO', done: 'Done' };
 const roleNames = ['Operations', 'Engineering', 'Infrastructure', 'Product', 'Knowledge', 'Quality', 'Communications'];
@@ -18,7 +19,6 @@ function button(text: string, fn: () => void, className = 'btn'): HTMLButtonElem
 }
 const fmt = (n: number) => new Intl.NumberFormat().format(n);
 function date(value: number | null): string { return value ? new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(value) : '—'; }
-function priority(status: string): number { return ({ working: 5, 'needs-ceo': 4, review: 3, assigned: 2, inbox: 1, done: 0 } as Record<string,number>)[status] ?? 0; }
 function roleLabel(role: string): string { return t(roleNames[COMPANY_ROLES.indexOf(role as typeof COMPANY_ROLES[number])] ?? role); }
 const seatStateLabels: Record<CompanySeatState, string> = {
   'rest-free': 'Free · no tasks', 'rest-confirmed': 'Completed · COO confirmed',
@@ -27,7 +27,7 @@ const seatStateLabels: Record<CompanySeatState, string> = {
   'needs-ceo': 'Waiting for CEO', unverified: 'Completion not verified'
 };
 
-export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
+export function initCompanyUi(api: AppApi, openWorkerChat: (sessionId:string)=>void = () => undefined): { refresh: () => Promise<void> } {
   let snapshot: CompanySnapshot | null = null;
   let observed: CompanyObservabilityView | null = null;
   let view: 'board' | 'office' | 'rpg' = (() => { try { const stored=localStorage.getItem('company:view'); return stored==='rpg'||stored==='office'?stored:'board'; } catch { return 'board'; } })();
@@ -241,36 +241,30 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
   function paintOffice(): void {
     const office = $('companyOffice'); office.replaceChildren(); if (!snapshot) return;
     const current = Date.now();
+    const employees=companyOfficeEmployees(snapshot,observed,current);
     // A delayed local completion must never put a broker-observed active worker
     // in the lounge while the same seat appears at the RPG work desks.
-    const resting = companyRestingSeats(snapshot, current).filter(entry =>
-      companyLiveSeatState(observed, entry.seat, snapshot!.demo, current).state !== 'working' &&
-      companyLiveSeatState(observed, entry.seat, snapshot!.demo, current).state !== 'meeting-present');
-    const restIds = new Set(resting.map(entry => entry.seat));
+    const resting = employees.filter(entry=>entry.location==='rest').map(entry=>({seat:entry.seat,state:entry.restKind!,completedRequestId:entry.ticket?.status==='done'?entry.ticket.id:null}));
     COMPANY_ROLES.forEach((role, index) => {
       const room = el('section', 'company-room');
       const heading = el('div', 'company-room-head'); heading.append(el('span', 'company-room-icon', String.fromCharCode(65 + index)), el('div'));
       heading.lastElementChild!.append(el('h2', '', t(COMPANY_AREAS[index]!)), el('p', '', `${role} · ${t('Manager')}`)); room.append(heading);
       const desks = el('div', 'company-desks');
       const managed = snapshot!.requests.filter(r => r.owner === role && r.status !== 'done');
-      const manager = button(role, () => { if (managed[0]) detail(managed[0].id); }, 'company-desk manager');
+      const manager = button(role, () => roleInspector(role), 'company-desk manager');
       manager.prepend(el('span', 'company-desk-avatar', role.slice(-3).toUpperCase()));
       manager.append(chip(managed.some(r => r.status === 'needs-ceo') ? t('Waiting for CEO') : `${t('Open requests')}: ${managed.length}`));
       desks.append(manager);
-      for (const seat of snapshot!.company.seats.filter((seat, i) => {
-        if (restIds.has(seat)) return false;
-        const assigned = snapshot!.requests.filter(r => r.seat === seat && r.status !== 'done').sort((a, b) => priority(b.status) - priority(a.status))[0];
-        return (assigned?.owner ?? COMPANY_ROLES[i % COMPANY_ROLES.length]) === role;
-      })) {
-        const work = snapshot!.requests.filter(r => r.seat === seat && r.status !== 'done').sort((a, b) => priority(b.status) - priority(a.status))[0];
-        const desk = button(seat, () => { if (work) detail(work.id); }, 'company-desk');
-        const projection = companyLiveSeatState(observed, seat, snapshot!.demo, current);
+      for (const employee of employees.filter(item=>item.location==='desk'&&item.role===role)) {
+        const {seat}=employee;
+        const desk = button(seat, () => workerInspector(seat), 'company-desk');
+        const projection = employee;
         const label = snapshot!.demo ? t('Synthetic example · not live worker status') :
           projection.state === 'unverified' ? t('Configured seat · no authenticated worker') :
           `${t(projection.state)} · ${t('Source')}: ${projection.source}`;
         desk.dataset.seat = seat; desk.dataset.state = projection.state; desk.dataset.source = projection.source;
         desk.setAttribute('aria-label', `${seat}: ${label}`);
-        desk.prepend(el('span', 'company-desk-avatar', seat.slice(5))); desk.append(chip(label));
+        desk.prepend(el('span', 'company-desk-avatar', seat.slice(5)));desk.append(el('span','company-desk-task',employee.ticket?.title??t('Unassigned')),chip(label));
         desk.addEventListener('dragover', event => event.preventDefault());
         desk.addEventListener('drop', event => { event.preventDefault(); const id = event.dataTransfer?.getData('text/plain'); if (id) void change({ action: 'seat', payload: { id, seat } }); });
         desks.append(desk);
@@ -294,7 +288,9 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
       li.setAttribute('aria-label', `${entry.seat}: ${label}`);
       const avatar = el('span', 'company-desk-avatar', entry.seat.slice(5)); avatar.setAttribute('aria-hidden','true');
       const details = el('div', 'company-rest-worker-body'); details.append(el('strong', '', entry.seat), el('span', 'company-rest-worker-state', label));
-      li.append(avatar, details);
+      const inspect=button(entry.seat,()=>workerInspector(entry.seat),'company-rest-worker-open');
+      inspect.replaceChildren(avatar,details);
+      li.append(inspect);
       if (entry.completedRequestId) {
         li.append(button('View report', () => detail(entry.completedRequestId!), 'company-rest-review'));
       }
@@ -305,12 +301,31 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     if (!snapshot.demo) lounge.append(el('p','company-rest-demo',t('Configured seats do not prove a connected worker.')));
     if (snapshot.demo) lounge.append(el('p', 'company-rest-demo', t('Synthetic example · not live worker status')));
     office.append(lounge);
-    if (snapshot.meetings.length) { const meeting = el('section', 'company-room company-meeting'); meeting.append(el('h2', '', t('Meeting room'))); for (const row of snapshot.meetings) { meeting.append(button(row.title,()=>meetingDetail(row.id),'company-ceo-action'), el('p', '', `${row.participants.join(' · ')} · ${row.durationMinutes} min`), el('p', '', row.minutes)); for (const decision of row.decisions) meeting.append(el('p', 'company-dialog-hint', `• ${decision}`)); } office.append(meeting); }
+    if (snapshot.meetings.length || employees.some(e=>e.location==='meeting')) {const meeting=el('section','company-room company-meeting');meeting.append(el('h2','',t('Meeting room')));
+      for(const employee of employees.filter(e=>e.location==='meeting'))meeting.append(button(employee.seat,()=>workerInspector(employee.seat),'company-desk'));
+      for(const row of snapshot.meetings){meeting.append(button(row.title,()=>meetingDetail(row.id),'company-ceo-action'),el('p','',`${row.participants.join(' · ')} · ${row.durationMinutes} min`),el('p','',row.minutes));for(const decision of row.decisions)meeting.append(el('p','company-dialog-hint',`• ${decision}`));}
+      office.append(meeting);}
+  }
+  function roleInspector(role:typeof COMPANY_ROLES[number]):void {
+    if(!snapshot)return;open('Worker inspector');content.append(el('h3','',role));
+    const items=snapshot.requests.filter(row=>row.owner===role&&row.status!=='done');
+    content.append(el('p','company-dialog-hint',`${t('Open requests')}: ${items.length}`));
+    for(const item of items)actions.append(button(item.title,()=>detail(item.id)));
   }
   function workerInspector(seat:string):void {
+    if(!snapshot)return;
+    const employee=companyOfficeEmployees(snapshot,observed).find(item=>item.seat===seat);
     const data=observed?.seats.find(row=>row.seat===seat);
-    if(!data)return;
+    if(!employee)return;
     open('Worker inspector');
+    const task=employee.ticket;
+    content.append(el('p','company-dialog-hint',`${t('Current task')}: ${task?.title??t('Unassigned')}`));
+    if(task?.execution?.result)content.append(el('h4','',t('Last report')),el('p','company-dialog-hint',task.execution.result));
+    const approvals=snapshot.cooHostApproval?.audit.filter(entry=>entry.seat===seat).slice(-8).reverse()??[];
+    content.append(el('h4','',t('COO approvals')));
+    for(const item of approvals)content.append(el('p','company-dialog-hint',`${new Date(item.at).toLocaleString()} · ${item.decision} · ${item.tool}`));
+    if(!approvals.length)content.append(el('p','company-dialog-hint',t('No approvals recorded')));
+    if(!data){content.append(el('p','company-dialog-hint',t('Observation unavailable')));if(task)actions.append(button('Request details',()=>detail(task.id)));return;}
     content.append(el('h3','',seat),el('p','company-dialog-hint',`${t('Observed state')}: ${t(data.state)} · ${t('Source')}: ${data.source}`),
       el('p','company-dialog-hint',`${t('Status since')}: ${new Date(data.statusSince).toLocaleString()}`),
       el('p','company-dialog-hint',`${t('Last verified')}: ${data.observedAt?new Date(data.observedAt).toLocaleString():t('Unavailable')}`),
@@ -320,6 +335,7 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
     for(const event of observed?.events.filter(e=>e.seat===seat).slice(0,30)??[]){timeline.append(el('li','',`${new Date(event.at).toLocaleString()} · ${t(event.kind)} (${event.source})`));}
     content.append(el('h4','',t('Worker timeline')),timeline);
     if(data.ticketId)actions.append(button('Request details',()=>detail(data.ticketId!)));
+    if(employee.sessionId)actions.append(button('Open full chat',()=>{close();openWorkerChat(employee.sessionId!);},'btn btn-solid'));
   }
   function paintObservation():void {
     const panel=$('companyObservePanel');panel.replaceChildren();
@@ -474,7 +490,17 @@ export function initCompanyUi(api: AppApi): { refresh: () => Promise<void> } {
       ++observationGeneration;observed=null;paint();
     }finally{livePolling=false;}
   };
-  window.setInterval(()=>void liveTick(),6000);
+  // Changes are already published by the Company store and the broker's swarm channel.
+  // Coalesce bursts and never run a hidden-panel refresh.
+  let refreshTimer:number|null=null;
+  function scheduleCompanyRefresh():void{
+    if(refreshTimer!==null)return;
+    refreshTimer=window.setTimeout(()=>{refreshTimer=null;void liveTick();},300);
+  }
+  api.onCompanyChanged(scheduleCompanyRefresh);
+  api.onSwarmChanged(scheduleCompanyRefresh);
+  api.onSessionChanged(scheduleCompanyRefresh);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')scheduleCompanyRefresh();});
   $('companyNewRequest').addEventListener('click', newRequest);
   $('companyMeetingCreate').addEventListener('click', newMeeting);
   $('companySettings').addEventListener('click', settings);

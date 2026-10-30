@@ -8,12 +8,12 @@ import { getCompany } from './company-store.js';
 import { localCompanyWorkerBackend, type CompanyWorkerBackend } from './company-broker.js';
 import { companySeatView, type CompanySnapshot } from '../shared/company.js';
 
-export const OP_STATES = ['working','shell-wait','needs-ceo','review','available-confirmed','meeting-present','disconnected','unverified'] as const;
+export const OP_STATES = ['working','approval-wait','shell-wait','needs-ceo','review','available-confirmed','meeting-present','disconnected','unverified'] as const;
 const stateSchema = z.enum(OP_STATES);
 const eventSchema = z.object({ id:z.string().uuid(),at:z.number().int().nonnegative(),seat:z.string().regex(/^marks(?:[1-9][0-9]?)$/),ticketId:z.string().uuid().nullable(),kind:stateSchema,source:z.enum(['broker','company','meeting','expired','error']),runId:z.string().uuid().nullable(),workerId:z.string().regex(/^worker-[1-9][0-9]*$/).nullable() }).strict();
 const journalSchema=z.object({version:z.literal(1),retentionDays:z.number().int().min(1).max(30),events:z.array(eventSchema).max(2000)}).strict();
 export type CompanyObservationEvent=z.infer<typeof eventSchema>;
-export type CompanyOperationalState={seat:string;state:typeof OP_STATES[number];statusSince:number;observedAt:number|null;source:CompanyObservationEvent['source'];provenance:string;ticketId:string|null;ownerId:string|null;runId:string|null;workerId:string|null;tokensUsed:number|null;minutesUsed:number|null;error:boolean};
+export type CompanyOperationalState={seat:string;state:typeof OP_STATES[number];statusSince:number;observedAt:number|null;source:CompanyObservationEvent['source'];provenance:string;ticketId:string|null;ownerId:string|null;runId:string|null;workerId:string|null;sessionId?:string|null;tokensUsed:number|null;minutesUsed:number|null;error:boolean};
 export type CompanyObservabilityView={at:number;demo:boolean;seats:CompanyOperationalState[];events:CompanyObservationEvent[];attention:number;statusCounts:Record<string,number>};
 let directoryPath='';let serialize:Promise<void>=Promise.resolve();
 const memory=new Map<string,{at:number;state:CompanyOperationalState['state'];source:CompanyObservationEvent['source'];since:number}>();
@@ -50,16 +50,16 @@ export function createCompanyObserver(backend:CompanyWorkerBackend=localCompanyW
   const company=fixture??await getCompany();const records:CompanyOperationalState[]=[];
   const previous=await readObservationEvents(now);
   const updates:Omit<CompanyObservationEvent,'id'>[]=[];
-  for(const seat of company.company.seats.slice(0,10)){
+  for(const seat of company.company.seats){
    const tickets=company.requests.filter(r=>r.seat===seat).sort((a,b)=>b.updatedAt-a.updatedAt);
    const current=tickets.find(r=>r.status!=='done')??tickets[0];const exec=current?.execution;
-   let state:CompanyOperationalState['state']='unverified';let source:CompanyObservationEvent['source']='company';let error=false;let observedAt:number|null=null;
+   let state:CompanyOperationalState['state']='unverified';let source:CompanyObservationEvent['source']='company';let error=false;let observedAt:number|null=null;let sessionId:string|null=null;
    const seatState=companySeatView(company,seat,now);
    if(seatState.state==='meeting-present'){state='meeting-present';source='meeting';}
    else if(seatState.state==='needs-ceo'){state='needs-ceo';}
    else if(seatState.state==='review'){state='review';}
    else if(seatState.state==='rest-confirmed'&&!company.demo){state='available-confirmed';}
-   else if(exec?.mode==='live'&&exec.ownerId===current?.id&&exec.runId&&exec.workerId&&!company.demo){
+   if(exec?.mode==='live'&&exec.ownerId===current?.id&&exec.runId&&exec.workerId&&!company.demo){
     const key=`${current.id}:${exec.runId}:${exec.workerId}`;const last=memory.get(key);
     if(refreshBroker){try{
       const found=await backend.status(exec.ownerId,exec.runId);
@@ -69,15 +69,18 @@ export function createCompanyObserver(backend:CompanyWorkerBackend=localCompanyW
         (!exec.conversationId||w.conversationId===exec.conversationId));
       if(workers.length!==1)throw Error('identity');const worker=workers[0]!;
       // Broker does not expose shell state reliably in every version. Unknown never means shell.
-      state=worker.state==='active'?'working':'disconnected';source='broker';observedAt=now;
-      memory.set(key,{at:now,state,source,since:last?.state===state?last.since:now});
-    }catch{error=true;state='disconnected';source='error';}}
-    else if(last&&now-last.at<=TTL){state=last.state;source=last.source;observedAt=last.at;}
-    else{state='disconnected';source='expired';}
-   } else if(seatState.state==='busy'||seatState.state==='unverified'||seatState.state==='meeting-invited'||seatState.state==='meeting-accepted')state='unverified';
+      sessionId=worker.sessionId??null;
+      if(state==='unverified'&&seatState.state!=='meeting-invited'&&seatState.state!=='meeting-accepted'){
+        state=worker.state==='active'?(worker.needsUserApproval?'approval-wait':'working'):'disconnected';source='broker';observedAt=now;
+        memory.set(key,{at:now,state,source,since:last?.state===state?last.since:now});
+      }
+    }catch{if(state==='unverified'){error=true;state='disconnected';source='error';}}}
+    else if(state==='unverified'&&last&&now-last.at<=TTL){state=last.state;source=last.source;observedAt=last.at;}
+    else if(state==='unverified'){state='disconnected';source='expired';}
+   }
    const prior=previous.findLast(e=>e.seat===seat&&e.ticketId===(current?.id??null));
    const statusSince=prior?.kind===state&&prior.source===source&&prior.runId===(exec?.runId??null)&&prior.workerId===(exec?.workerId??null)?prior.at:now;
-   records.push({seat,state,statusSince,observedAt,source,provenance:exec?.runId?'bound-owner-run-worker':'company-state',ticketId:current?.id??null,ownerId:exec?.ownerId??null,runId:exec?.runId??null,workerId:exec?.workerId??null,tokensUsed:current?.execution?.mode==='live'&&current.tokensUsed>0?current.tokensUsed:null,minutesUsed:current?.execution?.mode==='live'&&current.minutesUsed>0?current.minutesUsed:null,error});
+   records.push({seat,state,statusSince,observedAt,source,provenance:exec?.runId?'bound-owner-run-worker':'company-state',ticketId:current?.id??null,ownerId:exec?.ownerId??null,runId:exec?.runId??null,workerId:exec?.workerId??null,sessionId,tokensUsed:current?.execution?.mode==='live'&&current.tokensUsed>0?current.tokensUsed:null,minutesUsed:current?.execution?.mode==='live'&&current.minutesUsed>0?current.minutesUsed:null,error});
    if(!company.demo)updates.push({at:now,seat,ticketId:current?.id??null,kind:state,source,runId:exec?.runId??null,workerId:exec?.workerId??null});
   }
   const events=company.demo?[]:await record(updates,now);
