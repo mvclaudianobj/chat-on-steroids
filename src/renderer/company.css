@@ -82,3 +82,98 @@
 .company-meeting .company-desk{display:inline-flex;margin:6px;vertical-align:top}
 @media(max-width:750px){.company-meeting{grid-column:span 1}}
 @media(prefers-reduced-motion:reduce){.company-desk{transition:none}.company-desk:hover{transform:none}}
+
+/* Habblaud-inspired pixel office: real Company tickets determine rooms; the
+   broker decides the character state. See company-assets/LICENSE.md. */
+.company-rpg{background:color-mix(in srgb,var(--page) 82%,#1b3650 18%);padding:20px;
+  border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.company-pixel-header{display:flex;align-items:baseline;flex-wrap:wrap;gap:8px 24px;margin:0 0 14px}
+.company-pixel-title{font-size:18px;font-weight:850;letter-spacing:.2px;margin:0;color:var(--ink)}
+.company-pixel-header p{margin:0;font-size:11px;line-height:1.6}
+.company-pixel-legend{color:var(--soft);flex-basis:100%}
+.company-pixel-building{background:#23394c;border:5px solid #30465a;border-radius:9px;overflow:hidden;
+  box-shadow:0 15px 35px #0002,inset 0 0 0 3px #15293e;image-rendering:pixelated}
+.company-pixel-skyline{height:58px;background:linear-gradient(#3b5a72 0 60%,#738a95 60% 70%,#384c5e 70%);
+  position:relative;overflow:hidden}
+.company-pixel-skyline::after{content:'';position:absolute;bottom:0;left:5%;width:90%;height:32px;
+  background:repeating-linear-gradient(90deg,transparent 0 34px,#30485b 34px 53px,transparent 53px 86px),
+  linear-gradient(transparent 10px,#1c344a 10px)}
+.company-pixel-roof{background:repeating-linear-gradient(90deg,#a25e5b 0 32px,#85505a 32px 36px);
+  border-block:4px solid #df9b74;padding:11px 16px;text-align:center;color:#fff3dc;font-size:12px;
+  font-weight:900;letter-spacing:4px;text-shadow:2px 2px #54354a}
+.company-pixel-lobby{height:70px;background:repeating-linear-gradient(90deg,#34485d 0 22px,#3f556b 22px 24px);
+  border-bottom:8px solid #e3b38a;position:relative}
+.company-pixel-lobby::after{content:'◆  MARKS COMPANY  ◆';font:900 12px monospace;color:#ffe9bb;
+  position:absolute;left:18px;top:20px;letter-spacing:3px}
+.company-pixel-elevator{position:absolute;right:22px;top:5px;width:52px;height:66px;
+  border:5px solid #afc9ce;border-bottom:0;box-shadow:inset 0 0 0 3px #293f55;
+  background:linear-gradient(90deg,#738d9b 0 48%,#314f65 49% 52%,#738d9b 53%)}
+.company-pixel-elevator::after{content:'↑ ↓';font:700 10px monospace;color:#ffecbd;
+  position:absolute;right:16px;top:5px}
+.company-pixel-hallway{height:19px;background:repeating-linear-gradient(90deg,#98795f 0 32px,#c09c79 32px 64px);
+  border-bottom:4px solid #493b4e}
+.company-rpg-rooms{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;
+  padding:15px;align-items:start}
+.company-rpg-room{min-width:0;min-height:0;border:4px solid #c7a27e;border-radius:5px;
+  background:#2d4356;padding:0;overflow:hidden;position:relative;box-shadow:4px 5px 0 #111b2c55}
+.company-rpg-room h3{margin:0;border-bottom:3px solid #d5b28d;padding:9px 10px;
+  background:#354c60;color:#fff5d7;font-size:12px;font-weight:850;
+  text-overflow:ellipsis;white-space:nowrap;overflow:hidden}
+.company-rpg-project{border-color:#7fb9b1}.company-rpg-project h3{background:#205e64}
+.company-rpg-department{border-color:#aeb0c9}.company-rpg-department h3{background:#4d5873}
+.company-rpg-meeting{border-color:#dac186}.company-rpg-meeting h3{background:#846d4b}
+.company-rpg-rest{border-color:#99b28b}.company-rpg-rest h3{background:#466857}
+.company-rpg-attention{border-color:#e4a36a}.company-rpg-attention h3{background:#9c544f}
+.company-rpg-offline{border-color:#687486}.company-rpg-offline h3{background:#445064}
+.company-pixel-stage{position:relative;min-height:165px;overflow:hidden;background:#d8bd94}
+.company-pixel-floor{display:block;width:100%;aspect-ratio:384/180;height:auto;image-rendering:pixelated}
+.company-pixel-painting{position:absolute;top:9%;left:52%;width:16%;height:15%;
+  background-image:url('./company-assets/art/painting-city-night.png');
+  background-size:contain;background-position:center;background-repeat:no-repeat;image-rendering:pixelated}
+.company-rpg-project:nth-child(3n+1) .company-pixel-painting{
+  background-image:url('./company-assets/art/painting-wide-forest-lake.png')}
+.company-rpg-project:nth-child(3n+2) .company-pixel-painting{
+  background-image:url('./company-assets/art/painting-beach.png')}
+.company-rpg-rest .company-pixel-painting{
+  background-image:url('./company-assets/art/poster-coffee.png');width:10%;left:18%}
+.company-rpg-actors{position:absolute;bottom:9px;left:4px;right:4px;z-index:2;
+  display:flex;justify-content:space-around;flex-wrap:wrap;gap:3px;list-style:none;margin:0;padding:0;
+  min-height:56px;align-content:end}
+.company-rpg-actor{display:block;min-width:0;max-width:105px;border:0;border-radius:7px;
+  background:#1b2633c7;box-shadow:0 2px 0 #0006;transition:background .2s}
+.company-rpg-agent{display:grid;justify-items:center;align-content:end;gap:2px;min-width:67px;
+  padding:3px 5px 4px;background:transparent;border:0;color:#fff;cursor:pointer;position:relative}
+.company-rpg-agent:hover{background:#ffffff24}.company-rpg-agent:focus-visible{outline:3px solid #f8cd83;outline-offset:2px}
+.company-rpg-pixel{display:block;width:37px;height:53px;image-rendering:pixelated;object-fit:contain;
+  filter:drop-shadow(2px 3px 0 #162535)}
+.company-rpg-symbol{position:absolute;right:0;top:0;display:grid;place-items:center;
+  background:#d4e6e1;color:#223a45;font-size:12px;font-weight:900;min-width:19px;height:19px;
+  border:2px solid #223a45;border-radius:50%}
+.company-rpg-name{font-weight:900;font-size:11px;letter-spacing:.2px}
+.company-rpg-state{font-size:9px;color:#dceaf0;max-width:95px;text-align:center}
+.company-rpg-task{font-size:9px;color:#ffe0ad;max-width:90px;line-height:1.2;text-align:center;
+  text-overflow:ellipsis;overflow:hidden;white-space:nowrap}
+.company-rpg-task:empty{display:none}
+.company-rpg-actor[data-state='working'] .company-rpg-pixel{animation:company-pixel-type .45s steps(2,end) infinite}
+.company-rpg-actor[data-state='meeting-present'] .company-rpg-pixel{animation:company-pixel-chat 1s steps(2,end) infinite}
+.company-rpg-actor[data-state='approval-wait'] .company-rpg-symbol,
+.company-rpg-actor[data-state='needs-ceo'] .company-rpg-symbol{background:#f4bd76;animation:company-pixel-alert 1s steps(2,end) infinite}
+.company-rpg-actor[data-state='available-confirmed'] .company-rpg-pixel{animation:company-pixel-idle 2.7s steps(2,end) infinite}
+.company-rpg-actor[data-state='unverified']{opacity:.75}
+.company-pixel-manager{position:absolute;top:43px;right:6px;background:#304456d9;
+  border:2px solid #f1d2ad;border-radius:4px;padding:4px 7px;cursor:pointer;
+  color:#fff4d3;font-size:10px;font-weight:800;display:grid;justify-items:center;gap:3px}
+.company-pixel-manager-sprite{width:30px;height:42px;object-fit:contain;image-rendering:pixelated}
+.company-pixel-manager:focus-visible{outline:3px solid #f8cd83}
+.company-pixel-new-room{animation:company-pixel-build .45s steps(4,end) both}
+.company-rpg[data-paused='true'] *, .company-rpg[hidden] *,
+.company-panel:not(.is-active) .company-rpg * {animation-play-state:paused!important;transition:none!important}
+@keyframes company-pixel-type{50%{transform:translateY(-2px)}}
+@keyframes company-pixel-idle{50%{transform:translateY(2px)}}
+@keyframes company-pixel-chat{50%{transform:translateX(2px)}}
+@keyframes company-pixel-alert{50%{filter:brightness(1.8)}}
+@keyframes company-pixel-build{from{opacity:.4;transform:scale(.97)}to{opacity:1;transform:scale(1)}}
+@media(max-width:1360px){.company-rpg-rooms{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:800px){.company-rpg-rooms{grid-template-columns:1fr;padding:9px}
+ .company-pixel-lobby::after{font-size:9px}.company-pixel-header{display:block}}
+@media(prefers-reduced-motion:reduce){.company-rpg *{animation:none!important;transition:none!important}}

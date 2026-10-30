@@ -73,7 +73,7 @@ app.whenReady().then(async()=>{
   await server.listen();
   win=new BrowserWindow({show:false,width:1700,height:1050,webPreferences:{sandbox:true,offscreen:true,backgroundThrottling:false}});
   const errors=[]; win.webContents.on('console-message',e=>{if(e.level==='error'&&!BENIGN_RENDERER_ERRORS.includes(e.message))errors.push(e.message);});
-  const js=code=>win.webContents.executeJavaScript(code);
+  const js=code=>win.webContents.executeJavaScript(code).catch(error=>{throw new Error('Company UI JS: '+code.slice(0,180)+': '+error.message);});
   const until=async expression=>{for(const end=Date.now()+15000;Date.now()<end;){if(await js(expression))return;await pause(75);}throw new Error('Timeout: '+expression);};
   const screenshot=async name=>{fs.mkdirSync(output,{recursive:true});await pause(250);fs.writeFileSync(path.join(output,name),(await win.webContents.capturePage()).toPNG());};
   await win.loadURL(server.resolvedUrls.local[0]); await until("!!document.getElementById('sidebarCompany')");
@@ -123,13 +123,20 @@ app.whenReady().then(async()=>{
   await screenshot('company-rest-light.png');
   await js("document.getElementById('companyRpgTab').click()");
   await until("!document.getElementById('companyRpg').hidden");
-  assert.equal(await js("document.querySelectorAll('.company-rpg-room').length"),5);
+  assert.ok(await js("document.querySelectorAll('.company-rpg-project').length>=4"),'Every active project should have a pixel room');
+  assert.equal(await js("document.querySelectorAll('.company-rpg-department').length"),7);
   assert.equal(await js("document.querySelectorAll('.company-rpg-actor').length"),6);
+  assert.equal(await js("document.querySelectorAll('.company-pixel-elevator').length"),1);
+  assert.ok(await js("[...document.querySelectorAll('.company-pixel-floor')].filter(node=>node.width===384).length>10"));
+  assert.ok(await js("document.querySelector('.company-rpg-pixel').getContext('2d').getImageData(10,10,1,1).data[3]>0"),
+    'A real pixel-art character must be painted onto the canvas');
   assert.equal(await js("document.querySelectorAll('.company-rpg-meeting .company-rpg-actor').length"),0);
   assert.equal(await js("document.querySelectorAll('.company-rpg-rest .company-rpg-actor').length"),0);
   await screenshot('company-rpg-light.png');
+  assert.ok(await js("document.getElementById('companyRpg').dataset.paused==='false'"),'Visible scene must be animatable');
   await js("document.getElementById('companyOfficeTab').click()");
   assert.equal(await js("document.getElementById('companyOffice').hidden"),false);
+  assert.equal(await js("document.getElementById('companyRpg').dataset.paused"),'true');
   await js("document.getElementById('companyRpgTab').click()");
   assert.equal(await js("localStorage.getItem('company:view')"),'rpg');
   // Capture the RPG itself in the dark theme; the previous sequence saved the
