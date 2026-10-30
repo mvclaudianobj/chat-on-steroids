@@ -2132,7 +2132,7 @@ it('offers enabled CLI modules in a lazy project terminal submenu with the proje
   await settle();
 
   projectMenu(w, project.id);
-  expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'new-terminal', 'group-new', 'chatgpt-link', 'color', 'secrets-shield', 'remove']);
+  expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-chat', 'temporary-chat', 'new-terminal', 'group-new', 'chatgpt-link', 'color', 'secrets-shield', 'remove']);
   menuItem(w, 'new-terminal').click();
   const submenu = w.document.querySelectorAll<HTMLElement>('.row-menu')[1]!;
   expect([...submenu.querySelectorAll<HTMLElement>('.row-menu-item')].map(item => item.dataset.rowAction)).toEqual(['new-terminal-markscode', 'new-terminal-claude']);
@@ -2159,7 +2159,7 @@ it("keeps a project's engine chat and its terminal of the same name apart", asyn
 
   projectMenu(w, project.id);
   expect([...w.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(item => item.dataset.rowAction))
-    .toEqual(['new-chat', 'new-chat-engine-claude', 'new-terminal', 'group-new', 'chatgpt-link', 'color', 'secrets-shield', 'remove']);
+    .toEqual(['new-chat', 'temporary-chat', 'new-chat-engine-claude', 'new-terminal', 'group-new', 'chatgpt-link', 'color', 'secrets-shield', 'remove']);
   menuItem(w, 'new-chat-engine-claude').click();
   expect(engineChat).toHaveBeenCalledExactlyOnceWith(project.id);
   expect(createCliSession).not.toHaveBeenCalled();
