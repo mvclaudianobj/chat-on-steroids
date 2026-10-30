@@ -4064,6 +4064,7 @@
   "Claude Code Router is not installed. Install it from Settings > Modules.": "Claude Code Router chưa được cài đặt. Hãy cài nó trong Cài đặt > Mô-đun.",
   "Claude Code Router is not running. Start it from Settings > Modules.": "Claude Code Router không chạy. Hãy khởi động nó trong Cài đặt > Mô-đun.",
   "This Codex chat cannot answer until then; switch to \"CLI account (direct)\" to continue in a new Codex thread.": "Đến lúc đó, cuộc trò chuyện Codex này không thể trả lời; hãy chuyển sang \"Tài khoản CLI (trực tiếp)\" để tiếp tục trong một luồng Codex mới.",
+  "The local proxy at {0} (openai_base_url in the Codex config.toml) is not running; start it to use it. Until then Codex uses the official endpoint of the CLI account.": "Proxy cục bộ tại {0} (openai_base_url trong config.toml của Codex) không chạy; hãy khởi động nó để sử dụng. Cho đến lúc đó Codex dùng endpoint chính thức của tài khoản CLI.",
   "Until then this chat answers with the CLI account (direct).": "Đến lúc đó, cuộc trò chuyện này trả lời bằng tài khoản CLI (trực tiếp).",
   "Claude Code Router needs Node.js 22 or newer, and none was found.": "Claude Code Router cần Node.js 22 trở lên, và không tìm thấy bản nào.",
   "Claude Code Router needs Node.js 22 or newer.": "Claude Code Router cần Node.js 22 trở lên.",

@@ -16,6 +16,9 @@
  *   `none` without a login of its own; `null` is refused and drops the whole layer). Codex: its
  *   built-in `openai` provider (`-c model_provider="openai"`) and, when the router replaced the
  *   model catalog, Codex's own cached catalog of the account (`<CODEX_HOME>/models_cache.json`).
+ *   A top-level `openai_base_url` on a loopback address (a local proxy in front of the built-in
+ *   provider, e.g. codex-chatgpt-web) would still carry that provider elsewhere: the direct route
+ *   resets it to the official endpoint of the CLI's sign-in (`codexOfficialBaseUrl`).
  * - `router`: the CLI exactly as the user configured it (every chat created before routes).
  * Without a detected router both routes are the same process (no override): `effectiveRoute`.
  *
@@ -24,6 +27,7 @@
  * detected there (untested).
  */
 import { existsSync, readFileSync } from 'node:fs';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { parse as parseToml } from 'smol-toml';
@@ -103,6 +107,12 @@ export interface CodexRouterDetection extends RouterDetection {
   provider: string | null;
   /** Direct-route `-c` overrides (empty when nothing is detected). */
   directOverrides: string[];
+  /**
+   * Without a router: the user's own loopback `openai_base_url` proxy. It stays in use while it
+   * answers; only when it does not does the direct server start with `override` (the official
+   * endpoint) and the chat say so (`codexRouteOverrides`, `localProxyAnswers`).
+   */
+  localProxy?: { host: string; port: number; override: string };
 }
 
 export interface RoutingEnvironment {
@@ -147,6 +157,42 @@ export const effectiveRoute = (route: AgentEngineRoute, detection: RouterDetecti
 
 const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1', '[::1]']);
+const isLoopbackHost = (host: string): boolean => LOOPBACK.has(host) || /^127(\.\d{1,3}){3}$/.test(host);
+
+/** A loopback http(s) URL's host and port (the address a local proxy listens on), else null. */
+function loopbackAddress(raw: unknown): { host: string; port: number } | null {
+  if (typeof raw !== 'string') return null;
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
+    return isLoopbackHost(url.hostname) && Number.isInteger(port) && port > 0 && port < 65536 ? { host: url.hostname.replace(/^\[|\]$/g, ''), port } : null;
+  } catch { return null; }
+}
+
+/** The built-in provider's official endpoints (codex-cli): ChatGPT sign-in, else an API key. */
+export const CODEX_OFFICIAL_BASE_URLS = { chatgpt: 'https://chatgpt.com/backend-api/codex', api: 'https://api.openai.com/v1' } as const;
+
+/**
+ * The official endpoint for the CLI's sign-in: only `auth.json`'s `auth_mode` is looked at (no
+ * token is read out or logged); a ChatGPT sign-in gets the ChatGPT endpoint, anything else the API.
+ */
+export function codexOfficialBaseUrl(codexHome: string): string {
+  const auth = readJson(path.join(codexHome, 'auth.json'));
+  const mode = isRecord(auth) && typeof auth.auth_mode === 'string' ? auth.auth_mode.toLowerCase() : '';
+  return mode.startsWith('chatgpt') ? CODEX_OFFICIAL_BASE_URLS.chatgpt : CODEX_OFFICIAL_BASE_URLS.api;
+}
+
+/** Whether something accepts TCP connections at a local proxy's address now (bounded). */
+export function localProxyAnswers(address: { host: string; port: number }, timeoutMs = 1_000): Promise<boolean> {
+  return new Promise(resolve => {
+    const socket = net.connect({ host: address.host, port: address.port });
+    const done = (answers: boolean): void => { socket.destroy(); resolve(answers); };
+    socket.setTimeout(timeoutMs, () => done(false));
+    socket.once('connect', () => done(true));
+    socket.once('error', () => done(false));
+  });
+}
 
 function readJson(file: string): unknown {
   try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return null; }
@@ -185,7 +231,12 @@ const CCR_PROVIDER = /claude[-_ ]?code[-_ ]?router/i;
 /**
  * Codex is routed by CCR when config.toml's top-level `model_provider` is CCR's provider (by its
  * id, its table's `name`, or CCR's managed-block marker). The direct route then selects Codex's
- * built-in `openai` provider and, when CCR replaced the model catalog, Codex's own cached catalog.
+ * built-in `openai` provider, when CCR replaced the model catalog Codex's own cached catalog, and
+ * when `openai_base_url` points at a loopback proxy the official endpoint of the sign-in.
+ *
+ * Without CCR a loopback `openai_base_url` is the user's own setup and is kept (no route to choose
+ * between); it is reported as `localProxy` so a direct server started while it does not answer
+ * uses the official endpoint instead of retrying a dead address.
  */
 export function detectCodexRouter(environment: RoutingEnvironment = realEnvironment()): CodexRouterDetection {
   const none = { detected: false, provider: null, directOverrides: [] };
@@ -196,19 +247,26 @@ export function detectCodexRouter(environment: RoutingEnvironment = realEnvironm
   let config: Record<string, unknown>;
   try { config = parseToml(text) as Record<string, unknown>; } catch { return none; }
   const provider = typeof config.model_provider === 'string' ? config.model_provider : null;
-  if (!provider || provider === 'openai') return none;
+  const proxy = loopbackAddress(config.openai_base_url);
+  const official = (): string => `openai_base_url=${JSON.stringify(codexOfficialBaseUrl(home))}`;
+  if (!provider || provider === 'openai') return proxy ? { ...none, localProxy: { ...proxy, override: official() } } : none;
   const table = isRecord(config.model_providers) && isRecord(config.model_providers[provider]) ? config.model_providers[provider] as Record<string, unknown> : {};
   const name = typeof table.name === 'string' ? table.name : '';
   if (!CCR_PROVIDER.test(provider) && !CCR_PROVIDER.test(name) && !/^# BEGIN CCR managed/m.test(text)) return none;
   const overrides = ['model_provider="openai"'];
+  if (proxy) overrides.push(official());
   const ownCatalog = path.join(home, 'models_cache.json');
   if (typeof config.model_catalog_json === 'string' && existsSync(ownCatalog)) overrides.push(`model_catalog_json=${JSON.stringify(ownCatalog)}`);
   return withAvailability({ detected: true, provider: provider.slice(0, 100), directOverrides: overrides });
 }
 
-/** The `-c` values of one route's app-server, after the safe overrides. */
-export const codexRouteOverrides = (route: AgentEngineRoute, detection: CodexRouterDetection): string[] =>
-  effectiveRoute(route, detection) === 'direct' ? [...detection.directOverrides] : [];
+/**
+ * The `-c` values of one route's app-server, after the safe overrides. `proxyDown`: the user's own
+ * loopback `openai_base_url` (`localProxy`, no router) did not answer when the server started.
+ */
+export const codexRouteOverrides = (route: AgentEngineRoute, detection: CodexRouterDetection, proxyDown = false): string[] =>
+  effectiveRoute(route, detection) !== 'direct' ? []
+    : [...detection.directOverrides, ...(proxyDown && detection.localProxy ? [detection.localProxy.override] : [])];
 
 /** The `--settings` layer of one route's Claude Code process. */
 export const claudeRouteSettings = (route: AgentEngineRoute, detection: RouterDetection): string =>
@@ -231,18 +289,10 @@ export function chatRoutes(stored: AgentEngineRoute, detection: RouterDetection)
  */
 export function routerAddressFromCliFiles(environment: RoutingEnvironment = realEnvironment()): { host: string; port: number } | null {
   if (environment.platform === 'win32') return null;
-  const fromUrl = (raw: unknown): { host: string; port: number } | null => {
-    if (typeof raw !== 'string') return null;
-    try {
-      const url = new URL(raw);
-      const port = Number(url.port || (url.protocol === 'https:' ? 443 : 80));
-      return LOOPBACK.has(url.hostname) && Number.isInteger(port) && port > 0 && port < 65536 ? { host: url.hostname.replace(/^\[|\]$/g, ''), port } : null;
-    } catch { return null; }
-  };
   const dir = environment.env.CLAUDE_CONFIG_DIR?.trim() || path.join(environment.home, '.claude');
   const settings = readJson(path.join(dir, 'settings.json'));
   const env = isRecord(settings) && isRecord(settings.env) ? settings.env : {};
-  const claude = fromUrl(env.ANTHROPIC_BASE_URL) ?? fromUrl(env.ANTHROPIC_API_BASE_URL);
+  const claude = loopbackAddress(env.ANTHROPIC_BASE_URL) ?? loopbackAddress(env.ANTHROPIC_API_BASE_URL);
   if (claude) return claude;
   const home = environment.env.CODEX_HOME?.trim() || path.join(environment.home, '.codex');
   try {
@@ -250,7 +300,7 @@ export function routerAddressFromCliFiles(environment: RoutingEnvironment = real
     const providers = isRecord(config.model_providers) ? config.model_providers : {};
     for (const [id, table] of Object.entries(providers)) {
       if (!isRecord(table) || (!CCR_PROVIDER.test(id) && !CCR_PROVIDER.test(String(table.name ?? '')))) continue;
-      const found = fromUrl(table.base_url);
+      const found = loopbackAddress(table.base_url);
       if (found) return found;
     }
   } catch { /* none */ }

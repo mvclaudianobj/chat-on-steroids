@@ -4131,6 +4131,7 @@
   "Claude Code Router is not installed. Install it from Settings > Modules.": "Claude Code Router kurulu değil. Ayarlar > Modüller bölümünden kurun.",
   "Claude Code Router is not running. Start it from Settings > Modules.": "Claude Code Router çalışmıyor. Ayarlar > Modüller bölümünden başlatın.",
   "This Codex chat cannot answer until then; switch to \"CLI account (direct)\" to continue in a new Codex thread.": "Bu Codex sohbeti o zamana kadar yanıt veremez; yeni bir Codex iş parçacığında devam etmek için \"CLI hesabı (doğrudan)\" seçeneğine geçin.",
+  "The local proxy at {0} (openai_base_url in the Codex config.toml) is not running; start it to use it. Until then Codex uses the official endpoint of the CLI account.": "{0} adresindeki yerel proxy (Codex config.toml içindeki openai_base_url) çalışmıyor; kullanmak için başlatın. O zamana kadar Codex, CLI hesabının resmî uç noktasını kullanır.",
   "Until then this chat answers with the CLI account (direct).": "O zamana kadar bu sohbet CLI hesabıyla (doğrudan) yanıt verir.",
   "Claude Code Router needs Node.js 22 or newer, and none was found.": "Claude Code Router için Node.js 22 veya daha yenisi gerekiyor ve hiçbiri bulunamadı.",
   "Claude Code Router needs Node.js 22 or newer.": "Claude Code Router için Node.js 22 veya daha yenisi gerekiyor.",

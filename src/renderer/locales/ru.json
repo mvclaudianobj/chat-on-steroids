@@ -4265,6 +4265,7 @@
   "Claude Code Router is not installed. Install it from Settings > Modules.": "Claude Code Router не установлен. Установите его в разделе Настройки > Модули.",
   "Claude Code Router is not running. Start it from Settings > Modules.": "Claude Code Router не запущен. Запустите его в разделе Настройки > Модули.",
   "This Codex chat cannot answer until then; switch to \"CLI account (direct)\" to continue in a new Codex thread.": "До тех пор этот чат Codex не может отвечать; переключитесь на «Учётная запись CLI (напрямую)», чтобы продолжить в новой ветке Codex.",
+  "The local proxy at {0} (openai_base_url in the Codex config.toml) is not running; start it to use it. Until then Codex uses the official endpoint of the CLI account.": "Локальный прокси по адресу {0} (openai_base_url в config.toml Codex) не запущен; запустите его, чтобы использовать. До тех пор Codex использует официальный адрес учётной записи CLI.",
   "Until then this chat answers with the CLI account (direct).": "До тех пор этот чат отвечает через учётную запись CLI (напрямую).",
   "Claude Code Router needs Node.js 22 or newer, and none was found.": "Claude Code Router нужен Node.js 22 или новее, но он не найден.",
   "Claude Code Router needs Node.js 22 or newer.": "Claude Code Router нужен Node.js 22 или новее.",

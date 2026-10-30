@@ -107,6 +107,11 @@ export interface ApiChatView {
    * chats are refused until it answers or the chat switches to direct.
    */
   routeNotice?: 'not_installed' | 'stopped';
+  /**
+   * Codex without a router: the loopback `openai_base_url` proxy of the user's config.toml
+   * (`host:port`) does not answer, so a direct server starting now uses the official endpoint.
+   */
+  localProxyDown?: string;
 }
 
 /** Whether an API chat asks before running a tool that edits files or runs commands. */
