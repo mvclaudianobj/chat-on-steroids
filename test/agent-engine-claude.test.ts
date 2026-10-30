@@ -500,13 +500,13 @@ describe('Claude Code engine: routes (direct CLI account or a detected Claude Co
     await fresh.resetForTests();
   });
 
-  it('chooses the available router for a new chat without direct login and respects explicit direct', async () => {
+  it('defaults to the CLI route without direct login and respects explicit router', async () => {
     extraEnv.FAKE_CLAUDE_DIRECT_ACCOUNT = signedIn(false);
     const automatic = await engine.create({ projectId: null });
-    expect(automatic.route).toBe('router');
-    expect((await ledger.storedChatRecord(automatic.sessionId))?.route).toBe('router');
-    const direct = await engine.create({ projectId: null, route: 'direct' });
-    expect(direct.route).toBe('direct');
+    expect(automatic.route).toBe('direct');
+    expect((await ledger.storedChatRecord(automatic.sessionId))?.route).toBe('direct');
+    const router = await engine.create({ projectId: null, route: 'router' });
+    expect(router.route).toBe('router');
   });
 
   it('lists each route\'s own catalog with the concrete model of every alias', async () => {

@@ -4767,5 +4767,6 @@
   "Start router when Chat Marks opens": "Iniciar o router ao abrir o Chat Marks",
   "Chat engine unavailable": "Motor de chat indisponível",
   "Choose Via Claude Code Router or sign in to the CLI account.": "Escolha Via Claude Code Router ou inicie sessão na conta da CLI.",
-  "Start Claude Code Router in Settings > Modules to continue this chat.": "Inicie o Claude Code Router em Definições > Módulos para continuar esta conversa."
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "Inicie o Claude Code Router em Definições > Módulos para continuar esta conversa.",
+  "Sign in to Claude Code": "Iniciar sessão no Claude Code"
 }

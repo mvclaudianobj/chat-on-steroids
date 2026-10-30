@@ -225,7 +225,14 @@ export function ensureOpenCodeService(): Promise<OpenCodeServiceRef> {
   starting ??= serial(async () => {
     const runtime = await host.runtime();
     let found = await probe(runtime);
-    if (found.state === 'foreign') throw new Error(OPENCODE_SERVICE_FOREIGN);
+    if (found.state === 'foreign') {
+      // A divergent service is safe to replace only when its session API is
+      // accessible and confirms there are no active jobs or terminal turns.
+      // An unauthorized service (401) yields an unknown activity state.
+      if (await anythingRunning(found.ref)) throw new Error(OPENCODE_SERVICE_FOREIGN);
+      await command(runtime, 'restart');
+      found = await waitFor(runtime, next => next.state === 'running');
+    }
     if (found.state === 'running') {
       if (found.stale || restartPending) {
         // An update replaced the binary: restart when nothing runs, else keep serving the old one.

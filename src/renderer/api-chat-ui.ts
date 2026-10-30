@@ -150,6 +150,16 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   terminal.hidden = true;
   ui(terminal, 'textContent', () => t('Open in terminal'));
   terminal.addEventListener('click', () => void openTerminal());
+  const claudeLogin = document.createElement('button');
+  claudeLogin.type = 'button';
+  claudeLogin.id = 'apiChatClaudeLogin';
+  claudeLogin.className = 'btn';
+  ui(claudeLogin, 'textContent', () => t('Sign in to Claude Code'));
+  claudeLogin.addEventListener('click', () => void (async () => {
+    const result = await api.cliCreateSession('claude', hooks.workspace(), 'claude-login');
+    if (!result.ok) { toast(t(result.error)); return; }
+    await hooks.openCliSession?.(result.data.id);
+  })());
   // A chat on "Via Claude Code Router" whose router is configured but not installed or not running,
   // or a Codex chat whose own local openai_base_url proxy is not running: a row of the composer
   // dock (above the composer), like the approval card.
@@ -158,7 +168,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   routeNotice.className = 'api-chat-route-notice';
   routeNotice.setAttribute('role', 'status');
   routeNotice.hidden = true;
-  controls.append(route, model, effort, approval, terminal);
+  controls.append(route, model, effort, approval, terminal, claudeLogin);
 
   // The paused call of the running turn: tool, readable arguments and the three answers.
   const card = document.createElement('section');
@@ -329,6 +339,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     for (const choice of effort.options) choice.disabled = !!choice.value && !!efforts?.length && !efforts.includes(choice.value);
     const mode = terminalEngines.get(engineOf()) ?? null;
     terminal.hidden = !view || !mode;
+    claudeLogin.hidden = !view || engineOf() !== 'claude' || view.route !== 'direct';
     // A hand-over stops the app's own session, so it waits for the turn; a live attach does not.
     terminal.disabled = !view || busy || (mode === 'handover' && view.running);
     terminal.title = mode === 'live'

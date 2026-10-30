@@ -503,9 +503,12 @@ export async function cliSessions(): Promise<CliSession[]> {
   return sessions.slice().sort((a, b) => b.updatedAt - a.updatedAt).map(session => ({ ...session }));
 }
 
-export async function cliCreateSession(id: CliId, projectId: string | null, kind?: 'quickstart'): Promise<CliSession> {
+export async function cliCreateSession(id: CliId, projectId: string | null, kind?: 'quickstart' | 'claude-login'): Promise<CliSession> {
   if (kind === 'quickstart' && id !== 'zeroclaw') throw new Error('Only ZeroClaw has a quickstart terminal');
-  return createSessionRecord(id, projectId, null, kind === 'quickstart' ? { args: ['quickstart'], title: 'ZeroClaw quickstart' } : undefined);
+  if (kind === 'claude-login' && id !== 'claude') throw new Error('Only Claude Code has a login terminal');
+  return createSessionRecord(id, projectId, null, kind === 'quickstart'
+    ? { args: ['quickstart'], title: 'ZeroClaw quickstart' }
+    : kind === 'claude-login' ? { args: ['auth', 'login'], title: 'Claude Code login' } : undefined);
 }
 
 /**
@@ -758,7 +761,7 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
   const request = z.discriminatedUnion('action', [
     z.object({ action: z.literal('status') }).strict(),
     z.object({ action: z.literal('sessions') }).strict(),
-    z.object({ action: z.literal('create'), module: id, projectId: z.string().uuid().nullable(), kind: z.literal('quickstart').optional() }).strict(),
+    z.object({ action: z.literal('create'), module: id, projectId: z.string().uuid().nullable(), kind: z.enum(['quickstart', 'claude-login']).optional() }).strict(),
     z.object({ action: z.enum(['enable', 'disable', 'install', 'update', 'update-external', 'stop']), module: id, version: z.string().regex(UPSTREAM_VERSION).optional() }).strict(),
     z.object({ action: z.literal('open'), sessionId: z.string().uuid(), attachmentId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(2).max(200) }).strict(),
     z.object({ action: z.literal('write'), attachmentId: z.string().uuid(), data: z.string().max(16_384) }).strict(),

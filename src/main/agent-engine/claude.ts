@@ -668,11 +668,7 @@ export class ClaudeEngine implements AgentEngine {
     if (options.projectId) await this.deps.runtime(options.projectId);
     const summary = await createSession({ title: `New ${LABEL} chat`, titleSource: 'fallback', conversationId: `${API_CONVERSATION_PREFIX}${randomUUID()}` });
     if (options.projectId) await bindSessionProject(summary.id, options.projectId);
-    const direct = routerUsable(routing) && options.route === undefined
-      ? await this.initInfo(await this.deps.runtime(options.projectId ?? null), CLAUDE_DIRECT_SETTINGS)
-      : null;
-    const route = z.enum(AGENT_ENGINE_ROUTES).parse(options.route ??
-      (routerUsable(routing) && direct?.signedIn !== true ? 'router' : DEFAULT_AGENT_ENGINE_ROUTE));
+    const route = z.enum(AGENT_ENGINE_ROUTES).parse(options.route ?? DEFAULT_AGENT_ENGINE_ROUTE);
     await updateChatRecord(summary.id, () => ({ engine: 'claude', backendSessionId: randomUUID(), model: options.model ?? null, effort: null, route }));
     notifyChanged(summary.id);
     return this.view(summary.id);

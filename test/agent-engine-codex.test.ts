@@ -560,15 +560,15 @@ describe('Codex engine: routes (one app-server per route)', () => {
     expect(await engine.status()).toEqual({ available: true, router: true, detail: 'Codex 0.163.0 · direct: not signed in · Claude Code Router detected' });
   });
 
-  it('defaults to the router when direct has no auth and preserves an explicit direct selection', async () => {
+  it('defaults to the CLI route without auth and preserves an explicit router selection', async () => {
     const { engine } = start(routed({ routes: {
       direct: { account: { account: null, requiresOpenaiAuth: true } },
       router: { account: { account: null, requiresOpenaiAuth: false } }
     } }));
     const automatic = await engine.create({ projectId: null });
-    expect(automatic.route).toBe('router');
-    const direct = await engine.create({ projectId: null, route: 'direct' });
-    expect(direct.route).toBe('direct');
+    expect(automatic.route).toBe('direct');
+    const router = await engine.create({ projectId: null, route: 'router' });
+    expect(router.route).toBe('router');
   });
 
   it('creates direct chats on the direct server; a route change starts a new thread on the other server with its default model', async () => {

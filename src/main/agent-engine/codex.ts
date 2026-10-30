@@ -719,17 +719,7 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
   async function create(input: EngineCreateOptions): Promise<ApiChatView> {
     await recover();
     await refreshRouterAvailability();
-    const router = routerUsable(routing());
-    let defaultRoute: AgentEngineRoute = DEFAULT_AGENT_ENGINE_ROUTE;
-    if (input.route === undefined && router) {
-      try {
-        const direct = await connection_('direct');
-        const account = await direct.peer.request<{ account?: unknown; requiresOpenaiAuth?: unknown }>(
-          'account/read', { refreshToken: false }, { timeoutMs: 15_000 });
-        if (!account.account && account.requiresOpenaiAuth !== false) defaultRoute = 'router';
-      } catch { defaultRoute = 'router'; }
-    }
-    const route = z.enum(AGENT_ENGINE_ROUTES).parse(input.route ?? defaultRoute);
+    const route = z.enum(AGENT_ENGINE_ROUTES).parse(input.route ?? DEFAULT_AGENT_ENGINE_ROUTE);
     const refused = routerRefusal(route);
     if (refused) throw new Error(refused);
     const runtime = await runtimeOrThrow();

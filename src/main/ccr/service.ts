@@ -34,7 +34,6 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { logInfo, logWarn } from '../logger.js';
 import { readDurable, writeDurableNow } from '../durable.js';
-import { chatRecords, routeOf } from '../agent-engine/ledger.js';
 import { isNewerVersion } from '../github-release.js';
 import { downloadNpmTarball } from '../npm-release.js';
 import {
@@ -64,10 +63,7 @@ const AUTOSTART_STATE = 'marks-ccr-autostart';
 
 export async function ccrAutoStartEnabled(): Promise<boolean> {
   const saved = await readDurable<{ enabled?: unknown }>(AUTOSTART_STATE).catch(() => null);
-  if (typeof saved?.enabled === 'boolean') return saved.enabled;
-  const records = await chatRecords();
-  return Object.values(records).some(record =>
-    (record.engine === 'claude' || record.engine === 'codex') && routeOf(record) === 'router');
+  return saved?.enabled === true;
 }
 
 export async function setCcrAutoStart(enabled: boolean): Promise<void> {

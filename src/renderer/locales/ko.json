@@ -4633,5 +4633,6 @@
   "Start router when Chat Marks opens": "Chat Marks 시작 시 라우터 실행",
   "Chat engine unavailable": "채팅 엔진을 사용할 수 없습니다",
   "Choose Via Claude Code Router or sign in to the CLI account.": "Claude Code Router를 선택하거나 CLI 계정에 로그인하세요.",
-  "Start Claude Code Router in Settings > Modules to continue this chat.": "설정 > 모듈에서 Claude Code Router를 시작해 이 채팅을 계속하세요."
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "설정 > 모듈에서 Claude Code Router를 시작해 이 채팅을 계속하세요.",
+  "Sign in to Claude Code": "Claude Code 로그인"
 }

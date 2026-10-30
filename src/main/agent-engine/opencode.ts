@@ -55,7 +55,6 @@ import {
   type OpenCodePermission, type OpenCodeRule
 } from './opencode-client.js';
 import { opencodeSupport } from '../opencode/release.js';
-import { OPENCODE_SERVICE_FOREIGN as FOREIGN } from '../opencode/service.js';
 import { noteBrainEngineToolCall, wireOpenCodeBrain } from '../brain/engine-mcp.js';
 
 const ENGINE = 'opencode' as const;
@@ -170,7 +169,12 @@ export async function openCodeStatus(): Promise<OpenCodeStatus> {
     return { available: false, detail: `OpenCode ${version} is not supported by this version of Chat Marks (OpenCode 2.1 or a newer 2.x is needed; install it in Settings > Modules)` };
   }
   const view = await deps.serviceView().catch(() => null);
-  if (view?.state === 'foreign') return { available: false, detail: FOREIGN };
+  // Creation can safely reconcile an idle service launched by another binary;
+  // an active/unauthorized foreign service is refused by ensureOpenCodeService.
+  if (view?.state === 'foreign') return {
+    available: true,
+    detail: `OpenCode ${version} (the background service will be checked and, only when idle, restarted with this module's CLI)`
+  };
   const notes = [
     support === 'newer' ? 'newer than tested' : '',
     state.managed ? '' : 'not installed by Chat Marks',

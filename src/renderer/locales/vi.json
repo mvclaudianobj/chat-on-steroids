@@ -4633,5 +4633,6 @@
   "Start router when Chat Marks opens": "Khởi động bộ định tuyến khi mở Chat Marks",
   "Chat engine unavailable": "Không thể sử dụng công cụ trò chuyện",
   "Choose Via Claude Code Router or sign in to the CLI account.": "Chọn Claude Code Router hoặc đăng nhập tài khoản CLI.",
-  "Start Claude Code Router in Settings > Modules to continue this chat.": "Khởi động Claude Code Router tại Cài đặt > Mô-đun để tiếp tục cuộc trò chuyện."
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "Khởi động Claude Code Router tại Cài đặt > Mô-đun để tiếp tục cuộc trò chuyện.",
+  "Sign in to Claude Code": "Đăng nhập Claude Code"
 }

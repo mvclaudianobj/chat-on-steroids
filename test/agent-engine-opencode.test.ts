@@ -285,13 +285,13 @@ describe('OpenCode 2.x agent engine (fake HTTP+SSE service)', () => {
     module.managed = false;
     expect((await engine.openCodeStatus()).detail).toBe('OpenCode 2.1.2 (not installed by Chat Marks, the background service starts on first use)');
     expect(state.actions).toEqual([]);
-    // Another OpenCode program runs the service: refused, never talked to for chats.
+    // A foreign service may be reconciled only after checking there is no active work.
     state.registration = fake.registration();
     state.exe = '/usr/local/bin/opencode';
-    expect(await engine.openCodeStatus()).toEqual({ available: false, detail: service.OPENCODE_SERVICE_FOREIGN });
-    await expect(engine.openCodeEngine.models({})).rejects.toThrow(service.OPENCODE_SERVICE_FOREIGN);
-    expect(fake.requests.filter(item => item.path !== '/api/info')).toEqual([]);
-    expect((await registry.listAgentEngines()).find(item => item.id === 'opencode')).toMatchObject({ available: false, terminal: 'live' });
+    expect(await engine.openCodeStatus()).toMatchObject({ available: true });
+    expect((await registry.listAgentEngines()).find(item => item.id === 'opencode')).toMatchObject({ available: true, terminal: 'live' });
+    await engine.openCodeEngine.models({});
+    expect(state.actions.some(item => item.action === 'restart')).toBe(true);
   });
 
   it('starts the service on first use with the resolved binary, an environment without Electron node mode, server auth or MarksCode, and self-update off', async () => {

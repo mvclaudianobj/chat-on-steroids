@@ -4834,5 +4834,6 @@
   "Start router when Chat Marks opens": "Запускать маршрутизатор при открытии Chat Marks",
   "Chat engine unavailable": "Движок чата недоступен",
   "Choose Via Claude Code Router or sign in to the CLI account.": "Выберите Claude Code Router или войдите в учётную запись CLI.",
-  "Start Claude Code Router in Settings > Modules to continue this chat.": "Запустите Claude Code Router в Настройки > Модули, чтобы продолжить чат."
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "Запустите Claude Code Router в Настройки > Модули, чтобы продолжить чат.",
+  "Sign in to Claude Code": "Войти в Claude Code"
 }

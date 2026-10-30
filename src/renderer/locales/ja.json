@@ -4633,5 +4633,6 @@
   "Start router when Chat Marks opens": "Chat Marks の起動時にルーターを開始",
   "Chat engine unavailable": "チャットエンジンを利用できません",
   "Choose Via Claude Code Router or sign in to the CLI account.": "Claude Code Router を選択するか CLI アカウントにログインしてください。",
-  "Start Claude Code Router in Settings > Modules to continue this chat.": "設定 > モジュールから Claude Code Router を起動してください。"
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "設定 > モジュールから Claude Code Router を起動してください。",
+  "Sign in to Claude Code": "Claude Code にログイン"
 }

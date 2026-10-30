@@ -219,7 +219,7 @@ const api = {
   cliAction: (module: import('../main/cli-modules.js').CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'update-external' | 'stop', version?: string) => call<unknown>('marksCli:request', { action, module, ...(version ? { version } : {}) }),
   cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),
   /** `quickstart`: ZeroClaw's `zeroclaw quickstart` instead of its `zerocode` terminal. */
-  cliCreateSession: (module: import('../main/cli-modules.js').CliId, projectId: string | null, kind?: 'quickstart') => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId, ...(kind ? { kind } : {}) }),
+  cliCreateSession: (module: import('../main/cli-modules.js').CliId, projectId: string | null, kind?: 'quickstart' | 'claude-login') => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId, ...(kind ? { kind } : {}) }),
   cliOpen: (sessionId: string, attachmentId: string, cols: number, rows: number) => call<{ id: string; cwd: string; session: string }>('marksCli:request', { action: 'open', sessionId, attachmentId, cols, rows }),
   cliWrite: (attachmentId: string, data: string) => call<void>('marksCli:request', { action: 'write', attachmentId, data }),
   cliResize: (attachmentId: string, cols: number, rows: number) => call<void>('marksCli:request', { action: 'resize', attachmentId, cols, rows }),

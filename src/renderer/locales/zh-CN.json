@@ -4633,5 +4633,6 @@
   "Start router when Chat Marks opens": "打开 Chat Marks 时启动路由器",
   "Chat engine unavailable": "聊天引擎不可用",
   "Choose Via Claude Code Router or sign in to the CLI account.": "选择 Claude Code Router 或登录 CLI 帐户。",
-  "Start Claude Code Router in Settings > Modules to continue this chat.": "在设置 > 模块中启动 Claude Code Router 以继续此聊天。"
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "在设置 > 模块中启动 Claude Code Router 以继续此聊天。",
+  "Sign in to Claude Code": "登录 Claude Code"
 }
