@@ -110,7 +110,8 @@ it('queries direct Claude and Codex account status using only their CLIs, withou
   fixture.accountLogged = true;
   expect((await cliDirectAccount('claude')).signedIn).toBe(true);
   expect((await cliDirectAccount('codex')).signedIn).toBe(true);
-  expect(fixture.commands.some(command => command.includes('--settings') && command.includes('status'))).toBe(true);
+  // `claude auth status` rejects --settings; the router's helper is set aside by reading the sign-in instead.
+  expect(fixture.commands.some(command => command.includes('--settings') && command.includes('status'))).toBe(false);
   fixture.accountLogged = false;
   await cliAction('claude', 'disable');
 });

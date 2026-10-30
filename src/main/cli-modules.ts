@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { constants as fsConstants } from 'node:fs';
+import { constants as fsConstants, promises as fs } from 'node:fs';
+import os from 'node:os';
 import { UPSTREAM_VERSION } from '../shared/upstream-module.js';
 import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
@@ -510,6 +511,16 @@ export async function cliSessions(): Promise<CliSession[]> {
 export type DirectAccountAction = 'login' | 'logout';
 export type DirectAccountState = { signedIn: boolean; detail: string };
 
+async function claudeOauthSignedIn(env: NodeJS.ProcessEnv): Promise<boolean> {
+  if (process.platform === 'win32') return false;
+  const dir = env.CLAUDE_CONFIG_DIR?.trim() || path.join(os.homedir(), '.claude');
+  try {
+    const parsed = JSON.parse(await fs.readFile(path.join(dir, '.credentials.json'), 'utf8')) as Record<string, unknown>;
+    const oauth = parsed.claudeAiOauth;
+    return !!oauth && typeof oauth === 'object' && Object.keys(oauth).length > 0;
+  } catch { return false; }
+}
+
 export async function cliDirectAccount(id: 'claude' | 'codex'): Promise<DirectAccountState> {
   await loadCliModules();
   if (!enabled.has(id)) return { signedIn: false, detail: 'Module disabled' };
@@ -520,7 +531,8 @@ export async function cliDirectAccount(id: 'claude' | 'codex'): Promise<DirectAc
     const env = normalizeEnvironment(process.env);
     // Prevent a configured router from impersonating the direct account.
     for (const key of ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'OPENAI_BASE_URL']) delete env[key];
-    const directArgs = id === 'claude' ? ['--settings', CLAUDE_DIRECT_SETTINGS, ...args] : args;
+    // `claude auth status` has no --settings: it rejected the flag, so every check read "unavailable".
+    const directArgs = args;
     const output = await run(process.platform === 'win32' ? 'wsl.exe' : bin,
       process.platform === 'win32' ? ['--exec', bin, ...directArgs] : directArgs,
       { timeout: 15_000, maxBuffer: 64 * 1024, env });
@@ -528,7 +540,11 @@ export async function cliDirectAccount(id: 'claude' | 'codex'): Promise<DirectAc
       const info = JSON.parse(output.stdout) as Record<string, unknown>;
       const method = typeof info.authMethod === 'string' ? info.authMethod : '';
       const source = typeof info.tokenSource === 'string' ? info.tokenSource : '';
-      const logged = info.loggedIn === true && !/apiKeyHelper/i.test(method + source);
+      // A configured apiKeyHelper (the router's) wins in `auth status`, hiding a real sign-in that the
+      // direct route uses once it clears the helper. The OAuth sign-in is the credentials file's
+      // claudeAiOauth entry; only its presence is checked, never a token.
+      const viaHelper = /apiKeyHelper|api_key_helper/i.test(method + source);
+      const logged = info.loggedIn === true && (!viaHelper || await claudeOauthSignedIn(env));
       const account = typeof info.email === 'string' && /^[^\s@]+@[^\s@]+$/.test(info.email) ? info.email.slice(0, 120) : '';
       const plan = typeof info.subscriptionType === 'string' && /^[a-zA-Z0-9 -]{1,40}$/.test(info.subscriptionType) ? info.subscriptionType : '';
       return { signedIn: logged, detail: logged ? [account, plan].filter(Boolean).join(' · ') : '' };

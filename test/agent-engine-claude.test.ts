@@ -621,3 +621,14 @@ describe('Claude Code engine: routes (direct CLI account or a detected Claude Co
     expect((await engine.view(chat.sessionId)).route).toBe('router');
   });
 });
+
+describe('Claude init account', () => {
+  it('counts a claude.ai sign-in, which reports the account but no key source', async () => {
+    const { claudeInitInfo } = await import('../src/main/agent-engine/claude.js');
+    const oauth = { response: { response: { models: [], account: { email: 'ceo@example.com', subscriptionType: 'Claude Team' } } } };
+    const none = { response: { response: { models: [], account: { tokenSource: 'none', apiKeySource: 'none' } } } };
+    const read = (value: unknown) => claudeInitInfo((value as { response: { response: unknown } }).response.response).signedIn;
+    expect(read(oauth)).toBe(true);
+    expect(read(none)).toBe(false);
+  });
+});

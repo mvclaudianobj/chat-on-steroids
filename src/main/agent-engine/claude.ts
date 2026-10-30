@@ -191,7 +191,9 @@ export function claudeInitInfo(response: unknown): ClaudeInitInfo {
   }
   const account = record(body?.account);
   const source = (key: string): string | null => typeof account?.[key] === 'string' ? account[key] as string : null;
-  const signedIn = !account ? null : [source('tokenSource'), source('apiKeySource')].some(value => !!value && value !== 'none');
+  // A key reports its source; a claude.ai sign-in (OAuth) reports no source, only the account itself.
+  const signedIn = !account ? null : [source('tokenSource'), source('apiKeySource')].some(value => !!value && value !== 'none')
+    || !!(source('email') || source('subscriptionType') || source('organization'));
   return { models, signedIn };
 }
 
