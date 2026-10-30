@@ -94,7 +94,22 @@ export async function importNotificationSettings(value: unknown): Promise<Notifi
   return saveNotificationSettings(settings);
 }
 
-export interface OutboundNotice { event: NotificationEvent; title: string; project: string; excerpt?: string; dedupeKey?: string; }
+/** An approval-pending notice names its exact cards, so a WhatsApp reply can answer one without picking a chat. */
+export interface NoticeApproval { conversationId: string; cardId: string; allow: boolean }
+export interface OutboundNotice { event: NotificationEvent; title: string; project: string; excerpt?: string; dedupeKey?: string; approvals?: NoticeApproval[]; }
+type ApprovalCodeMinter = (number: string, conversationId: string, cardId: string) => Promise<string | null>;
+let mintApprovalCode: ApprovalCodeMinter | null = null;
+/** The two-way WhatsApp owner mints reply codes; null (duplex off, number not allowed) adds no reply line. */
+export function setWhatsAppApprovalCodes(minter: ApprovalCodeMinter | null): void { mintApprovalCode = minter; }
+async function approvalReplyLines(number: string, approvals: readonly NoticeApproval[] | undefined): Promise<string> {
+  if (!mintApprovalCode || !approvals?.length) return '';
+  const lines: string[] = [];
+  for (const card of approvals.slice(0, 5)) {
+    const code = await mintApprovalCode(number, card.conversationId, card.cardId).catch(() => null);
+    if (code) lines.push(card.allow ? `Responda: aprovar ${code} ou negar ${code}` : `Responda: negar ${code} (este cartão não permite aprovar)`);
+  }
+  return lines.length ? `\n${lines.join('\n')}\nVale por 10 minutos, só para este cartão.` : '';
+}
 const lastSent = new Map<string, number>();
 const counts = new Map<string, { at: number; count: number }>();
 const inFlight = new Set<string>();
@@ -114,7 +129,8 @@ export async function queueOutboundNotice(notice: OutboundNotice): Promise<void>
     const count = entry.notices.length;
     const payload = count === 1 ? entry.notices[0]! : {
       event: notice.event,
-      title: `${count} Chat Marks events`, project: 'Chat Marks'
+      title: `${count} Chat Marks events`, project: 'Chat Marks',
+      ...(entry.notices.some(item => item.approvals?.length) ? { approvals: entry.notices.flatMap(item => item.approvals ?? []).slice(0, 5) } : {})
     };
     void dispatchNotice(payload).catch(error => logWarn(`Notification ${notice.event}: delivery failed (${describeFailure(failureOf(error))})`));
   }, windowSeconds * 1000) };
@@ -216,7 +232,8 @@ export async function dispatchNotice(notice: OutboundNotice, options: { channel?
       }
     } else if (channel === 'whatsapp-web') {
       for (const number of choice.destinations) {
-        try { await sendWhatsAppWeb(number, `${title}\n${body}`); }
+        const replies = await approvalReplyLines(number, notice.approvals);
+        try { await sendWhatsAppWeb(number, `${title}\n${body}${replies}`); }
         catch { throw deliveryFailure('whatsapp_disconnected'); }
         delivered++;
       }
