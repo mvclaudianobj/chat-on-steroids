@@ -4958,5 +4958,10 @@
   "{0} controls": "{0} 個のコントロール",
   "{0} sessions": "{0} 件のセッション",
   "{0} entries": "{0} 件のエントリ",
-  "Chat Marks wants to use your mouse and keyboard": "Chat Marks がマウスとキーボードを使おうとしています"
+  "Chat Marks wants to use your mouse and keyboard": "Chat Marks がマウスとキーボードを使おうとしています",
+  "CLIProxy Local routes configured in CCR (backup saved).": "CCR に CLIProxy Local のルートを設定しました（バックアップ保存済み）。",
+  "CLIProxy Local routes already configured in CCR.": "CLIProxy Local のルートは CCR に設定済みです。",
+  "CLIProxy key is not configured yet.": "CLIProxy キーはまだ設定されていません。",
+  "Local CLIProxy service is unavailable.": "ローカル CLIProxy サービスを利用できません。",
+  "CCR configuration could not be updated.": "CCR の設定を更新できませんでした。"
 }

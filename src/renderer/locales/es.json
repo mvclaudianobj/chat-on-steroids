@@ -5120,5 +5120,10 @@
   "{0} messages|many": "{0} de mensajes",
   "{0} actions|one": "{0} acción",
   "{0} actions|many": "{0} de acciones",
-  "Chat Marks wants to use your mouse and keyboard": "Chat Marks quiere usar tu ratón y teclado"
+  "Chat Marks wants to use your mouse and keyboard": "Chat Marks quiere usar tu ratón y teclado",
+  "CLIProxy Local routes configured in CCR (backup saved).": "Rutas de CLIProxy Local configuradas en CCR (copia de seguridad guardada).",
+  "CLIProxy Local routes already configured in CCR.": "Las rutas de CLIProxy Local ya estan configuradas en CCR.",
+  "CLIProxy key is not configured yet.": "La clave de CLIProxy aun no esta configurada.",
+  "Local CLIProxy service is unavailable.": "El servicio local de CLIProxy no esta disponible.",
+  "CCR configuration could not be updated.": "No se pudo actualizar la configuracion de CCR."
 }

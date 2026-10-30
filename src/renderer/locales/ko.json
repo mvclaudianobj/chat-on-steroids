@@ -4958,5 +4958,10 @@
   "{0} controls": "컨트롤 {0}개",
   "{0} sessions": "세션 {0}개",
   "{0} entries": "항목 {0}개",
-  "Chat Marks wants to use your mouse and keyboard": "Chat Marks가 마우스와 키보드를 사용하려고 합니다"
+  "Chat Marks wants to use your mouse and keyboard": "Chat Marks가 마우스와 키보드를 사용하려고 합니다",
+  "CLIProxy Local routes configured in CCR (backup saved).": "CCR에 CLIProxy Local 경로를 설정했습니다(백업 저장됨).",
+  "CLIProxy Local routes already configured in CCR.": "CLIProxy Local 경로가 이미 CCR에 설정되어 있습니다.",
+  "CLIProxy key is not configured yet.": "CLIProxy 키가 아직 설정되지 않았습니다.",
+  "Local CLIProxy service is unavailable.": "로컬 CLIProxy 서비스를 사용할 수 없습니다.",
+  "CCR configuration could not be updated.": "CCR 설정을 업데이트할 수 없습니다."
 }

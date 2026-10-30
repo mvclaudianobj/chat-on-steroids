@@ -56,6 +56,7 @@ export function createCcrManageUi(api: AppApi, parent: Element, onChanged: () =>
   ui(badge, 'textContent', () => t('Update available'));
   const serviceLine = el('p', { className: 'modules-detail', id: 'ccrService' });
   const configuredLine = el('p', { className: 'modules-detail', id: 'ccrConfigured' });
+  const autoConfigLine = el('p', { className: 'modules-detail', id: 'ccrAutoConfig' });
   const autoStartLabel = el('label', { className: 'modules-detail' });
   const autoStart = el('input', { type: 'checkbox', id: 'ccrAutoStart' }) as HTMLInputElement;
   const autoStartText = el('span');
@@ -80,7 +81,7 @@ export function createCcrManageUi(api: AppApi, parent: Element, onChanged: () =>
   actions.append(openUi);
   const head = el('div', { className: 'modules-service-head' });
   head.append(state);
-  surface.append(head, lead, installedLine, latestLine, badge, serviceLine, configuredLine, autoStartLabel, note, progressLine, actions);
+  surface.append(head, lead, installedLine, latestLine, badge, serviceLine, configuredLine, autoConfigLine, autoStartLabel, note, progressLine, actions);
   row.append(title, surface);
   parent.append(row);
 
@@ -132,6 +133,12 @@ export function createCcrManageUi(api: AppApi, parent: Element, onChanged: () =>
       ? t('Configured for {0}. Their chats can use "Via Claude Code Router".', [targets.join(', ')])
       : installed ? t('Not configured for Claude Code or Codex yet. Set them up in the router UI; the route appears in their chats once it is.') : '';
     configuredLine.hidden = !configuredLine.textContent;
+    autoConfigLine.textContent = s?.autoConfig === 'configured' ? t('CLIProxy Local routes configured in CCR (backup saved).')
+      : s?.autoConfig === 'unchanged' ? t('CLIProxy Local routes already configured in CCR.')
+        : s?.autoConfig === 'key_missing' ? t('CLIProxy key is not configured yet.')
+          : s?.autoConfig === 'proxy_unavailable' ? t('Local CLIProxy service is unavailable.')
+            : s?.autoConfig === 'config_unavailable' ? t('CCR configuration could not be updated.') : '';
+    autoConfigLine.hidden = !autoConfigLine.textContent;
     const notes = [
       s?.support === 'newer' ? t('This version is newer than the one Chat Marks was tested with.') : '',
       s?.support === 'unsupported' ? t('This version is not supported by this version of Chat Marks yet.') : '',

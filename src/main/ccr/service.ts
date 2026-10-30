@@ -22,8 +22,9 @@
  * `app_config` `default` → `gateway.host`/`gateway.port`, nothing else), else from the user's CLI
  * files, else 127.0.0.1:3456.
  *
- * The user's files: this module never writes `~/.claude/settings.json`, `~/.codex/config.toml`
- * or anything in `~/.claude-code-router` (CCR edits those itself), never prints or copies a key.
+ * The user's files: this module never writes `~/.claude/settings.json` or `~/.codex/config.toml`;
+ * it updates only CCR's known config.sqlite after a private backup for the CLIProxy provider.
+ * It never prints keys or web tokens.
  * After an update the router restarts only when no routed Codex/Claude Code turn runs.
  */
 import { execFile } from 'node:child_process';
@@ -47,6 +48,7 @@ import {
   CCR_CLI, CCR_TARBALL_LIMIT, ccrLatest, ccrRelease, ccrServiceArgv, ccrSupport, minimumNodeMajor, NATIVE_CHECK_SCRIPT, nodeMajor,
   npmInstallArgv, npmRebuildArgv
 } from './release.js';
+import { configureCcrFromCliProxy, type CcrAutoConfigState } from './autoconfig.js';
 
 const exec = promisify(execFile);
 const PACKAGE_PATH = `node_modules/${CCR_NPM_PACKAGE}`;
@@ -60,6 +62,14 @@ const AVAILABILITY_TTL_MS = 5_000;
 const LATEST_TTL_MS = 60 * 60_000;
 const RESTART_POLL_MS = 5_000;
 const AUTOSTART_STATE = 'marks-ccr-autostart';
+let autoConfigResult: CcrAutoConfigState | null = null;
+
+/** No configuration data, keys or tokens are returned. A failed check never blocks other modules. */
+export async function ccrAutoConfigure(): Promise<CcrAutoConfigState> {
+  const result = await configureCcrFromCliProxy(host.home(), { fetchImpl: host.fetchImpl });
+  autoConfigResult = result;
+  return result;
+}
 
 export async function ccrAutoStartEnabled(): Promise<boolean> {
   const saved = await readDurable<{ enabled?: unknown }>(AUTOSTART_STATE).catch(() => null);
@@ -72,6 +82,7 @@ export async function setCcrAutoStart(enabled: boolean): Promise<void> {
 
 /** Once per application launch, after the main IPC is registered. */
 export async function startCcrOnLaunch(): Promise<void> {
+  await ccrAutoConfigure().catch(() => undefined);
   if (!await ccrAutoStartEnabled()) return;
   const { inUse } = await copies();
   if (!inUse) return;
@@ -328,6 +339,7 @@ let availability: { at: number; value: RouterUnavailable | null } | null = null;
 let availabilityRun: Promise<void> | null = null;
 
 export function resetCcrStateForTests(): void {
+  autoConfigResult = null;
   latestCache = null; lastInstall = null; installing = false; restartPending = false;
   if (restartTimer) clearInterval(restartTimer);
   restartTimer = null; operations = Promise.resolve(); availability = null; availabilityRun = null;
@@ -406,6 +418,7 @@ export async function ccrStatus(refresh = false): Promise<CcrStatus> {
   availability = { at: host.now(), value: !inUse ? 'not_installed' : service.state === 'running' ? null : 'stopped' };
   return {
     autoStart: await ccrAutoStartEnabled(),
+    ...(autoConfigResult ? { autoConfig: autoConfigResult } : {}),
     managed: view(managed), external: view(external), inUse: inUse?.kind ?? null,
     latest: found.version, ...(found.error ? { latestError: found.error } : {}),
     updateAvailable: newer && latestSupport !== 'unsupported',
@@ -452,6 +465,9 @@ export async function ccrService(action: CcrServiceAction): Promise<CcrStatus> {
   await serial(async () => {
     const { inUse } = await copies();
     if (!inUse) throw new Error('not_installed');
+    // The gateway reads its model routes on startup. Persist local defaults before
+    // launching it, not after, so a newly configured provider is usable at once.
+    if (action !== 'stop') await ccrAutoConfigure().catch(() => undefined);
     if (action === 'start') await start(inUse);
     else if (action === 'stop') await stop(inUse);
     else {
@@ -465,9 +481,55 @@ export async function ccrService(action: CcrServiceAction): Promise<CcrStatus> {
 }
 
 export async function ccrOpenUi(): Promise<void> {
-  const url = await webUiUrl();
-  if (!url) throw new Error('ui_unavailable');
+  const { inUse } = await copies();
+  if (!inUse || !await probeHealth(await gatewayAddress(), host.fetchImpl)) throw new Error('ui_unavailable');
+  const tools = await nodeTools();
+  if (!tools.node) throw new Error('node_missing');
+  // A service.json link may hold an expired, once-consumed web token. Ask the running
+  // CCR for a *new* URL on every click. Never log stdout, stderr or the URL.
+  let output: { stdout: string; stderr: string };
+  try {
+    output = await host.run(tools.node, [inUse.cli, 'ui', '--no-open'], {
+      timeoutMs: 15_000, cwd: host.home(), env: ccrEnvironment(host.env(), tools.node)
+    });
+  } catch { throw new Error('ui_unavailable'); }
+  const url = ccrFreshUiUrl(output.stdout) ?? ccrFreshUiUrl(output.stderr);
+  if (!url || !await ccrUiTokenValid(url, host.fetchImpl)) throw new Error('ui_unavailable');
   await host.openExternal(url);
+}
+
+/** CCR's own authenticated RPC validates the issued URL before any browser sees it. */
+export async function ccrUiTokenValid(raw: string, fetchImpl: typeof fetch = fetch): Promise<boolean> {
+  const valid = ccrFreshUiUrl(raw);
+  if (!valid) return false;
+  const url = new URL(valid);
+  const token = url.searchParams.get('ccr_web_token');
+  if (!token) return false;
+  try {
+    const response = await fetchImpl(`${url.origin}/api/ccr/rpc`, {
+      method: 'POST', redirect: 'manual', signal: AbortSignal.timeout(2500),
+      headers: { 'content-type': 'application/json', 'x-ccr-web-auth': token },
+      body: JSON.stringify({ method: 'getAppInfo', args: [] })
+    });
+    if (!response.ok) return false;
+    const data = await response.json() as { ok?: unknown; value?: { name?: unknown } };
+    return data?.ok === true && data.value?.name === 'Claude Code Router';
+  } catch { return false; }
+}
+
+/** Strictly accepts a freshly issued loopback URL with an auth token, never a stale service link. */
+export function ccrFreshUiUrl(output: string): string | null {
+  if (output.length > 64 * 1024) return null;
+  for (const match of output.matchAll(/https?:\/\/[^\s<>"']+/g)) {
+    try {
+      const url = new URL(match[0].replace(/[),.;]+$/, ''));
+      if (url.protocol !== 'http:' || !LOOPBACK.has(url.hostname.replace(/^\[|\]$/g, '')) ||
+        url.username || url.password || url.pathname !== '/' || !/^\d+$/.test(url.port) ||
+        !url.searchParams.get('ccr_web_token')) continue;
+      return url.toString();
+    } catch { /* Other CLI text is not an auth URL. */ }
+  }
+  return null;
 }
 
 /**

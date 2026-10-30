@@ -5039,5 +5039,10 @@
   "{0} entries|one": "{0} kayıt",
   "{0} messages|one": "{0} mesaj",
   "{0} actions|one": "{0} eylem",
-  "Chat Marks wants to use your mouse and keyboard": "Chat Marks faresini ve klavyeni kullanmak istiyor"
+  "Chat Marks wants to use your mouse and keyboard": "Chat Marks faresini ve klavyeni kullanmak istiyor",
+  "CLIProxy Local routes configured in CCR (backup saved).": "CLIProxy Local rotalari CCR icinde ayarlandi (yedek kaydedildi).",
+  "CLIProxy Local routes already configured in CCR.": "CLIProxy Local rotalari CCR icinde zaten ayarli.",
+  "CLIProxy key is not configured yet.": "CLIProxy anahtari henuz ayarlanmadi.",
+  "Local CLIProxy service is unavailable.": "Yerel CLIProxy hizmetine ulasilamiyor.",
+  "CCR configuration could not be updated.": "CCR yapilandirmasi guncellenemedi."
 }

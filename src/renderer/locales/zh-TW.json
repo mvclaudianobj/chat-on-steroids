@@ -4958,5 +4958,10 @@
   "{0} controls": "{0} 個控制項",
   "{0} sessions": "{0} 個對話",
   "{0} entries": "{0} 個項目",
-  "Chat Marks wants to use your mouse and keyboard": "Chat Marks 想使用你的滑鼠和鍵盤"
+  "Chat Marks wants to use your mouse and keyboard": "Chat Marks 想使用你的滑鼠和鍵盤",
+  "CLIProxy Local routes configured in CCR (backup saved).": "已在 CCR 設定 CLIProxy Local 路由（已儲存備份）。",
+  "CLIProxy Local routes already configured in CCR.": "CCR 中已設定 CLIProxy Local 路由。",
+  "CLIProxy key is not configured yet.": "尚未設定 CLIProxy 金鑰。",
+  "Local CLIProxy service is unavailable.": "本機 CLIProxy 服務無法使用。",
+  "CCR configuration could not be updated.": "無法更新 CCR 設定。"
 }

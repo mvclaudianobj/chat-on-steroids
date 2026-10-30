@@ -5201,5 +5201,10 @@
   "{0} actions|one": "{0} действие",
   "{0} actions|few": "{0} действия",
   "{0} actions|many": "{0} действий",
-  "Chat Marks wants to use your mouse and keyboard": "Chat Marks хочет использовать вашу мышь и клавиатуру"
+  "Chat Marks wants to use your mouse and keyboard": "Chat Marks хочет использовать вашу мышь и клавиатуру",
+  "CLIProxy Local routes configured in CCR (backup saved).": "Маршруты CLIProxy Local настроены в CCR (резервная копия сохранена).",
+  "CLIProxy Local routes already configured in CCR.": "Маршруты CLIProxy Local уже настроены в CCR.",
+  "CLIProxy key is not configured yet.": "Ключ CLIProxy еще не настроен.",
+  "Local CLIProxy service is unavailable.": "Локальная служба CLIProxy недоступна.",
+  "CCR configuration could not be updated.": "Не удалось обновить конфигурацию CCR."
 }
