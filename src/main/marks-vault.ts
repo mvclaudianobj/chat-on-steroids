@@ -202,6 +202,16 @@ export async function putVault(entry: VaultEntry, password: string): Promise<voi
     await update(file, key, data);
   });
 }); }
+/** Privileged local main-process import of a user-provided credential. Never exposed to IPC. */
+export async function putVaultLocal(entry: VaultEntry): Promise<void> { return serialize(async () => {
+  const valid = validateEntry(entry);
+  await withCatalog(undefined, async (file, key, data) => {
+    const index = data.entries.findIndex(item => item.name === valid.name);
+    if (index < 0) data.entries.push(valid); else data.entries[index] = valid;
+    if (data.entries.length > MAX_ENTRIES) throw new Error('Vault capacity exceeded');
+    await update(file, key, data);
+  });
+}); }
 export async function removeVault(name: string, password: string): Promise<void> { return serialize(async () => {
   await withCatalog(password, async (file, key, data) => {
     if (!NAME.test(name) || !data.entries.some(entry => entry.name === name)) throw new Error('Secret not found');

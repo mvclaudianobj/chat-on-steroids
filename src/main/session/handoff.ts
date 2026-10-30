@@ -15,6 +15,7 @@ import { logInfo } from '../logger.js';
 import { getSession, readEvents, readSessionPlan, saveHandoff } from './store.js';
 import { destinationContinuationMarker } from './handoff-prompt.js';
 import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
+import { remoteModeInstructions } from '../remote/mode.js';
 import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt, userPromptText } from '../../shared/user-prompt.js';
 import type { AgentPlan } from '../../shared/agent-plan.js';
 
@@ -255,6 +256,10 @@ export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handof
   if (!text) throw new Error('A handoff cannot be empty');
   const summary = await getSession(input.sessionId);
   if (!summary) throw new Error('That session no longer exists');
+  // Compact & Resume starts a new native conversation. Reassert the durable
+  // remote target before the handoff so a local cache cannot become its workspace.
+  const remote = await remoteModeInstructions(input.sessionId);
+  if (remote && remote.startsWith('[CHAT REMOTE MODE]')) text = prependUserPrompt(text, remote);
   // Freeze the actual saved plan with the brief. A pointer to the removed session
   // tool cannot supply it to the replacement model. Budget this same snapshot once.
   const planNotice = handoffPlanNotice(await readSessionPlan(input.sessionId));

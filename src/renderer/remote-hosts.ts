@@ -2,6 +2,7 @@ import type { AppApi } from '../preload/index.js';
 import { t, onLanguageChange, ui } from './i18n.js';
 import { createWorkspaceTerminal } from './workspace-terminal.js';
 import type { LocalProject } from '../shared/projects.js';
+import { askFields } from './ask-dialog.js';
 
 interface Host { id: string; name: string; type: string; host: string; port: number; user: string }
 interface Reply { ok: boolean; data?: unknown; error?: string }
@@ -14,11 +15,32 @@ export function initRemoteHostsUi(api: AppApi): void {
   }
   const input = (id: string) => root.querySelector<HTMLInputElement>(`#${id}`)!;
   const call = (action: string, payload?: unknown) => api.remoteHosts(action, payload) as Promise<Reply>;
+  const offCredentials = api.onRemoteCredentialNeeded(request => void (async () => {
+    const answer = await askFields(t('SSH password'), [
+      { label: t('Server password'), type: 'password' },
+      { label: t('Save password in Cofre K'), type: 'checkbox', optional: true }
+    ]);
+    // Always settle the exact request, including on Cancel; never retain values in state.
+    await call('credentialAnswer', answer
+      ? { id: request.id, password: answer[0], remember: answer[1] === 'true' }
+      : { id: request.id, cancel: true });
+  })());
+  const offMasterKey = api.onRemoteMasterKeyNeeded(request => void (async () => {
+    if (!window.confirm(t('Prepare or synchronize the master key for this user and root?'))) {
+      await call('masterKeyAnswer', { id: request.id, confirmed: false }); return;
+    }
+    const answer = await askFields(t('Create master key'), [
+      { label: t('Optional master key passphrase'), type: 'password', optional: true }
+    ]);
+    await call('masterKeyAnswer', answer ? { id: request.id, confirmed: true, ...(answer[0] ? { passphrase: answer[0] } : {}) }
+      : { id: request.id, confirmed: false });
+  })());
   const message = root.querySelector<HTMLElement>('#remoteMessage')!;
   const rows = root.querySelector<HTMLElement>('#remoteRows')!;
   const previewRows = root.querySelector<HTMLElement>('#remotePreviewRows')!;
   const pending = root.querySelector<HTMLElement>('#remotePending')!;
   const terminalMount = root.querySelector<HTMLElement>('#remoteTerminalMount')!;
+  let editingHostId: string | null = null;
   let terminal: ReturnType<typeof createWorkspaceTerminal> | null = null;
   const floating = document.createElement('aside');
   floating.id = 'remoteApprovalBanner'; floating.setAttribute('role', 'alert'); floating.hidden = true;
@@ -31,6 +53,30 @@ export function initRemoteHostsUi(api: AppApi): void {
   const button = (label: string, callback: () => void): HTMLButtonElement => {
     const node = document.createElement('button'); node.type = 'button'; node.className = 'btn'; node.textContent = t(label); node.addEventListener('click', callback); return node;
   };
+  const installFlow = async (host: Host): Promise<boolean> => {
+    if (!window.confirm(t('Install the master public key on this SSH host?'))) return false;
+    let result = await call('install', { name: host.name });
+    if (result.ok) return true;
+    // Polkit always obtains its own independent OS approval; this confirmation is
+    // not permission to bypass the root authenticator.
+    if (window.confirm(t('Prepare or synchronize the master key for this user and root?'))) {
+      const answer = await askFields(t('Create master key'), [
+        { label: t('Optional master key passphrase'), type: 'password', optional: true }
+      ]);
+      if (answer) {
+        const prepared = await call('prepareKey', { confirmed: true, ...(answer[0] ? { passphrase: answer[0] } : {}) });
+        if (prepared.ok) result = await call('install', { name: host.name });
+      }
+    }
+    if (result.ok) return true;
+    const answer = await askFields(t('SSH password'), [
+      { label: t('Server password'), type: 'password' },
+      { label: t('Save password in Cofre K'), type: 'checkbox', optional: true }
+    ]);
+    if (!answer) return false;
+    result = await call('install', { name: host.name, password: answer[0], remember: answer[1] === 'true' });
+    return result.ok;
+  };
   async function refresh(): Promise<void> {
     const list = await call('list'); rows.replaceChildren();
     if (list.ok && Array.isArray(list.data)) for (const host of list.data as Host[]) {
@@ -39,7 +85,22 @@ export function initRemoteHostsUi(api: AppApi): void {
       label.textContent = `${host.name} · ${host.type.toUpperCase()} · ${host.user}@${host.host}:${host.port}`;
       row.append(label);
       if (host.type === 'ssh') {
-        row.append(button('Test connection', () => void action(() => call('test', { name: host.name }))));
+        row.append(button('Edit host', () => {
+          editingHostId = host.id;
+          input('remoteName').value = host.name;
+          input('remoteType').value = host.type;
+          input('remoteAddress').value = host.host;
+          input('remotePort').value = String(host.port);
+          input('remoteUser').value = host.user;
+          input('remotePassword').value = '';
+          input('remoteName').focus();
+        }));
+        row.append(button('Test connection', () => void (async () => {
+          let result = await call('test', { name: host.name });
+          if (!result.ok && await installFlow(host)) result = await call('test', { name: host.name });
+          message.textContent = result.ok ? t('Remote operation completed.') : t('Remote operation failed. Check SSH trust and key.');
+          await refresh();
+        })()));
         row.append(button('Trust host fingerprint', () => void (async () => {
           const result = await call('fingerprint', { name: host.name });
           if (!result.ok) { message.textContent = t('Could not read the server fingerprint.'); return; }
@@ -48,13 +109,11 @@ export function initRemoteHostsUi(api: AppApi): void {
           if (!window.confirm(t('Confirm the host fingerprint for {0}?\n{1}', [`${host.host}:${host.port}`, candidate.fingerprint]))) return;
           await action(() => call('trust', { name: host.name, fingerprint: candidate.fingerprint }));
         })()));
-        row.append(button('Install master key on this host', () => {
-          const passwordInput = input('remotePassword');
-          const password = passwordInput.value;
-          passwordInput.value = '';
-          if (!password) { message.textContent = t('Enter the server password for one-time key installation.'); return; }
-          void action(() => call('install', { name: host.name, password }));
-        }));
+        row.append(button('Install master key on this host', () => void (async () => {
+          const ok = await installFlow(host);
+          message.textContent = ok ? t('Remote operation completed.') : t('Remote operation failed. Check SSH trust and key.');
+          await refresh();
+        })()));
         row.append(button('Open as project', () => void action(() => call('project', { name: host.name, folder: input('remoteFolder').value }))));
         row.append(button('Open terminal on this host', () => void (async () => {
           const result = await call('project', { name: host.name, folder: input('remoteFolder').value || '~' });
@@ -89,10 +148,17 @@ export function initRemoteHostsUi(api: AppApi): void {
     }
     pending.textContent = approvals.data.length ? t('Remote command approvals') : '';
   }
-  root.querySelector('#remoteSave')!.addEventListener('click', () => void action(() => call('save', {
-    name: input('remoteName').value, type: input('remoteType').value, host: input('remoteAddress').value,
-    port: Number(input('remotePort').value), user: input('remoteUser').value
-  })));
+  root.querySelector('#remoteSave')!.addEventListener('click', () => void (async () => {
+    const password = input('remotePassword').value;
+    input('remotePassword').value = '';
+    await action(() => call('save', {
+      name: input('remoteName').value, type: input('remoteType').value, host: input('remoteAddress').value,
+      port: Number(input('remotePort').value), user: input('remoteUser').value,
+      ...(editingHostId ? { id: editingHostId } : {}),
+      ...(password ? { password } : {})
+    }));
+    editingHostId = null;
+  })());
   root.querySelector('#remoteUnlock')!.addEventListener('click', () => void action(() => call('unlock')));
   root.querySelector('#remotePreview')!.addEventListener('click', () => void (async () => {
     const response = await call('preview'); previewRows.replaceChildren();
@@ -110,6 +176,6 @@ export function initRemoteHostsUi(api: AppApi): void {
   });
   onLanguageChange(() => { delete pending.dataset.signature; void refresh(); });
   const unsubscribe = api.onRemoteApprovalsChanged(() => { void refreshPending(); });
-  window.addEventListener('beforeunload', unsubscribe, { once: true });
+  window.addEventListener('beforeunload', () => { unsubscribe(); offCredentials(); offMasterKey(); }, { once: true });
   void refresh();
 }

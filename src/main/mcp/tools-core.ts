@@ -295,7 +295,45 @@ export function registerCoreTools(reg: SurfaceRegistrar, brainAudience: 'core' |
         return fail('Remote mode changed during approval');
       // The profile may have been removed or changed while the approval card was open.
       if (JSON.stringify(await remoteHostByName(name)) !== JSON.stringify(profile)) return fail('Remote host changed; request approval again');
-      return ok(await executeRemoteHost(profile, command));
+      try { return ok(await executeRemoteHost(profile, command)); }
+      catch (error) {
+        // Password bootstrap is permitted only after a separate exact-host approval.
+        // The password remains inside the main process and the PTY, never the model.
+        if (!(error instanceof Error) || !/server did not accept your SSH key|permission denied/i.test(error.message)) throw error;
+        if (!await requestRemoteApproval(caller.conversationId, address, 'Install master public key with Cofre K credential'))
+          return fail('SSH key installation was not approved');
+        const { installMasterKeyFromVault, installMasterKeyWithPassword, saveRemoteHostWithPassword } = await import('../remote/hosts.js');
+        const verified = await findSessionByConversation(caller.conversationId);
+        if (!verified || verified.id !== caller.sessionId ||
+            JSON.stringify(await remoteHostByName(name)) !== JSON.stringify(profile)) return fail('Remote host changed during key approval');
+        const selectedAfterApproval = await remoteProfileForChat(caller.sessionId);
+        if ((assigned?.id ?? null) !== (selectedAfterApproval?.id ?? null)) return fail('Remote mode changed during key approval');
+        const { masterPublicKey } = await import('../remote/hosts.js');
+        try { await masterPublicKey(); }
+        catch {
+          const { requestRemoteMasterKey } = await import('../remote/credential-prompt.js');
+          const keyApproval = await requestRemoteMasterKey(profile.name);
+          if (!keyApproval.confirmed) return fail('Master key setup was not approved');
+          const { prepareMasterKeyPair } = await import('../remote/master-key.js');
+          await prepareMasterKeyPair(keyApproval);
+        }
+        try { await installMasterKeyFromVault(profile); }
+        catch (error) {
+          // Only a missing vault entry leads to a password modal; a locked or
+          // damaged vault must fail closed, never request secrets repeatedly.
+          if (!(error instanceof Error) || error.message !== 'Secret not found') throw error;
+          const { requestRemoteCredential } = await import('../remote/credential-prompt.js');
+          const answer = await requestRemoteCredential(profile.id, profile.name);
+          if (!answer) return fail('SSH password prompt cancelled or unavailable');
+          const stillOwner = await findSessionByConversation(caller.conversationId);
+          const stillMode = await remoteProfileForChat(caller.sessionId);
+          if (!stillOwner || stillOwner.id !== caller.sessionId || (assigned?.id ?? null) !== (stillMode?.id ?? null))
+            return fail('Remote chat changed while requesting the SSH password');
+          await installMasterKeyWithPassword(profile, answer.password);
+          if (answer.remember) await saveRemoteHostWithPassword(profile, answer.password);
+        }
+        return ok(await executeRemoteHost(profile, command));
+      }
     } catch { return fail('Remote command failed. Check the saved host, trust and SSH key.'); }
   }));
   // Named from the live roots, never from a `/project` that may not exist: a worked example the

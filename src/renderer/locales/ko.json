@@ -4963,5 +4963,15 @@
   "CLIProxy Local routes already configured in CCR.": "CLIProxy Local 경로가 이미 CCR에 설정되어 있습니다.",
   "CLIProxy key is not configured yet.": "CLIProxy 키가 아직 설정되지 않았습니다.",
   "Local CLIProxy service is unavailable.": "로컬 CLIProxy 서비스를 사용할 수 없습니다.",
-  "CCR configuration could not be updated.": "CCR 설정을 업데이트할 수 없습니다."
+  "CCR configuration could not be updated.": "CCR 설정을 업데이트할 수 없습니다.",
+  "Install the master public key on this SSH host?": "Install the master public key on this SSH host?",
+  "Prepare or synchronize the master key for this user and root?": "Prepare or synchronize the master key for this user and root?",
+  "Create master key": "Create master key",
+  "Optional master key passphrase": "Optional master key passphrase",
+  "SSH password": "SSH password",
+  "Server password": "Server password",
+  "Save password in Cofre K": "Save password in Cofre K",
+  "SSH profile not found": "SSH profile not found",
+  "Invalid data directory": "Invalid data directory",
+  "Unsafe mirror folder": "Unsafe mirror folder"
 }

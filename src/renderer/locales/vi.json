@@ -4963,5 +4963,15 @@
   "CLIProxy Local routes already configured in CCR.": "Tuyen CLIProxy Local da duoc cau hinh trong CCR.",
   "CLIProxy key is not configured yet.": "Khoa CLIProxy chua duoc cau hinh.",
   "Local CLIProxy service is unavailable.": "Dich vu CLIProxy cuc bo khong kha dung.",
-  "CCR configuration could not be updated.": "Khong the cap nhat cau hinh CCR."
+  "CCR configuration could not be updated.": "Khong the cap nhat cau hinh CCR.",
+  "Install the master public key on this SSH host?": "Install the master public key on this SSH host?",
+  "Prepare or synchronize the master key for this user and root?": "Prepare or synchronize the master key for this user and root?",
+  "Create master key": "Create master key",
+  "Optional master key passphrase": "Optional master key passphrase",
+  "SSH password": "SSH password",
+  "Server password": "Server password",
+  "Save password in Cofre K": "Save password in Cofre K",
+  "SSH profile not found": "SSH profile not found",
+  "Invalid data directory": "Invalid data directory",
+  "Unsafe mirror folder": "Unsafe mirror folder"
 }

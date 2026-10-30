@@ -10,6 +10,8 @@ export interface AskField {
   value?: string;
   choices?: { value: string; label: string }[];
   placeholder?: string;
+  type?: 'text' | 'password' | 'checkbox';
+  optional?: boolean;
 }
 
 export function askFields(title: string, fields: AskField[], submit: string = t('OK')): Promise<string[] | null> {
@@ -35,13 +37,14 @@ export function askFields(title: string, fields: AskField[], submit: string = t(
         input = select;
       } else {
         const text = document.createElement('input');
-        text.type = 'text';
+        text.type = field.type ?? 'text';
         text.spellcheck = false;
-        text.value = field.value ?? '';
+        if (field.type === 'checkbox') text.checked = field.value === 'true';
+        else text.value = field.value ?? '';
         if (field.placeholder) text.placeholder = field.placeholder;
         input = text;
       }
-      input.required = true;
+      input.required = !field.optional && field.type !== 'checkbox';
       label.append(caption, input);
       form.append(label);
       return input;
@@ -64,8 +67,8 @@ export function askFields(title: string, fields: AskField[], submit: string = t(
     cancel.addEventListener('click', close);
     form.addEventListener('submit', event => {
       event.preventDefault();
-      const values = inputs.map(input => input.value.trim());
-      if (values.some(value => !value)) return;
+      const values = inputs.map(input => input instanceof HTMLInputElement && input.type === 'checkbox' ? String(input.checked) : input.value.trim());
+      if (values.some((value, index) => !fields[index]?.optional && fields[index]?.type !== 'checkbox' && !value)) return;
       answer = values;
       close();
     });

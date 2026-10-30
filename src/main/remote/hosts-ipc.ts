@@ -1,15 +1,26 @@
 import { BrowserWindow, dialog, ipcMain } from 'electron';
 import { z } from 'zod';
-import { listRemoteHosts, saveRemoteHost, deleteRemoteHost, previewRemoteTargets, remoteHostByName, executeRemoteHost, hostKeyCandidate, trustHostKeys, installMasterKeyWithPassword, unlockMasterKeyFromVault, type HostProfile } from './hosts.js';
+import { listRemoteHosts, saveRemoteHostWithPassword, installMasterKeyFromVault, deleteRemoteHost, previewRemoteTargets, remoteHostByName, executeRemoteHost, hostKeyCandidate, trustHostKeys, installMasterKeyWithPassword, unlockMasterKeyFromVault, type HostProfile } from './hosts.js';
 import { remoteApprovals, decideRemoteApproval, onRemoteApprovalsChanged } from './approval.js';
 import { addRemoteProject } from '../projects.js';
 import { importRemoteHosts } from './hosts.js';
 import { dialogLabel, mainText } from '../main-texts.js';
 import { remoteModeView, setChatRemoteMode } from './mode.js';
+import { prepareMasterKeyPair } from './master-key.js';
+import { onRemoteCredentialNeeded, answerRemoteCredential, onRemoteMasterKeyNeeded, answerRemoteMasterKey } from './credential-prompt.js';
 
 let preview: HostProfile[] | null = null;
 const fingerprints = new Map<string, { fingerprint: string; keys: string }>();
 export function registerRemoteHostsIpc(getWindow: () => BrowserWindow | null): void {
+  onRemoteCredentialNeeded(request => {
+    const window = getWindow();
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed())
+      window.webContents.send('remoteHosts:credential-needed', request);
+  });
+  onRemoteMasterKeyNeeded(request => {
+    const window = getWindow();
+    if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('remoteHosts:master-key-needed', request);
+  });
   onRemoteApprovalsChanged(() => {
     const window = getWindow();
     if (window && !window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('remoteHosts:pending-changed');
@@ -30,16 +41,35 @@ export function registerRemoteHostsIpc(getWindow: () => BrowserWindow | null): v
     const args = z.object({ sessionId: z.string().min(8).max(64).nullable(), projectId: z.string().uuid().nullable().optional() }).strict().parse(raw);
     return remoteModeView(args.sessionId, args.projectId);
   });
-  register('save', raw => saveRemoteHost(raw));
+  register('credentialAnswer', async raw => {
+    const response = z.object({ id: z.string().uuid(), password: z.string().max(4096).optional(), remember: z.boolean().optional(), cancel: z.boolean().optional() }).strict().parse(raw);
+    return answerRemoteCredential(response.id, response);
+  });
+  register('masterKeyAnswer', async raw => {
+    const answer = z.object({ id: z.string().uuid(), confirmed: z.boolean(), passphrase: z.string().max(1024).optional() }).strict().parse(raw);
+    return answerRemoteMasterKey(answer.id, answer);
+  });
+  register('save', async raw => {
+    const parsed = z.object({ name: z.string(), type: z.string(), host: z.string(), port: z.number(), user: z.string(), id: z.string().optional(), password: z.string().optional() }).strict().parse(raw);
+    const { password, ...profile } = parsed;
+    return saveRemoteHostWithPassword(profile, password);
+  });
   register('delete', async raw => { await deleteRemoteHost(z.object({ id: z.string().uuid() }).strict().parse(raw).id); });
   register('test', async raw => executeRemoteHost(await remoteHostByName(name.parse(raw).name), 'true'));
   register('install', async raw => {
-    const data = name.extend({ password: z.string().min(1).max(4096) }).strict().parse(raw);
+    const data = name.extend({ password: z.string().min(1).max(4096).optional(), remember: z.boolean().optional() }).strict().parse(raw);
     const host = await remoteHostByName(data.name);
-    await installMasterKeyWithPassword(host, data.password);
+    if (data.password) {
+      await installMasterKeyWithPassword(host, data.password);
+      if (data.remember) await saveRemoteHostWithPassword(host, data.password);
+    } else await installMasterKeyFromVault(host);
     return true;
   });
   register('unlock', async () => { await unlockMasterKeyFromVault(); return true; });
+  register('prepareKey', async raw => {
+    const args = z.object({ confirmed: z.literal(true), passphrase: z.string().max(1024).optional() }).strict().parse(raw);
+    return prepareMasterKeyPair(args);
+  });
   register('fingerprint', async raw => {
     const host = await remoteHostByName(name.parse(raw).name);
     const candidate = await hostKeyCandidate(host);

@@ -395,13 +395,23 @@ const api = {
     return () => ipcRenderer.removeListener('vault:pending-changed', wrapped);
   },
   remoteHosts: (action: string, payload?: unknown) => {
-    if (!['list', 'save', 'delete', 'test', 'install', 'unlock', 'fingerprint', 'trust', 'project', 'preview', 'import', 'pending', 'decide', 'mode', 'modeView'].includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown remote action' });
+    if (!['list', 'save', 'delete', 'test', 'install', 'unlock', 'prepareKey', 'credentialAnswer', 'masterKeyAnswer', 'fingerprint', 'trust', 'project', 'preview', 'import', 'pending', 'decide', 'mode', 'modeView'].includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown remote action' });
     return call<unknown>(`remoteHosts:${action}`, payload);
   },
   onRemoteApprovalsChanged: (listener: () => void): (() => void) => {
     const wrapped = (): void => listener();
     ipcRenderer.on('remoteHosts:pending-changed', wrapped);
     return () => ipcRenderer.removeListener('remoteHosts:pending-changed', wrapped);
+  },
+  onRemoteCredentialNeeded: (listener: (request: { id: string; profileId: string; profileName: string }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: { id: string; profileId: string; profileName: string }) => listener(request);
+    ipcRenderer.on('remoteHosts:credential-needed', handler);
+    return () => ipcRenderer.removeListener('remoteHosts:credential-needed', handler);
+  },
+  onRemoteMasterKeyNeeded: (listener: (request: { id: string; profileName: string }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: { id: string; profileName: string }) => listener(request);
+    ipcRenderer.on('remoteHosts:master-key-needed', handler);
+    return () => ipcRenderer.removeListener('remoteHosts:master-key-needed', handler);
   },
   /** Saves the Usage page as CSV through a save dialog; `divisor` is the page's token divisor. */
   exportUsage: (divisor: number) => call<{ saved: false } | { saved: true; name: string }>('usage:export', { divisor }),

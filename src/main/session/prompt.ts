@@ -10,6 +10,7 @@ import { selectedSkillInstructions, type SelectedSkill } from './skill-prompt.js
 import { listSkillLibrary } from '../skill-library.js';
 import { brainContextBlock } from '../brain/context.js';
 import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
+import { remoteModeInstructions } from '../remote/mode.js';
 import type { RoutedSkillSelection } from '../../shared/skill-routing.js';
 
 type PromptScope = { sessionId?: string | null; projectId?: string | null; autoSkills?: readonly RoutedSkillSelection[];
@@ -127,6 +128,8 @@ export function fitSessionPrompt(text: string, core: string, agents: ProjectInst
 /** Opening normal/worker messages only. Callers own first-message eligibility;
  * follow-ups, helpers, handoff requests and resumed bootstraps never call this. */
 export async function prepareSessionPrompt(text: string, scope: PromptScope = {}, budget = limits, authored = text): Promise<string> {
+  const remote = await remoteModeInstructions(scope.sessionId, scope.projectId);
+  if (remote && !text.includes('[CHAT REMOTE MODE]')) text = prependUserPrompt(text, remote);
   const folder = await promptFolder(scope);
   const skillScope = { projectPath: localProjectPath(folder) };
   // Automatic routing has already frozen its decision from the app's published Skill catalog at
@@ -136,7 +139,8 @@ export async function prepareSessionPrompt(text: string, scope: PromptScope = {}
   const core = [currentMarksSystemPrompt('chatgpt'), await currentCoreInstructions(library)].filter(Boolean).join('\n\n');
   const skills = await selectedSkillInstructions(authored, skillScope, library, scope.autoSkills);
   fitSessionPrompt(text, core, null, budget, [], scope.workingDirectory); // Only Core/task overflow is mandatory.
-  const agents = await projectInstructions(scope);
+  // Local mirrors are caches, not the working directory of a remote chat.
+  const agents = remote.includes('[CHAT REMOTE MODE]') ? null : await projectInstructions(scope);
   if ((await promptFolder(scope))?.real !== folder?.real) throw new Error('The selected project changed during Skill preparation');
   // Chat Marks: Brain context joins the opening's COS_CONTEXT only when the whole message still fits.
   const memory = scope.brainContext ? await brainContextBlock(authored) : '';

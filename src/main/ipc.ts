@@ -18,7 +18,7 @@ import { queueWorkerArchives, workerArchiveFinishDelayMs } from './worker-archiv
 import { registerDictationIpc } from './dictation.js';
 import { registerRemoteHostsIpc } from './remote/hosts-ipc.js';
 import { revokeRemoteChat } from './remote/approval.js';
-import { remoteModeInstructions } from './remote/mode.js';
+import { remoteModeInstructions, mentionedRemoteInstructions } from './remote/mode.js';
 import { syncRemoteProfileProject } from './remote/mirror.js';
 import { prependUserPrompt } from '../shared/user-prompt.js';
 import { registerJarvisAudioIpc } from './jarvis-audio.js';
@@ -1461,19 +1461,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // A folder on a server (#1469): the address and folder as typed; the server is asked once.
   handle('projects:addRemoteProfile', async payload => {
     const { profileId, folder } = z.object({ profileId: z.string().uuid(), folder: z.string().min(1).max(4096) }).strict().parse(payload);
-    const window = getWindow();
-    if (!window) throw new Error('No window');
-    const result = await dialog.showOpenDialog(window, { ...dialogLabel('Choose a project folder for ChatGPT'), properties: ['openDirectory', 'createDirectory'] });
-    if (result.canceled || !result.filePaths[0]) return null;
-    const local = result.filePaths[0];
-    try { await resolvePath(getConfig().roots, local); }
-    catch (error) {
-      if (!(error instanceof SandboxError)) throw error;
-      const state = await approveRoot(local);
-      push('state:changed', state);
-    }
-    const { addRemoteProfileProject } = await import('./projects.js');
-    const project = await addRemoteProfileProject(local, profileId, folder);
+    const { createRemoteProfileProject } = await import('./projects.js');
+    const project = await createRemoteProfileProject(app.getPath('userData'), profileId, folder);
     push('session:changed');
     return project;
   });
@@ -2734,7 +2723,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const baseText = mode === 'goal' && goalBackendFor('goal') === 'templates' && !entry.text.includes(GOAL_MARKER_INSTRUCTION)
         ? entry.text + GOAL_MARKER_INSTRUCTION : entry.text;
       const remote = !entry.finishOwner && entry.purpose !== 'decision'
-        ? await remoteModeInstructions(entry.sessionId, entry.projectId) : '';
+        ? (await remoteModeInstructions(entry.sessionId, entry.projectId)) || await mentionedRemoteInstructions(entry.text) : '';
       const text = remote ? prependUserPrompt(baseText, remote) : baseText;
       // Only the opening user input owns executor setup. Existing chats, queued
       // checkpoints and automatic continuations already have their instructions.
