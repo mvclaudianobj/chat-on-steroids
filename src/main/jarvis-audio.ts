@@ -14,6 +14,7 @@ import { jarvisMicrophoneConsented, setJarvisMicrophoneConsent } from './jarvis-
 import { markspanelAccessBlocked } from './markspanel-auth.js';
 import { jarvisVoiceConfigSchema, jarvisVoiceRoutingSchema } from '../shared/jarvis-voice.js';
 import { jarvisVoiceStatus, jarvisVoiceRouteStatus, speakJarvisVoice, storeJarvisVoiceKey, streamJarvisVoice, transcribeJarvisVoice } from './jarvis-voice.js';
+import { logInfo } from './logger.js';
 
 const audio = z.object({ action: z.literal('transcribe'), engine: z.enum(['cliproxy', 'local', 'provider']), model: z.string().max(128),
   language: z.string().max(35), mime: z.enum(['audio/webm', 'audio/ogg', 'audio/mp4']), bytes: z.instanceof(Uint8Array).refine(b => b.length > 0 && b.length <= 12_000_000),
@@ -24,6 +25,17 @@ const voiceKey = z.object({ action: z.literal('voice-key'), slot: z.enum(['prima
   value: z.string().trim().min(1).max(16384), password: z.string().min(1).max(1024) }).strict();
 const speak = z.object({ action: z.literal('speak'), voice: jarvisVoiceConfigSchema, text: z.string().min(1).max(4000), routing: jarvisVoiceRoutingSchema.optional(), groupId: z.string().uuid().optional() }).strict();
 const speakStream = z.object({ action: z.literal('speak-stream'), voice: jarvisVoiceConfigSchema, text: z.string().min(1).max(4000), requestId: z.string().uuid(), routing: jarvisVoiceRoutingSchema.optional(), groupId: z.string().uuid().optional() }).strict();
+const trace = z.object({ action: z.literal('trace'),
+  step: z.enum(['send', 'receipt', 'observed', 'gate', 'decision', 'speak-call', 'speak-result', 'wait', 'cancel', 'session-change', 'provider-status']),
+  reason: z.enum(['accepted', 'rejected', 'not-selected', 'not-eligible', 'not-confirmed', 'no-link', 'ambiguous-link', 'no-text', 'empty-sentences', 'tts-disabled', 'provider', 'system', 'unavailable', 'stream', 'audio', 'success', 'failed', 'aborted', 'stale', 'error', 'complete', 'partial']).optional(),
+  sessionId: z.string().min(8).max(64).regex(/^[a-zA-Z0-9-]+$/).optional(),
+  inputId: z.string().uuid().optional(),
+  messageId: z.string().min(1).max(180).regex(/^[a-zA-Z0-9:_-]+$/).optional(),
+  turnId: z.string().min(1).max(256).regex(/^[a-zA-Z0-9:_-]+$/).optional(),
+  enabled: z.boolean().optional(), tts: z.boolean().optional(), consented: z.boolean().optional(), target: z.boolean().optional(),
+  providerReady: z.boolean().optional(), providerSpeaks: z.boolean().optional(), systemSpeech: z.boolean().optional(), providerChecked: z.boolean().optional(),
+  engine: z.enum(['auto', 'provider', 'system']).optional()
+}).strict();
 const MAX_RESPONSE = 64_000;
 
 /** Only recognize an already provisioned whisper.cpp executable and model. */
@@ -117,6 +129,12 @@ export function registerJarvisAudioIpc(getWindow: () => BrowserWindow | null): v
       const target = getWindow();
       if (!target || target.isDestroyed() || target.webContents !== event.sender || event.senderFrame !== target.webContents.mainFrame) throw new Error('Window not authorized');
       if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out');
+      if (payload && typeof payload === 'object' && (payload as { action?: unknown }).action === 'trace') {
+        const { action: _action, ...data } = trace.parse(payload);
+        // Only fixed vocabulary, bounded opaque identities and booleans reach app.log.
+        logInfo(`jarvis: ${Object.entries(data).map(([key, value]) => `${key}=${value}`).join(' ')}`);
+        return { ok: true, data: null };
+      }
       if (payload && typeof payload === 'object' && (payload as { action?: unknown }).action === 'microphone-consent') {
         const command = z.object({ action: z.literal('microphone-consent'), enabled: z.boolean().optional() }).strict().parse(payload);
         return { ok: true, data: command.enabled === undefined ? jarvisMicrophoneConsented() : await setJarvisMicrophoneConsent(command.enabled) };

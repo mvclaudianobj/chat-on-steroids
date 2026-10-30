@@ -173,6 +173,8 @@ const api = {
     return () => ipcRenderer.removeListener('jarvis:speech-stream', wrapped);
   },
   jarvisSpeakCancel: () => call<null>('jarvis:audio', { action: 'speak-cancel' }),
+  /** No text or secrets may cross this diagnostics boundary. */
+  jarvisTrace: (entry: import('../shared/jarvis-trace.js').JarvisTrace) => call<null>('jarvis:audio', { action: 'trace', ...entry }),
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */
   startDictation: (language = '') => call<{ status: 'starting' }>('dictation:start', { language }),
   stopDictation: () => call<void>('dictation:stop'),

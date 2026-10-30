@@ -454,6 +454,19 @@ describe('Jarvis native ChatGPT bridge ownership', () => {
   const message = (turnId: string, text: string) => ({ kind: 'assistant_message', turnId, messageId: 'm-'+turnId,
     seq: 3, message: { text, truncated: false, chars: text.length }, final: false });
 
+  it('still calls provider TTS on a complete native voice reply while the credential status check is pending', async () => {
+    const f = await fixture({ selected: normal, deferredProviderStatus: true });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [input] = f.sendInput.mock.calls[0]!;
+    await f.nativeEvents([
+      { kind: 'user_message', messageId: 'pending-check-q', inputId: input.id, inputDelivery: 'confirmed', seq: 1 },
+      { kind: 'assistant_message', messageId: 'pending-check-a', turnId: 'pending-check-turn', seq: 2, final: true,
+        message: { text: 'Esta resposta final precisa chegar à voz.', chars: 40, truncated: false } },
+      { kind: 'turn_end', turnId: 'pending-check-turn', seq: 3, outcome: 'completed' }
+    ], { 'pending-check-turn': { origin: 2, time: 100, questionId: 'pending-check-q' } });
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Esta resposta final precisa chegar à voz.']);
+  });
+
   it('recovers a confirmed spoken question beyond the 80-event tail without guessing a response', async () => {
     const f = await fixture({ selected: normal, g4f: true, pagedSession: true });
     f.hold(); await f.flush(); f.release(); await f.flush();

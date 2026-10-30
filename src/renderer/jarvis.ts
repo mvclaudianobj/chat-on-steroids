@@ -17,6 +17,7 @@ import { onLanguageChange, t } from './i18n.js';
 import { JarvisSpeechQueue, JarvisStreamingSplitter, playEarcon, watchSilence } from './jarvis-speech.js';
 import { JarvisProgressiveAudio } from './jarvis-progressive.js';
 import { JarvisPlaybackMetrics } from './jarvis-playback-metrics.js';
+import type { JarvisTrace } from '../shared/jarvis-trace.js';
 
 const KEY = 'chat-marks.jarvis.settings.v1';
 type Engine = 'provider' | 'cliproxy' | 'local' | 'windows';
@@ -69,6 +70,9 @@ export interface JarvisChatActions {
 }
 type JarvisSelection = { id: string; conversationId: string | null; engine?: string; title?: string; model?: string };
 export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, actions?: JarvisChatActions): void {
+  const trace = (step: JarvisTrace['step'], fields: Omit<JarvisTrace, 'step'> = {}): void => {
+    void api.jarvisTrace?.({ step, ...fields }).catch(() => undefined);
+  };
   const find = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
   const maybe = <T extends HTMLElement>(id: string): T | null => document.getElementById(id) as T | null;
   const button = find<HTMLButtonElement>('jarvisTalk');
@@ -219,9 +223,18 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     : recorderAvailable && (mode === 'provider' ? jarvisVoiceSttReady(preferences.provider) && providerReachable()
       : mode === 'local' ? capability.local : capability.models.length > 0);
   const mode = (): Engine | null => modes().find(usable) ?? null;
+  // The credential-status request is advisory and can lag the already completed
+  // transcription. In auto mode an unresolved status must not silently discard a
+  // completed answer; the main process owns the definitive credential check.
   const providerSpeaks = (): boolean => jarvisVoiceTtsReady(preferences.provider) && typeof api.jarvisSpeak === 'function' &&
-    (preferences.ttsEngine === 'provider' || (preferences.ttsEngine === 'auto' && providerReachable()));
+    (preferences.ttsEngine === 'provider' || preferences.ttsEngine === 'auto');
   const speaks = (): boolean => preferences.tts && (providerSpeaks() || systemSpeech());
+  const traceGate = (reason: JarvisTrace['reason'], sessionId?: string, turnId?: string): void => {
+    trace('gate', { reason, sessionId, turnId, enabled: preferences.enabled, tts: preferences.tts,
+      consented, target: !!eligible(), engine: preferences.ttsEngine,
+      providerReady: jarvisVoiceTtsReady(preferences.provider), providerChecked: provider.checked,
+      providerSpeaks: providerSpeaks(), systemSpeech: systemSpeech() });
+  };
   const liveStreams = new Set<JarvisProgressiveAudio>();
   type RouteReply = { ok: true; data: { g4f1: boolean; g4f2: boolean; error: string | null } } | { ok: false; error: string };
   const routedApi = api as AppApi & {
@@ -291,6 +304,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
           // Start the HTTP request before the next sentence finishes: the player can begin
           // as soon as its first decodable frames arrive, without waiting for the whole MP3.
           if (api.jarvisSpeakStream && api.onJarvisSpeechStream) {
+            trace('speak-call', { reason: 'stream' });
             const requestId = crypto.randomUUID();
             const player = new JarvisProgressiveAudio(requestId, api.onJarvisSpeechStream);
             liveStreams.add(player);
@@ -300,15 +314,18 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
               provider: JarvisVoiceConfig, text: string, requestId: string, routing: JarvisVoiceRouting, groupId: string
             ) => ReturnType<NonNullable<typeof api.jarvisSpeakStream>>;
             void speakStream(preferences.provider, text, requestId, preferences.routing, groupId).then(reply => {
+              trace('speak-result', { reason: reply.ok ? 'success' : 'failed' });
               if (!reply.ok) player.fail(new Error(reply.error));
-            }).catch(error => player.fail(error));
+            }).catch(error => { trace('speak-result', { reason: 'error' }); player.fail(error); });
             return { kind: 'stream', player };
           }
           const groupId = speechGroup?.id ?? crypto.randomUUID();
+          trace('speak-call', { reason: 'audio' });
           const speak = api.jarvisSpeak as unknown as (
             provider: JarvisVoiceConfig, text: string, routing: JarvisVoiceRouting, groupId: string
           ) => ReturnType<typeof api.jarvisSpeak>;
           const reply = await speak(preferences.provider, text, preferences.routing, groupId);
+          trace('speak-result', { reason: reply.ok ? 'success' : 'failed' });
           if (reply.ok) {
             if (signal.aborted) return { kind: 'system', text: '' };
             return { kind: 'audio', url: URL.createObjectURL(new Blob([new Uint8Array(reply.data.bytes)], { type: reply.data.mime })) };
@@ -317,6 +334,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
           status.textContent = `${t('Provider speech failed; using the system voice.')} ${reply.error}`;
         } catch (error) { if (!systemSpeech()) throw error; }
       }
+      trace('decision', { reason: systemSpeech() ? 'system' : 'unavailable' });
       return { kind: 'system', text };
     },
     play: (item, signal) => new Promise<void>((resolve, reject) => {
@@ -735,7 +753,9 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       const chat = selected();
       if (chat?.conversationId && !isApiConversationId(chat.conversationId)) {
         const inputId = crypto.randomUUID();
+        trace('send', { reason: 'accepted', sessionId: target!, inputId });
         void api.sendInput({ id: inputId, sessionId: target, text, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null }).then(reply => {
+          trace('receipt', { reason: reply.ok ? 'accepted' : 'rejected', sessionId: target!, inputId });
           if (!currentSend()) return;
           if (!reply.ok || reply.data.id !== inputId || reply.data.sessionId !== target ||
               reply.data.state === 'failed' || reply.data.state === 'cancelled') {
@@ -746,6 +766,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
           nativeDeadline = setTimeout(() => {
             if (nativePending?.inputId !== inputId) return;
             nativePending = null;
+            trace('wait', { reason: 'not-confirmed', sessionId: target!, inputId });
             nativeDeadline = null;
             status.textContent = t('ChatGPT did not confirm the Jarvis message. Check this chat in the timeline.');
             if (phase === 'thinking') setPhase('idle');
@@ -873,10 +894,10 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         const typed = activeTypedWatch();
         const epoch = typedEpoch;
         if (!current && !pending && !typed) return;
-        if (!api.getSession) return;
+        if (!api.getSession) { trace('wait', { reason: 'unavailable', sessionId: (current ?? pending ?? typed)?.sessionId }); return; }
         const sessionId = (current ?? pending ?? typed)!.sessionId;
         const reply = await api.getSession(sessionId, { limit: 80 });
-        if (!reply.ok || answer !== current || nativePending !== pending) continue;
+        if (!reply.ok || answer !== current || nativePending !== pending) { trace('wait', { reason: 'stale', sessionId }); continue; }
         if (typed && (typed !== typedWatch || epoch !== typedEpoch)) continue;
         if (selected()?.id !== sessionId || !consented || !preferences.enabled) { cancel(); return; }
         let page = reply.data;
@@ -900,7 +921,8 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
           const submitted = page.events.filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
             event.kind === 'user_message').find(event => event.inputId === pending.inputId &&
             event.inputDelivery === 'confirmed' && (!!event.messageId || !!event.turnId));
-          if (!submitted) continue;
+          if (!submitted) { trace('wait', { reason: 'not-confirmed', sessionId, inputId: pending.inputId }); continue; }
+          trace('observed', { reason: 'accepted', sessionId, inputId: pending.inputId, messageId: submitted.messageId });
           // ChatGPT's native user-message turnId is not the response turnId. The recorder's
           // exact questionId -> response-turn relation is the only valid bridge between them.
           // The relation may arrive after the confirmed input: wait for the next session change.
@@ -911,7 +933,8 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
               .map(([id]) => responseTurnId(turns, id)))] : [];
           // No recorded relation or two independent responses: leave the input pending.
           const responseTurn = linked.length === 1 ? linked[0] : null;
-          if (!responseTurn) continue;
+          if (!responseTurn) { trace('wait', { reason: linked.length ? 'ambiguous-link' : 'no-link', sessionId, inputId: pending.inputId, messageId: submitted.messageId }); continue; }
+          trace('observed', { reason: 'accepted', sessionId, messageId: submitted.messageId, turnId: responseTurn });
           nativePending = null;
           clearNativeDeadline();
           current = { sessionId: pending.sessionId, turnId: responseTurn, splitter: new JarvisStreamingSplitter(), spoken: 0 };
@@ -928,6 +951,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
           else if (event.kind === 'turn_end') ended = true;
         }
         const text = [...messages.values()].map(event => event.message.text).join('\n\n');
+        traceGate(!preferences.tts ? 'tts-disabled' : providerSpeaks() ? 'provider' : systemSpeech() ? 'system' : 'unavailable', sessionId, current.turnId);
         if (speaks()) {
           const sentences = (ended ? current.splitter.finish(text) : current.splitter.push(text)).filter(sentence => {
             current.spoken += sentence.length;
@@ -935,7 +959,10 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
           });
           if (sentences.length) activateSpeechGroup(current.sessionId, current.turnId);
           if (sentences.length) playbackMetric?.queued(sentences.length + speech.queued);
+          trace('decision', { reason: sentences.length ? 'accepted' : text ? 'empty-sentences' : 'no-text', sessionId, turnId: current.turnId });
           speech.enqueue(sentences);
+        } else {
+          trace('decision', { reason: !preferences.tts ? 'tts-disabled' : 'unavailable', sessionId, turnId: current.turnId });
         }
         if (ended) {
           answer = null;
@@ -943,7 +970,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
           if (!speech.speaking && !speech.queued) turnComplete();
         }
       } while (readAgain);
-    } catch { /* the next session change retries */ }
+    } catch { trace('wait', { reason: 'error' }); /* the next session change retries */ }
     finally { reading = false; }
   }
   api.onSessionChanged(change => {
