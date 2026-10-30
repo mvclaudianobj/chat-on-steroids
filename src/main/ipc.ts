@@ -1898,6 +1898,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     await clipboard.writeText(text);
     return true;
   });
+  handle('clipboard:read', async (payload) => {
+    const { primary } = z.object({ primary: z.boolean().optional() }).parse(payload ?? {});
+    const read = clipboard.readText as (type?: string) => Promise<string>;
+    return (await read(primary && process.platform === 'linux' ? 'selection' : 'clipboard')).slice(0, 262_144);
+  });
   // A code block's Save: a bare `name.ext` suggestion only, so no renderer value can point outside the dialog's choice.
   handle('code:save', async (payload) => {
     const { text, name } = z.object({

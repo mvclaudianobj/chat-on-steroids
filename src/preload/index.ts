@@ -435,6 +435,7 @@ const api = {
   getLogText: () => call<string>('log:text'),
   getLogJson: () => call<string>('log:json'),
   writeClipboard: (text: string) => call<boolean>('clipboard:write', { text }),
+  readClipboard: (primary = false) => call<string>('clipboard:read', { primary }),
   // A code block's Save: main asks where, in a native dialog, and `name` is only its suggestion.
   saveCode: (request: { text: string; name: string }) => call<{ done: 'saved'; name: string } | { done: 'cancelled' }>('code:save', request),
   exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file' }) =>

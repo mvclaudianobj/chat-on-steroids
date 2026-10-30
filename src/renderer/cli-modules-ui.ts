@@ -661,7 +661,9 @@ export function createCliModulesUi(api: AppApi, hooks: {
       close: attachmentId => api.cliDetach(attachmentId),
       onEvent: listener => api.onCliEvent(listener)
     };
-    const manager = createWorkspaceTerminal(() => undefined, mount, { id: `cliTerminal-${session.id}`, onEmpty: () => undefined, transport, ...(onTabsChanged ? { onTabsChanged } : {}) });
+    const manager = createWorkspaceTerminal(() => undefined, mount, { id: `cliTerminal-${session.id}`, onEmpty: () => undefined, transport,
+      loginTerminal: (session.module === 'claude' || session.module === 'codex') && !!session.args?.includes('login'),
+      ...(onTabsChanged ? { onTabsChanged } : {}) });
     manager.update(session.projectId ? { id: session.projectId, name: session.title, path: '', createdAt: session.createdAt } : null);
     terminalManagers.set(session.id, manager);
     return manager;
