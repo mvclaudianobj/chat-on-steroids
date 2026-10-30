@@ -237,6 +237,10 @@ describe('Codex protocol (pure)', () => {
     expect(protocol.codexModelRow({ id: 'x', model: 'x', hidden: true })).toBeNull();
     expect(protocol.codexEffort('high', { efforts: ['low', 'medium'] })).toBeNull();
     expect(protocol.codexEffort('medium', { efforts: ['low', 'medium'] })).toBe('medium');
+    // "Default" sends the model's own default, never config.toml's value the model may reject (e.g. "none").
+    expect(protocol.codexEffort(null, { efforts: ['low', 'medium', 'high'], defaultEffort: 'low' })).toBe('low');
+    expect(protocol.codexEffort('high', { efforts: ['low', 'medium'], defaultEffort: 'medium' })).toBe('medium');
+    expect(protocol.codexEffort(null, { efforts: ['low'] })).toBeNull();
   });
 });
 

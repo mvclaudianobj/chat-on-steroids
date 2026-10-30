@@ -133,10 +133,14 @@ export function codexTurnStartParams(input: {
   };
 }
 
-/** The chat's effort when that model lists it; otherwise Codex keeps the model's default. */
-export function codexEffort(effort: ApiChatEffort | null, model: Pick<ApiChatModel, 'efforts'> | undefined): string | null {
-  if (!effort) return null;
-  return !model?.efforts || model.efforts.includes(effort) ? effort : null;
+/**
+ * The chat's effort when that model lists it; otherwise the model's own default. Sent explicitly, not
+ * left to Codex: config.toml's model_reasoning_effort may be one the model rejects (e.g. "none" with
+ * gpt-6.1-sol, written there by another tool), and the turn then fails with HTTP 400.
+ */
+export function codexEffort(effort: ApiChatEffort | null, model: Pick<ApiChatModel, 'efforts' | 'defaultEffort'> | undefined): string | null {
+  if (effort && (!model?.efforts || model.efforts.includes(effort))) return effort;
+  return model?.defaultEffort && (!model.efforts?.length || model.efforts.includes(model.defaultEffort)) ? model.defaultEffort : null;
 }
 
 interface CodexModel { id?: unknown; model?: unknown; displayName?: unknown; hidden?: unknown; isDefault?: unknown; supportedReasoningEfforts?: unknown; defaultReasoningEffort?: unknown }
