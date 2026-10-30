@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { acknowledgeLocalReports, offerMessagesForCaller, persistCriticalSwarmNow, requestWorkerBootstraps,
+import { acknowledgeLocalReports, offerMessagesForCaller, ownedWorkerFleet, persistCriticalSwarmNow, requestWorkerBootstraps,
   requestWorkerRevivals, stageMessages, statusForCaller, type Caller } from './agents.js';
 import { acceptAgentMutation, measureSleepingWorkers, spawnAgentWorkers } from './agent-admission.js';
 import { effectiveCapabilities, getConfig } from './config.js';
@@ -8,9 +8,11 @@ import { projectWorkspace } from './projects.js';
 import { redactSecretText } from './redaction.js';
 import { findSessionByConversation } from './session/store.js';
 import { approvalCardWaiting } from './approval-wait.js';
+import { archiveAllOwnedWorkers } from './worker-cleanup.js';
 
 const uuid = z.string().uuid().refine(value => value === value.toLowerCase());
-const routePattern = /^\/v1\/workers\/([0-9a-f-]{36})(?:\/(spawn|message|reports|ack))?$/;
+const routePattern = /^\/v1\/workers\/([0-9a-f-]{36})(?:\/(spawn|message|reports|ack|archive-all))?$/;
+const ownerArchiveRoute = /^\/v1\/workers\/([0-9a-z-]{8,64})\/archive-all$/;
 const run = { runId: uuid.optional() };
 const spawnBody = z.object({ ...run, projectId: uuid.optional(), context: z.string().max(4000).optional(),
   workers: z.array(z.object({ label: z.string().trim().min(1).max(60).optional(), task: z.string().trim().min(1).max(4000) }).strict()).min(1).max(8) }).strict();
@@ -75,6 +77,26 @@ export async function serveWorkerRead(route: string, params: URLSearchParams): P
 }
 
 export async function serveWorkerAction(method: string, route: string, raw: unknown, authorize: () => void) {
+  const archiveOwner = method === 'POST' ? ownerArchiveRoute.exec(route) : null;
+  if (archiveOwner) {
+    authorize();
+    if (!getConfig().controlApi.enabled || !getConfig().controlApi.allowActions)
+      throw new RequestError(403, 'actions_disabled');
+    parse(z.object({}).strict(), raw ?? {});
+    const id = archiveOwner[1]!;
+    const profile = getConfig().tunnel.profileId ?? 'default';
+    const fromChat = { conversationId: id };
+    const fromLocal = uuid.safeParse(id).success ? { localOwnerId: id, setupProfileId: profile } : null;
+    const chatCount = ownedWorkerFleet(fromChat).length;
+    const localCount = fromLocal ? ownedWorkerFleet(fromLocal).length : 0;
+    if (chatCount && localCount) throw new RequestError(409, 'ambiguous_owner');
+    const owner = chatCount ? fromChat : fromLocal ?? fromChat;
+    const report = await archiveAllOwnedWorkers(owner);
+    authorize();
+    if (!getConfig().controlApi.enabled || !getConfig().controlApi.allowActions)
+      throw new RequestError(403, 'actions_disabled');
+    return { status: report.pending.length ? 207 : 200, body: report };
+  }
   const selected = callerFor(route);
   if (method !== 'POST' || !selected || !['spawn', 'message', 'ack'].includes(selected.action ?? '')) return undefined;
   enabled();

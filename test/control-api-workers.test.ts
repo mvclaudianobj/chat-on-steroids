@@ -49,6 +49,7 @@ beforeEach(async () => {
   await config.saveConfig({ ...current, controlApi: { enabled: true, allowActions: true },
     multiAgent: { ...current.multiAgent, enabled: true, allowUnattributedCalls: false, autoWorktrees: false } });
   broker.onSwarmPersistNow(snapshot => durable.writeDurableNow('swarm', snapshot));
+  broker.onRetiredWorkersPersistNow(snapshot => durable.writeDurableNow('retired-workers', snapshot));
   await api.startControlApi();
 });
 
@@ -72,7 +73,7 @@ async function request(route: string, body?: unknown) {
   return { status: response.status, body: await response.json() as any };
 }
 
-function worker(action: 'spawn' | 'status' | 'reports' | 'message' | 'ack', data: any) {
+function worker(action: 'spawn' | 'status' | 'reports' | 'message' | 'ack' | 'archive-all', data: any) {
   const { ownerId, ...body } = data;
   const route = '/v1/workers/' + ownerId + (action === 'status' ? '' : '/' + action);
   return action === 'status' || action === 'reports'
@@ -175,6 +176,17 @@ it('lets a local orchestrator spawn real broker workers without a ChatGPT prime 
   expect(status.body.workers).toMatchObject([{ id: 'worker-1', state: 'invited' }]);
   expect(status.body.freeWorkerSlots).toBe(config.getConfig().multiAgent.maxWorkers - 1);
   expect(broker.primeConversation(result.body.runId)).toBeNull();
+});
+
+it('archives all exact local-owner worker slots without retiring another local owner', async () => {
+  const separate = '22222222-2222-4222-8222-222222222222';
+  expect((await worker('spawn', { ownerId, workers: [{ task: 'one' }, { task: 'two' }] })).status).toBe(202);
+  expect((await worker('spawn', { ownerId: separate, workers: [{ task: 'foreign' }] })).status).toBe(202);
+  const cleared = await worker('archive-all', { ownerId });
+  expect(cleared.status, JSON.stringify(cleared.body)).toBe(207);
+  expect(cleared.body).toMatchObject({ workers: 2, retired: 2, archived: 0 });
+  expect((await worker('status', { ownerId })).body.workers.map((row: { state: string }) => row.state)).toEqual(['finished', 'finished']);
+  expect((await worker('status', { ownerId: separate })).body.workers[0].state).toBe('invited');
 });
 
 it('collects exact worker reports across parking, explicitly acknowledges them, and reuses the sleeper', async () => {

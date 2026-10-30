@@ -52,6 +52,15 @@ it('queues nothing while the setting is off', async () => {
   expect(nextArchive(1_000)).toBeNull();
 });
 
+it('an explicit owner archive bypasses the automatic preference and survives a queue reload', async () => {
+  await archiving(false);
+  queueWorkerArchives([A], 1_000, 0, true);
+  await workerArchiveWritten();
+  resetWorkerArchiveForTests();
+  await loadWorkerArchive();
+  expect(nextArchive(1_000)).toBe(A);
+});
+
 it('uses the configured finish delay and rechecks it for new work without losing old queued jobs', async () => {
   const base = defaultConfig();
   expect(workerArchiveFinishDelayMs()).toBe(2 * 60_000);

@@ -41,6 +41,7 @@ type Entry = {
   leased: boolean;
   /** Archive again once this unarchive has finished: the run ended meanwhile. */
   rearchive: boolean;
+  explicit?: boolean;
 };
 
 /** One browser pass owns an entry for this long before another may try it. */
@@ -106,7 +107,7 @@ export async function loadWorkerArchive(): Promise<void> {
       // A lease never outlives the process that took it. Version 1 files only held archives.
       entries.set(id, {
         conversationId: id, archive: value.archive !== false, queuedAt: count(value.queuedAt), dueAt: count(value.dueAt),
-        attempts: count(value.attempts), notBefore: 0, leased: false, rearchive: value.rearchive === true
+        attempts: count(value.attempts), notBefore: 0, leased: false, rearchive: value.rearchive === true, explicit: value.explicit === true
       });
     }
     for (const raw of Array.isArray(parsed.archived) ? parsed.archived : []) {
@@ -157,14 +158,20 @@ function rememberArchived(id: string, now: number): void {
  * (with `delayMs`) one whose worker just reported its task done. The delay lets that worker's
  * last answer finish, and lets a wake that follows at once simply drop the entry.
  */
-export function queueWorkerArchives(conversationIds: readonly string[], now = Date.now(), delayMs = 0): void {
-  if (!enabled()) return;
+export function queueWorkerArchives(conversationIds: readonly string[], now = Date.now(), delayMs = 0, explicit = false): void {
+  if (!explicit && !enabled()) return;
   let added = 0;
   let changed = false;
   for (const value of conversationIds) {
     const id = cleanId(value);
     if (!id) continue;
     const entry = entries.get(id);
+    if (entry?.archive && explicit && !entry.explicit) {
+      entry.explicit = true;
+      entry.dueAt = Math.min(entry.dueAt, now);
+      entry.notBefore = 0;
+      changed = true;
+    }
     if (entry && !entry.archive) {
       // A wake is restoring this chat, and now its run is over after all.
       if (entry.leased) entry.rearchive = true;
@@ -178,7 +185,7 @@ export function queueWorkerArchives(conversationIds: readonly string[], now = Da
     }
     if (entry || archived.has(id) || entries.size >= MAX_ENTRIES) continue;
     entries.set(id, {
-      conversationId: id, archive: true, queuedAt: now, dueAt: now + delayMs, attempts: 0, notBefore: 0, leased: false, rearchive: false
+      conversationId: id, archive: true, queuedAt: now, dueAt: now + delayMs, attempts: 0, notBefore: 0, leased: false, rearchive: false, explicit
     });
     added += 1;
   }
@@ -255,7 +262,7 @@ export function nextWorkerArchive(now = Date.now()): WorkerArchiveJob | null {
       dropped = true;
       continue;
     }
-    if (entry.notBefore > now || entry.dueAt > now || (entry.archive && !enabled())) continue;
+    if (entry.notBefore > now || entry.dueAt > now || (entry.archive && !enabled() && !entry.explicit)) continue;
     if (!entry.archive) { next = entry; break; }
     next ??= entry;
   }

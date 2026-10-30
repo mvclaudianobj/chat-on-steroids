@@ -30,7 +30,7 @@ export const CONTROL_API_ROUTES = [
  */
 export const CONTROL_API_ACTION_ROUTES = ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel',
   'POST /v1/workers/{ownerId}/spawn', 'POST /v1/workers/{ownerId}/message', 'POST /v1/workers/{ownerId}/ack',
-  'POST /v1/sessions/{id}/stop'] as const;
+  'POST /v1/workers/{ownerId}/archive-all', 'POST /v1/sessions/{id}/stop', 'POST /v1/sessions/{id}/archive'] as const;
 
 /** Written to `userData/control-api/endpoint.json` while the listener is up. */
 export interface ControlApiEndpoint {

@@ -4639,5 +4639,10 @@
   "Direct account not signed in": "直接アカウント未ログイン",
   "Account status unavailable": "アカウント状態不明",
   "Sign in again": "再ログイン",
-  "Sign out of the direct CLI account?": "直接 CLI アカウントからログアウトしますか？"
+  "Sign out of the direct CLI account?": "直接 CLI アカウントからログアウトしますか？",
+  "End and archive all workers": "すべてのワーカーを終了してアーカイブ",
+  "End only this chat’s workers, preserving their conversations, reports and worktrees": "このチャットのワーカーのみ終了し、会話、レポート、ワークツリーを保持します",
+  "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "このチャットのすべてのワーカーを終了してアーカイブしますか？ターンを停止しますが、履歴、レポート、ワークツリーは保持します。",
+  "{0} workers archived; {1} pending. No history or checkout was deleted.": "{0} 件のワーカーをアーカイブ、{1} 件が保留中。履歴やワークツリーは削除していません。",
+  "Owner session not found": "所有元のセッションが見つかりません"
 }

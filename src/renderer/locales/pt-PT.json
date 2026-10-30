@@ -4773,5 +4773,10 @@
   "Direct account not signed in": "Conta direta sem sessão",
   "Account status unavailable": "Estado da conta indisponível",
   "Sign in again": "Entrar novamente",
-  "Sign out of the direct CLI account?": "Sair da conta direta da CLI?"
+  "Sign out of the direct CLI account?": "Sair da conta direta da CLI?",
+  "End and archive all workers": "Terminar e arquivar todos os workers",
+  "End only this chat’s workers, preserving their conversations, reports and worktrees": "Termina apenas os workers deste chat, preservando as conversas, relatórios e worktrees",
+  "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "Terminar e arquivar todos os workers deste chat? Os turnos serão interrompidos; os históricos, relatórios e worktrees serão preservados.",
+  "{0} workers archived; {1} pending. No history or checkout was deleted.": "{0} workers arquivados; {1} pendentes. Nenhum histórico ou checkout foi eliminado.",
+  "Owner session not found": "Sessão proprietária não encontrada"
 }

@@ -4706,5 +4706,10 @@
   "Direct account not signed in": "Direktes Konto abgemeldet",
   "Account status unavailable": "Kontostatus nicht verfügbar",
   "Sign in again": "Erneut anmelden",
-  "Sign out of the direct CLI account?": "Vom direkten CLI-Konto abmelden?"
+  "Sign out of the direct CLI account?": "Vom direkten CLI-Konto abmelden?",
+  "End and archive all workers": "Alle Worker beenden und archivieren",
+  "End only this chat’s workers, preserving their conversations, reports and worktrees": "Beendet nur die Worker dieses Chats und erhält Gespräche, Berichte und Worktrees",
+  "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "Alle Worker dieses Chats beenden und archivieren? Ihre Durchläufe werden gestoppt; Verläufe, Berichte und Worktrees bleiben erhalten.",
+  "{0} workers archived; {1} pending. No history or checkout was deleted.": "{0} Worker archiviert; {1} ausstehend. Keine Verläufe oder Worktrees wurden gelöscht.",
+  "Owner session not found": "Besitzende Sitzung nicht gefunden"
 }

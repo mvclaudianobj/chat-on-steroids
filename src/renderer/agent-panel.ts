@@ -53,6 +53,7 @@ export function createAgentPanel(options: {
   /** A worker's tool calls for its Activity view (#105); without it a worker opens on its conversation. */
   loadActivity?: (id: string) => Promise<SessionEvent[] | null>;
   openMain: (id: string) => void;
+  archiveAll?: (ownerSessionId: string) => void;
   /** The same exact-session approval control used by the chat and global notice. */
   approvalPanel?: (sessionId: string) => HTMLElement;
   working: (summary: SessionSummary) => boolean;
@@ -126,6 +127,13 @@ export function createAgentPanel(options: {
   }
   function list(): void {
     generation++; selected = null; head.hidden = true; body.replaceChildren();
+    if (parent && workers.length && options.archiveAll) {
+      const archive = el('button', 'btn', () => t('End and archive all workers')) as HTMLButtonElement;
+      archive.type = 'button';
+      archive.dataset.archiveAllWorkers = parent;
+      archive.onclick = () => { if (parent) options.archiveAll?.(parent); };
+      body.append(archive);
+    }
     const isActive = (worker: SessionSummary): boolean => {
       const state = options.agent?.(worker)?.state;
       return state ? ['invited', 'active', 'detached', 'waking'].includes(state) : options.working(worker);
