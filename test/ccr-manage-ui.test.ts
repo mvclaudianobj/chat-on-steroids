@@ -51,6 +51,19 @@ it('a fresh machine: not installed, one confirmed Install of the npm release, no
   expect(String((dom.window.confirm as ReturnType<typeof vi.fn>).mock.calls[0]![0])).toContain('the npm registry');
 });
 
+it('shows the automatic CLIProxy configuration outcome without exposing any key', async () => {
+  const { card, set } = mount(status({ autoConfig: 'configured' }));
+  await card.refresh();
+  expect($('ccrAutoConfig').textContent).toContain('backup saved');
+  expect($('ccrModule').textContent).not.toContain('synthetic-secret');
+  set(status({ autoConfig: 'unchanged' }));
+  await card.refresh();
+  expect($('ccrAutoConfig').textContent).toContain('already configured');
+  set(status({ autoConfig: 'key_missing' }));
+  await card.refresh();
+  expect($('ccrAutoConfig').textContent).toContain('key is not configured');
+});
+
 it('a copy the user installed: "Using installed", update in place only when writable, and its own managed copy offered', async () => {
   const external = { kind: 'external' as const, version: '3.1.2', path: '~/.local/lib/node_modules/@musistudio/claude-code-router/dist/main/cli.js', writable: true };
   const { api, card, set } = mount(status({

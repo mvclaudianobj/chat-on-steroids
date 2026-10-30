@@ -4677,5 +4677,10 @@
   "Owner session not found": "找不到所屬工作階段",
   "Copy URL": "複製 URL",
   "Paste code": "貼上代碼",
-  "Authentication code": "驗證代碼"
+  "Authentication code": "驗證代碼",
+  "CLIProxy Local routes configured in CCR (backup saved).": "已在 CCR 設定 CLIProxy Local 路由（已儲存備份）。",
+  "CLIProxy Local routes already configured in CCR.": "CCR 中已設定 CLIProxy Local 路由。",
+  "CLIProxy key is not configured yet.": "尚未設定 CLIProxy 金鑰。",
+  "Local CLIProxy service is unavailable.": "本機 CLIProxy 服務無法使用。",
+  "CCR configuration could not be updated.": "無法更新 CCR 設定。"
 }

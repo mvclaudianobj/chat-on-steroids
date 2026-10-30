@@ -53,7 +53,9 @@ export type CcrInstallMode = 'install' | 'update' | 'update-external';
 export type CcrServiceAction = 'start' | 'stop' | 'restart';
 
 export interface CcrStatus {
-  /** Start an installed router on launch; enabled by migration when routed chats already exist. */
+  /** Non-secret outcome of checking the local CLIProxy provider; never includes configuration or keys. */
+  autoConfig?: 'configured' | 'unchanged' | 'proxy_unavailable' | 'key_missing' | 'config_unavailable';
+  /** Start an installed router on launch; disabled until the user opts in. */
   autoStart?: boolean;
   managed: CcrInstallation | null;
   external: CcrInstallation | null;

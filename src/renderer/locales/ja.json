@@ -4677,5 +4677,10 @@
   "Owner session not found": "所有元のセッションが見つかりません",
   "Copy URL": "URL をコピー",
   "Paste code": "コードを貼り付け",
-  "Authentication code": "認証コード"
+  "Authentication code": "認証コード",
+  "CLIProxy Local routes configured in CCR (backup saved).": "CCR に CLIProxy Local のルートを設定しました（バックアップ保存済み）。",
+  "CLIProxy Local routes already configured in CCR.": "CLIProxy Local のルートは CCR に設定済みです。",
+  "CLIProxy key is not configured yet.": "CLIProxy キーはまだ設定されていません。",
+  "Local CLIProxy service is unavailable.": "ローカル CLIProxy サービスを利用できません。",
+  "CCR configuration could not be updated.": "CCR の設定を更新できませんでした。"
 }

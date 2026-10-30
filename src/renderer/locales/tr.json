@@ -4744,5 +4744,10 @@
   "Owner session not found": "Sahip oturumu bulunamadı",
   "Copy URL": "URL'yi kopyala",
   "Paste code": "Kodu yapıştır",
-  "Authentication code": "Kimlik doğrulama kodu"
+  "Authentication code": "Kimlik doğrulama kodu",
+  "CLIProxy Local routes configured in CCR (backup saved).": "CLIProxy Local rotalari CCR icinde ayarlandi (yedek kaydedildi).",
+  "CLIProxy Local routes already configured in CCR.": "CLIProxy Local rotalari CCR icinde zaten ayarli.",
+  "CLIProxy key is not configured yet.": "CLIProxy anahtari henuz ayarlanmadi.",
+  "Local CLIProxy service is unavailable.": "Yerel CLIProxy hizmetine ulasilamiyor.",
+  "CCR configuration could not be updated.": "CCR yapilandirmasi guncellenemedi."
 }

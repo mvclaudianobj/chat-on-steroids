@@ -244,14 +244,35 @@ describe('Claude Code Router status', () => {
 
   it('opens only a loopback web UI of a live daemon, and never hands its address to the renderer', async () => {
     let opened: string | null = null;
-    useHost({ openExternal: async url => { opened = url; } });
+    let healthy = false;
+    let issues = 0;
+    const runner = fakeRun();
+    const upstream = registry({ health: () => healthy }).fetchImpl;
+    useHost({ openExternal: async url => { opened = url; }, fetchImpl: (async (input, options) => {
+      if (String(input).endsWith('/api/ccr/rpc')) return new Response(JSON.stringify({ ok: true, value: { name: 'Claude Code Router' } }), { status: 200 });
+      return upstream(input, options);
+    }) as typeof fetch }, async (file, args) => {
+      if (args[1] === 'start') healthy = true;
+      if (args[1] === 'ui') { runs.push({ file, args }); return { stdout: `CCR UI http://127.0.0.1:3458/?ccr_web_token=fresh-${++issues}\n`, stderr: '' }; }
+      return runner(file, args);
+    });
     await expect(service.ccrOpenUi()).rejects.toThrow('ui_unavailable');
+    await service.ccrInstall('install', '3.1.3');
+    await service.ccrService('start');
     await writeTree(home, { '.claude-code-router/service.json': JSON.stringify({ pid: process.pid, url: 'http://127.0.0.1:3458/?ccr_web_token=synthetic', serviceToken: 'synthetic' }) });
     await service.ccrOpenUi();
-    expect(opened).toBe('http://127.0.0.1:3458/?ccr_web_token=synthetic');
+    expect(opened).toBe('http://127.0.0.1:3458/?ccr_web_token=fresh-1');
+    await service.ccrOpenUi();
+    expect(opened).toBe('http://127.0.0.1:3458/?ccr_web_token=fresh-2');
+    expect(runs.filter(call => call.args[1] === 'ui').map(call => call.args.slice(1))).toEqual([['ui', '--no-open'], ['ui', '--no-open']]);
     const status = await service.ccrStatus();
     expect(status.service.ui).toBe(true);
     expect(JSON.stringify(status)).not.toContain('synthetic');
+    expect(JSON.stringify(status)).not.toContain('fresh-');
+    expect(await service.ccrUiTokenValid('http://127.0.0.1:3458/?ccr_web_token=stale', async () => new Response('unauthorized', { status: 401 }))).toBe(false);
+    for (const text of ['https://127.0.0.1:3458/?ccr_web_token=bad', 'http://example.com:3458/?ccr_web_token=bad', 'http://127.0.0.1:3458/']) {
+      expect(service.ccrFreshUiUrl(text)).toBeNull();
+    }
     await writeTree(home, { '.claude-code-router/service.json': JSON.stringify({ pid: process.pid, url: 'http://example.com:3458/?ccr_web_token=synthetic' }) });
     expect(await service.webUiUrl()).toBeNull();
     await writeTree(home, { '.claude-code-router/service.json': JSON.stringify({ pid: 2 ** 22 + 12345, url: 'http://127.0.0.1:3458/' }) });

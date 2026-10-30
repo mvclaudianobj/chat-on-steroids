@@ -4677,5 +4677,10 @@
   "Owner session not found": "未找到所属会话",
   "Copy URL": "复制 URL",
   "Paste code": "粘贴代码",
-  "Authentication code": "认证代码"
+  "Authentication code": "认证代码",
+  "CLIProxy Local routes configured in CCR (backup saved).": "已在 CCR 配置 CLIProxy Local 路由（已保存备份）。",
+  "CLIProxy Local routes already configured in CCR.": "CCR 中已配置 CLIProxy Local 路由。",
+  "CLIProxy key is not configured yet.": "尚未配置 CLIProxy 密钥。",
+  "Local CLIProxy service is unavailable.": "本地 CLIProxy 服务不可用。",
+  "CCR configuration could not be updated.": "无法更新 CCR 配置。"
 }

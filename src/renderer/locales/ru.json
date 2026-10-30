@@ -4878,5 +4878,10 @@
   "Owner session not found": "Сеанс владельца не найден",
   "Copy URL": "Копировать URL",
   "Paste code": "Вставить код",
-  "Authentication code": "Код аутентификации"
+  "Authentication code": "Код аутентификации",
+  "CLIProxy Local routes configured in CCR (backup saved).": "Маршруты CLIProxy Local настроены в CCR (резервная копия сохранена).",
+  "CLIProxy Local routes already configured in CCR.": "Маршруты CLIProxy Local уже настроены в CCR.",
+  "CLIProxy key is not configured yet.": "Ключ CLIProxy еще не настроен.",
+  "Local CLIProxy service is unavailable.": "Локальная служба CLIProxy недоступна.",
+  "CCR configuration could not be updated.": "Не удалось обновить конфигурацию CCR."
 }

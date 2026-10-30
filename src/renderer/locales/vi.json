@@ -4677,5 +4677,10 @@
   "Owner session not found": "Không tìm thấy phiên chủ sở hữu",
   "Copy URL": "Sao chép URL",
   "Paste code": "Dán mã",
-  "Authentication code": "Mã xác thực"
+  "Authentication code": "Mã xác thực",
+  "CLIProxy Local routes configured in CCR (backup saved).": "Da cau hinh tuyen CLIProxy Local trong CCR (da luu ban sao).",
+  "CLIProxy Local routes already configured in CCR.": "Tuyen CLIProxy Local da duoc cau hinh trong CCR.",
+  "CLIProxy key is not configured yet.": "Khoa CLIProxy chua duoc cau hinh.",
+  "Local CLIProxy service is unavailable.": "Dich vu CLIProxy cuc bo khong kha dung.",
+  "CCR configuration could not be updated.": "Khong the cap nhat cau hinh CCR."
 }

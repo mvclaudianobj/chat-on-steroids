@@ -4811,5 +4811,10 @@
   "Owner session not found": "Session propriétaire introuvable",
   "Copy URL": "Copier l’URL",
   "Paste code": "Coller le code",
-  "Authentication code": "Code d’authentification"
+  "Authentication code": "Code d’authentification",
+  "CLIProxy Local routes configured in CCR (backup saved).": "Routes CLIProxy Local configurees dans CCR (sauvegarde enregistree).",
+  "CLIProxy Local routes already configured in CCR.": "Les routes CLIProxy Local sont deja configurees dans CCR.",
+  "CLIProxy key is not configured yet.": "La cle CLIProxy nest pas encore configuree.",
+  "Local CLIProxy service is unavailable.": "Le service local CLIProxy est indisponible.",
+  "CCR configuration could not be updated.": "Impossible de mettre a jour la configuration CCR."
 }
