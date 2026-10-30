@@ -4870,5 +4870,10 @@
   "SSH profile no longer exists": "SSH-профиль больше не существует",
   "Choose a local project folder": "Выберите локальную папку проекта",
   "This folder already belongs to another project": "Эта папка уже относится к другому проекту",
-  "This mirror belongs to another remote profile or folder": "Это зеркало относится к другому удаленному профилю или папке"
+  "This mirror belongs to another remote profile or folder": "Это зеркало относится к другому удаленному профилю или папке",
+  "End and archive all workers": "Завершить и архивировать всех воркеров",
+  "End only this chat’s workers, preserving their conversations, reports and worktrees": "Завершает только воркеров этого чата, сохраняя беседы, отчёты и рабочие деревья",
+  "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "Завершить и архивировать всех воркеров этого чата? Их ходы будут остановлены, а история, отчёты и рабочие деревья сохранятся.",
+  "{0} workers archived; {1} pending. No history or checkout was deleted.": "Архивировано воркеров: {0}; ожидают: {1}. История и рабочие деревья не удалены.",
+  "Owner session not found": "Сеанс владельца не найден"
 }

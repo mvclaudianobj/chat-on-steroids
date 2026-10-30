@@ -1318,6 +1318,12 @@ function sessionRow(summary: SessionSummary): HTMLElement {
     title: () => summary.archivedAt ? t('Restore chat to the main list') : t('Move chat to Archived without deleting its history'),
     run: () => void changeArchiveStatus(summary.id, !summary.archivedAt)
   });
+  if (summary.origin?.kind !== 'worker' && summary.conversationId) items.push({
+    action: 'archive-workers', icon: 'i-folder',
+    label: () => t('End and archive all workers'),
+    title: () => t('End only this chat’s workers, preserving their conversations, reports and worktrees'),
+    run: () => void archiveWorkersOf(summary.id)
+  });
   if (isUnattributedSession(summary)) {
     // Strict mode cannot trust an unattributed stream by definition. Do not offer an "Allow"
     // that the kernel will intentionally ignore; the Settings checkbox explains that
@@ -1760,6 +1766,20 @@ async function changeArchiveStatus(id: string, archived: boolean): Promise<void>
   if (archived) toast(t('Chat archived'));
   else toast(t('Chat restored'));
   await Promise.all([loadSessions('changed'), loadArchivedSessions()]);
+}
+
+async function archiveWorkersOf(sessionId: string): Promise<void> {
+  if (!window.confirm(t('End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.'))) return;
+  const report = await run(api.archiveAllWorkers(sessionId));
+  if (!report) return;
+  toast(t('{0} workers archived; {1} pending. No history or checkout was deleted.', [report.archived, report.pending.length]));
+  void refreshAll();
+}
+
+function selectedWorkerArchiveOwnerId(): string | null {
+  const row = sessions.find(session => session.id === selectedId);
+  if (!row) return null;
+  return row.origin?.kind === 'worker' ? row.origin.fromSessionId ?? null : row.id;
 }
 
 async function loadArchivedSessions(append = false): Promise<void> {
@@ -8052,6 +8072,7 @@ function paintSwarm(state: SwarmState): void {
   // Gating on `running` left finished-but-present swarm state with no way out, which is
   // exactly the state a user wants to clear before starting the next run.
   $<HTMLButtonElement>('swarmReset').disabled = state.agents.length === 0 && state.retainedHistory !== true;
+  $<HTMLButtonElement>('swarmArchiveAll').disabled = !selectedWorkerArchiveOwnerId();
 }
 
 /** A presentation of already verified cleanup offers; no marker or filesystem discovery here. */
@@ -9705,6 +9726,7 @@ export function initChat(next: Deps): void {
       return { events: detail.events, traces: outlined?.ok ? outlined.data ?? {} : {} };
     },
     loadActivity: async id => (await run(api.getSession(id, { limit: 400, actions: true })))?.events ?? null,
+    archiveAll: id => void archiveWorkersOf(id),
     openMain: selectSession, working: sessionWorking,
     approvalPanel: approvalCardPanel,
     modelLabel: chatModelName,
@@ -10436,6 +10458,7 @@ export function initChat(next: Deps): void {
       toast(t('Workers cleared; retained Git checkouts can be reviewed below.'));
     }
   });
+  $('swarmArchiveAll').addEventListener('click', () => { const id = selectedWorkerArchiveOwnerId(); if (id) void archiveWorkersOf(id); });
 
   // Which of the two things happened is decided in the main process and reported back,
   // so the toast describes the actual outcome rather than the intent of the click.

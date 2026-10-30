@@ -66,6 +66,7 @@ const { setChatBlocked } = await import('../src/main/session/blocked-chats.js');
 const controlActions = await import('../src/main/control-actions.js');
 const chatModels = await import('../src/main/chat-models.js');
 const controlApi = await import('../src/main/control-api.js');
+const { initCompanyStore } = await import('../src/main/company-store.js');
 const { listInputs, resetInputForTests } = input;
 
 let dir: string;
@@ -191,6 +192,7 @@ beforeAll(async () => {
   initConfigPath(dir);
   initSecretsPath(dir);
   initSessionStore(dir);
+  initCompanyStore(dir);
   initDurableStore(dir);
   controlApi.initControlApiPath(dir);
   chatSession = await makeSession('Chat one', CHAT);
@@ -255,7 +257,7 @@ describe('with actions switched off', () => {
     expect(refused.status).toBe(403);
     expect(refused.continued).toBe(false);
     expect((await call('GET', '/v1/inputs')).status).toBe(200);
-    expect((await call('GET', '/v1/health')).body.actions).toEqual({ enabled: false, routes: ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel', 'POST /v1/workers/{ownerId}/spawn', 'POST /v1/workers/{ownerId}/message', 'POST /v1/workers/{ownerId}/ack', 'POST /v1/sessions/{id}/stop'] });
+    expect((await call('GET', '/v1/health')).body.actions).toEqual({ enabled: false, routes: ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel', 'POST /v1/workers/{ownerId}/spawn', 'POST /v1/workers/{ownerId}/message', 'POST /v1/workers/{ownerId}/ack', 'POST /v1/workers/{ownerId}/archive-all', 'POST /v1/sessions/{id}/stop', 'POST /v1/sessions/{id}/archive'] });
   });
 
   it('follows the switch on the next request without restarting the listener', async () => {
@@ -1169,6 +1171,29 @@ describe('stopping an answer', () => {
     } finally {
       stops.mockRestore();
     }
+  });
+});
+
+describe('worker cleanup and session archive action gates', () => {
+  it('rejects owner archive without Allow actions and refuses extra body fields', async () => {
+    const owner = randomUUID();
+    gate.actions = false;
+    expect((await post('/v1/workers/' + owner + '/archive-all', {})).body.error).toBe('actions_disabled');
+    expect((await post('/v1/sessions/' + chatSession + '/archive', {})).body.error).toBe('actions_disabled');
+    gate.actions = true;
+    expect((await post('/v1/workers/' + owner + '/archive-all', { all: true })).body.error).toBe('invalid_body');
+    expect((await post('/v1/sessions/' + chatSession + '/archive', { all: true })).body.error).toBe('invalid_body');
+  });
+
+  it('makes empty exact-owner batch idempotent, keeps unknown sessions unavailable and archives settled chats', async () => {
+    const owner = randomUUID();
+    const noWorkers = await post('/v1/workers/' + owner + '/archive-all', {});
+    expect(noWorkers.status).toBe(200);
+    expect(noWorkers.body).toMatchObject({ workers: 0, archived: 0 });
+    expect((await post('/v1/sessions/nosuchsession/archive', {})).body.error).toBe('session_not_found');
+    const archived = await post('/v1/sessions/' + chatSession + '/archive', {});
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ sessionId: chatSession, archived: true });
   });
 });
 

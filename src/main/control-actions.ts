@@ -15,6 +15,7 @@ import type { InputArgs, InputEntry } from './session/input.js';
 import { getProject } from './projects.js';
 import { readSession } from './session/read-model.js';
 import { cancelDesktopInput, sendDesktopInput } from './session/start-input.js';
+import { archiveSessionLocally } from './session/local-archive.js';
 
 /**
  * The action routes of the local control API: send a message to an existing chat or start a new
@@ -72,11 +73,12 @@ const stopBody = z.object({ turnId: z.string().min(1).max(256) }).strict();
 
 const CANCEL_ROUTE = /^\/v1\/inputs\/([0-9a-f-]{36})\/cancel$/;
 const STOP_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})\/stop$/;
+const ARCHIVE_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})\/archive$/;
 
 /** Every path an action can arrive on, whatever the id, so one gate can refuse them all alike. */
 export function isActionPath(route: string): boolean {
-  return route === '/v1/inputs' || /^\/v1\/inputs\/[^/]+\/cancel$/.test(route) || /^\/v1\/workers\/[^/]+\/(spawn|message|ack)$/.test(route) ||
-    /^\/v1\/sessions\/[^/]+\/stop$/.test(route);
+  return route === '/v1/inputs' || /^\/v1\/inputs\/[^/]+\/cancel$/.test(route) || /^\/v1\/workers\/[^/]+\/(spawn|message|ack|archive-all)$/.test(route) ||
+    /^\/v1\/sessions\/[^/]+\/(stop|archive)$/.test(route);
 }
 
 export interface ActionReply {
@@ -276,5 +278,13 @@ export async function serveAction(method: string, route: string, body: unknown):
   if (match) return cancel(match[1]!, body);
   const stopMatch = STOP_ROUTE.exec(route);
   if (stopMatch) return stop(stopMatch[1]!, body);
+  const archiveMatch = ARCHIVE_ROUTE.exec(route);
+  if (archiveMatch) {
+    parse(cancelBody, body);
+    if (!actionsAllowed()) throw new RequestError(403, 'actions_disabled');
+    if (!await readSession(archiveMatch[1]!)) throw new RequestError(404, 'session_not_found');
+    const summary = await archiveSessionLocally(archiveMatch[1]!, true);
+    return { status: 200, body: { sessionId: summary.id, archived: Boolean(summary.archivedAt) } };
+  }
   return undefined;
 }

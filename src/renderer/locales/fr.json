@@ -4803,5 +4803,10 @@
   "SSH profile no longer exists": "Le profil SSH nexiste plus",
   "Choose a local project folder": "Choisir un dossier de projet local",
   "This folder already belongs to another project": "Ce dossier appartient deja a un autre projet",
-  "This mirror belongs to another remote profile or folder": "Ce miroir est associe a un autre profil ou dossier distant"
+  "This mirror belongs to another remote profile or folder": "Ce miroir est associe a un autre profil ou dossier distant",
+  "End and archive all workers": "Terminer et archiver tous les agents",
+  "End only this chat’s workers, preserving their conversations, reports and worktrees": "Termine uniquement les agents de cette discussion, sans supprimer les conversations, rapports ni espaces de travail",
+  "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "Terminer et archiver tous les agents de cette discussion ? Leurs tours seront arrêtés ; les historiques, rapports et espaces de travail seront conservés.",
+  "{0} workers archived; {1} pending. No history or checkout was deleted.": "{0} agents archivés ; {1} en attente. Aucun historique ni espace de travail supprimé.",
+  "Owner session not found": "Session propriétaire introuvable"
 }

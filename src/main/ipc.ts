@@ -180,6 +180,7 @@ import {
   withSessionMutationFence
 } from './session/store.js';
 import { archiveSessionLocally } from './session/local-archive.js';
+import { archiveAllOwnedWorkers } from './worker-cleanup.js';
 import { netTurnChanges, netTurnFileDiff, turnFileEdits, type EditAt } from './session/turn-changes.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
@@ -2492,6 +2493,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // ----------------------------------------------------------------- swarm
 
   handle('swarm:get', async () => swarmState());
+  handle('swarm:archiveAll', async (payload) => {
+    const { sessionId } = z.object({ sessionId: z.string().min(8).max(64) }).strict().parse(payload);
+    const session = await getSession(sessionId);
+    if (!session?.conversationId || session.origin?.kind === 'worker') throw new Error('Owner session not found');
+    const result = await archiveAllOwnedWorkers({ conversationId: session.conversationId });
+    notifyChanged(sessionId);
+    return result;
+  });
   handle('swarm:reset', async () => {
     resetSwarm();
     if (!(await persistAgentAuthorityNow())) {

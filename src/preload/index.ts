@@ -657,6 +657,7 @@ const api = {
   openExtensionFolder: () => call<string>('bridge:openExtensionFolder'),
 
   getSwarm: () => call<SwarmState>('swarm:get'),
+  archiveAllWorkers: (sessionId: string) => call<import('../main/worker-cleanup.js').WorkerCleanupReport>('swarm:archiveAll', { sessionId }),
   resetSwarm: () => call<SwarmState>('swarm:reset'),
   // Clearing the prime ends the run; clearing a worker frees that slot. Which of the two
   // happened comes back in the result — the renderer does not decide it.

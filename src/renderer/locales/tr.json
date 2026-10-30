@@ -4736,5 +4736,10 @@
   "SSH profile no longer exists": "SSH profili artik mevcut degil",
   "Choose a local project folder": "Yerel proje klasoru secin",
   "This folder already belongs to another project": "Bu klasor baska bir projeye ait",
-  "This mirror belongs to another remote profile or folder": "Bu ayna baska bir uzak profil veya klasore ait"
+  "This mirror belongs to another remote profile or folder": "Bu ayna baska bir uzak profil veya klasore ait",
+  "End and archive all workers": "Tüm workerları bitir ve arşivle",
+  "End only this chat’s workers, preserving their conversations, reports and worktrees": "Yalnızca bu sohbetin workerlarını bitirir; sohbetleri, raporları ve çalışma ağaçlarını korur",
+  "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "Bu sohbetin tüm workerlarını bitirip arşivlemek istiyor musunuz? Turları durdurulacak; geçmişler, raporlar ve çalışma ağaçları korunacak.",
+  "{0} workers archived; {1} pending. No history or checkout was deleted.": "{0} worker arşivlendi; {1} bekliyor. Geçmiş veya çalışma ağacı silinmedi.",
+  "Owner session not found": "Sahip oturumu bulunamadı"
 }

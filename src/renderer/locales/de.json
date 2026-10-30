@@ -4736,5 +4736,10 @@
   "SSH profile no longer exists": "SSH-Profil existiert nicht mehr",
   "Choose a local project folder": "Lokalen Projektordner waehlen",
   "This folder already belongs to another project": "Dieser Ordner gehoert bereits zu einem anderen Projekt",
-  "This mirror belongs to another remote profile or folder": "Dieser Spiegel gehoert zu einem anderen Remote-Profil oder -Ordner"
+  "This mirror belongs to another remote profile or folder": "Dieser Spiegel gehoert zu einem anderen Remote-Profil oder -Ordner",
+  "End and archive all workers": "Alle Worker beenden und archivieren",
+  "End only this chat’s workers, preserving their conversations, reports and worktrees": "Beendet nur die Worker dieses Chats und erhält Gespräche, Berichte und Worktrees",
+  "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "Alle Worker dieses Chats beenden und archivieren? Ihre Durchläufe werden gestoppt; Verläufe, Berichte und Worktrees bleiben erhalten.",
+  "{0} workers archived; {1} pending. No history or checkout was deleted.": "{0} Worker archiviert; {1} ausstehend. Keine Verläufe oder Worktrees wurden gelöscht.",
+  "Owner session not found": "Besitzende Sitzung nicht gefunden"
 }

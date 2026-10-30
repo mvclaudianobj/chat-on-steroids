@@ -4669,5 +4669,10 @@
   "SSH profile no longer exists": "Ho so SSH khong con ton tai",
   "Choose a local project folder": "Chon thu muc du an cuc bo",
   "This folder already belongs to another project": "Thu muc nay da thuoc du an khac",
-  "This mirror belongs to another remote profile or folder": "Ban sao nay thuoc ho so hoac thu muc tu xa khac"
+  "This mirror belongs to another remote profile or folder": "Ban sao nay thuoc ho so hoac thu muc tu xa khac",
+  "End and archive all workers": "Kết thúc và lưu trữ tất cả worker",
+  "End only this chat’s workers, preserving their conversations, reports and worktrees": "Chỉ kết thúc worker của cuộc trò chuyện này, giữ nguyên hội thoại, báo cáo và cây làm việc",
+  "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "Kết thúc và lưu trữ tất cả worker trong cuộc trò chuyện này? Các lượt sẽ dừng; lịch sử, báo cáo và cây làm việc được giữ nguyên.",
+  "{0} workers archived; {1} pending. No history or checkout was deleted.": "Đã lưu trữ {0} worker; còn {1} đang chờ. Không xóa lịch sử hoặc cây làm việc.",
+  "Owner session not found": "Không tìm thấy phiên chủ sở hữu"
 }

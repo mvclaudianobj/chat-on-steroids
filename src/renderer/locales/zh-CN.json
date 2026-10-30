@@ -4669,5 +4669,10 @@
   "SSH profile no longer exists": "SSH 配置已不存在",
   "Choose a local project folder": "选择本地项目文件夹",
   "This folder already belongs to another project": "此文件夹已属于其他项目",
-  "This mirror belongs to another remote profile or folder": "此镜像属于其他远程配置或文件夹"
+  "This mirror belongs to another remote profile or folder": "此镜像属于其他远程配置或文件夹",
+  "End and archive all workers": "结束并归档所有工作代理",
+  "End only this chat’s workers, preserving their conversations, reports and worktrees": "只结束此聊天的工作代理，保留对话、报告和工作树",
+  "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "结束并归档此聊天的所有工作代理？它们的轮次将停止；历史记录、报告和工作树会保留。",
+  "{0} workers archived; {1} pending. No history or checkout was deleted.": "已归档 {0} 个工作代理；{1} 个待处理。未删除历史记录或工作树。",
+  "Owner session not found": "未找到所属会话"
 }

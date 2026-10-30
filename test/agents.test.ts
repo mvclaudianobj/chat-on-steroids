@@ -52,6 +52,7 @@ const {
   offerMessages,
   offerMessagesForConversation,
   onSpawnRequest,
+  onRetiredWorkersPersistNow,
   onSwarmEnd,
   onWorkerChatsRetired,
   onWorkerFinished,
@@ -127,6 +128,10 @@ const { recordChatObservations, resetRecorderForTests } = await import('../src/m
 const { resetWorkspaces, setWorkspaceFor, workspaceForChat } = await import('../src/main/workspace.js');
 const { DEFAULT_CAPABILITIES } = await import('../src/shared/types.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
+const { initCompanyStore } = await import('../src/main/company-store.js');
+const { initCompanyLocalGrants } = await import('../src/main/company-local-grants.js');
+const { initWorkerArchivePath, resetWorkerArchiveForTests } = await import('../src/main/worker-archive.js');
+const { archiveAllOwnedWorkers } = await import('../src/main/worker-cleanup.js');
 
 let dir: string;
 
@@ -148,6 +153,9 @@ beforeAll(async () => {
   initConfigPath(dir);
   initSessionStore(dir);
   initDurableStore(dir);
+  initCompanyStore(dir);
+  initCompanyLocalGrants(dir);
+  initWorkerArchivePath(dir);
   await setEnabled(true);
 });
 
@@ -165,10 +173,67 @@ beforeEach(() => {
   // tests exercise that production contract rather than an intentionally half-wired broker;
   // durability-specific cases below replace this no-op sink with controlled writers.
   onSwarmPersistNow(async () => undefined);
+  onRetiredWorkersPersistNow(async () => undefined);
+  resetWorkerArchiveForTests();
 });
 
 const PRIME_CHAT = 'c-prime';
 const prime: Caller = { conversationId: PRIME_CHAT };
+
+it('retires only exact owner workers, including parked history, preserving their identities and checkout metadata', async () => {
+  const { ownedWorkerFleet, retireOwnedWorkerFleet } = await import('../src/main/agents.js');
+  const cleanupOwner = { conversationId: PRIME_CHAT };
+  const a = spawn({ caller: prime, workers: [{ task: 'first' }, { task: 'second' }] });
+  const bOwner = { conversationId: 'c-unrelated-cleanup-prime' };
+  const b = spawn({ caller: bOwner, workers: [{ task: 'unrelated' }] });
+  expect(bindConversation('worker-1', 'c-cleanup-one', a.runId)).toBe(true);
+  expect(bindConversation('worker-2', 'c-cleanup-two', a.runId)).toBe(true);
+  expect(bindConversation('worker-1', 'c-cleanup-foreign', b.runId)).toBe(true);
+  expect(ownedWorkerFleet(cleanupOwner)).toHaveLength(2);
+  expect(ownedWorkerFleet(bOwner)).toHaveLength(1);
+  expect(retireOwnedWorkerFleet(cleanupOwner)).toBe(2);
+  expect(ownedWorkerFleet(cleanupOwner).map(w => w.state)).toEqual(['finished', 'finished']);
+  expect(ownedWorkerFleet(bOwner)[0]?.state).not.toBe('finished');
+  const saved = JSON.parse(JSON.stringify(snapshotSwarm()));
+  resetAgentsForTests();
+  restoreSwarm(saved);
+  expect(ownedWorkerFleet(cleanupOwner).map(w => w.conversationId).sort()).toEqual(['c-cleanup-one', 'c-cleanup-two']);
+  expect(ownedWorkerFleet(cleanupOwner).every(w => w.state === 'finished')).toBe(true);
+  expect(ownedWorkerFleet(bOwner)[0]?.state).not.toBe('finished');
+});
+
+it('archives an exact owner fleet with a durable app-authored orphan stop, not touching foreign workers', async () => {
+  const { appendEvent, readRecentEvents } = await import('../src/main/session/store.js');
+  const run = spawn({ caller: prime, workers: [{ task: 'orphan' }, { task: 'idle' }] });
+  const foreign = spawn({ caller: { conversationId: 'c-cleanup-other-prime' }, workers: [{ task: 'leave alone' }] });
+  const one = 'aaaaaaaa-1111-4222-8333-444444444444';
+  const two = 'bbbbbbbb-1111-4222-8333-444444444444';
+  const other = 'cccccccc-1111-4222-8333-444444444444';
+  bindConversation('worker-1', one, run.runId);
+  bindConversation('worker-2', two, run.runId);
+  bindConversation('worker-1', other, foreign.runId);
+  const parent = await createSession({ conversationId: PRIME_CHAT });
+  const first = await createSession({ conversationId: one, origin: { kind: 'worker', fromSessionId: parent.id, agentId: 'worker-1', task: 'orphan' } });
+  const second = await createSession({ conversationId: two, origin: { kind: 'worker', fromSessionId: parent.id, agentId: 'worker-2', task: 'idle' } });
+  const foreignSession = await createSession({ conversationId: other, origin: { kind: 'worker', fromSessionId: parent.id, agentId: 'worker-1', task: 'leave alone' } });
+  await appendEvent(first.id, { kind: 'turn_start', source: 'extension', turnId: 'ghost-1', time: Date.now() });
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(Date.now() + 6 * 60_000);
+    const result = await archiveAllOwnedWorkers({ conversationId: PRIME_CHAT });
+    expect(result.workers).toBe(2);
+    expect(result.stoppedLocally).toBe(1);
+    expect(result.archived, JSON.stringify(result.pending)).toBe(2);
+    expect(result.pending).toEqual([]);
+    expect((await getSession(first.id))?.archivedAt).toBeDefined();
+    expect((await getSession(second.id))?.archivedAt).toBeDefined();
+    expect((await getSession(foreignSession.id))?.archivedAt).toBeUndefined();
+    expect((await readRecentEvents(first.id, 10)).filter(e => e.kind === 'turn_end')).toEqual([
+      expect.objectContaining({ source: 'app', outcome: 'stopped', turnId: 'ghost-1' })
+    ]);
+    expect(workerPrimeOwner(other).primeConversationId).toBe('c-cleanup-other-prime');
+  } finally { vi.useRealTimers(); }
+});
 
 it('returns an empty exact-caller status without creating a family or exposing another prime', () => {
   const empty = { self: null, runId: null, state: { running: false, retainedHistory: false, agents: [] } };

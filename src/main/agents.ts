@@ -4801,6 +4801,55 @@ export function swarmState(runId?: string): SwarmState {
     agents: visible.flatMap(r => stateForAgents(r.agents, true).agents) };
 }
 
+/** A read-only, exact owner projection. Never infer parentage from titles or worker labels. */
+export function ownedWorkerFleet(owner: { conversationId?: string; localOwnerId?: string; setupProfileId?: string }): Array<{
+  id: string; runId: string; conversationId: string | null; state: AgentState;
+}> {
+  return allFamilies().filter(family =>
+    !('runId' in family && unpublishedRuns.has(family)) &&
+    (owner.conversationId ? family.primeConversationId === owner.conversationId && !family.localOwnerId :
+      !!owner.localOwnerId && family.localOwnerId === owner.localOwnerId &&
+      (!family.setupProfileId || family.setupProfileId === owner.setupProfileId))
+  ).flatMap(family => [...family.agents.values()]
+    .filter(agent => agent.info.role === 'worker' && !unpublishedAgents.has(agent))
+    .map(agent => ({ id: agent.info.id, runId: familyKey(family),
+      conversationId: agent.info.conversationId, state: agent.info.state })));
+}
+
+/**
+ * The explicit owner's terminal transition, including parked workers. Preserve the complete
+ * family, its prime inbox, every worker report and every managed checkout. Only execution
+ * authority and pending instructions are retired; nothing is deleted.
+ */
+export function retireOwnedWorkerFleet(owner: { conversationId?: string; localOwnerId?: string; setupProfileId?: string }): number {
+  const selected = ownedWorkerFleet(owner);
+  if (!selected.length) return 0;
+  const identities = new Set(selected.map(row => `${row.runId}:\u0000${row.id}`));
+  let changedCount = 0;
+  for (const family of allFamilies()) {
+    if ('runId' in family && unpublishedRuns.has(family)) continue;
+    const runId = familyKey(family);
+    for (const agent of family.agents.values()) {
+      if (!identities.has(`${runId}:\u0000${agent.info.id}`) || agent.info.role !== 'worker') continue;
+      retireManagedWorktreeCleanupOffers([agent], 'cleared');
+      if (agent.info.state !== 'finished' || agent.info.revivable || agent.info.result === null || agent.queue.length > 0 ||
+          agent.info.silenceParked || agent.info.detachedAt !== null) changedCount++;
+      agent.info.state = 'finished';
+      agent.info.revivable = false;
+      agent.info.finishedAt ??= Date.now();
+      agent.info.detachedAt = null;
+      agent.info.silenceParked = false;
+      agent.info.silenceRecoveryTurnId = null;
+      agent.info.silenceRecoveryRequestOriginMax = null;
+      agent.info.result ??= 'Ended by the owner; chat and historical reports were preserved.';
+      agent.queue = [];
+      recount(agent);
+    }
+  }
+  if (changedCount) changed();
+  return changedCount;
+}
+
 export function agentConversation(id: string, runId?: string): string | null {
   const run = scopedRun(runId);
   return run?.agents.get(id)?.info.conversationId ?? null;
@@ -4894,6 +4943,14 @@ export function agentInfoForOwnedConversation(conversationId: string): AgentInfo
     const active = agentForConversationId(conversationId);
     if (active) return { ...active.info };
   }
+  // A deliberately terminal worker no longer has an *active* command lease. It still owns
+  // its exact durable history and may be archived, including before its parent run parks.
+  // Refuse an ambiguous restored duplicate rather than borrowing the first worker's identity.
+  const terminal = allFamilies().filter(owner => !('runId' in owner && unpublishedRuns.has(owner)))
+    .flatMap(owner => [...owner.agents.values()].filter(agent =>
+      agent.info.role === 'worker' && agent.info.conversationId === conversationId && isOver(agent.info.state)));
+  if (terminal.length === 1) return { ...terminal[0]!.info };
+  if (terminal.length > 1) return null;
   const dormant = dormantAgentForConversation(conversationId)?.agent ?? null;
   return dormant ? { ...dormant.info } : null;
 }
