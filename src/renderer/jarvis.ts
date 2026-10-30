@@ -500,6 +500,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       createChat.hidden = !preferences.enabled || !!target || !actions;
       createChat.disabled = creating;
       createChat.textContent = t(creating ? 'Creating CLIProxy chat…' : 'Open optional CLIProxy chat');
+      createChat.title = t('Jarvis needs a ChatGPT or CLIProxy conversation. The voice provider configures audio, not chat.');
     }
     if (returnChat) {
       returnChat.hidden = !preferences.enabled || !previousChat || !target || !actions;
@@ -520,7 +521,9 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       stateLabel.dataset.state = shown;
       stateLabel.textContent = reason || phaseText();
       stateLabel.title = reason;
-      stateLabel.hidden = !native && !preferences.enabled || (!reason && shown === 'idle');
+      // Outside a ChatGPT/CLIProxy chat the "Open optional CLIProxy chat" button already says it; the
+      // long reason squeezed beside it in an engine chat's composer wrapped one letter per line.
+      stateLabel.hidden = !native && !preferences.enabled || (!reason && shown === 'idle') || (!target && !createChat?.hidden);
     }
     if (!mode()) status.textContent = t('No transcription engine available. Configure a voice provider, a CLIProxy audio model, an installed local Whisper engine, or Windows speech recognition.') + (capability.error ? ` ${capability.error}` : '');
     else if (!consented) status.textContent = t('Enable microphone consent to use Jarvis.');
