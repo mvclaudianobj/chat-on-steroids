@@ -15,11 +15,13 @@ import { markspanelAccessBlocked } from './markspanel-auth.js';
 import { jarvisVoiceConfigSchema, jarvisVoiceRoutingSchema } from '../shared/jarvis-voice.js';
 import { jarvisVoiceStatus, jarvisVoiceRouteStatus, speakJarvisVoice, storeJarvisVoiceKey, streamJarvisVoice, transcribeJarvisVoice } from './jarvis-voice.js';
 import { logInfo } from './logger.js';
+import { jarvisLocalStatus, installJarvisLocal, speakJarvisLocal, transcribeJarvisLocal } from './jarvis-local.js';
 
 const audio = z.object({ action: z.literal('transcribe'), engine: z.enum(['cliproxy', 'local', 'provider']), model: z.string().max(128),
   language: z.string().max(35), mime: z.enum(['audio/webm', 'audio/ogg', 'audio/mp4']), bytes: z.instanceof(Uint8Array).refine(b => b.length > 0 && b.length <= 12_000_000),
   voice: jarvisVoiceConfigSchema.optional() }).strict();
 const status = z.object({ action: z.literal('status') }).strict();
+const localInstall = z.object({ action: z.literal('local-install'), model: z.enum(['base', 'small']) }).strict();
 const voiceStatus = z.object({ action: z.literal('voice-status'), voice: jarvisVoiceConfigSchema }).strict();
 const voiceKey = z.object({ action: z.literal('voice-key'), slot: z.enum(['primary', 'fallback', 'fallback2', 'fallback3', 'g4f1', 'g4f2']), baseUrl: z.string().min(1).max(300),
   value: z.string().trim().min(1).max(16384), password: z.string().min(1).max(1024) }).strict();
@@ -34,7 +36,7 @@ const trace = z.object({ action: z.literal('trace'),
   turnId: z.string().min(1).max(256).regex(/^[a-zA-Z0-9:_-]+$/).optional(),
   enabled: z.boolean().optional(), tts: z.boolean().optional(), consented: z.boolean().optional(), target: z.boolean().optional(),
   providerReady: z.boolean().optional(), providerSpeaks: z.boolean().optional(), systemSpeech: z.boolean().optional(), providerChecked: z.boolean().optional(),
-  engine: z.enum(['auto', 'provider', 'system']).optional()
+  engine: z.enum(['auto', 'provider', 'local', 'system']).optional()
 }).strict();
 const MAX_RESPONSE = 64_000;
 
@@ -52,7 +54,7 @@ export async function jarvisAudioStatus(): Promise<{ models: string[]; local: bo
   let error: string | null = null;
   try { models = (await allApiModels()).filter(m => isJarvisAudioModelId(m.id) && !/(^|[-_/])tts([-_.]|$)/i.test(m.id)).map(m => m.id); }
   catch (reason) { error = reason instanceof Error ? reason.message.slice(0, 200) : 'Model catalog unavailable'; }
-  return { models, local: !!(await localEngine()), windows: process.platform === 'win32', error };
+  return { models, local: !!(await localEngine()) || (await jarvisLocalStatus()).stt, windows: process.platform === 'win32', error };
 }
 
 export async function transcribeJarvis(input: z.infer<typeof audio>, signal: AbortSignal): Promise<string> {
@@ -61,6 +63,7 @@ export async function transcribeJarvis(input: z.infer<typeof audio>, signal: Abo
     return transcribeJarvisVoice(input.voice, input.mime, input.bytes, input.language, signal);
   }
   if (input.engine === 'local') {
+    if ((await jarvisLocalStatus()).stt) return transcribeJarvisLocal(input.bytes, input.language, signal);
     const local = await localEngine();
     if (!local) throw new Error('Configure MARKS_JARVIS_WHISPER_CLI and MARKS_JARVIS_WHISPER_MODEL with installed absolute paths.');
     const dir = await mkdtemp(path.join(os.tmpdir(), 'marks-jarvis-'));
@@ -141,6 +144,11 @@ export function registerJarvisAudioIpc(getWindow: () => BrowserWindow | null): v
       }
       if (status.safeParse(payload).success) return { ok: true, data: await jarvisAudioStatus() };
       const action = payload && typeof payload === 'object' ? (payload as { action?: unknown }).action : undefined;
+      if (action === 'local-status') return { ok: true, data: await jarvisLocalStatus() };
+      if (action === 'local-install') {
+        const input = localInstall.parse(payload);
+        return { ok: true, data: await installJarvisLocal(input.model, new AbortController().signal) };
+      }
       if (action === 'cancel') { active?.abort(); active = null; return { ok: true, data: null }; }
       if (action === 'speak-cancel') { for (const controller of speaking) controller.abort(); speaking.clear(); return { ok: true, data: null }; }
       if (action === 'voice-status') return { ok: true, data: await jarvisVoiceStatus(voiceStatus.parse(payload).voice) };
@@ -179,7 +187,9 @@ export function registerJarvisAudioIpc(getWindow: () => BrowserWindow | null): v
               return { ok: false, error };
             }
           }
-          return { ok: true, data: await speakJarvisVoice(input.voice, input.text, controller.signal, input.routing, input.groupId) };
+          return { ok: true, data: input.voice.baseUrl === ''
+            ? await speakJarvisLocal(input.text, controller.signal)
+            : await speakJarvisVoice(input.voice, input.text, controller.signal, input.routing, input.groupId) };
         }
         finally { clearTimeout(timer); speaking.delete(controller); }
       }

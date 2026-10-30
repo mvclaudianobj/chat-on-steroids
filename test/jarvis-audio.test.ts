@@ -4,7 +4,7 @@ const models = vi.hoisted(() => vi.fn(async () => [
   { id: 'whisper-1', modality: 'audio' }, { id: 'gpt-4o-mini-tts', modality: 'audio' },
   { id: 'gpt-6-sol', modality: 'chat' }
 ]));
-vi.mock('electron', () => ({ app: { on: vi.fn() }, ipcMain: { handle: vi.fn() } }));
+vi.mock('electron', () => ({ app: { on: vi.fn(), getPath: () => '/tmp/marks-jarvis-test-uninstalled' }, ipcMain: { handle: vi.fn() } }));
 vi.mock('../src/main/api-chat/catalog.js', () => ({ allApiModels: models }));
 vi.mock('../src/main/api-chat/settings.js', () => ({
   apiChatKey: async () => 'test-only-token',

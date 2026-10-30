@@ -22,7 +22,7 @@ import type { JarvisTrace } from '../shared/jarvis-trace.js';
 const KEY = 'chat-marks.jarvis.settings.v1';
 type Engine = 'provider' | 'cliproxy' | 'local' | 'windows';
 type EngineChoice = 'auto' | Engine;
-type TtsEngine = 'auto' | 'provider' | 'system';
+type TtsEngine = 'auto' | 'provider' | 'local' | 'system';
 export type JarvisPhase = 'idle' | 'listening' | 'stopping' | 'transcribing' | 'thinking' | 'speaking';
 type Preferences = {
   enabled: boolean; key: 'F8' | 'F9' | 'F10' | 'F11'; language: string; tts: boolean; voice: string; engine: EngineChoice; audioModel: string;
@@ -50,7 +50,7 @@ export function parseJarvisPreferences(value: unknown): Preferences {
     voice: typeof data.voice === 'string' ? data.voice.slice(0, 120) : '',
     engine,
     audioModel: typeof data.audioModel === 'string' && /^[\w./-]{0,128}$/.test(data.audioModel) ? data.audioModel : '',
-    ttsEngine: data.ttsEngine === 'provider' || data.ttsEngine === 'system' ? data.ttsEngine : 'auto',
+    ttsEngine: data.ttsEngine === 'provider' || data.ttsEngine === 'local' || data.ttsEngine === 'system' ? data.ttsEngine : 'auto',
     continuous: data.continuous === true,
     earcons: data.earcons !== false,
     provider: parseJarvisVoiceConfig(data.provider),
@@ -100,6 +100,9 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   const ttsModel = maybe<HTMLInputElement>('jarvisTtsModel');
   const providerVoice = maybe<HTMLInputElement>('jarvisProviderVoice');
   const providerStatus = maybe<HTMLElement>('jarvisProviderStatus');
+  const localStatus = maybe<HTMLElement>('jarvisLocalStatus');
+  const localInstall = maybe<HTMLButtonElement>('jarvisLocalInstall');
+  const localModel = maybe<HTMLSelectElement>('jarvisLocalModel');
   const routeMode = maybe<HTMLSelectElement>('jarvisRoutingMode');
   const routeStatus = maybe<HTMLElement>('jarvisG4fStatus');
   const routeFields = [1, 2].map(n => ({
@@ -212,11 +215,26 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     catch { return false; }
   };
   let capability: { models: string[]; local: boolean; windows: boolean; error: string | null } = { models: [], local: false, windows: recognitionAvailable, error: null };
+  let localVoice = false;
+  const refreshLocal = (): void => {
+    if (!api.jarvisLocalStatus) return;
+    void api.jarvisLocalStatus().then(reply => {
+      if (!reply.ok) { if (localStatus) localStatus.textContent = reply.error; return; }
+      localVoice = reply.data.tts;
+      capability.local = reply.data.stt || capability.local;
+      if (localStatus) localStatus.textContent = `${reply.data.version}. ${reply.data.detail}`;
+      paint();
+    }).catch(() => { if (localStatus) localStatus.textContent = 'Local voice status unavailable.'; });
+  };
   let provider: ProviderCapability = { checked: false, primary: false, fallback: false, ffmpeg: false, stt: [], tts: [], error: null };
   let providerCheckGeneration = 0;
   let providerStatusConfig: string | null = null;
   let media: { recorder: MediaRecorder; stream: MediaStream; chunks: Blob[]; bytes: number; id: number; mode: Engine } | null = null;
-  const modes = (): Engine[] => preferences.engine === 'auto' ? ORDER : [preferences.engine, ...ORDER.filter(candidate => candidate !== preferences.engine)];
+  // An explicit offline choice is a privacy boundary: never send its audio to a
+  // remote fallback when whisper.cpp is unavailable or returns no speech.
+  const modes = (): Engine[] => preferences.engine === 'auto' ? ORDER
+    : preferences.engine === 'local' ? ['local']
+      : [preferences.engine, ...ORDER.filter(candidate => candidate !== preferences.engine)];
   const providerReachable = (): boolean => provider.primary || provider.fallback ||
     provider.fallback2 === true || provider.fallback3 === true || (provider.checked && !provider.error);
   const usable = (mode: Engine): boolean => mode === 'windows' ? recognitionAvailable
@@ -228,7 +246,9 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   // completed answer; the main process owns the definitive credential check.
   const providerSpeaks = (): boolean => jarvisVoiceTtsReady(preferences.provider) && typeof api.jarvisSpeak === 'function' &&
     (preferences.ttsEngine === 'provider' || preferences.ttsEngine === 'auto');
-  const speaks = (): boolean => preferences.tts && (providerSpeaks() || systemSpeech());
+  const localSpeaks = (): boolean => localVoice && typeof api.jarvisSpeak === 'function' &&
+    (preferences.ttsEngine === 'local' || preferences.ttsEngine === 'auto');
+  const speaks = (): boolean => preferences.tts && (providerSpeaks() || localSpeaks() || systemSpeech());
   const traceGate = (reason: JarvisTrace['reason'], sessionId?: string, turnId?: string): void => {
     trace('gate', { reason, sessionId, turnId, enabled: preferences.enabled, tts: preferences.tts,
       consented, target: !!eligible(), engine: preferences.ttsEngine,
@@ -299,6 +319,11 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
 
   const speech = new JarvisSpeechQueue<Playable>({
     synthesize: async (text, signal) => {
+      if (localSpeaks() && (preferences.ttsEngine === 'local' || !providerSpeaks())) {
+        const reply = await api.jarvisSpeak(emptyJarvisVoiceConfig(), text);
+        if (reply.ok && !signal.aborted) return { kind: 'audio', url: URL.createObjectURL(new Blob([new Uint8Array(reply.data.bytes)], { type: reply.data.mime })) };
+        if (!reply.ok && !systemSpeech()) throw new Error(reply.error);
+      }
       if (providerSpeaks()) {
         try {
           // Start the HTTP request before the next sentence finishes: the player can begin
@@ -463,6 +488,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     });
   };
   const refresh = (): void => {
+    refreshLocal();
     refreshProvider();
     if (!api.jarvisAudioStatus) return;
     void api.jarvisAudioStatus().then(result => {
@@ -1008,6 +1034,16 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   }
   for (const element of [enable, key, language, tts, voice, engine, audioModel, ttsEngine, continuous, earcons, providerUrl, sttMode, sttModel, ttsModel, providerVoice,
     routeMode, ...routeFields.flatMap(fields => [fields.url, fields.model, fields.voice])]) element?.addEventListener('change', persist);
+  localInstall?.addEventListener('click', () => {
+    if (!api.jarvisLocalInstall) return;
+    localInstall.disabled = true;
+    if (localStatus) localStatus.textContent = 'Downloading and verifying local voice models…';
+    void api.jarvisLocalInstall(localModel?.value === 'small' ? 'small' : 'base').then(reply => {
+      if (localStatus) localStatus.textContent = reply.ok ? `${reply.data.version}. ${reply.data.detail}` : reply.error;
+      if (reply.ok) refresh();
+    }).catch(error => { if (localStatus) localStatus.textContent = String(error); })
+      .finally(() => { localInstall.disabled = false; });
+  });
   preset?.addEventListener('change', () => {
     const chosen = JARVIS_VOICE_PRESETS[preset.value as keyof typeof JARVIS_VOICE_PRESETS];
     if (!chosen) return;

@@ -158,6 +158,8 @@ const api = {
   jarvisMicrophoneConsent: (enabled?: boolean) => call<boolean>('jarvis:audio', enabled === undefined
     ? { action: 'microphone-consent' } : { action: 'microphone-consent', enabled }),
   jarvisAudioStatus: () => call<{ models: string[]; local: boolean; windows: boolean; error: string | null }>('jarvis:audio', { action: 'status' }),
+  jarvisLocalStatus: () => call<import('../main/jarvis-local.js').JarvisLocalStatus>('jarvis:audio', { action: 'local-status' }),
+  jarvisLocalInstall: (model: 'base' | 'small') => call<import('../main/jarvis-local.js').JarvisLocalStatus>('jarvis:audio', { action: 'local-install', model }),
   jarvisTranscribe: (engine: 'cliproxy' | 'local' | 'provider', model: string, language: string, mime: 'audio/webm' | 'audio/ogg' | 'audio/mp4', bytes: Uint8Array, voice?: import('../shared/jarvis-voice.js').JarvisVoiceConfig) =>
     call<string>('jarvis:audio', { action: 'transcribe', engine, model, language, mime, bytes, ...(voice ? { voice } : {}) }),
   jarvisCancel: () => call<null>('jarvis:audio', { action: 'cancel' }),

@@ -348,13 +348,21 @@
                 <label class="setting"><span class="setting-text"><b>Speech language</b><em>Optional language code (for example pt-BR). Windows must have its speech language installed; also sets the spoken reply language.</em></span><input id="jarvisLanguage" type="text" maxlength="35" placeholder="System default" /></label>
                 <label class="setting"><span class="setting-text"><b>Chat model</b><em>Jarvis uses the model of the selected ChatGPT or CLIProxy conversation. The voice provider supplies STT/TTS, not the chat model.</em></span><span id="jarvisModelInfo">Select a ChatGPT conversation</span></label>
                 <label class="setting"><span class="setting-text"><b>Speak replies</b><em>Off by default. Jarvis starts speaking while the answer is still being written, one sentence at a time.</em></span><input id="jarvisTts" type="checkbox" /></label>
-                <label class="setting"><span class="setting-text"><b>Speech engine</b><em>The voice provider when it is configured, otherwise the system voice.</em></span><select id="jarvisTtsEngine"><option value="auto">Voice provider, then system voice</option><option value="provider">Voice provider</option><option value="system">System voice</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Speech engine</b><em>Choose your local Piper voice or an online provider.</em></span><select id="jarvisTtsEngine"><option value="auto">Provider when configured, otherwise local Piper or system voice</option><option value="provider">Voice provider</option><option value="local">Local Piper (offline)</option><option value="system">System voice</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Voice</b><em>Choose a voice installed in your operating system.</em></span><select id="jarvisVoice"><option value="">System default</option></select></label>
                 <label class="setting"><span class="setting-text"><b>Continuous conversation</b><em>After a spoken answer, Jarvis listens again and sends when you stop talking. Push-to-talk stays the default; pressing the key always interrupts Jarvis.</em></span><input id="jarvisContinuous" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Sound cues</b><em>Short tones when listening starts and stops.</em></span><input id="jarvisEarcons" type="checkbox" /></label>
                 <label class="setting"><span class="setting-text"><b>Always allow Jarvis microphone in every chat</b><em>This authorization stays enabled after restarting Chat Marks and applies to all chats. Turn it off here at any time. Jarvis only records when you press to talk or explicitly enable continuous conversation. Voice provider or CLIProxy may receive audio for transcription; local engines keep it here.</em></span><input id="jarvisConsent" type="checkbox" /></label>
                 <p id="jarvisReadiness" class="jarvis-readiness" role="status" aria-live="polite">Jarvis needs setup before speaking.</p>
                 <p id="jarvisSettingsStatus" role="status" aria-live="polite"></p>
+              </div>
+            </section>
+            <section class="appearance-section" id="jarvisLocalSettings">
+              <header class="settings-section-head"><div><h2>Local voice (offline)</h2><p>Install verified whisper.cpp and Piper releases in your user profile, without administrator privileges.</p></div></header>
+              <div class="settings-surface pane appearance-settings-card">
+                <label class="setting"><span class="setting-text"><b>Whisper model</b><em>Base downloads faster; small generally recognizes speech more accurately.</em></span><select id="jarvisLocalModel"><option value="base">Base</option><option value="small">Small</option></select></label>
+                <button type="button" class="btn" id="jarvisLocalInstall">Install local speech</button>
+                <p id="jarvisLocalStatus" role="status" aria-live="polite">Checking installed local engines…</p>
               </div>
             </section>
             <section class="appearance-section" id="jarvisProviderSettings">

@@ -14,5 +14,5 @@ export type JarvisTrace = {
   providerSpeaks?: boolean;
   systemSpeech?: boolean;
   providerChecked?: boolean;
-  engine?: 'auto' | 'provider' | 'system';
+  engine?: 'auto' | 'provider' | 'local' | 'system';
 };

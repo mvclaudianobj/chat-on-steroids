@@ -7,6 +7,8 @@ const skeleton = `<!doctype html><html><body>
   <input id="jarvisEnabled" type="checkbox"><input id="jarvisConsent" type="checkbox">
   <select id="jarvisKey"><option value="F8">F8</option></select>
   <input id="jarvisLanguage"><input id="jarvisTts" type="checkbox">
+  <select id="jarvisTtsEngine"><option value="auto">Auto</option><option value="local">Local</option><option value="provider">Provider</option></select>
+  <select id="jarvisLocalModel"><option value="base">Base</option><option value="small">Small</option></select><button id="jarvisLocalInstall"></button><p id="jarvisLocalStatus"></p>
   <select id="jarvisEngine"><option value="auto">auto</option><option value="cliproxy">CLIProxy</option></select>
   <select id="jarvisVoice"><option value="">System default</option></select>
   <input id="jarvisContinuous" type="checkbox"><input id="jarvisEarcons" type="checkbox">
@@ -33,12 +35,12 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   selected?: { id: string; conversationId: string | null; engine?: string } | null; consent?: boolean; noAudioEngines?: boolean;
   g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; providerUnavailable?: boolean; microphoneDenied?: boolean;
   deferredProviderStatus?: boolean; pagedSession?: boolean; noSystemVoices?: boolean; lateSlotOnly?: boolean;
-  google?: boolean; language?: string;
+  google?: boolean; language?: string; sttEngine?: 'auto' | 'local'; localStt?: boolean; localFails?: boolean;
   routingMode?: 'off' | 'gemini-first' | 'g4f-first';
   initialEvents?: unknown[]; initialTurns?: Record<string, { origin: number; time: number; questionId: string }> } = {}) {
   page = new JSDOM(skeleton, { url: 'https://local.test/' });
   const window = page.window;
-  window.localStorage.setItem('chat-marks.jarvis.settings.v1', JSON.stringify({ enabled: options.enabled !== false, tts: options.tts ?? true, continuous: options.continuous ?? false, earcons: false,
+  window.localStorage.setItem('chat-marks.jarvis.settings.v1', JSON.stringify({ enabled: options.enabled !== false, engine: options.sttEngine ?? 'auto', tts: options.tts ?? true, continuous: options.continuous ?? false, earcons: false,
     language: options.language ?? '', provider: options.noProvider ? { ...voice, baseUrl: '' }
       : options.google ? { baseUrl: 'https://generativelanguage.googleapis.com/v1beta', sttMode: 'transcriptions', sttModel: 'gemini-3.5-transcribe', ttsModel: 'gemini-3.8-flash-tts', voice: 'Charon' }
       : options.g4f ? { baseUrl: 'https://g4f.space/v1', sttMode: 'chat-audio', sttModel: 'srv_synthetic:gemini', ttsModel: 'gpt-4o-mini-tts', voice: 'alloy' } : voice,
@@ -87,7 +89,7 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   let events: unknown[] = options.initialEvents ?? [];
   let sessionSummary: { timelineTurns: Record<string, { origin: number; time: number; questionId: string }> } | null =
     options.initialTurns ? { timelineTurns: options.initialTurns } : null;
-  const transcribe = vi.fn(async (engine: string, ..._rest: unknown[]) => engine === 'provider' && options.providerTranscribe === 'fail'
+  const transcribe = vi.fn(async (engine: string, ..._rest: unknown[]) => (engine === 'provider' && options.providerTranscribe === 'fail') || (engine === 'local' && options.localFails)
     ? { ok: false as const, error: 'provider down' } : { ok: true as const, data: `text from ${engine}` });
   const speak = vi.fn(async (_voice: unknown, text: string, _routing?: unknown, _groupId?: string) => ({ ok: true as const, data: { mime: 'audio/mpeg', bytes: new TextEncoder().encode(text) } }));
   const speakCancel = vi.fn(async () => ({ ok: true as const, data: null }));
@@ -97,10 +99,13 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   const sendInput = vi.fn(async (input: { id: string; sessionId: string | null; text: string }) => ({ ok: true as const, data: { ...input, state: 'queued' } }));
   const statusResolvers: Array<(reply: { ok: true; data: { models: string[]; stt: string[]; tts: string[]; primary: boolean; fallback: boolean; ffmpeg: boolean; error: string | null } }) => void> = [];
   const statusRejectors: Array<(error: Error) => void> = [];
+  let localInstalled = options.localStt === true;
   const api = {
     dictationSupported: false,
     jarvisMicrophoneConsent: vi.fn(async (enabled?: boolean) => ({ ok: true as const, data: enabled ?? false })),
-    jarvisAudioStatus: async () => ({ ok: true as const, data: { models: options.noAudioEngines ? [] : ['whisper-1'], local: false, windows: false, error: null } }),
+    jarvisAudioStatus: async () => ({ ok: true as const, data: { models: options.noAudioEngines ? [] : ['whisper-1'], local: options.localStt === true, windows: false, error: null } }),
+    jarvisLocalStatus: vi.fn(async () => ({ ok: true as const, data: { supported: true, installed: localInstalled, stt: localInstalled, tts: localInstalled, ffmpeg: true, model: null, version: 'test', detail: localInstalled ? 'Ready' : 'Not installed' } })),
+    jarvisLocalInstall: vi.fn(async (model: 'base' | 'small') => { localInstalled = true; return { ok: true as const, data: { supported: true, installed: true, stt: true, tts: true, ffmpeg: true, model, version: 'test', detail: 'Ready' } }; }),
     jarvisVoiceStatus: async () => options.deferredProviderStatus
       ? await new Promise<{ ok: true; data: { models: string[]; stt: string[]; tts: string[]; primary: boolean; fallback: boolean; ffmpeg: boolean; error: string | null } }>((resolve, reject) => {
         statusResolvers.push(resolve);
@@ -166,8 +171,26 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
   };
   const rejectProviderCheck = async (index: number) => { statusRejectors[index]?.(new Error('old provider unavailable')); await flush(); };
   return { element, hold, release, flush, stream, nativeEvents, switchTo, finishProviderCheck, rejectProviderCheck, statusResolvers,
-    transcribe, speak, speakCancel, routeStatus, setKey, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat, openSettings, openChat };
+    transcribe, speak, speakCancel, routeStatus, setKey, send, sendInput, players, getUserMedia, tracks, createCliProxyChat, selectChat, openSettings, openChat,
+    localInstall: api.jarvisLocalInstall };
 }
+
+describe('Jarvis local settings', () => {
+  it('keeps microphone audio offline when explicitly selected local STT fails', async () => {
+    const f = await fixture({ sttEngine: 'local', localStt: true, localFails: true });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    expect(f.transcribe.mock.calls.map(call => call[0])).toEqual(['local']);
+  });
+  it('requests the selected model through main and displays confirmed readiness', async () => {
+    const f = await fixture();
+    f.element<HTMLSelectElement>('jarvisLocalModel').value = 'small';
+    f.element<HTMLButtonElement>('jarvisLocalInstall').click();
+    await f.flush();
+    expect(f.localInstall).toHaveBeenCalledWith('small');
+    expect(f.element<HTMLElement>('jarvisLocalStatus').textContent).toContain('Ready');
+    expect(f.element<HTMLButtonElement>('jarvisLocalInstall').disabled).toBe(false);
+  });
+});
 
 describe('Jarvis Gemini/G4F public routing settings', () => {
   it('persists both independent G4F profiles, never persists credentials, and shows saved-key masks from main status', async () => {
