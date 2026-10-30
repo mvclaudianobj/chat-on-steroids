@@ -85,8 +85,8 @@ export function createCliModulesUi(api: AppApi, hooks: {
     const panel = accountPanels.get(id);
     if (!panel) return;
     if (typeof api.cliDirectAccount !== 'function') return;
-    const result = await api.cliDirectAccount(id);
-    panel.status.textContent = result.ok
+    const result = await api.cliDirectAccount(id).catch(() => null);
+    panel.status.textContent = result?.ok && result.data
       ? (result.data.signedIn ? t('Direct account connected') : t('Direct account not signed in')) + (result.data.detail ? ' · ' + t(result.data.detail) : '')
       : t('Account status unavailable');
   }
