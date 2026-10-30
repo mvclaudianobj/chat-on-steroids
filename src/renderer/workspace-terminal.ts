@@ -26,7 +26,7 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
   options: { id?: string; onEmpty?: () => void; onClosePanel?: () => void;
     dockedTabs?: boolean; onTabsChanged?: () => void; transport?: TerminalTransport;
     /** Adds selected terminal text to the composer; false when nothing was added. */
-    onSendSelection?: (text: string) => boolean } = {}) {
+    onSendSelection?: (text: string) => boolean; loginTerminal?: boolean } = {}) {
   const app = document.querySelector<HTMLElement>('.app')!;
   const panel = el('section', 'workspace-terminal'); panel.id = options.id ?? 'workspaceTerminal'; panel.hidden = true;
   ui(panel, 'aria-label', () => t('Terminal'));
@@ -55,6 +55,47 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
   if (!options.dockedTabs) panel.append(bar);
   panel.append(body); initialMount.append(panel);
   const tabs = new Map<string, Tab>();
+  const loginCard = el('section', 'terminal-login-card');
+  loginCard.hidden = true;
+  const loginLink = el('a') as HTMLAnchorElement;
+  const loginUrlCopy = el('button', 'btn', () => t('Copy URL')) as HTMLButtonElement;
+  const loginCopy = el('button', 'btn', () => t('Copy')) as HTMLButtonElement;
+  const loginCode = el('code');
+  const loginInput = el('input') as HTMLInputElement;
+  const loginSubmit = el('button', 'btn', () => t('Paste code')) as HTMLButtonElement;
+  loginInput.placeholder = t('Authentication code');
+  loginCard.append(loginLink, loginUrlCopy, loginCopy, loginCode, loginInput, loginSubmit);
+  if (options.loginTerminal) body.append(loginCard);
+  let loginUrl = '', loginDeviceCode = '';
+  loginCopy.addEventListener('click', () => void window.api.writeClipboard(loginDeviceCode));
+  loginUrlCopy.addEventListener('click', () => void window.api.writeClipboard(loginUrl));
+  loginSubmit.addEventListener('click', () => {
+    const tab = selected ? tabs.get(selected) : null;
+    if (tab?.ready && !tab.exited && loginInput.value) {
+      tab.term.paste(loginInput.value);
+      loginInput.value = '';
+      tab.term.focus();
+    }
+  });
+  let loginOutput = '';
+  const watchLoginOutput = (data: string): void => {
+    if (!options.loginTerminal) return;
+    // Only a small in-memory window of terminal output; no logging or persistence.
+    loginOutput = (loginOutput + data).slice(-4096);
+    const printable = loginOutput.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').replace(/[\x00-\x08\x0b-\x1f]/g, ' ');
+    const url = printable.match(/https:\/\/[^\s<>"']+/)?.[0];
+    const code = printable.match(/(?:device\s+code|authentication\s+code|one.time\s+code)\s*[:：]\s*([A-Z0-9-]{4,40})/i)?.[1];
+    if (url) loginUrl = url.replace(/[.,;]+$/, '');
+    if (code) loginDeviceCode = code;
+    if (!loginUrl && !loginDeviceCode) return;
+    loginCard.hidden = false;
+    loginLink.textContent = loginUrl;
+    loginLink.href = loginUrl || '#';
+    loginLink.onclick = event => { event.preventDefault(); if (loginUrl) void window.api.openLink(loginUrl, { external: true }); };
+    loginCode.textContent = loginDeviceCode;
+    loginCopy.hidden = !loginDeviceCode;
+    loginUrlCopy.hidden = !loginUrl;
+  };
   const transport = options.transport ?? {
     create: (id, projectId, cols, rows) => window.api.terminalCreate(id, projectId, cols, rows),
     write: (id, data) => window.api.terminalWrite(id, data),
@@ -75,6 +116,14 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
   };
   const sendSelection = (tab: Tab): void => {
     if (options.onSendSelection?.(tab.term.getSelection())) { tab.term.clearSelection(); paintSend(); }
+  };
+  const copySelection = async (tab: Tab): Promise<void> => {
+    if (tab.term.hasSelection()) await window.api.writeClipboard(tab.term.getSelection());
+  };
+  const pasteClipboard = async (tab: Tab, primary = false): Promise<void> => {
+    const result = await window.api.readClipboard(primary);
+    const clipboard = result.ok ? result.data : '';
+    if (clipboard && tab.ready && !tab.exited) tab.term.paste(clipboard);
   };
   send.addEventListener('click', () => { const tab = selected ? tabs.get(selected) : null; if (tab) sendSelection(tab); });
   const terminalTheme = () => {
@@ -152,6 +201,19 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     const id = crypto.randomUUID();
     const node = el('div', 'terminal-screen'); body.append(node);
     const term = new Terminal({ theme: terminalTheme(), cursorBlink: true, fontSize: 13, fontFamily: 'Cascadia Code, Consolas, monospace', scrollback: 5000, allowProposedApi: false });
+    // xterm's native link provider avoids a new package dependency. Links always
+    // open through the main-process external-browser allowlist.
+    term.registerLinkProvider?.({
+      provideLinks: (line, callback) => {
+        const content = term.buffer.active.getLine(line - 1)?.translateToString() ?? '';
+        const matches = [...content.matchAll(/https:\/\/[^\s<>"']+/g)].map(match => ({
+          text: match[0]!.replace(/[.,;]+$/, ''),
+          range: { start: { x: match.index! + 1, y: line }, end: { x: match.index! + match[0]!.length, y: line } },
+          activate: (_event: MouseEvent, text: string) => { void window.api.openLink(text, { external: true }); }
+        }));
+        callback(matches);
+      }
+    });
     const addon = new FitAddon(); term.loadAddon(addon); term.open(node);
     const tab: Tab = { id, projectId: restored ? restored.projectId : scope?.id ?? null, cwd: restored?.cwd ?? '',
       title: restored?.title ?? scope?.name ?? t('Terminal'), node, term, fit: addon, ready: false, exited: false,
@@ -160,6 +222,14 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
     if (!options.dockedTabs && !restored) setOpen(true);
     paint(); fit();
     term.onSelectionChange(() => { if (selected === id) paintSend(); });
+    node.addEventListener('contextmenu', event => {
+      event.preventDefault();
+      if (term.hasSelection()) void copySelection(tab);
+      else void pasteClipboard(tab);
+    });
+    node.addEventListener('auxclick', event => {
+      if (event.button === 1) { event.preventDefault(); void pasteClipboard(tab, true); }
+    });
     term.onData(data => {
       if (tab.exited || !tab.ready) return;
       if (tab.queued + data.length > 262_144) { toast(t('Terminal input is busy. Try a smaller paste.')); return; }
@@ -177,7 +247,10 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
       if (event.type === 'keydown' && event.ctrlKey && event.key === '`') { onToggleBottom(); return false; }
       // Keep ordinary Ctrl+C as SIGINT; copy selection using Ctrl+Shift+C.
       if (event.type === 'keydown' && event.ctrlKey && event.code === 'KeyC' && (event.shiftKey || term.hasSelection())) {
-        void window.api.writeClipboard(term.getSelection()); return false;
+        event.preventDefault(); void copySelection(tab); return false;
+      }
+      if (event.type === 'keydown' && event.ctrlKey && event.shiftKey && event.code === 'KeyV') {
+        event.preventDefault(); void pasteClipboard(tab); return false;
       }
       // Cmd/Ctrl+Shift+Enter does what Send to chat does; without a selection the shell gets the key.
       if (event.type === 'keydown' && event.key === 'Enter' && event.shiftKey && (event.ctrlKey || event.metaKey)
@@ -211,7 +284,10 @@ export function createWorkspaceTerminal(onToggleBottom: () => void, initialMount
   };
   const stopEvents = transport.onEvent(event => {
     const tab = tabs.get(event.id); if (!tab) return;
-    if (event.data !== undefined) tab.term.write(event.data, () => { void transport.ack(event.id, event.data!.length); });
+    if (event.data !== undefined) {
+      watchLoginOutput(event.data);
+      tab.term.write(event.data, () => { void transport.ack(event.id, event.data!.length); });
+    }
     else { tab.exited = true; tab.term.write(`\r\n[${t('Process exited: {0}', [event.exitCode])}]\r\n`); remember(); paint(); options.onTabsChanged?.(); }
   });
   // Tab order is the map's insertion order; moving a tab rebuilds it in the new order.
