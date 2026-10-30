@@ -4819,5 +4819,10 @@
   "60 days": "60 дней",
   "90 days": "90 дней",
   "180 days": "180 дней",
-  "365 days": "365 дней"
+  "365 days": "365 дней",
+  "Temporary chat": "Временный чат",
+  "Temporary chat without local recording": "Временный чат без локальной записи",
+  "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "Этот разговор не появится в истории ChatGPT. Chat Marks сохраняет локальную запись.",
+  "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "Открывает ChatGPT напрямую. Chat Marks не создаёт локальный чат и не записывает сообщения.",
+  "Temporary chats cannot use Compact & Resume.": "Временные чаты не поддерживают Сжать и продолжить."
 }

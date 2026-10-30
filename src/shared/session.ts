@@ -606,6 +606,8 @@ export type NewSessionEvent = SessionEvent extends infer Event
  */
 export interface SessionOrigin {
   kind: 'resume' | 'worker' | 'helper' | 'desktop';
+  /** This worker was explicitly opened using ChatGPT's Temporary mode. */
+  temporaryChat?: boolean;
   /** The session this chat continues. Null when the source session no longer exists. */
   fromSessionId: string | null;
   /** Agent id for a worker chat ("worker-1"). Null for a resume. */
@@ -661,6 +663,8 @@ export function originTitle(origin: SessionOrigin, source: string | null): strin
 }
 
 export interface SessionSummary {
+  /** ChatGPT owns this conversation as temporary; the user's local history is still recorded. */
+  temporaryChat?: boolean;
   /** Explicit local Chat Marks archive; absent means visible. It never changes ChatGPT's archive. */
   archivedAt?: number;
   /** Rebuildable transcript boundaries; no message bodies or execution authority. */
@@ -938,6 +942,8 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
 }
 
 export interface AgentInfo {
+  /** Worker creation option; temporary ChatGPT chats cannot be restored through history. */
+  temporaryChat?: boolean;
   /** Broker owner projection. IDs such as worker-1 are local to this incarnation. */
   runId?: string;
   /** Immutable broker allocation identity; survives a sleeping family's new incarnation. */

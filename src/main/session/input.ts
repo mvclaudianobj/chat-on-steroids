@@ -50,6 +50,8 @@ export const inputArgs = z.object({
   authoredSource: z.enum(['text', 'objective', 'none']).optional(),
   /** Sent with /image (#1701): the person asked for a picture, so it goes without the Core mention. */
   imageRequest: z.literal(true).optional(),
+  /** A native temporary ChatGPT conversation. Local recording remains enabled. */
+  temporaryChat: z.literal(true).optional(),
   stages: z.array(z.string().trim().min(1).max(16000)).max(11).optional(),
   images: z.array(z.object({ name: z.string().min(1).max(110), dataUrl: z.string().max(512100).regex(/^data:image\/webp;base64,[A-Za-z0-9+/]+={0,2}$/) })).max(MAX_INPUT_IMAGES).optional(),
   attachments: z.array(attachmentSchema).max(20).optional(),
@@ -872,6 +874,7 @@ async function materializeOpening(entry: InputEntry): Promise<void> {
     existing.origin?.kind !== 'worker' && existing.origin?.kind !== 'helper';
   const session = recoveredExactOwner ? existing : await createSession({ reservedId: entry.sessionId,
     title: userTitle(entry.text, authoredTextOf(entry)), titleSource: 'fallback',
+    ...(entry.temporaryChat ? { temporaryChat: true } : {}),
     origin: entry.branch
       ? { kind: 'desktop', fromSessionId: entry.branch.sessionId, agentId: null, task: '',
         branchOf: { conversationId: entry.branch.conversationId, messageId: entry.branch.messageId } }
@@ -1011,6 +1014,12 @@ export function enqueueInput(raw: InputArgs, finishOwner?: InputEntry['finishOwn
       return { ...prior };
     }
     const requestedSession = input.sessionId ? await getSession(input.sessionId) : null;
+    if (input.temporaryChat && (input.sessionId || input.branch || input.edit))
+      throw new Error('Start a temporary chat as a new conversation');
+    if (input.temporaryChat && input.projectId) {
+      const linked = (await getProject(input.projectId))?.chatgpt;
+      if (linked?.state === 'linked') throw new Error('Temporary chats cannot belong to a ChatGPT Project');
+    }
     // Chat Marks: an API chat sends through its own executor, never the browser outbox.
     if (isApiConversationId(requestedSession?.conversationId)) throw new Error('API chats send through their own composer');
     // Explicit injection has its own recipient and can never spend a browser completion.
@@ -1856,9 +1865,9 @@ async function completedStageBoundary(entry: InputEntry, current: InputEntry[]):
       row.dueAt <= Date.now() && ['queued', 'browser', 'tool'].includes(row.state))) return null;
   return turnId;
 }
-export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }>> {
+export function pendingBrowserInputs(): Promise<Array<{ id: string; conversationId: string | null; temporaryChat?: true; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }>> {
   return serial(async () => {
-    const result: Array<{ id: string; conversationId: string | null; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }> = [];
+    const result: Array<{ id: string; conversationId: string | null; temporaryChat?: true; recovery?: { questionId: string; stop: boolean }; silenceTurnId?: string; directTurn?: InputEntry['directTurn']; supersededConversationId?: string; lifetime?: 'temporary-planner'; project?: string; branch?: { conversationId: string; messageId: string }; edit?: { messageId: string } }> = [];
     const current = await load();
     for (const entry of ordered(current)) {
       if (companionOf(current, entry)) continue;
@@ -1881,6 +1890,7 @@ export function pendingBrowserInputs(): Promise<Array<{ id: string; conversation
         const silenceTurnId = entry.silenceBoundary?.turnId ?? (end?.kind === 'turn_end' && end.outcome === 'failed' &&
           end.reason === 'thinking_failed' && end.turnId && await eligibleStageEnd(entry) === end.turnId ? end.turnId : undefined);
         result.push({ id: entry.id, conversationId,
+          ...(entry.temporaryChat ? { temporaryChat: true as const } : {}),
           ...(entry.recovery ? { recovery: { questionId: entry.recovery.questionId, stop: entry.silenceBoundary?.nativeBusy === true && entry.recovery.phase === 'ready' } } : {}),
           ...(silenceTurnId ? { silenceTurnId } : {}),
           ...(entry.directTurn ? { directTurn: entry.directTurn } : {}),

@@ -169,10 +169,10 @@ it('opens one New chat menu whose ChatGPT item keeps the app\'s own new chat', a
   expect(chatgpt).not.toHaveBeenCalled();
   const items = await vi.waitFor(() => {
     const found = [...dom.window.document.querySelectorAll<HTMLElement>('.row-menu-item')];
-    expect(found.length).toBe(2);
+    expect(found.length).toBe(4);
     return found;
   });
-  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'new-terminal-claude']);
+  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'temporary-chat', 'temporary-chat-no-recording', 'new-terminal-claude']);
   items[0]!.click();
   await vi.waitFor(() => expect(chatgpt).toHaveBeenCalledTimes(1));
 });
@@ -224,17 +224,17 @@ it('keeps the Claude terminal module and the Claude Code engine apart when both 
     dom.window.document.getElementById('newChat')!.click();
     return vi.waitFor(() => {
       const found = [...dom.window.document.querySelectorAll<HTMLElement>('.row-menu-item')];
-      expect(found.length).toBe(3);
+      expect(found.length).toBe(5);
       return found;
     });
   };
   const items = await open();
-  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'new-chat-engine-claude', 'new-terminal-claude']);
-  expect(new Set(items.map(item => item.dataset.rowAction)).size).toBe(3);
-  items[1]!.click();
+  expect(items.map(item => item.dataset.rowAction)).toEqual(['new-chat-chatgpt', 'temporary-chat', 'temporary-chat-no-recording', 'new-chat-engine-claude', 'new-terminal-claude']);
+  expect(new Set(items.map(item => item.dataset.rowAction)).size).toBe(5);
+  items[3]!.click();
   expect(engineChat).toHaveBeenCalledTimes(1);
   expect(createSession).not.toHaveBeenCalled();
-  (await open())[2]!.click();
+  (await open())[4]!.click();
   await vi.waitFor(() => expect(createSession).toHaveBeenCalledWith('claude', 'project-1'));
   expect(engineChat).toHaveBeenCalledTimes(1);
 });
@@ -311,7 +311,7 @@ it('keeps ZeroClaw out of New chat, the project New terminal list and the sideba
     expect(found.length).toBeGreaterThan(1);
     return found;
   });
-  expect(items).toEqual(['new-chat-chatgpt', 'new-terminal-claude']);
+  expect(items).toEqual(['new-chat-chatgpt', 'temporary-chat', 'temporary-chat-no-recording', 'new-terminal-claude']);
   // Its sidebar item sits right below Pets, shown while the module is enabled, and opens its page.
   const item = doc.getElementById('sidebarZeroClaw')!;
   expect(doc.getElementById('sidebarPets')!.nextElementSibling).toBe(item);

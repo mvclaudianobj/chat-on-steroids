@@ -149,6 +149,7 @@ export function projectSession(summary: SessionSummary): ControlApiSession {
     id: summary.id,
     title: line(summary.title, TITLE_CAP),
     conversationId: summary.conversationId,
+    ...(summary.temporaryChat ? { temporaryChat: true } : {}),
     projectId: summary.projectId ?? null,
     startedAt: summary.startedAt,
     updatedAt: summary.updatedAt,

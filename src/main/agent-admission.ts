@@ -98,7 +98,8 @@ export async function spawnAgentWorkers(
     ? existing.state.agents.filter(agent => agent.role === 'worker' && agent.label === worker.label!.trim() &&
         agent.state === 'sleeping' && agent.revivable === true && !!agent.conversationId &&
         (worker.model === undefined || worker.model === agent.model) &&
-        (worker.reasoning_effort === undefined || worker.reasoning_effort === agent.reasoningEffort))
+        (worker.reasoning_effort === undefined || worker.reasoning_effort === agent.reasoningEffort) &&
+        (worker.temporary_chat === undefined || worker.temporary_chat === (agent.temporaryChat === true)))
     : []);
   // Once a family has accumulated its configured worker count, prefer the oldest idle
   // member for one new task. Only an exact owner may recycle it. Company ticket workers
@@ -110,7 +111,8 @@ export async function spawnAgentWorkers(
       agent.revivable === true && !!agent.conversationId && agent.pending === 0 && agent.awaitingAck === 0 &&
       !/^marks(?:\d+|-[a-z]+):/i.test(agent.label) &&
       (worker.model === undefined || worker.model === agent.model) &&
-      (worker.reasoning_effort === undefined || worker.reasoning_effort === agent.reasoningEffort))
+      (worker.reasoning_effort === undefined || worker.reasoning_effort === agent.reasoningEffort) &&
+      (worker.temporary_chat === undefined || worker.temporary_chat === (agent.temporaryChat === true)))
       .sort((a, b) => (a.sleptAt ?? a.createdAt) - (b.sleptAt ?? b.createdAt));
     if (idle.length) chosen[0] = [idle[0]!];
   }

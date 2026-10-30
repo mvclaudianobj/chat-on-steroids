@@ -39,6 +39,17 @@ export function createCliModulesUi(api: AppApi, hooks: {
   const sidebar = document.getElementById('cliModuleChats')!;
   const sidebarPrimary = document.getElementById('sidebarPrimary')!;
   const newChatBtn = document.getElementById('newChat')!;
+  // Keep the established one-click New Chat behavior. Offer temporary creation as
+  // its own adjacent action even when no external chat engine is installed.
+  const tempChatBtn = document.createElement('button');
+  tempChatBtn.type = 'button';
+  tempChatBtn.id = 'newTemporaryChat';
+  tempChatBtn.className = 'btn sidebar-primary-link';
+  tempChatBtn.append(chatTypeMark('temporary', 'temporary-chat-icon'));
+  ui(tempChatBtn, 'title', () => t('Temporary chat'));
+  ui(tempChatBtn, 'aria-label', () => t('Temporary chat'));
+  tempChatBtn.addEventListener('click', () => document.dispatchEvent(new Event('marks:temporary-chat')));
+  newChatBtn.after(tempChatBtn);
   const chatBody = document.getElementById('chatBody')!;
   const composer = document.getElementById('composer');
   const composerDock = document.getElementById('composerDock');
@@ -381,6 +392,12 @@ export function createCliModulesUi(api: AppApi, hooks: {
             try { target.click(); } finally { delete target.dataset.newChatPassThrough; }
           }
         },
+        { action: 'temporary-chat', icon: 'i-shield', label: () => t('Temporary chat'),
+          title: () => t('This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.'),
+          run: () => document.dispatchEvent(new Event('marks:temporary-chat')) },
+        { action: 'temporary-chat-no-recording', icon: 'i-shield', label: () => t('Temporary chat without local recording'),
+          title: () => t('Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.'),
+          run: () => void api.openLink('https://chatgpt.com/?temporary-chat=true&clf-no-local-recording=true') },
         ...providerItems(),
         ...enabledModules().map((id, index) => ({
           // Terminal modules have their own namespace: an engine of the same name is `new-chat-engine-<id>`.

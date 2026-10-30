@@ -838,6 +838,7 @@ function nextJournalBatch(preferredConversationId = null, excluded = []) {
   let agent;
   let agentCommandId;
   let chatgptProject;
+  let temporaryChat = false;
   const mine = [];
   for (const entry of journal) {
     if (!conversationId) {
@@ -854,13 +855,14 @@ function nextJournalBatch(preferredConversationId = null, excluded = []) {
       agentCommandId = entry.agentCommandId;
     }
     if (!chatgptProject && entry.chatgptProject) chatgptProject = entry.chatgptProject;
+    if (entry.temporaryChat === true) temporaryChat = true;
     if (mine.length >= BATCH) break;
   }
-  return conversationId ? { conversationId, mine, agent, agentCommandId, chatgptProject } : null;
+  return conversationId ? { conversationId, mine, agent, agentCommandId, chatgptProject, temporaryChat } : null;
 }
 
 async function deliverJournalBatch(batch) {
-  const { conversationId, mine, agent, agentCommandId, chatgptProject } = batch;
+  const { conversationId, mine, agent, agentCommandId, chatgptProject, temporaryChat } = batch;
   const result = await call('/events', {
     method: 'POST',
     timeoutMs: EVENTS_REQUEST_TIMEOUT_MS,
@@ -869,6 +871,7 @@ async function deliverJournalBatch(batch) {
       agent,
       agentCommandId,
       chatgptProject,
+      ...(temporaryChat ? { temporaryChat: true } : {}),
       events: mine.map((entry) => entry.event)
     })
   });
@@ -879,7 +882,9 @@ async function deliverJournalBatch(batch) {
     const retry = await call('/events', {
       method: 'POST',
       timeoutMs: EVENTS_REQUEST_TIMEOUT_MS,
-      body: JSON.stringify({ conversationId, agent, agentCommandId, chatgptProject, events: half.map((entry) => entry.event) })
+      body: JSON.stringify({ conversationId, agent, agentCommandId, chatgptProject,
+        ...(half.some((entry) => entry.temporaryChat === true) ? { temporaryChat: true } : {}),
+        events: half.map((entry) => entry.event) })
     });
     noteDelivery(retry, half.length, conversationId);
     if (!retry.ok) return false;
@@ -2485,8 +2490,8 @@ async function deliverDesktopInputs(inputs, background, reusableConversations = 
       const url = target ? `https://chatgpt.com/c/${encodeURIComponent(target)}`
         : branchInput ? `https://chatgpt.com/c/${encodeURIComponent(branchInput.conversationId)}?${marker}#${marker}`
         : project ? `https://chatgpt.com/g/${project}/project?${marker}#${marker}`
-        : `https://chatgpt.com/?${input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`;
-      if (!target && !project && !branchInput && input.lifetime !== 'temporary-planner') {
+        : `https://chatgpt.com/?${input.temporaryChat === true || input.lifetime === 'temporary-planner' ? 'temporary-chat=true&' : ''}${marker}#${marker}`;
+      if (!target && !project && !branchInput && input.lifetime !== 'temporary-planner' && input.temporaryChat !== true) {
         const reusable = new Set(reusableConversations);
         const choices = tabs.filter(candidate => !candidate.pinned && !candidate.pendingUrl && modelCatalogTarget?.tab !== candidate.id &&
           (recoveredReuse ? candidate.id === recoveredReuse.tab :
@@ -4523,7 +4528,8 @@ const HANDLERS = {
     const chatgptProject = await tabChatgptProject(source, conversationId);
     const entries = (Array.isArray(message.entries) ? message.entries : []).map((entry) => {
       if (!entry || typeof entry !== 'object') return entry;
-      const placed = chatgptProject ? { ...entry, chatgptProject } : entry;
+      const placed = { ...entry, ...(chatgptProject ? { chatgptProject } : {}),
+        ...(message.temporaryChat === true ? { temporaryChat: true } : {}) };
       return placed.conversationId ? placed : { ...placed, provisional: key };
     });
     enqueue(entries);
@@ -5458,6 +5464,7 @@ async function placeSuccessorChat(raw, tabId) {
     const model = commandModelSlug(raw.model);
     const effort = commandReasoningEffort(raw.reasoningEffort);
     const query = [marker];
+    if (raw.temporaryChat === true) query.push('temporary-chat=true');
     if (model) query.push(`model=${encodeURIComponent(model)}`);
     if (effort) query.push(`reasoning_effort=${encodeURIComponent(effort)}`);
     let created;
@@ -5506,6 +5513,7 @@ async function placeSuccessorChat(raw, tabId) {
       const model = commandModelSlug(raw && raw.model);
       const reasoningEffort = commandReasoningEffort(raw && raw.reasoningEffort);
       const query = [marker];
+      if (raw.temporaryChat === true) query.push('temporary-chat=true');
       if (model) query.push(`model=${encodeURIComponent(model)}`);
       if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
       let created;
@@ -5541,6 +5549,7 @@ async function placeSuccessorChat(raw, tabId) {
   const model = commandModelSlug(raw && raw.model);
   const reasoningEffort = commandReasoningEffort(raw && raw.reasoningEffort);
   const query = [marker];
+  if (raw.temporaryChat === true) query.push('temporary-chat=true');
   if (model) query.push(`model=${encodeURIComponent(model)}`);
   if (reasoningEffort) query.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
   // A chat in the app's own tab group sits in the user's window (#128): its successor joins that

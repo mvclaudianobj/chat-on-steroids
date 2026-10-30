@@ -269,7 +269,12 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     controls.hidden = !id;
     label.hidden = !id;
     const selected = id ? null : hooks.selectedChat?.() ?? null;
-    nativeMark.hidden = !!id || !selected || chatTypeOf(selected) !== 'chatgpt';
+    const nativeType = selected ? chatTypeOf(selected) : null;
+    nativeMark.hidden = !!id || !selected || (nativeType !== 'chatgpt' && nativeType !== 'temporary');
+    if (nativeType === 'chatgpt' || nativeType === 'temporary') {
+      setIcon(nativeMark, chatTypeIcon(nativeType), 'ico chat-type-icon chat-head-type');
+      nativeMark.dataset.chatType = nativeType;
+    }
     paintApproval(id ? view?.pending ?? null : null);
     paintTakeBack();
     if (!id) { routeNotice.hidden = true; return; }

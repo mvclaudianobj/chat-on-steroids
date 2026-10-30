@@ -4685,5 +4685,10 @@
   "60 days": "60 gün",
   "90 days": "90 gün",
   "180 days": "180 gün",
-  "365 days": "365 gün"
+  "365 days": "365 gün",
+  "Temporary chat": "Geçici sohbet",
+  "Temporary chat without local recording": "Yerel kayıt olmadan geçici sohbet",
+  "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "Bu konuşma ChatGPT geçmişinde görünmez. Chat Marks yerel bir kayıt tutar.",
+  "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "ChatGPT’yi doğrudan açar. Chat Marks yerel sohbet oluşturmaz veya mesajları kaydetmez.",
+  "Temporary chats cannot use Compact & Resume.": "Geçici sohbetlerde Sıkıştır ve sürdür kullanılamaz."
 }

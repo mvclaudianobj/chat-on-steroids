@@ -32,6 +32,20 @@ afterEach(async () => {
   vi.restoreAllMocks(); await flushDurable(); resetTrustedChatsForTests(); resetInputForTests(); resetSessionStoreForTests(); resetDurableForTests(); await removeTempDir(directory);
 });
 
+it('reserves and restores a native temporary chat while retaining the explicit local-history policy', async () => {
+  const request = args({ temporaryChat: true, model: null, reasoningEffort: null });
+  const queued = await enqueueInput(request);
+  expect(queued).toMatchObject({ opening: true, temporaryChat: true, conversationId: null });
+  expect(await getSession(queued.sessionId!)).toMatchObject({ temporaryChat: true, id: queued.sessionId });
+  expect(await pendingBrowserInputs()).toContainEqual(expect.objectContaining({
+    id: request.id, temporaryChat: true, conversationId: null
+  }));
+  resetInputForTests(); resetSessionStoreForTests(); initSessionStore(directory);
+  expect((await listInputs()).find(row => row.id === request.id)?.temporaryChat).toBe(true);
+  expect((await getSession(queued.sessionId!))?.temporaryChat).toBe(true);
+  await expect(enqueueInput(args({ temporaryChat: true, sessionId: queued.sessionId }))).rejects.toThrow('Start a temporary chat');
+});
+
 it('admits twenty independent durable sessions before any native ACK and preserves exact retry identity', async () => {
   const requests = Array.from({ length: 20 }, (_, n) => args({ text: `Independent task ${n}` }));
   const accepted = await Promise.all(requests.map(request => enqueueInput(request)));

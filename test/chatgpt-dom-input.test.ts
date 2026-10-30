@@ -13,6 +13,7 @@ interface DomApi {
   generating(): boolean;
   sendButton(): HTMLButtonElement | null;
   temporaryChatReady(): boolean;
+  temporaryChatSurface(): boolean;
   confirmTemporaryChatIntroduction(): void;
   errors(): Array<{ text: string; recoverable: boolean; blocking?: boolean }>;
   captureComposerDraft(text: string, current?: () => boolean): { current(): boolean; clear(): Promise<boolean>; withdraw(): boolean; dispose(): void; attachments(nodes: Element[]): void };
@@ -46,6 +47,19 @@ beforeEach(() => {
   button = document.querySelector('[data-testid="send-button"]')!;
 });
 afterEach(() => { dom.window.close(); vi.useRealTimers(); });
+
+it('detects a native temporary opening and retained temporary conversation by URL but refuses a normal chat', () => {
+  expect(api.temporaryChatSurface()).toBe(false);
+  dom.window.history.replaceState(null, '', '/?temporary-chat=true&cos-input=00000000-0000-4000-8000-000000000001');
+  expect(api.temporaryChatSurface()).toBe(true);
+  const id = '00000000-0000-4000-8000-000000000001';
+  dom.window.history.replaceState(null, '', '/c/' + id + '?temporary-chat=true');
+  expect(api.temporaryChatSurface()).toBe(true);
+  dom.window.history.replaceState(null, '', '/c/' + id);
+  expect(api.temporaryChatSurface()).toBe(false);
+  dom.window.history.replaceState(null, '', '/g/g-p-00000000000000000000000000000001/project?temporary-chat=true');
+  expect(api.temporaryChatSurface()).toBe(false);
+});
 
 it('does not interpret Marks controls injected inside the editor as an authored draft', () => {
   box.textContent = '';

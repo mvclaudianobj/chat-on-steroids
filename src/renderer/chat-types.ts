@@ -13,7 +13,7 @@ import { isApiConversationId } from '../shared/api-chat.js';
 import { icon } from './dom.js';
 
 /** `chatgpt` is a native ChatGPT chat, `api` an API chat whose engine this version cannot read. */
-export type ChatType = 'chatgpt' | 'terminal' | 'api' | AgentEngineId;
+export type ChatType = 'chatgpt' | 'temporary' | 'terminal' | 'api' | AgentEngineId;
 
 /**
  * One drawing per engine (icons.css `.cm-glyph-*`): a line drawing, or the project's own simple
@@ -30,6 +30,7 @@ const ENGINE_ICONS: Readonly<Record<AgentEngineId, string>> = {
 
 /** The icon name (dom.ts vocabulary) of a chat type. */
 export function chatTypeIcon(type: ChatType): string {
+  if (type === 'temporary') return 'i-shield';
   if (type === 'chatgpt') return 'i-chat-chatgpt';
   if (type === 'terminal') return 'i-terminal';
   if (type === 'api') return 'i-chat';
@@ -40,8 +41,9 @@ export function chatTypeIcon(type: ChatType): string {
  * A listed session's type: an API chat by the engine main projected onto its summary, any other
  * chat with a conversation a ChatGPT chat. The unattributed stream (no conversation) is no chat.
  */
-export function chatTypeOf(summary: { conversationId: string | null; engine?: AgentEngineId }): ChatType | null {
+export function chatTypeOf(summary: { conversationId: string | null; engine?: AgentEngineId; temporaryChat?: boolean }): ChatType | null {
   if (isApiConversationId(summary.conversationId)) return summary.engine ?? 'api';
+  if (summary.conversationId && summary.temporaryChat === true) return 'temporary';
   return summary.conversationId ? 'chatgpt' : null;
 }
 

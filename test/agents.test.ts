@@ -3520,6 +3520,17 @@ describe('restart', () => {
     expect(spawned).toEqual(['worker-1', 'worker-2']);
   });
 
+  it('persists an explicitly temporary worker and preserves its native creation intent after restart', () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'Temporary isolated worker', temporary_chat: true }] });
+    staged.commit();
+    expect(pendingWorkerSpawns()).toContainEqual(expect.objectContaining({ id: 'worker-1', temporaryChat: true }));
+    const snapshot = snapshotSwarm()!;
+    expect(snapshot.agents.find(entry => entry.info.id === 'worker-1')?.info.temporaryChat).toBe(true);
+    resetAgentsForTests();
+    restoreSwarm(snapshot);
+    expect(pendingWorkerSpawns()).toContainEqual(expect.objectContaining({ id: 'worker-1', temporaryChat: true }));
+  });
+
   it('repairs only the exact durable prime A→B recovery transition after transfer state was lost', () => {
     startSwarm(2);
     const snapshot = snapshotSwarm()!;
