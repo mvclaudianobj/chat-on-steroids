@@ -1366,8 +1366,15 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
   if (stale) {
     // Firefox runs the add-on Mozilla signed and updates it itself; the app's folder is not what it loads.
     const firefox = bridge.extensionEngine === 'gecko' || (bridge.externalExtension?.engine === 'gecko' && bridge.externalExtension.version === stale);
+    // bridge.extensionVersion is scoped to the ChatGPT browser selected by the app,
+    // not to the newest extension seen in any unrelated browser. Name that browser
+    // explicitly so a stale Firefox copy cannot be mistaken for the built-in one.
+    const browser = firefox ? t('Mozilla Firefox') : config.ui.chatBrowser === 'cos'
+      ? t('Chat Marks browser (built-in)') : config.ui.chatBrowser === 'edge'
+      ? t('Microsoft Edge') : config.ui.chatBrowser === 'brave'
+      ? t('Brave Browser') : t('Google Chrome / Chromium');
     lines.push(
-      t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
+      `${t('ChatGPT browser')}: ${browser}. ` + t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
         (firefox
           ? t("Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.")
           : t("Reload the extension from this app’s folder, then refresh ChatGPT."))
