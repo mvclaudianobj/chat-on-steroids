@@ -14,6 +14,19 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.48.1': {
+    lead: () => `${t("A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard.")} ${t("Vault, notifications, Brain memory and new ways to work with agents.")}`,
+    highlights: [
+      { icon: 'i-check-circle', title: () => t("Goal step reviewer"), text: () => t("A second chat checks each Goal step's file changes before the next one.") },
+      { icon: 'i-sun', title: () => t("Follows your system"), text: () => t("Light or dark as your computer is set, also when it switches.") },
+      { icon: 'i-keyboard', title: () => t("Asks before taking over"), text: () => t("A small question asks before a chat uses your mouse and keyboard.") },
+      { icon: 'i-chat', title: () => t("Messages that get through"), text: () => t("Also when you close the chat's tab while sending, or ChatGPT changes its model menu.") },
+      { icon: 'i-chat', title: () => t("Jarvis with ChatGPT normal"), text: () => t("Select a ChatGPT chat, enable Jarvis in Settings, and hold its microphone. CLIProxy is optional.") },
+      { icon: 'i-terminal', title: () => t("Agent routes and remote labs"), text: () => t("Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.") },
+      { icon: 'i-lock', title: () => t("Vault and notifications"), text: () => t("Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.") },
+      { icon: 'i-search', title: () => t("Brain memory"), text: () => t("Recall and save local memories, connect optional sources and selectively import past conversations.") }
+    ]
+  },
   '2.1.48': {
     lead: () => t("A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard."),
     highlights: [
@@ -310,7 +323,7 @@ export function hasHighlights(version: string): boolean {
 export function paintWhatsNew(version: string): boolean {
   // The Marks patch releases retain community highlights while showing their own version
   // and opening its own release notes.
-  const release = RELEASES[version === '2.1.48.1' ? '2.1.48' : version === '2.1.47.1' ? '2.1.47' : version === '2.1.46.1' ? '2.1.46' : version];
+  const release = RELEASES[version === '2.1.47.1' ? '2.1.47' : version === '2.1.46.1' ? '2.1.46' : version];
   if (!release) return false;
   ui($('whatsNewVersion'), 'textContent', () => t('Version {0}', [version]));
   ui($('whatsNewLead'), 'textContent', release.lead);

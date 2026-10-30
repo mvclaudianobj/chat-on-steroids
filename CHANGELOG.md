@@ -49,6 +49,12 @@ Goal can have a second chat check each step's file changes. The theme can follow
 - **A long task continued in fresh turns** no longer repeats the earlier turns' sentences in each later turn.
 
 
+### Chat Marks integration since 2.1.46.1 (2.1.47.1-1 through -9 QA candidates)
+
+- Includes all changes already merged into Marks base `4166f3a1`: native Jarvis voice and provider routing, Company/worker UX, notifications and WhatsApp bridge, archive and approval protections, local account and terminal login/clipboard fixes, SSH remote profiles, prompt persistence, CLI module UI, and browser/extension fixes.
+- Additional reviewed branches are part of this integration **by real Git merges**: `fix/marks-jarvis-voice-trigger` (`e38eca91`) for confirmed-answer speech, session-tail and Linux voice fallback, and `feat/marks-ccr-autoconfig` (`9b2447fb`) for ephemeral CCR UI token validation and backed-up CLIProxy routing.
+- The intermediate 2.1.47.1 builds were QA candidates, **not an official release**. The next planned release is **2.1.48.1**, after CEO sign-off. See `docs/release-notes/v2.1.48.1.md` for the consolidated release scope and verification limits.
+
 ## [2.1.47.1] — Chat Marks integration of community 2.1.47
 
 - Preserves the upstream 2.1.47 features while integrating Chat Marks modules, desktop and mobile controls, approvals, and its established visual identity.
