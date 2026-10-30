@@ -2,7 +2,7 @@ import type { AppApi } from '../preload/index.js';
 import type { CliSession } from '../main/cli-modules.js';
 import { createWorkspaceTerminal, type TerminalTransport } from './workspace-terminal.js';
 import { openRowMenu, type RowMenuItem } from './row-menu.js';
-import { t, ui } from './i18n.js';
+import { t, ui, uiText } from './i18n.js';
 import { chatTypeIcon, chatTypeMark, moduleMark } from './chat-types.js';
 import { createUpstreamManageUi, type UpstreamManageUi } from './upstream-manage-ui.js';
 import { findProjectGroup } from './project-group-locator.js';
@@ -45,9 +45,8 @@ export function createCliModulesUi(api: AppApi, hooks: {
   tempChatBtn.type = 'button';
   tempChatBtn.id = 'newTemporaryChat';
   tempChatBtn.className = 'btn sidebar-primary-link';
-  tempChatBtn.append(chatTypeMark('temporary', 'temporary-chat-icon'));
-  ui(tempChatBtn, 'title', () => t('Temporary chat'));
-  ui(tempChatBtn, 'aria-label', () => t('Temporary chat'));
+  // Named like its neighbours (New chat, Plugins…): an icon alone did not say what it opens.
+  tempChatBtn.append(chatTypeMark('temporary', 'temporary-chat-icon'), uiText(() => t('Temporary chat')));
   tempChatBtn.addEventListener('click', () => document.dispatchEvent(new Event('marks:temporary-chat')));
   newChatBtn.after(tempChatBtn);
   const chatBody = document.getElementById('chatBody')!;
