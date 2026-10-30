@@ -71,6 +71,7 @@ const {
   unattributedIncidentsSettledForTests,
   restoreCommands,
   resumeJobFor,
+  retrySessionResume,
   setBrowserOpener,
   shutdownBridge,
   STALE_SWARM_MS,
@@ -8299,6 +8300,44 @@ describe('targeted open', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('retries three model-stalled resume openings with backoff then offers an explicit retry', async () => {
+    vi.useFakeTimers();
+    try {
+      setBrowserOpener(async url => { opened.push(url); });
+      await pair();
+      const { sessionId, token } = await automaticCompactedSession(
+        '62626262-7777-8888-9999-aaaaaaaaaaaa', 'durable fallback brief');
+      const first = queueResume(sessionId, token)!;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const active = pendingCommands().find(row => row.what === `resume:${sessionId}`);
+        expect(active).toBeDefined();
+        expect((await redeem(active!.id, `model-tab-${attempt}`)).text).toContain('durable fallback brief');
+        if (attempt > 1) {
+          const chosen = await request('POST', '/commands/redeem', { body: { id: active!.id, client: `model-tab-${attempt}` } });
+          expect(chosen.body.command.model).toBeNull();
+        }
+        expect((await request('POST', '/commands/step', { body: { id: active!.id, client: `model-tab-${attempt}`, step: 'model' } })).body).toEqual({ ok: true });
+        await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+        await vi.waitFor(() => expect(pendingCommands().some(row => row.id === active!.id)).toBe(false));
+        expect(continuationByToken(token)?.openingFailures).toBe(attempt);
+        if (attempt < 3) {
+          await vi.advanceTimersByTimeAsync(attempt === 1 ? 20_001 : 60_001);
+          await sweepStaleSwarm(Date.now());
+          expect(pendingCommands().filter(row => row.what === `resume:${sessionId}`)).toHaveLength(1);
+        }
+      }
+      expect(resumeJobFor(sessionId)).toMatchObject({ stage: 'failed', canRetry: true, openingAttempts: 3 });
+      expect(continuationByToken(token)?.state).not.toBe('aborted');
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect(pendingCommands().filter(row => row.what === `resume:${sessionId}`)).toHaveLength(0);
+      await retrySessionResume(sessionId);
+      expect(resumeJobFor(sessionId)).toMatchObject({ canRetry: false, openingAttempts: 0 });
+      expect(pendingCommands().filter(row => row.what === `resume:${sessionId}`)).toHaveLength(1);
+      expect(first.id).not.toBe(pendingCommands().at(-1)?.id);
+    } finally { vi.useRealTimers(); }
   });
 
   it('withdraws a cancelled resume so no tab opens for it afterwards', async () => {

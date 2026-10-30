@@ -236,6 +236,10 @@ interface Continuation {
   automatic: boolean;
   /** Number of rejected incomplete briefs in this Compact & Resume chain. */
   briefRetries: number;
+  /** Durable count and deadline for replacement pages that never reached Send. */
+  openingFailures: number;
+  openingRetryAt: number | null;
+  openingFallbackModel: boolean;
   /** When the brief request first went on its way; the automatic clock starts here. */
   askedAt: number | null;
   state: ContinuationState;
@@ -297,6 +301,9 @@ interface ContinuationRecord {
   /** Absent in records written before durable auto-compaction tickets existed. */
   automatic?: boolean;
   briefRetries?: number;
+  openingFailures?: number;
+  openingRetryAt?: number | null;
+  openingFallbackModel?: boolean;
   /** Absent in records written before automatic handovers had a deadline. */
   askedAt?: number | null;
   /** Absent in records written before Project affinity was carried; null means the site root. */
@@ -332,6 +339,9 @@ function durableRecord(entry: Continuation): ContinuationRecord {
     sourceProgress: entry.sourceProgress,
     automatic: entry.automatic,
     briefRetries: entry.briefRetries,
+    openingFailures: entry.openingFailures,
+    openingRetryAt: entry.openingRetryAt,
+    openingFallbackModel: entry.openingFallbackModel,
     askedAt: entry.askedAt,
     project: entry.project,
     state: entry.state,
@@ -388,6 +398,9 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
   entry.sourceProgress = record.sourceProgress ?? 0;
   entry.automatic = record.automatic === true;
   entry.briefRetries = record.briefRetries ?? 0;
+  entry.openingFailures = record.openingFailures ?? 0;
+  entry.openingRetryAt = record.openingRetryAt ?? null;
+  entry.openingFallbackModel = record.openingFallbackModel === true;
   entry.state = record.state;
   entry.summary = record.summary;
   entry.handoffId = record.handoffId;
@@ -468,6 +481,9 @@ export interface ContinuationView {
   openedAt: number;
   automatic: boolean;
   briefRetries: number;
+  openingFailures: number;
+  openingRetryAt: number | null;
+  openingFallbackModel: boolean;
   /** When the brief request first went on its way, or null while it has not. */
   askedAt: number | null;
   /** The Project the replacement chat belongs in, or null for the site root. */
@@ -489,6 +505,9 @@ const view = (entry: Continuation): ContinuationView => ({
   openedAt: entry.openedAt,
   automatic: entry.automatic,
   briefRetries: entry.briefRetries,
+  openingFailures: entry.openingFailures,
+  openingRetryAt: entry.openingRetryAt,
+  openingFallbackModel: entry.openingFallbackModel,
   askedAt: entry.askedAt,
   project: entry.project,
   sourceSend: { ...entry.sourceSend },
@@ -791,6 +810,9 @@ function makeContinuation(sessionId: string, fromConversationId: string, automat
     sourceProgress: 0,
     automatic,
     briefRetries: 0,
+    openingFailures: 0,
+    openingRetryAt: null,
+    openingFallbackModel: false,
     askedAt: null,
     state: 'awaiting-summary',
     summary: '',
@@ -1116,6 +1138,40 @@ export async function releaseContinuationDestinationSendNow(token: string, unatt
       destinationSend: { state: 'not-attempted', conversationId: null, messageId: null }
     }));
     endResumeClaim(entry.token);
+    return true;
+  });
+}
+
+/** The failed browser attempt and its next due time are one durable transition. */
+export async function failResumeOpeningNow(token: string, claimant: string, reason: string,
+  failedModel: boolean, maxAttempts: number, backoffMs: readonly number[]): Promise<{ failures: number; retryAt: number | null } | null> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || !['claimed', 'awaiting-chat'].includes(entry.state) ||
+        (entry.claimedBy !== claimant && entry.claimedBy !== null) ||
+        entry.destinationSend.state !== 'not-attempted') return null;
+    const failures = entry.openingFailures + 1;
+    const retryAt = failures >= maxAttempts ? null : Date.now() + backoffMs[Math.min(failures - 1, backoffMs.length - 1)]!;
+    await transitionNow(entry, current => ({ ...current,
+      state: 'awaiting-chat', claimedBy: null,
+      destinationSend: { state: 'not-attempted', conversationId: null, messageId: null },
+      openingFailures: failures, openingRetryAt: retryAt,
+      openingFallbackModel: current.openingFallbackModel || failedModel,
+      error: failures >= maxAttempts ? `Resume could not open after ${failures} attempts: ${reason}` : null
+    }));
+    endResumeClaim(token);
+    return { failures, retryAt };
+  });
+}
+
+/** The user's explicit Retry starts a new bounded series on the same saved brief. */
+export async function retryResumeOpeningNow(token: string, maxAttempts: number): Promise<boolean> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || entry.state !== 'awaiting-chat' || entry.claimedBy !== null ||
+        entry.destinationSend.state !== 'not-attempted' || entry.openingFailures < maxAttempts) return false;
+    await transitionNow(entry, current => ({ ...current, openingFailures: 0, openingRetryAt: null,
+      openingFallbackModel: true, error: null }));
     return true;
   });
 }
@@ -1831,6 +1887,9 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       touchedAt: Number.isFinite(raw.touchedAt) && raw.touchedAt! >= raw.openedAt && raw.touchedAt! <= now ? Number(raw.touchedAt) : raw.openedAt,
       automatic: raw.automatic === true,
       briefRetries: Number.isSafeInteger(raw.briefRetries) && raw.briefRetries! >= 0 && raw.briefRetries! <= 8 ? raw.briefRetries! : 0,
+      openingFailures: Number.isSafeInteger(raw.openingFailures) && raw.openingFailures! >= 0 && raw.openingFailures! <= 50 ? raw.openingFailures! : 0,
+      openingRetryAt: Number.isFinite(raw.openingRetryAt) && raw.openingRetryAt! > 0 ? raw.openingRetryAt! : null,
+      openingFallbackModel: raw.openingFallbackModel === true,
       askedAt: null,
       state: raw.state,
       summary: typeof raw.summary === 'string' ? raw.summary.slice(0, 512 * 1024) : '',

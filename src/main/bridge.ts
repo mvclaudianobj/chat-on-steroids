@@ -240,6 +240,8 @@ import {
   openContinuationNow,
   reopenWithHandoffNow,
   releaseContinuationDestinationSendNow,
+  failResumeOpeningNow,
+  retryResumeOpeningNow,
   recoverContinuationFromRecordedBootstrap,
   repairPrimeFromResumeShadow,
   resetContinuationsForTests,
@@ -2376,6 +2378,20 @@ export async function resumeFromSavedSummary(sessionId: string, handoffId: strin
 export async function cancelSessionCompaction(sessionId: string): Promise<SessionControlsView> {
   await controlledConversation(sessionId);
   await cancelResumeNow(sessionId);
+  changed();
+  return sessionControlsFor(sessionId);
+}
+
+/** Reuse the same unspent handoff when its bounded opening attempts were exhausted. */
+export async function retrySessionResume(sessionId: string): Promise<SessionControlsView> {
+  await controlledConversation(sessionId);
+  const entry = continuationForSession(sessionId);
+  if (!entry || entry.openingFailures < RESUME_OPEN_MAX_ATTEMPTS ||
+      commands.some(command => command.spec.type === 'resume' && command.spec.token === entry.token) ||
+      !await retryResumeOpeningNow(entry.token, RESUME_OPEN_MAX_ATTEMPTS))
+    throw new Error('This resume is no longer waiting for a retry.');
+  queueResumeCommand(sessionId, entry.token);
+  await deliver();
   changed();
   return sessionControlsFor(sessionId);
 }
@@ -6521,6 +6537,9 @@ export interface ResumeJobView {
     messageId: string | null;
   };
   error: string | null;
+  openingAttempts?: number;
+  retryAt?: number | null;
+  canRetry?: boolean;
 }
 
 const RUNNING_STAGES = new Set<ResumeStage>(['handoff-pending', 'opening', 'waiting-for-browser']);
@@ -6554,6 +6573,8 @@ export function resumeJobFor(sessionId: string): ResumeJobView | null {
       ? 'done'
       : entry.state === 'aborted'
         ? 'failed'
+        : entry.openingFailures >= RESUME_OPEN_MAX_ATTEMPTS && !command
+          ? 'failed'
         : entry.state === 'awaiting-summary'
           ? 'handoff-pending'
           : command && !isLeased(command) && !openInBrowser
@@ -6569,7 +6590,11 @@ export function resumeJobFor(sessionId: string): ResumeJobView | null {
     handoffId: entry.handoffId,
     sourceSend: entry.sourceSend,
     destinationSend: entry.destinationSend,
-    error: entry.error
+    error: entry.error,
+    openingAttempts: entry.openingFailures,
+    retryAt: entry.openingRetryAt,
+    canRetry: stage === 'failed' && entry.state !== 'aborted' &&
+      entry.openingFailures >= RESUME_OPEN_MAX_ATTEMPTS && entry.destinationSend.state === 'not-attempted'
   };
 }
 
@@ -7748,6 +7773,14 @@ function forgetActivity(conversationId: string): void {
  */
 function armSilenceSweep(now = Date.now()): void {
   let earliest = Number.POSITIVE_INFINITY;
+  // A released resume is durable work even with no active MCP call left to keep
+  // the ordinary silence timer alive. Wake its next backoff without waiting for
+  // an unrelated browser poll or a quarter-hour pickup.
+  if (compactionWatchFloor !== null) for (const entry of pendingContinuations()) {
+    if (entry.openingRetryAt !== null && entry.openingFailures < RESUME_OPEN_MAX_ATTEMPTS &&
+        !commands.some(command => command.spec.type === 'resume' && command.spec.token === entry.token))
+      earliest = Math.min(earliest, Math.max(now + 1_000, entry.openingRetryAt));
+  }
   for (const grant of activeUntil.values()) {
     if (grant.until > now) earliest = Math.min(earliest, grant.until);
     const visibleUntil = activityDeadline(grant);
@@ -7785,6 +7818,10 @@ function armSilenceSweep(now = Date.now()): void {
       // the resulting queue implies for a worker's slot remains the full sweep's business.
       void inspectSilentChats(Date.now()).then((pass) => {
       wakeDueProviderDeferredRecovery(Date.now());
+      if (pendingContinuations().some(entry => entry.openingRetryAt !== null &&
+          entry.openingFailures < RESUME_OPEN_MAX_ATTEMPTS && entry.openingRetryAt <= Date.now())) {
+        void runStaleSwarmSweep().catch(error => logWarn(`resume opening retry sweep failed: ${String(error)}`));
+      }
       // A chat whose one repair was already carried out is the sweep's to retire, because letting
       // go of it can free a worker slot. Hand that half back rather than doing it from here.
       if (pass.spent.length > 0) {
@@ -9391,6 +9428,9 @@ const COMPACTION_PICKUPS: Record<CompactionPhase, { every: number; attempts: num
   writing: { every: 5 * 60_000, attempts: 3 },
   opening: { every: 15 * 60_000, attempts: 3 }
 };
+/** Initial opening plus two fresh-page retries, 20 seconds then one minute apart. */
+const RESUME_OPEN_MAX_ATTEMPTS = 3;
+const RESUME_OPEN_BACKOFF_MS = [20_000, 60_000] as const;
 const compactionWatch = new Map<string, { token: string; phase: CompactionPhase; nextAt: number; attempts: number; backoffs?: number; told?: boolean; streamLost?: boolean }>();
 /**
  * Why the source page last stopped an automatic ticket's attempt before asking (#1643), by token.
@@ -9652,6 +9692,11 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
       compactionWatch.set(entry.from, watch);
     }
     const schedule = COMPACTION_PICKUPS[phase];
+    if (phase === 'opening') {
+      if (entry.openingFailures >= RESUME_OPEN_MAX_ATTEMPTS) continue;
+      if (entry.openingRetryAt !== null) watch.nextAt = entry.openingRetryAt;
+      else if (watch.attempts === 0) watch.nextAt = Math.min(watch.nextAt, now + 30_000);
+    }
     if (now < watch.nextAt) continue;
     // The handoff request is sent when the source turn has finished. While that turn still works,
     // a pickup only reloads a busy page and spends the budget: on 2026-10-12 an automatic ticket
@@ -9672,7 +9717,7 @@ async function inspectOwedCompactions(now: number): Promise<boolean> {
       watch.nextAt = now + schedule.every;
       continue;
     }
-    if (watch.attempts >= schedule.attempts) {
+    if (phase !== 'opening' && watch.attempts >= schedule.attempts) {
       if (phase === 'writing' && !watch.told) {
         // The sent request stays protected and gets no fourth reload, but the person reading
         // the app is told once that the handoff is stuck rather than left with a silent card.
@@ -11177,7 +11222,8 @@ function revivalFor(agent: string, runId: string): WorkerRevival | null {
 function describe(command: Command, client: string | null, claimedSummary?: string): BridgeCommand {
   const spec = command.spec;
   // Only what this ChatGPT account offers: a Free plan has no picker to confirm a model with (#1766).
-  const selection = spec.type === 'resume' ? resumeModelSelection(continuationByToken(spec.token)?.requestedModel, spec.token) : null;
+  const selection = spec.type === 'resume' ? resumeModelSelection(
+    continuationByToken(spec.token)?.openingFallbackModel ? null : continuationByToken(spec.token)?.requestedModel, spec.token) : null;
   const expiresAt = Date.now() + Math.max(1, commandDeadlineDelay(command));
   if (spec.type === 'stop') return { id: command.id, expiresAt, kind: 'stop-turn', type: 'stop', text: '', agent: null, model: null, reasoningEffort: null, conversationId: spec.conversationId, turnId: spec.turnId, ...(spec.userMessageId ? { userMessageId: spec.userMessageId } : {}), ...(spec.held ? { held: true } : {}) };
   // A resume's claim is persisted by /commands/redeem before this renderer is called. A
@@ -11218,13 +11264,28 @@ function drop(command: Command, why: string, options: { startTimedOut?: boolean 
       if (!commands.includes(command) || command.spec.type !== 'resume') return false;
       const entry = continuationByToken(command.spec.token);
       if (!entry?.automatic || entry.state === 'committing' || entry.state === 'committed') return false;
-      if (entry.destinationSend.state === 'not-attempted')
-        await releaseContinuationDestinationSendNow(command.spec.token, command.id);
+      const failure = entry.destinationSend.state === 'not-attempted'
+        ? await failResumeOpeningNow(command.spec.token, command.id, why,
+          ['model', 'composer-after-model'].includes(command.progress?.step ?? ''),
+          RESUME_OPEN_MAX_ATTEMPTS, RESUME_OPEN_BACKOFF_MS)
+        : null;
+      // An uncertain Send remains protected; only a proven pre-Send loss can
+      // justify typing the same bootstrap into another ChatGPT conversation.
       await writeDurableNow(COMMANDS_STATE, commandSnapshot({ removeCommandId: command.id }));
       if (command.timer) clearTimeout(command.timer);
       command.timer = null;
       commands = commands.filter(candidate => candidate !== command);
       logWarn(`bridge: released ${specKey(command.spec)} browser attempt without closing its ticket — ${why}`);
+      if (failure?.retryAt !== null && failure) {
+        logInfo(`bridge: resume ${entry.token.slice(0, 8)} opening attempt ${failure.failures}/${RESUME_OPEN_MAX_ATTEMPTS} will retry after backoff`);
+        armSilenceSweep();
+      } else if (failure?.failures === RESUME_OPEN_MAX_ATTEMPTS) {
+        logWarn(`bridge: resume ${entry.token.slice(0, 8)} exhausted opening attempts; user can Try again`);
+        void recordNote(entry.sessionId, `Compact & Resume could not open the new chat after ${failure.failures} attempts. The saved handoff remains available. Use Try again to retry with ChatGPT's default model.`).catch(() => undefined);
+      } else if (!failure) {
+        void recordNote(entry.sessionId,
+          'Compact & Resume stopped waiting for a browser response after Send became uncertain. The handoff is protected from duplicate delivery; check the replacement chat or cancel compaction.').catch(() => undefined);
+      }
       changed();
       return true;
     }).then(retired => {
