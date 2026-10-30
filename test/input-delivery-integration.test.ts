@@ -2794,7 +2794,7 @@ describe('native progress silence authority', () => {
 
 describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)', mode => {
   beforeEach(async () => { await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } }); });
-  async function silent(model: string, advance: (ms: number) => void, reloadDelay = 0, sourceEnd?: 'completed' | 'interrupted' | 'unknown', mcp = true, manualClose = false) {
+  async function silent(model: string, advance: (ms: number) => void, reloadDelay = 0, sourceEnd?: 'completed' | 'interrupted' | 'unknown', mcp = true, manualClose = false, endDuringReload = false) {
     const bridge = await import('../src/main/bridge.js');
     const conversationId = randomUUID();
     const session = await createSession({ title: 'Automatic Continue fixture', conversationId });
@@ -2836,10 +2836,15 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     expect(repair?.reason).toBe('silence');
     if (repair.requiresClaim) expect((await post('/repairs/claim', { token: repair.token })).body.allowed).toBe(true);
     advance(reloadDelay);
+    // ChatGPT can settle the *same* interrupted generation while the old document
+    // reloads, before the extension's exact repair acknowledgement reaches the app.
+    if (endDuringReload) await post('/events', { conversationId, events: [
+      { kind: 'turn_end', turnId, outcome: 'interrupted', time: Date.now() }
+    ] });
     await post(`/status?repaired=${repair.token}&repairAction=${manualClose ? 'reopened' : 'reloaded'}`, { openConversations });
     const row = (await input.listInputs()).find(row => row.sessionId === session.id && row.recovery)!;
     expect(row).toMatchObject({ state: 'queued', recovery: { questionId, phase: 'ready' } });
-    return { row, conversationId, session, turnId };
+    return { row, conversationId, session, turnId, repairToken: repair.token };
   }
 
   it.each(['gpt-5.6-sol', 'gpt-5.6-pro'])('continues an idle unfinished %s immediately after its initial reload', async model => {
@@ -2853,6 +2858,28 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
       expect(await input.authorizeBrowserInput(row.id, 'idle-doc', conversationId)).toBe(true);
       expect(await input.authorizeBrowserInput(row.id, 'idle-doc', conversationId)).toBe(false);
       expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+    } finally { clock.mockRestore(); }
+  });
+
+  it('continues one interrupted working turn whose end reaches the app before the reload receipt', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { row, conversationId, session, repairToken } = await silent('gpt-5.6-sol', ms => { now += ms; },
+        0, undefined, true, false, true);
+      expect(row.recovery).toMatchObject({ phase: 'ready' });
+      expect((await input.listInputs()).filter(entry => entry.sessionId === session.id && entry.recovery)).toHaveLength(1);
+      expect(await input.claimBrowserInput(row.id, 'reloaded-page', conversationId, true)).not.toBeNull();
+      expect(await input.authorizeBrowserInput(row.id, 'reloaded-page', conversationId)).toBe(true);
+      expect(await input.acknowledgeBrowserInput(row.id, 'reloaded-page', conversationId, 'continue-once')).toBe(true);
+      // Duplicate receipts, memory cache loss and another silence sweep must not
+      // mint a second Continue after the single native Send was acknowledged.
+      await post(`/status?repaired=${repairToken}&repairAction=reloaded`, { openConversations: [conversationId] });
+      input.resetInputForTests();
+      expect((await input.listInputs()).filter(entry => entry.sessionId === session.id && entry.recovery)).toMatchObject([
+        { id: row.id, state: 'sent', sendAuthorizedAt: expect.any(Number) }
+      ]);
+      await (await import('../src/main/bridge.js')).sweepStaleSwarm(now + 5 * 60_000);
+      expect((await input.listInputs()).filter(entry => entry.sessionId === session.id && entry.recovery)).toHaveLength(1);
     } finally { clock.mockRestore(); }
   });
 

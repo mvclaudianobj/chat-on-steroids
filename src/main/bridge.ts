@@ -8606,6 +8606,18 @@ async function noteRecoveryObservations(
   // is not new work and must not restart the browser or its listening clock.
   const repaired = repairsInFlight.get(conversationId);
   const confirmedAt = lastBrowserRecoveryAt.get(conversationId);
+  // A reload can close the very turn it was rescuing before Chrome sends its
+  // repair receipt. The terminal observation is not progress: retiring the
+  // handed silence repair here loses the one chance to file its durable
+  // Automatic Continue, leaving a working agent stopped mid-task. Keep custody
+  // only for this exact unanswered source; a new question, real final or user
+  // Stop still retires the recovery as usual.
+  const unansweredReloadEnd = !!sessionId && !!ended?.turnId && activity.terminal &&
+    repaired?.reason === 'silence' && repaired.state === 'handed' &&
+    repaired.sessionId === sessionId && repaired.silenceGrant?.turnId === ended.turnId &&
+    ended.outcome !== 'stopped' &&
+    (await readRecoveryBoundary(sessionId, ended.turnId))?.turnId === ended.turnId &&
+    !await readCompletedFinal(sessionId, conversationId, ended.turnId);
   const sameFailedRepair = thinkingFailed && activity.terminal && ended.turnId &&
     repaired?.reason === 'silence' && repaired.sessionId === sessionId &&
     (repaired.silenceGrant?.turnId ?? repaired.progress?.turnId) === ended.turnId ? repaired : null;
@@ -8637,7 +8649,7 @@ async function noteRecoveryObservations(
       await revokeSilenceInputs(sessionId);
       await revokeSilenceLoop(conversationId);
     }
-    if (!sameFailedRepair && (!activity.terminal || !observations.some(item => item.kind === 'turn_end' && item.outcome === 'stalled')))
+    if (!unansweredReloadEnd && !sameFailedRepair && (!activity.terminal || !observations.some(item => item.kind === 'turn_end' && item.outcome === 'stalled')))
       noteRecoveryActivity(conversationId);
     notePickupActivity(conversationId);
     // A current-turn interim can push an existing deadline; historical transcript/page rows
