@@ -4629,5 +4629,9 @@
   "Temporary chat without local recording": "不保留本地记录的临时聊天",
   "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "此对话不会显示在 ChatGPT 历史记录中。Chat Marks 仍会保留本地记录。",
   "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "直接打开 ChatGPT。Chat Marks 不会创建本地聊天或记录消息。",
-  "Temporary chats cannot use Compact & Resume.": "临时聊天不支持 压缩并继续。"
+  "Temporary chats cannot use Compact & Resume.": "临时聊天不支持 压缩并继续。",
+  "Start router when Chat Marks opens": "打开 Chat Marks 时启动路由器",
+  "Chat engine unavailable": "聊天引擎不可用",
+  "Choose Via Claude Code Router or sign in to the CLI account.": "选择 Claude Code Router 或登录 CLI 帐户。",
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "在设置 > 模块中启动 Claude Code Router 以继续此聊天。"
 }

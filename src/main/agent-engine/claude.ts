@@ -662,12 +662,17 @@ export class ClaudeEngine implements AgentEngine {
     this.hook();
     await this.recover();
     if (options.model !== undefined) modelId.parse(options.model);
-    if (options.route === 'router') this.refuseUnavailableRouter(await this.freshRouting());
+    const routing = await this.freshRouting();
+    if (options.route === 'router') this.refuseUnavailableRouter(routing);
     // The project must resolve to its canonical folder now; the process starts there.
     if (options.projectId) await this.deps.runtime(options.projectId);
     const summary = await createSession({ title: `New ${LABEL} chat`, titleSource: 'fallback', conversationId: `${API_CONVERSATION_PREFIX}${randomUUID()}` });
     if (options.projectId) await bindSessionProject(summary.id, options.projectId);
-    const route = z.enum(AGENT_ENGINE_ROUTES).parse(options.route ?? DEFAULT_AGENT_ENGINE_ROUTE);
+    const direct = routerUsable(routing) && options.route === undefined
+      ? await this.initInfo(await this.deps.runtime(options.projectId ?? null), CLAUDE_DIRECT_SETTINGS)
+      : null;
+    const route = z.enum(AGENT_ENGINE_ROUTES).parse(options.route ??
+      (routerUsable(routing) && direct?.signedIn !== true ? 'router' : DEFAULT_AGENT_ENGINE_ROUTE));
     await updateChatRecord(summary.id, () => ({ engine: 'claude', backendSessionId: randomUUID(), model: options.model ?? null, effort: null, route }));
     notifyChanged(summary.id);
     return this.view(summary.id);
@@ -773,6 +778,16 @@ export class ClaudeEngine implements AgentEngine {
       return { turnId };
     } catch (error) {
       if (turn && this.turns.get(chat.id) !== turn) await turn.projector.finish('failed').catch(() => undefined);
+      if (!turn && error instanceof Error && (error.message.includes(CLAUDE_DIRECT_NOT_SIGNED_IN) || error.message.includes('Claude Code Router'))) {
+        const failed = new TurnProjector({
+          engine: 'claude', conversationId: chat.conversationId, turnId: `api-${randomUUID()}`,
+          sink: (this.deps.sink ?? storeProjectorSink)(chat.id),
+          approvals: { gate: new ApprovalGate(() => notifyChanged(chat.id)), answer: () => undefined }
+        });
+        await failed.start(question);
+        await failed.apply({ type: 'error', message: error.message, fatal: true });
+        await failed.finish('failed');
+      }
       throw error;
     } finally {
       this.starting.delete(chat.id);

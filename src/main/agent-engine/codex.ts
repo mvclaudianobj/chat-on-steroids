@@ -718,8 +718,18 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
 
   async function create(input: EngineCreateOptions): Promise<ApiChatView> {
     await recover();
-    const route = z.enum(AGENT_ENGINE_ROUTES).parse(input.route ?? DEFAULT_AGENT_ENGINE_ROUTE);
     await refreshRouterAvailability();
+    const router = routerUsable(routing());
+    let defaultRoute: AgentEngineRoute = DEFAULT_AGENT_ENGINE_ROUTE;
+    if (input.route === undefined && router) {
+      try {
+        const direct = await connection_('direct');
+        const account = await direct.peer.request<{ account?: unknown; requiresOpenaiAuth?: unknown }>(
+          'account/read', { refreshToken: false }, { timeoutMs: 15_000 });
+        if (!account.account && account.requiresOpenaiAuth !== false) defaultRoute = 'router';
+      } catch { defaultRoute = 'router'; }
+    }
+    const route = z.enum(AGENT_ENGINE_ROUTES).parse(input.route ?? defaultRoute);
     const refused = routerRefusal(route);
     if (refused) throw new Error(refused);
     const runtime = await runtimeOrThrow();
@@ -764,7 +774,17 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     if (running.has(session.id)) throw new Error('This chat is still answering');
     await refreshRouterAvailability();
     const refused = routerRefusal(routeOf(session.record));
-    if (refused) throw new Error(refused);
+    if (refused) {
+      const failed = new TurnProjector({
+        engine: 'codex', conversationId: session.conversationId, turnId: `api-${randomUUID()}`,
+        sink: sinkFor(session.id),
+        approvals: { gate: new ApprovalGate(() => notifyChanged(session.id)), answer: () => undefined }
+      });
+      await failed.start(text);
+      await failed.apply({ type: 'error', message: refused, fatal: true });
+      await failed.finish('failed');
+      throw new Error(refused);
+    }
     const appTurnId = `api-${randomUUID()}`;
     let settle!: (outcome: TurnOutcome) => void;
     const done = new Promise<TurnOutcome>(resolve => { settle = resolve; });
@@ -797,6 +817,13 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
       const row = stateOf(connection.route).modelsCache?.rows.find(candidate => candidate.id === model);
       await projector.start(text);
       started = true;
+      if (routeOf(session.record) === 'direct') {
+        const account = await connection.peer.request<{ account?: unknown; requiresOpenaiAuth?: unknown }>(
+          'account/read', { refreshToken: false }, { timeoutMs: 15_000 });
+        if (!account.account && account.requiresOpenaiAuth !== false) {
+          throw new Error(CODEX_NOT_SIGNED_IN);
+        }
+      }
       if (placeholder.stopping) { await finish(placeholder, 'stopped'); return { turnId: appTurnId }; }
       // Codex app-server has no tested per-thread Chat Marks instruction field in this adapter.
       // Include the identity once in the first turn; the displayed question stays user-authored.

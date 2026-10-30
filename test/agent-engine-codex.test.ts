@@ -560,6 +560,17 @@ describe('Codex engine: routes (one app-server per route)', () => {
     expect(await engine.status()).toEqual({ available: true, router: true, detail: 'Codex 0.163.0 · direct: not signed in · Claude Code Router detected' });
   });
 
+  it('defaults to the router when direct has no auth and preserves an explicit direct selection', async () => {
+    const { engine } = start(routed({ routes: {
+      direct: { account: { account: null, requiresOpenaiAuth: true } },
+      router: { account: { account: null, requiresOpenaiAuth: false } }
+    } }));
+    const automatic = await engine.create({ projectId: null });
+    expect(automatic.route).toBe('router');
+    const direct = await engine.create({ projectId: null, route: 'direct' });
+    expect(direct.route).toBe('direct');
+  });
+
   it('creates direct chats on the direct server; a route change starts a new thread on the other server with its default model', async () => {
     const { fake, engine } = start(routed({ turns: [[completed()]], routes: {
       direct: { models: [codexModel('gpt-6.1-sol', 'GPT-6.1-Sol', true)] },
@@ -598,10 +609,11 @@ describe('Codex engine: routes (one app-server per route)', () => {
     // Only direct is offered now; the chat keeps its router choice and is told why.
     expect(await engine.view(chat.sessionId)).toMatchObject({ route: 'router', routes: ['direct'], routeNotice: 'not_installed' });
     expect((await engine.status()).detail).toContain('Claude Code Router is not installed. Install it from Settings > Modules > Claude Code Router.');
-    // Its thread carries CCR's provider: no silent fallback, nothing recorded, nothing started.
+    // Its thread carries CCR's provider: no silent fallback, a visible failed turn, nothing started.
     const before = (await store.readEvents(chat.sessionId)).length;
     await expect(engine.send(chat.sessionId, 'hi')).rejects.toThrow('Claude Code Router is not installed. Install it from Settings > Modules > Claude Code Router. Or switch this chat to "CLI account (direct)"');
-    expect(await store.readEvents(chat.sessionId)).toHaveLength(before);
+    expect((await store.readEvents(chat.sessionId)).slice(before).map(event => event.kind))
+      .toEqual(['user_message', 'turn_start', 'chat_error', 'turn_end']);
     expect(fake.requests('turn/start', 'router')).toEqual([]);
     // To direct: a new thread on the direct server (the router's one is not resumed there).
     await engine.setChatSettings(chat.sessionId, { route: 'direct' });

@@ -500,6 +500,15 @@ describe('Claude Code engine: routes (direct CLI account or a detected Claude Co
     await fresh.resetForTests();
   });
 
+  it('chooses the available router for a new chat without direct login and respects explicit direct', async () => {
+    extraEnv.FAKE_CLAUDE_DIRECT_ACCOUNT = signedIn(false);
+    const automatic = await engine.create({ projectId: null });
+    expect(automatic.route).toBe('router');
+    expect((await ledger.storedChatRecord(automatic.sessionId))?.route).toBe('router');
+    const direct = await engine.create({ projectId: null, route: 'direct' });
+    expect(direct.route).toBe('direct');
+  });
+
   it('lists each route\'s own catalog with the concrete model of every alias', async () => {
     const direct = await engine.models({ route: 'direct' });
     expect(direct.models.map(model => [model.id, model.label, model.efforts])).toEqual([
@@ -550,7 +559,7 @@ describe('Claude Code engine: routes (direct CLI account or a detected Claude Co
       .toEqual({ argv: ['--resume', id], mode: 'handover' });
   });
 
-  it('refuses a direct send without the CLI\'s own login, records nothing, and drops a model the other route lacks', async () => {
+  it('refuses a direct send without the CLI\'s own login, records the message and actionable error, and drops an unavailable model', async () => {
     extraEnv.FAKE_CLAUDE_DIRECT_ACCOUNT = signedIn(false);
     const chat = await engine.create({ projectId: null, route: 'router', model: 'Local/router-model' });
     await engine.send(chat.sessionId, 'plain');
@@ -559,7 +568,9 @@ describe('Claude Code engine: routes (direct CLI account or a detected Claude Co
     expect(await engine.setChatSettings(chat.sessionId, { route: 'direct' })).toMatchObject({ route: 'direct', model: null });
     const before = (await store.readEvents(chat.sessionId)).length;
     await expect(engine.send(chat.sessionId, 'plain')).rejects.toThrow(claude.CLAUDE_DIRECT_NOT_SIGNED_IN);
-    expect(await store.readEvents(chat.sessionId)).toHaveLength(before);
+    const recorded = (await store.readEvents(chat.sessionId)).slice(before);
+    expect(recorded.map(event => event.kind)).toEqual(['user_message', 'turn_start', 'chat_error', 'turn_end']);
+    expect(recorded.find(event => event.kind === 'chat_error')).toMatchObject({ kind: 'chat_error', recoverable: false });
     expect(launches()).toHaveLength(1);
   });
 

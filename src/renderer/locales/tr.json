@@ -4696,5 +4696,9 @@
   "Temporary chat without local recording": "Yerel kayıt olmadan geçici sohbet",
   "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "Bu konuşma ChatGPT geçmişinde görünmez. Chat Marks yerel bir kayıt tutar.",
   "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "ChatGPT’yi doğrudan açar. Chat Marks yerel sohbet oluşturmaz veya mesajları kaydetmez.",
-  "Temporary chats cannot use Compact & Resume.": "Geçici sohbetlerde Sıkıştır ve sürdür kullanılamaz."
+  "Temporary chats cannot use Compact & Resume.": "Geçici sohbetlerde Sıkıştır ve sürdür kullanılamaz.",
+  "Start router when Chat Marks opens": "Chat Marks açılırken yönlendiriciyi başlat",
+  "Chat engine unavailable": "Sohbet motoru kullanılamıyor",
+  "Choose Via Claude Code Router or sign in to the CLI account.": "Claude Code Router seçin veya CLI hesabında oturum açın.",
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "Bu sohbete devam etmek için Ayarlar > Modüller bölümünden Claude Code Router başlatın."
 }

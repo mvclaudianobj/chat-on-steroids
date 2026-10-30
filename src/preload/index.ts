@@ -494,6 +494,7 @@ const api = {
   /** Installs or updates to `version`, the release the user confirmed; `update-external` updates the user's own copy in place. */
   ccrInstall: (mode: import('../shared/ccr-module.js').CcrInstallMode, version: string) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'install', mode, version }),
   ccrService: (op: import('../shared/ccr-module.js').CcrServiceAction) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'service', op }),
+  ccrAutoStart: (enabled: boolean) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'autoStart', enabled }),
   /** Opens CCR's web UI in the browser (main reads its address; it never reaches the renderer). */
   ccrOpenUi: () => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'openUi' }),
   onCcrProgress: (listener: (progress: import('../shared/ccr-module.js').CcrInstallProgress) => void): (() => void) => {

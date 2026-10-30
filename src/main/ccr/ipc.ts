@@ -7,17 +7,19 @@ import { ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { markspanelAccessBlocked } from '../markspanel-auth.js';
 import { CCR_VERSION, type CcrInstallProgress } from '../../shared/ccr-module.js';
-import { bindCcrRouting, ccrInstall, ccrOpenUi, ccrService, ccrStatus } from './service.js';
+import { bindCcrRouting, ccrInstall, ccrOpenUi, ccrService, ccrStatus, setCcrAutoStart, startCcrOnLaunch } from './service.js';
 
 const request = z.discriminatedUnion('action', [
   z.object({ action: z.literal('status'), refresh: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('install'), mode: z.enum(['install', 'update', 'update-external']), version: z.string().regex(CCR_VERSION) }).strict(),
   z.object({ action: z.literal('service'), op: z.enum(['start', 'stop', 'restart']) }).strict(),
+  z.object({ action: z.literal('autoStart'), enabled: z.boolean() }).strict(),
   z.object({ action: z.literal('openUi') }).strict()
 ]);
 
 export function registerCcrIpc(getWindow: () => BrowserWindow | null): void {
   bindCcrRouting();
+  void startCcrOnLaunch().catch(() => undefined);
   const progress = (next: CcrInstallProgress): void => {
     const target = getWindow();
     if (target && !target.isDestroyed()) target.webContents.send('marksCcr:progress', next);
@@ -32,6 +34,7 @@ export function registerCcrIpc(getWindow: () => BrowserWindow | null): void {
         case 'status': return { ok: true, data: await ccrStatus(input.refresh) };
         case 'install': return { ok: true, data: await ccrInstall(input.mode, input.version, progress) };
         case 'service': return { ok: true, data: await ccrService(input.op) };
+        case 'autoStart': await setCcrAutoStart(input.enabled); return { ok: true, data: await ccrStatus() };
         case 'openUi': await ccrOpenUi(); return { ok: true, data: await ccrStatus() };
       }
     } catch (error) {

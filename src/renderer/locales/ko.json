@@ -4629,5 +4629,9 @@
   "Temporary chat without local recording": "로컬 기록 없는 임시 채팅",
   "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "이 대화는 ChatGPT 기록에 표시되지 않습니다. Chat Marks에는 로컬 기록이 남습니다.",
   "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "ChatGPT를 직접 엽니다. Chat Marks는 로컬 채팅을 만들거나 메시지를 기록하지 않습니다.",
-  "Temporary chats cannot use Compact & Resume.": "임시 채팅에서는 압축 후 계속를 사용할 수 없습니다."
+  "Temporary chats cannot use Compact & Resume.": "임시 채팅에서는 압축 후 계속를 사용할 수 없습니다.",
+  "Start router when Chat Marks opens": "Chat Marks 시작 시 라우터 실행",
+  "Chat engine unavailable": "채팅 엔진을 사용할 수 없습니다",
+  "Choose Via Claude Code Router or sign in to the CLI account.": "Claude Code Router를 선택하거나 CLI 계정에 로그인하세요.",
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "설정 > 모듈에서 Claude Code Router를 시작해 이 채팅을 계속하세요."
 }

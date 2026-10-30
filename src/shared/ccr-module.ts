@@ -53,6 +53,8 @@ export type CcrInstallMode = 'install' | 'update' | 'update-external';
 export type CcrServiceAction = 'start' | 'stop' | 'restart';
 
 export interface CcrStatus {
+  /** Start an installed router on launch; enabled by migration when routed chats already exist. */
+  autoStart?: boolean;
   managed: CcrInstallation | null;
   external: CcrInstallation | null;
   /** The copy Start/Stop and the chats use: the managed one first, else the external one. */

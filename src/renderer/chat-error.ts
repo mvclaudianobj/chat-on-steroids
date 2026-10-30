@@ -40,6 +40,23 @@ const noticeKey = (error: ChatError): string => `${error.seq}:${error.time}:${er
 /** Presentation only: never infer send/reload authority from error prose. */
 export function chatErrorPresentation(error: ChatError, history: readonly SessionEvent[] = []) {
   const text = error.message.text.trim();
+  const claudeAuth = 'Claude Code has no account of its own for direct chats. Run "claude auth login" in a terminal, or choose Via Claude Code Router.';
+  const codexAuth = 'Codex is not signed in. Run `codex login` in a terminal, then try again.';
+  if (text.includes(claudeAuth) || text === codexAuth || text.includes('Claude Code Router is not running.') ||
+      text.includes('Claude Code Router is not installed.')) {
+    const routerStopped = text.includes('Claude Code Router is not running.');
+    const routerMissing = text.includes('Claude Code Router is not installed.');
+    const direct = text.includes(claudeAuth) ? t(claudeAuth) : text === codexAuth ? t(codexAuth) : '';
+    const router = routerStopped ? t('Claude Code Router is not running. Start it from Settings > Modules.')
+      : routerMissing ? t('Claude Code Router is not installed. Install it from Settings > Modules.') : '';
+    return {
+      title: t('Chat engine unavailable'),
+      message: [router, direct].filter(Boolean).join(' '),
+      next: direct ? t('Choose Via Claude Code Router or sign in to the CLI account.')
+        : t('Start Claude Code Router in Settings > Modules to continue this chat.'),
+      resolved: false, reloaded: false
+    };
+  }
   if (text === CONVERSATION_DELETED) return { title: t('Chat deleted in ChatGPT'),
     message: t('ChatGPT no longer has this chat, so nothing more can be sent to it.'),
     next: t('Start a new chat to continue. This history stays in the app.'), resolved: false, reloaded: false };

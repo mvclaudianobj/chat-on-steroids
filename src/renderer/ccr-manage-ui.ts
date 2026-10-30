@@ -56,6 +56,11 @@ export function createCcrManageUi(api: AppApi, parent: Element, onChanged: () =>
   ui(badge, 'textContent', () => t('Update available'));
   const serviceLine = el('p', { className: 'modules-detail', id: 'ccrService' });
   const configuredLine = el('p', { className: 'modules-detail', id: 'ccrConfigured' });
+  const autoStartLabel = el('label', { className: 'modules-detail' });
+  const autoStart = el('input', { type: 'checkbox', id: 'ccrAutoStart' }) as HTMLInputElement;
+  const autoStartText = el('span');
+  ui(autoStartText, 'textContent', () => t('Start router when Chat Marks opens'));
+  autoStartLabel.append(autoStart, autoStartText);
   const note = el('p', { className: 'modules-detail cliproxy-warning', hidden: true, id: 'ccrNote' });
   const progressLine = el('p', { className: 'modules-detail', hidden: true, id: 'ccrProgress' });
   progressLine.setAttribute('role', 'status');
@@ -75,7 +80,7 @@ export function createCcrManageUi(api: AppApi, parent: Element, onChanged: () =>
   actions.append(openUi);
   const head = el('div', { className: 'modules-service-head' });
   head.append(state);
-  surface.append(head, lead, installedLine, latestLine, badge, serviceLine, configuredLine, note, progressLine, actions);
+  surface.append(head, lead, installedLine, latestLine, badge, serviceLine, configuredLine, autoStartLabel, note, progressLine, actions);
   row.append(title, surface);
   parent.append(row);
 
@@ -101,6 +106,8 @@ export function createCcrManageUi(api: AppApi, parent: Element, onChanged: () =>
 
   function paint(): void {
     const s = status;
+    autoStart.checked = s?.autoStart === true;
+    autoStart.disabled = busy || !s?.inUse;
     const running = s?.service.state === 'running';
     const installed = !!s?.inUse;
     const shownState = !s ? 'unknown' : !installed ? 'missing' : running ? 'running' : 'stopped';
@@ -160,6 +167,15 @@ export function createCcrManageUi(api: AppApi, parent: Element, onChanged: () =>
     else message = ccrErrorText(reply.error);
     paint();
   }
+  autoStart.addEventListener('change', () => void (async () => {
+    if (busy) return;
+    busy = true;
+    const reply = await api.ccrAutoStart(autoStart.checked);
+    if (reply.ok) status = reply.data;
+    else message = ccrErrorText(reply.error);
+    busy = false;
+    paint();
+  })());
 
   async function runInstall(mode: CcrInstallMode): Promise<void> {
     const s = status;

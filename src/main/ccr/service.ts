@@ -33,6 +33,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { logInfo, logWarn } from '../logger.js';
+import { readDurable, writeDurableNow } from '../durable.js';
+import { chatRecords, routeOf } from '../agent-engine/ledger.js';
 import { isNewerVersion } from '../github-release.js';
 import { downloadNpmTarball } from '../npm-release.js';
 import {
@@ -58,6 +60,27 @@ const LOOPBACK = new Set(['127.0.0.1', 'localhost', '::1']);
 const AVAILABILITY_TTL_MS = 5_000;
 const LATEST_TTL_MS = 60 * 60_000;
 const RESTART_POLL_MS = 5_000;
+const AUTOSTART_STATE = 'marks-ccr-autostart';
+
+export async function ccrAutoStartEnabled(): Promise<boolean> {
+  const saved = await readDurable<{ enabled?: unknown }>(AUTOSTART_STATE).catch(() => null);
+  if (typeof saved?.enabled === 'boolean') return saved.enabled;
+  const records = await chatRecords();
+  return Object.values(records).some(record =>
+    (record.engine === 'claude' || record.engine === 'codex') && routeOf(record) === 'router');
+}
+
+export async function setCcrAutoStart(enabled: boolean): Promise<void> {
+  await writeDurableNow(AUTOSTART_STATE, { enabled });
+}
+
+/** Once per application launch, after the main IPC is registered. */
+export async function startCcrOnLaunch(): Promise<void> {
+  if (!await ccrAutoStartEnabled()) return;
+  const { inUse } = await copies();
+  if (!inUse) return;
+  await ccrService('start');
+}
 
 export interface CcrHost {
   platform: NodeJS.Platform;
@@ -386,6 +409,7 @@ export async function ccrStatus(refresh = false): Promise<CcrStatus> {
   const codex = detectCodexRouter({ home: host.home(), env: host.env(), platform: host.platform }).detected;
   availability = { at: host.now(), value: !inUse ? 'not_installed' : service.state === 'running' ? null : 'stopped' };
   return {
+    autoStart: await ccrAutoStartEnabled(),
     managed: view(managed), external: view(external), inUse: inUse?.kind ?? null,
     latest: found.version, ...(found.error ? { latestError: found.error } : {}),
     updateAvailable: newer && latestSupport !== 'unsupported',

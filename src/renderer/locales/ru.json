@@ -4830,5 +4830,9 @@
   "Temporary chat without local recording": "Временный чат без локальной записи",
   "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "Этот разговор не появится в истории ChatGPT. Chat Marks сохраняет локальную запись.",
   "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "Открывает ChatGPT напрямую. Chat Marks не создаёт локальный чат и не записывает сообщения.",
-  "Temporary chats cannot use Compact & Resume.": "Временные чаты не поддерживают Сжать и продолжить."
+  "Temporary chats cannot use Compact & Resume.": "Временные чаты не поддерживают Сжать и продолжить.",
+  "Start router when Chat Marks opens": "Запускать маршрутизатор при открытии Chat Marks",
+  "Chat engine unavailable": "Движок чата недоступен",
+  "Choose Via Claude Code Router or sign in to the CLI account.": "Выберите Claude Code Router или войдите в учётную запись CLI.",
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "Запустите Claude Code Router в Настройки > Модули, чтобы продолжить чат."
 }

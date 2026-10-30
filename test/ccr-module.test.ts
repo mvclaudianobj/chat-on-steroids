@@ -10,6 +10,7 @@ const release = await import('../src/main/ccr/release.js');
 const service = await import('../src/main/ccr/service.js');
 const router = await import('../src/main/agent-engine/router.js');
 const npm = await import('../src/main/npm-release.js');
+const durable = await import('../src/main/durable.js');
 
 const PACKAGE = '@musistudio/claude-code-router';
 const DOC = 'https://registry.npmjs.org/@musistudio%2fclaude-code-router';
@@ -80,6 +81,7 @@ beforeEach(async () => {
   home = await makeTempDir('cos-ccr-home-');
   root = path.join(home, 'userData', 'modules');
   await fs.mkdir(root, { recursive: true });
+  durable.initDurableStore(path.join(home, 'userData'));
   runs = [];
   npm.setRegistryRetryDelayForTests(() => 0);
 });
@@ -88,6 +90,7 @@ afterEach(async () => {
   service.setCcrHostForTests(null);
   router.registerRouterAvailability(null);
   npm.setRegistryRetryDelayForTests(null);
+  durable.resetDurableForTests();
   await removeTempDir(home);
 });
 
@@ -274,6 +277,26 @@ describe('Claude Code Router status', () => {
       .toEqual({ PATH: '/opt/node/bin:/usr/bin:/bin', HOME: '/h', NO_COLOR: '1' });
     expect((await service.ccrService('stop')).service.state).toBe('stopped');
     expect(runs.filter(call => call.args[0] === cli).map(call => call.args.slice(1)).at(-1)).toEqual(['stop']);
+  });
+
+  it('keeps startup opt-in durable and starts an installed stopped router on app launch', async () => {
+    let healthy = false;
+    const run = fakeRun();
+    useHost({ fetchImpl: registry({ health: () => healthy }).fetchImpl }, async (file, args) => {
+      if (args[1] === 'start') healthy = true;
+      return run(file, args);
+    });
+    expect(await service.ccrAutoStartEnabled()).toBe(false);
+    await service.startCcrOnLaunch();
+    expect(runs.filter(call => call.args.some(arg => arg === 'start'))).toHaveLength(0);
+    await service.ccrInstall('install', '3.1.3');
+    await service.setCcrAutoStart(true);
+    expect((await service.ccrStatus()).autoStart).toBe(true);
+    await service.startCcrOnLaunch();
+    expect(healthy).toBe(true);
+    expect(runs.filter(call => call.args.some(arg => arg === 'start'))).toHaveLength(1);
+    await service.setCcrAutoStart(false);
+    expect((await service.ccrStatus()).autoStart).toBe(false);
   });
 
   it('restarts after an update only when no routed turn runs', async () => {

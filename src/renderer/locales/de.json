@@ -4696,5 +4696,9 @@
   "Temporary chat without local recording": "Temporärer Chat ohne lokale Aufzeichnung",
   "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "Diese Unterhaltung erscheint nicht im ChatGPT-Verlauf. Chat Marks speichert eine lokale Aufzeichnung.",
   "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "Öffnet ChatGPT direkt. Chat Marks erstellt keinen lokalen Chat und zeichnet keine Nachrichten auf.",
-  "Temporary chats cannot use Compact & Resume.": "Temporäre Chats können Komprimieren & Fortsetzen nicht verwenden."
+  "Temporary chats cannot use Compact & Resume.": "Temporäre Chats können Komprimieren & Fortsetzen nicht verwenden.",
+  "Start router when Chat Marks opens": "Router beim Start von Chat Marks starten",
+  "Chat engine unavailable": "Chat-Engine nicht verfügbar",
+  "Choose Via Claude Code Router or sign in to the CLI account.": "Claude Code Router wählen oder direkt bei der CLI anmelden.",
+  "Start Claude Code Router in Settings > Modules to continue this chat.": "Claude Code Router unter Einstellungen > Module starten, um diesen Chat fortzusetzen."
 }
