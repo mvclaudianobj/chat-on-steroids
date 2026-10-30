@@ -5125,5 +5125,15 @@
   "CLIProxy Local routes already configured in CCR.": "Las rutas de CLIProxy Local ya estan configuradas en CCR.",
   "CLIProxy key is not configured yet.": "La clave de CLIProxy aun no esta configurada.",
   "Local CLIProxy service is unavailable.": "El servicio local de CLIProxy no esta disponible.",
-  "CCR configuration could not be updated.": "No se pudo actualizar la configuracion de CCR."
+  "CCR configuration could not be updated.": "No se pudo actualizar la configuracion de CCR.",
+  "Install the master public key on this SSH host?": "Install the master public key on this SSH host?",
+  "Prepare or synchronize the master key for this user and root?": "Prepare or synchronize the master key for this user and root?",
+  "Create master key": "Create master key",
+  "Optional master key passphrase": "Optional master key passphrase",
+  "SSH password": "SSH password",
+  "Server password": "Server password",
+  "Save password in Cofre K": "Save password in Cofre K",
+  "SSH profile not found": "SSH profile not found",
+  "Invalid data directory": "Invalid data directory",
+  "Unsafe mirror folder": "Unsafe mirror folder"
 }

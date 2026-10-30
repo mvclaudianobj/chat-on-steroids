@@ -9,7 +9,8 @@ import { promisify } from 'node:util';
 import { spawn as spawnPty } from 'node-pty';
 import { parseRemote, sshArgs, sshProgram, sshFailure } from './ssh.js';
 import { redactVaultText } from '../marks-vault-redaction.js';
-import { useVault } from '../marks-vault.js';
+import { useVault, vaultStatus } from '../marks-vault.js';
+import { putVaultLocal } from '../marks-vault.js';
 
 export type HostType = 'ssh' | 'winrm' | 'powershell' | 'whm' | 'custom';
 export interface HostProfile { id: string; name: string; type: HostType; host: string; port: number; user: string; credential?: string }
@@ -62,6 +63,23 @@ export function saveRemoteHost(input: unknown): Promise<HostProfile> {
 export function deleteRemoteHost(id: string): Promise<void> {
   const operation = serial.then(async () => { const rows = await read(); await write(rows.filter(row => row.id !== id)); });
   serial = operation.catch(() => undefined); return operation;
+}
+/** Store SSH passwords only in the encrypted Cofre K, addressed by stable profile ID. */
+export async function saveRemoteHostWithPassword(input: unknown, password?: string): Promise<HostProfile> {
+  if (password !== undefined && (password.length < 1 || password.length > 4096 || /[\r\n\0]/.test(password))) throw new Error('Invalid SSH password');
+  if (password !== undefined && !(await vaultStatus()).ready) throw new Error('Cofre K must be unlocked before saving a server password');
+  const profile = await saveRemoteHost(input);
+  if (password !== undefined && profile.type === 'ssh') await putVaultLocal({
+    name: `ssh/${profile.id}/password`, value: password, origin: '', header: 'Authorization'
+  });
+  return profile;
+}
+
+export async function installMasterKeyFromVault(profile: HostProfile): Promise<void> {
+  await useVault(`ssh/${profile.id}/password`, async entry => {
+    await installMasterKeyWithPassword(profile, entry.value);
+    return 'installed';
+  });
 }
 /** Publish the reviewed catalog in one write; a collision must not leave a partial import. */
 export function importRemoteHosts(input: readonly HostProfile[]): Promise<HostProfile[]> {
@@ -157,10 +175,12 @@ export function installKeyCommand(publicKey: string): string {
   return `umask 077; mkdir -p ~/.ssh && chmod 700 ~/.ssh && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && { grep -qxF -- ${quoted} ~/.ssh/authorized_keys || printf '%s\\n' ${quoted} >> ~/.ssh/authorized_keys; }`;
 }
 /** Password bootstrap through a private PTY. The password is never persisted or returned. */
-export async function installMasterKeyWithPassword(profile: HostProfile, password: string): Promise<void> {
+export async function installMasterKeyWithPassword(profile: HostProfile, password: string, deps: {
+  publicKey?: () => Promise<string>; spawn?: typeof spawnPty;
+} = {}): Promise<void> {
   if (profile.type !== 'ssh') throw new Error('SSH only');
   if (!password || password.length > 4096 || /[\r\n\0]/.test(password)) throw new Error('Invalid server password');
-  const command = installKeyCommand(await masterPublicKey());
+  const command = installKeyCommand(await (deps.publicKey ?? masterPublicKey)());
   const args = [
     '-tt', '-p', String(profile.port), '-o', 'BatchMode=no', '-o', 'ConnectTimeout=15',
     '-o', 'StrictHostKeyChecking=yes', '-o', 'PubkeyAuthentication=no',
@@ -168,7 +188,7 @@ export async function installMasterKeyWithPassword(profile: HostProfile, passwor
     '-o', 'NumberOfPasswordPrompts=1', '--', `${profile.user}@${profile.host}`, command
   ];
   await new Promise<void>((resolve, reject) => {
-    const pty = spawnPty(sshProgram(), args, { name: 'xterm', cols: 80, rows: 24, cwd: os.homedir(), env: { ...process.env, TERM: 'xterm' } });
+    const pty = (deps.spawn ?? spawnPty)(sshProgram(), args, { name: 'xterm', cols: 80, rows: 24, cwd: os.homedir(), env: { ...process.env, TERM: 'xterm' } });
     let seenPrompt = false, finished = false, tail = '';
     const timer = setTimeout(() => end(new Error('SSH password installation timed out')), 30_000);
     const end = (error?: Error): void => {

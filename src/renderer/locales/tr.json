@@ -5044,5 +5044,15 @@
   "CLIProxy Local routes already configured in CCR.": "CLIProxy Local rotalari CCR icinde zaten ayarli.",
   "CLIProxy key is not configured yet.": "CLIProxy anahtari henuz ayarlanmadi.",
   "Local CLIProxy service is unavailable.": "Yerel CLIProxy hizmetine ulasilamiyor.",
-  "CCR configuration could not be updated.": "CCR yapilandirmasi guncellenemedi."
+  "CCR configuration could not be updated.": "CCR yapilandirmasi guncellenemedi.",
+  "Install the master public key on this SSH host?": "Install the master public key on this SSH host?",
+  "Prepare or synchronize the master key for this user and root?": "Prepare or synchronize the master key for this user and root?",
+  "Create master key": "Create master key",
+  "Optional master key passphrase": "Optional master key passphrase",
+  "SSH password": "SSH password",
+  "Server password": "Server password",
+  "Save password in Cofre K": "Save password in Cofre K",
+  "SSH profile not found": "SSH profile not found",
+  "Invalid data directory": "Invalid data directory",
+  "Unsafe mirror folder": "Unsafe mirror folder"
 }

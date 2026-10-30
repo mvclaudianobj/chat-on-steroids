@@ -6,8 +6,8 @@ import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
 import { defaultConfig, initConfigPath, saveConfig } from '../src/main/config.js';
 import { initSessionStore, resetSessionStoreForTests, createSession, getSession } from '../src/main/session/store.js';
 import { remoteHostsFileForTests, saveRemoteHost } from '../src/main/remote/hosts.js';
-import { addRemoteProfileProject, assignSessionProject, projectWorkspace } from '../src/main/projects.js';
-import { remoteModeInstructions, remoteModeView, setChatRemoteMode } from '../src/main/remote/mode.js';
+import { addRemoteProfileProject, createRemoteProfileProject, assignSessionProject, projectWorkspace } from '../src/main/projects.js';
+import { remoteModeInstructions, remoteModeView, setChatRemoteMode, mentionedRemoteInstructions } from '../src/main/remote/mode.js';
 import { remoteApprovals, requestRemoteApproval, decideRemoteApproval, resetRemoteApprovals } from '../src/main/remote/approval.js';
 
 let directory: string;
@@ -61,4 +61,24 @@ it('creates a local mirror and new chats inherit the SSH profile without a grant
   expect(remoteApprovals()).toEqual([]);
   await setChatRemoteMode(chat.id, null);
   expect(await remoteModeView(chat.id)).toBeNull();
+});
+
+it('directs a named host mention to remote_exec, not a local directory', async () => {
+  await saveRemoteHost({ name: 'marks1', type: 'ssh', host: 'one.example', port: 22, user: 'worker' });
+  expect(await mentionedRemoteInstructions('conecte no marks1 e avalie os tmps')).toContain('remote_exec');
+  expect(await mentionedRemoteInstructions('conecte no marks1 e avalie os tmps')).toContain('not a local filesystem directory');
+  expect(await mentionedRemoteInstructions('prefixmarks1suffix')).toBe('');
+});
+
+it('creates a private automatic mirror without a local folder picker', async () => {
+  const host = await saveRemoteHost({ name: 'marks1', type: 'ssh', host: 'one.example', port: 22, user: 'worker' });
+  const project = await createRemoteProfileProject(directory, host.id, '/var/backups');
+  expect(project.remoteProfile).toEqual({ profileId: host.id, folder: '/var/backups' });
+  expect(project.path).toContain('remote-mirrors');
+  const chat = await createSession({ conversationId: 'mirror-chat' });
+  await assignSessionProject(chat.id, project.id);
+  const prompt = await remoteModeInstructions(chat.id);
+  expect(prompt).toContain('directory /var/backups');
+  expect(prompt).toContain('NOT local work');
+  expect((await getSession(chat.id))?.remoteMode).toEqual({ profileId: host.id });
 });

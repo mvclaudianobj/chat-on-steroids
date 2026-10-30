@@ -4963,5 +4963,15 @@
   "CLIProxy Local routes already configured in CCR.": "CCR 中已配置 CLIProxy Local 路由。",
   "CLIProxy key is not configured yet.": "尚未配置 CLIProxy 密钥。",
   "Local CLIProxy service is unavailable.": "本地 CLIProxy 服务不可用。",
-  "CCR configuration could not be updated.": "无法更新 CCR 配置。"
+  "CCR configuration could not be updated.": "无法更新 CCR 配置。",
+  "Install the master public key on this SSH host?": "Install the master public key on this SSH host?",
+  "Prepare or synchronize the master key for this user and root?": "Prepare or synchronize the master key for this user and root?",
+  "Create master key": "Create master key",
+  "Optional master key passphrase": "Optional master key passphrase",
+  "SSH password": "SSH password",
+  "Server password": "Server password",
+  "Save password in Cofre K": "Save password in Cofre K",
+  "SSH profile not found": "SSH profile not found",
+  "Invalid data directory": "Invalid data directory",
+  "Unsafe mirror folder": "Unsafe mirror folder"
 }

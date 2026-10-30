@@ -43,9 +43,41 @@ export async function remoteModeInstructions(sessionId: string | null | undefine
   const mode = await remoteModeView(sessionId, projectId);
   if (!mode) return session?.remoteMode === null
     ? '[CHAT REMOTE MODE OFF] This chat no longer has an assigned remote host. Do not assume the previous host or its approvals remain valid.' : '';
+  const project = await getProject(session?.projectId ?? projectId ?? '');
+  const folder = project?.remoteProfile?.profileId === mode.profileId ? project.remoteProfile.folder : '~';
   return `[CHAT REMOTE MODE] Work on the remote SSH host selected by the saved profile "${mode.name}" (profile id ${mode.profileId}). ` +
+    `Remote target: ${mode.user}@${mode.host}:${mode.port}, directory ${folder}. This is REMOTE work, NOT local work. ` +
+    'Never run local filesystem, shell, disk or cleanup commands for work belonging to that remote host; the local mirror is only a cache. ' +
     'Execute remote commands only using remote_exec with the exact named profile and explicit approval. ' +
-    'Access remote files using the approved SFTP facilities, not local filesystem paths. ' +
+    'Real remote tools: remote_exec for remote shell commands, approved SFTP project file operations for remote files, and remoteHosts profile/SSH-key setup in the app. ' +
+    'Access remote files using SFTP, not local filesystem paths. ' +
     'Credentials and secrets are referred to by their name in Cofre K; never copy secret values into prompts, logs or files. ' +
     'This selection does not grant permissions or approve commands.';
+}
+
+/** An SSH profile mentioned in a normal message is a remote host, not a local path. */
+export async function mentionedRemoteInstructions(message: string): Promise<string> {
+  // Some standalone input/IPC contexts do not initialize the optional host catalog.
+  // An unavailable catalog must not interrupt delivery of a normal local chat.
+  let available: HostProfile[];
+  try { available = await listRemoteHosts(); }
+  catch { return ''; }
+  const matches = available.filter(host => {
+    if (host.type !== 'ssh') return false;
+    const text = message.toLocaleLowerCase(), name = host.name.toLocaleLowerCase();
+    let offset = text.indexOf(name);
+    while (offset >= 0) {
+      const before = text[offset - 1] ?? ' ', after = text[offset + name.length] ?? ' ';
+      if (!/[\p{L}\p{N}_]/u.test(before) && !/[\p{L}\p{N}_]/u.test(after)) return true;
+      offset = text.indexOf(name, offset + 1);
+    }
+    return false;
+  });
+  if (matches.length !== 1) return '';
+  const host = matches[0]!;
+  return `[SAVED REMOTE HOST] "${host.name}" means the saved SSH host ` +
+    `${host.user}@${host.host}:${host.port}, not a local filesystem directory. ` +
+    `For remote commands use remote_exec with the profile name "${host.name}" and approval. ` +
+    'Use SFTP for remote files; do not inspect the local computer as a substitute. ' +
+    'If the server refuses the key, request the approved SSH key-setup workflow without revealing secrets.';
 }

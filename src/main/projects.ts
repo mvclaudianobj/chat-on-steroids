@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import { rawPromises as fs } from './rawfs.js';
 import { readDurable, writeDurableNow } from './durable.js';
@@ -100,6 +100,28 @@ export function addRemoteProfileProject(folderPath: string, profileId: string, r
   });
   mutations = operation.catch(() => undefined);
   return operation;
+}
+
+/** Private local cache for a remote-profile project; remote SSH is its real authority. */
+export async function createRemoteProfileProject(userData: string, profileId: string, remoteFolder: string): Promise<LocalProject> {
+  const { listRemoteHosts } = await import('./remote/hosts.js');
+  const host = (await listRemoteHosts()).find(item => item.id === profileId && item.type === 'ssh');
+  if (!host) throw new Error('SSH profile not found');
+  const checked = parseRemote(`${host.user}@${host.host}:${host.port}`, remoteFolder);
+  if (!path.isAbsolute(userData)) throw new Error('Invalid data directory');
+  const root = path.join(userData, 'remote-mirrors');
+  const target = path.join(root, profileId, createHash('sha256').update(checked.path).digest('hex').slice(0, 24));
+  for (const folder of [root, path.dirname(target), target]) {
+    await fs.mkdir(folder, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+    const stat = await fs.lstat(folder);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || await fs.realpath(folder) !== folder) throw new Error('Unsafe mirror folder');
+  }
+  await updateConfig(config => {
+    if (config.roots.some(item => !item.remote && samePath(item.path, target))) return config;
+    if (config.roots.length >= 32) throw new Error('Folder limit reached');
+    return { ...config, roots: [...config.roots, { name: uniqueRootName(`remote-${host.name}`, config.roots), path: target }] };
+  });
+  return addRemoteProfileProject(target, profileId, checked.path);
 }
 
 
