@@ -33,7 +33,8 @@ export function hostPlatformInfo(
 }
 
 /**
- * Keep browser screen/control portable while masking unsupported native clipboard access.
+ * Keep browser screen/control portable; Electron supports text clipboard on Linux
+ * even though the native mouse/keyboard automation backend is unavailable.
  * Native registrars check backend availability separately; stored grants are never erased.
  */
 export function capabilitiesForPlatform(
@@ -41,7 +42,7 @@ export function capabilitiesForPlatform(
   platform: NodeJS.Platform = process.platform,
   release?: string
 ): Capabilities {
-  if (desktopAutomationSupported(platform, release)) return capabilities;
+  if (desktopAutomationSupported(platform, release) || platform === 'linux') return capabilities;
   const next = { ...capabilities };
   // Screen/control also govern the Chromium extension on every OS. Only native
   // clipboard capabilities disappear here; native tool registration checks its backend.

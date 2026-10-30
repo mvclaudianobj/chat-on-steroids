@@ -647,6 +647,7 @@ function paintGroups(): void {
   if (!state) return;
   const { readOnly } = state.config;
   const desktopSupported = state.platform?.desktopAutomation ?? true;
+  const clipboardSupported = desktopSupported || state.platform?.family === 'linux';
 
   for (const group of GROUPS) {
     const root = document.querySelector<HTMLElement>(`[data-group="${group.id}"]`)!;
@@ -661,7 +662,7 @@ function paintGroups(): void {
     }
 
     const usable = group.caps.filter((cap) => !(readOnly && WRITE_CAPABILITIES.includes(cap)) &&
-      (desktopSupported || cap !== 'clipboardRead' && cap !== 'clipboardWrite'));
+      (clipboardSupported || cap !== 'clipboardRead' && cap !== 'clipboardWrite'));
     const on = group.caps.filter((cap) => capInput(cap).checked);
 
     const box = root.querySelector<HTMLInputElement>('.group-box')!;
@@ -683,7 +684,7 @@ function paintGroups(): void {
 
   for (const cap of WRITE_CAPABILITIES) capInput(cap).disabled = readOnly;
   for (const cap of ['clipboardRead', 'clipboardWrite'] as const) {
-    capInput(cap).disabled = !desktopSupported || (readOnly && WRITE_CAPABILITIES.includes(cap));
+    capInput(cap).disabled = !clipboardSupported || (readOnly && WRITE_CAPABILITIES.includes(cap));
   }
 
   // The feature group. apply() already passed its switch through the
@@ -778,7 +779,7 @@ function save(over: { readOnly?: boolean; theme?: 'light' | 'dark'; appearance?:
     // config. A hidden disabled checkbox is presentation,
     // not a user edit: copying its forced-false value into every unrelated settings save
     // would erase those choices merely because the config was opened on another OS.
-    if (!(state.platform?.desktopAutomation ?? true) && DESKTOP_CAPABILITIES.includes(capability) && capability !== 'screen' && capability !== 'control') continue;
+    if (!(state.platform?.desktopAutomation ?? true) && state.platform?.family !== 'linux' && DESKTOP_CAPABILITIES.includes(capability) && capability !== 'screen' && capability !== 'control') continue;
     capabilities[capability] = input.checked;
   }
   const readOnly = over.readOnly ?? previous.readOnly;
@@ -1017,7 +1018,8 @@ const FILES_AND_TERMINAL = CAPABILITIES.filter(cap => !DESKTOP_CAPABILITIES.incl
 /** The Desktop permissions this host can grant: browser control everywhere, the rest only with a native backend. */
 function hostDesktopCapabilities(next: AppState): Capability[] {
   const native = next.platform?.desktopAutomation ?? true;
-  return DESKTOP_CAPABILITIES.filter(cap => native || cap === 'screen' || cap === 'control');
+  return DESKTOP_CAPABILITIES.filter(cap => native || cap === 'screen' || cap === 'control' ||
+    (next.platform?.family === 'linux' && (cap === 'clipboardRead' || cap === 'clipboardWrite')));
 }
 
 /** What the saved permissions amount to, in Setup's terms. */
@@ -1713,7 +1715,8 @@ function apply(next: AppState): void {
     : t('Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.'));
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const cap = input.dataset.cap as Capability;
-    const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap) || cap === 'screen' || cap === 'control';
+    const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap) || cap === 'screen' || cap === 'control' ||
+      (next.platform?.family === 'linux' && (cap === 'clipboardRead' || cap === 'clipboardWrite'));
     applyChecked(input, supported && config.capabilities[cap], previousState?.config.capabilities[cap]);
   }
   applyChecked(

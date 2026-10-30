@@ -805,7 +805,7 @@ describe('surface boundaries', () => {
   it('advertises exactly Desktop’s tools on Desktop, with nothing from Core', async () => {
     everything();
     const names = toolNames(await desktop('tools/list'));
-    expect(names).toEqual([...BROWSER_TOOLS, ...(IS_WINDOWS ? [...WINDOWS_COMPUTER_METHODS, 'read_clipboard', 'write_clipboard', 'exec'] : process.platform === 'darwin' ? ['computer', 'exec', 'observe'] : ['exec'])].sort());
+    expect(names).toEqual([...BROWSER_TOOLS, ...(IS_WINDOWS ? [...WINDOWS_COMPUTER_METHODS, 'read_clipboard', 'write_clipboard', 'exec'] : process.platform === 'darwin' ? ['computer', 'exec', 'observe'] : ['read_clipboard', 'write_clipboard', 'exec'])].sort());
     for (const name of surfaceDefinition('core').tools.filter(name => name !== 'exec')) expect(names, name).not.toContain(name);
   });
 
@@ -885,7 +885,7 @@ describe('surface boundaries', () => {
       'delete_directory',
       'run_command',
       'run_powershell',
-      ...(!IS_WINDOWS ? ['launch_app', 'list_windows', 'read_clipboard', 'write_clipboard'] : ['observe', 'computer']),
+      ...(!IS_WINDOWS ? ['launch_app', 'list_windows', ...(process.platform === 'linux' ? [] : ['read_clipboard', 'write_clipboard'])] : ['observe', 'computer']),
       'open_url',
       'process',
       'screenshot',
@@ -981,7 +981,7 @@ describe('surface boundaries', () => {
 
     // Each populated surface includes code mode; find and the shell exec pair remain exclusive.
     expect(coreTools).toHaveLength(12);
-    expect(desktopTools).toHaveLength(BROWSER_TOOLS.length + (IS_WINDOWS ? 16 : process.platform === 'darwin' ? 3 : 1));
+    expect(desktopTools).toHaveLength(BROWSER_TOOLS.length + (IS_WINDOWS ? 16 : process.platform === 'darwin' ? 3 : 3));
 
     // And the size, which is what a discovery pull actually costs the model on every
     // conversation that touches the connector. The ceilings sit just above what the
@@ -1548,17 +1548,17 @@ describe('desktop capabilities', () => {
     expect(textOf(clicked)).toContain(IS_WINDOWS ? 'TOOL_DISABLED' : 'mouse and keyboard control is disabled');
 
     const written = await desktop('tools/call', {
-      name: IS_WINDOWS ? 'write_clipboard' : 'computer',
-      arguments: IS_WINDOWS ? { text: 'nope' } : { actions: [{ type: 'write_clipboard', text: 'nope' }] }
+      name: IS_WINDOWS || process.platform === 'linux' ? 'write_clipboard' : 'computer',
+      arguments: IS_WINDOWS || process.platform === 'linux' ? { text: 'nope' } : { actions: [{ type: 'write_clipboard', text: 'nope' }] }
     });
     expect(written.body.result?.isError).toBe(true);
-    expect(textOf(written)).toContain(IS_WINDOWS ? 'TOOL_DISABLED' : 'Replace clipboard text permission');
+    expect(textOf(written)).toContain(IS_WINDOWS || process.platform === 'linux' ? 'TOOL_DISABLED' : 'Replace clipboard text permission');
   });
 
   it('publishes only the clipboard read tool and composition with clipboard-read permission alone', async () => {
     ctx.readOnly = false;
     ctx.caps = withCaps({ clipboardRead: true });
-    expect(toolNames(await desktop('tools/list'))).toEqual(IS_WINDOWS ? ['exec', 'read_clipboard'] : process.platform === 'darwin' ? ['computer', 'exec'] : []);
+    expect(toolNames(await desktop('tools/list'))).toEqual(IS_WINDOWS || process.platform === 'linux' ? ['exec', 'read_clipboard'] : ['computer', 'exec']);
   });
 
   it('marks observing read-only and control destructive', async () => {
