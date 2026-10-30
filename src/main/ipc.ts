@@ -275,6 +275,8 @@ const settingsPatch = z.object({
     binaryPath: z.string().max(4096)
   }),
   ui: z.object({
+    marksSystemPromptEnabled: z.boolean().optional(),
+    marksPreferredName: z.string().trim().max(80).optional(),
     appearance: appearanceSchema.optional(),
     autoContinue: z.boolean().optional(),
     defaultChatModel: z.string().trim().min(1).max(80).optional(),
@@ -499,6 +501,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       // Fields the settings form does not own (the What's New version) stay as they are; every
       // save rebuilt \`ui\` without them, so What's New came back after any changed setting.
       ...current.ui,
+      marksSystemPromptEnabled: pick(current.ui.marksSystemPromptEnabled, base.ui.marksSystemPromptEnabled, wanted.ui.marksSystemPromptEnabled),
+      marksPreferredName: pick(current.ui.marksPreferredName, base.ui.marksPreferredName, wanted.ui.marksPreferredName),
       appearance: mergeAppearance(current.ui.appearance, base.ui.appearance, wanted.ui.appearance),
       autoContinue: pick(current.ui.autoContinue, base.ui.autoContinue, wanted.ui.autoContinue),
       defaultChatModel: pick(current.ui.defaultChatModel, base.ui.defaultChatModel, wanted.ui.defaultChatModel),

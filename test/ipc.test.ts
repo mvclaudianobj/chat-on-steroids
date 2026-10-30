@@ -200,6 +200,33 @@ it('saves Personality and Writing style from Settings: own text, emptied, and ba
   expect(getConfig().ui.chatWritingStyle).toBeUndefined();
 });
 
+it('persists the Marks form of address through Settings, restart, new chat and resumed prompts', async () => {
+  const { loadConfig } = await import('../src/main/config.js');
+  const { prepareSessionPrompt } = await import('../src/main/session/prompt.js');
+  const { currentMarksSystemPrompt } = await import('../src/main/marks-system-prompt.js');
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, marksSystemPromptEnabled: true, marksPreferredName: '  Senhor Marcos  ' } }, base))
+    .toMatchObject({ ok: true });
+  expect(getConfig().ui.marksPreferredName).toBe('Senhor Marcos');
+  // An older form edited an unrelated preference in the meantime.
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base))
+    .toMatchObject({ ok: true });
+  await loadConfig(); // Re-read the actual persisted config.json, as the next app start does.
+  expect(getConfig().ui).toMatchObject({ marksSystemPromptEnabled: true, marksPreferredName: 'Senhor Marcos' });
+  const opening = await prepareSessionPrompt('Start this chat');
+  expect(opening).toContain('Trate a pessoa por "Senhor Marcos".');
+  expect(currentMarksSystemPrompt('chatgpt')).toContain('"Senhor Marcos"'); // Compact & Resume bootstrap.
+  for (const kind of ['cliproxy', 'claude', 'codex', 'opencode'] as const) {
+    expect(currentMarksSystemPrompt(kind)).toContain('"Senhor Marcos"');
+  }
+  const live = getConfig();
+  expect(await save({ ...live, ui: { ...live.ui, marksSystemPromptEnabled: false, marksPreferredName: undefined } }, live))
+    .toMatchObject({ ok: true });
+  await loadConfig();
+  expect(getConfig().ui.marksPreferredName).toBeUndefined();
+  expect(currentMarksSystemPrompt('chatgpt')).toBe('');
+});
+
 it('saves the send check address from Settings, keeps it through a stale save, and clears it when emptied (#1794)', async () => {
   const base = getConfig();
   expect(await save({ ...base, ui: { ...base.ui, sendCheckUrl: ' http://127.0.0.1:8091/check ' } }, base)).toMatchObject({ ok: true });
