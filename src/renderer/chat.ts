@@ -12,6 +12,7 @@ import { sendTerminalSelection } from './terminal-selection.js';
 import { createWorkspaceDocks } from './workspace-docks.js';
 import { showMarksProjectDockPicker } from './marks-project-dock.js';
 import { currentLanguage, ui, t, tn } from './i18n.js';
+import { askFields } from './ask-dialog.js';
 import { APP_COMMANDS, initSkills } from './skills.js';
 import { openBrainRecall, rememberBrainSelection, rememberChatContext, rememberLatestAnswer } from './brain-ui.js';
 import { imageStorageButton } from './image-storage.js';
@@ -1535,7 +1536,9 @@ async function remoteModeCommand(argument = ''): Promise<void> {
   const list = await api.remoteHosts('list') as { ok: boolean; data?: RemoteProfileChoice[] };
   if (!list.ok || !list.data) { toast(t('Could not load SSH profiles.')); return; }
   const ssh = list.data.filter(row => row.type === 'ssh');
-  const selected = argument ? remoteArgument(argument) : window.prompt(t('Remote SSH profile name:'), ssh[0]?.name ?? '');
+  const choices = [...ssh.map(row => ({ value: row.name, label: row.name })), { value: 'off', label: t('Off') }];
+  const selected = argument ? remoteArgument(argument)
+    : (await askFields(t('Remote mode'), [{ label: t('Remote SSH profile name:'), value: ssh[0]?.name, choices }]))?.[0] ?? null;
   if (selected === null) { if (argument) toast(t('Use /remotemode "profile name" or /remotemode off.')); return; }
   const off = selected.toLowerCase() === 'off';
   const profile = off ? null : ssh.find(row => row.name.toLowerCase() === selected.toLowerCase());
@@ -10078,12 +10081,16 @@ export function initChat(next: Deps): void {
     const result = await api.remoteHosts('list') as { ok: boolean; data?: RemoteProfileChoice[] };
     if (!result.ok || !result.data) { toast(t('Could not load SSH profiles.')); return; }
     const hosts = result.data.filter(row => row.type === 'ssh');
-    const name = window.prompt(t('Remote SSH profile name:'), hosts[0]?.name ?? '');
-    if (!name) return;
-    const profile = hosts.find(row => row.name.toLowerCase() === name.trim().toLowerCase());
+    if (!hosts.length) { toast(t('SSH profile not found.')); return; }
+    // Electron has no window.prompt: an in-app form asks for the profile and the folder.
+    const answer = await askFields(t('Remote profile folder…'), [
+      { label: t('Remote SSH profile name:'), value: hosts[0]?.name, choices: hosts.map(row => ({ value: row.name, label: row.name })) },
+      { label: t('Remote folder for SFTP (absolute path):'), value: '~/' }
+    ]);
+    if (!answer) return;
+    const [name, folder] = answer as [string, string];
+    const profile = hosts.find(row => row.name.toLowerCase() === name.toLowerCase());
     if (!profile) { toast(t('SSH profile not found.')); return; }
-    const folder = window.prompt(t('Remote folder for SFTP (absolute path):'), '~/');
-    if (!folder) return;
     const added = await run(api.addRemoteProfileProject(profile.id, folder));
     if (added) showAddedProject(added, generation);
   };

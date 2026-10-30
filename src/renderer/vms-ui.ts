@@ -1,6 +1,7 @@
 import type { AppApi } from '../preload/index.js';
 import type { VmAction, VmJob, VmView } from '../shared/vms.js';
 import { t, onLanguageChange } from './i18n.js';
+import { askFields } from './ask-dialog.js';
 
 /** VM actions are delegated to a fixed IPC allowlist; no path, command or shell input is accepted. */
 export function createVmsUi(api: AppApi, parent: Element): { refresh(): Promise<void> } {
@@ -133,7 +134,7 @@ export function createVmsUi(api: AppApi, parent: Element): { refresh(): Promise<
   async function act(vm: string, op: VmAction): Promise<void> {
     let confirmation: string | undefined;
     if (op === 'destroy') {
-      confirmation = window.prompt(t('Type the exact VM name to destroy: {0}', [vm])) ?? undefined;
+      confirmation = (await askFields(t('Destroy VM'), [{ label: t('Type the exact VM name to destroy: {0}', [vm]) }]))?.[0];
       if (confirmation !== vm) return;
     }
     busy = true; paint();
