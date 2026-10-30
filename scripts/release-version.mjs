@@ -9,10 +9,11 @@ export function productVersion(npmVersion) {
   return `${parts[1]}.${parts[2]}.${parts[3]}${parts[4] ? `.${parts[4]}` : ''}`;
 }
 
-/** Four-part Electron product versions use Debian's -1 packaging revision. */
+/** electron-builder names a four-part product's Debian revision after its buildNumber, the Marks revision. */
 export function debianVersion(npmVersion) {
   const version = productVersion(npmVersion);
-  return npmVersion.includes('+') ? `${version}-1` : version;
+  const revision = /\+(\d+)$/.exec(npmVersion)?.[1];
+  return revision ? `${version}-${revision}` : version;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

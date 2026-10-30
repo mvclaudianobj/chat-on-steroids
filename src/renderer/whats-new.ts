@@ -14,7 +14,7 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
-  '2.1.48.2': {
+  '2.1.48.3': {
     lead: () => `${t("A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard.")} ${t("Vault, notifications, Brain memory and new ways to work with agents.")}`,
     highlights: [
       { icon: 'i-check-circle', title: () => t("Goal step reviewer"), text: () => t("A second chat checks each Goal step's file changes before the next one.") },
@@ -316,7 +316,7 @@ const RELEASES: Readonly<Record<string, Release>> = {
 };
 
 export function hasHighlights(version: string): boolean {
-  return version === '2.1.48.2' || version === '2.1.46.1' || version === '2.1.47.1' || Object.hasOwn(RELEASES, version);
+  return version === '2.1.48.3' || version === '2.1.46.1' || version === '2.1.47.1' || Object.hasOwn(RELEASES, version);
 }
 
 /** Paints the dialog for one version; separate from showing it so a check can paint any entry. */

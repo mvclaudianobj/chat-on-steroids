@@ -9,7 +9,7 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [2.1.48.2] — A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard
+## [2.1.48.3] — A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard
 
 Goal can have a second chat check each step's file changes. The theme can follow your computer's light or dark mode, and the app can ask before a chat uses your mouse and keyboard. Ages read in days, weeks, months and years, tool rows speak your language, and sending recovers by itself in more situations.
 
@@ -53,7 +53,7 @@ Goal can have a second chat check each step's file changes. The theme can follow
 
 - Includes all changes already merged into Marks base `4166f3a1`: native Jarvis voice and provider routing, Company/worker UX, notifications and WhatsApp bridge, archive and approval protections, local account and terminal login/clipboard fixes, SSH remote profiles, prompt persistence, CLI module UI, and browser/extension fixes.
 - Additional reviewed branches are part of this integration **by real Git merges**: `fix/marks-jarvis-voice-trigger` (`e38eca91`) for confirmed-answer speech, session-tail and Linux voice fallback, and `feat/marks-ccr-autoconfig` (`9b2447fb`) for ephemeral CCR UI token validation and backed-up CLIProxy routing.
-- The intermediate 2.1.47.1 builds were QA candidates, **not an official release**. The next planned release was **2.1.48.1**; it was tagged but never published, because the release pipeline timed out, so the same scope ships as **2.1.48.2**. See `docs/release-notes/v2.1.48.2.md` for the consolidated release scope and verification limits.
+- The intermediate 2.1.47.1 builds were QA candidates, **not an official release**. The next planned release was **2.1.48.1**; 2.1.48.1 and 2.1.48.2 were tagged but never published (a pipeline time limit, then a Debian revision check), so the same scope ships as **2.1.48.3**. See `docs/release-notes/v2.1.48.3.md` for the consolidated release scope and verification limits.
 
 ## [2.1.47.1] — Chat Marks integration of community 2.1.47
 

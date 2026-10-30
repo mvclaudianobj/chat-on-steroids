@@ -32,6 +32,7 @@ describe('GitHub release metadata', () => {
     expect(productVersion('2.1.37+2')).toBe('2.1.37.2');
     expect(debianVersion('2.1.37')).toBe('2.1.37');
     expect(debianVersion('2.1.37+1')).toBe('2.1.37.1-1');
+    expect(debianVersion('2.1.48+3')).toBe('2.1.48.3-3');
     expect(() => productVersion('2.1.37.1')).toThrow(/Invalid stable package version/);
     expect(() => productVersion('2.1.37-rc.1')).toThrow(/Invalid stable package version/);
   });
