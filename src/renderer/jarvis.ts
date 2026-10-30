@@ -198,14 +198,23 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   let resumeTimer: ReturnType<typeof setTimeout> | null = null;
   const recognitionAvailable = api.dictationSupported && typeof api.startDictation === 'function';
   const recorderAvailable = typeof navigator !== 'undefined' && !!navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== 'undefined';
-  const systemSpeech = (): boolean => typeof window !== 'undefined' && 'speechSynthesis' in window;
+  const systemSpeechApi = (): boolean => typeof window !== 'undefined' &&
+    'speechSynthesis' in window && typeof window.speechSynthesis?.getVoices === 'function';
+  // Chromium on Linux exposes speechSynthesis even without speech-dispatcher or a voice.
+  // The mere API object must not advertise an audible fallback.
+  const systemSpeech = (): boolean => {
+    if (!systemSpeechApi()) return false;
+    try { return window.speechSynthesis.getVoices().length > 0; }
+    catch { return false; }
+  };
   let capability: { models: string[]; local: boolean; windows: boolean; error: string | null } = { models: [], local: false, windows: recognitionAvailable, error: null };
   let provider: ProviderCapability = { checked: false, primary: false, fallback: false, ffmpeg: false, stt: [], tts: [], error: null };
   let providerCheckGeneration = 0;
   let providerStatusConfig: string | null = null;
   let media: { recorder: MediaRecorder; stream: MediaStream; chunks: Blob[]; bytes: number; id: number; mode: Engine } | null = null;
   const modes = (): Engine[] => preferences.engine === 'auto' ? ORDER : [preferences.engine, ...ORDER.filter(candidate => candidate !== preferences.engine)];
-  const providerReachable = (): boolean => provider.primary || provider.fallback || (provider.checked && !provider.error);
+  const providerReachable = (): boolean => provider.primary || provider.fallback ||
+    provider.fallback2 === true || provider.fallback3 === true || (provider.checked && !provider.error);
   const usable = (mode: Engine): boolean => mode === 'windows' ? recognitionAvailable
     : recorderAvailable && (mode === 'provider' ? jarvisVoiceSttReady(preferences.provider) && providerReachable()
       : mode === 'local' ? capability.local : capability.models.length > 0);
@@ -353,7 +362,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     for (const stream of liveStreams) stream.cancel();
     liveStreams.clear();
     void api.jarvisSpeakCancel?.().catch(() => undefined);
-    if (systemSpeech()) speechSynthesis.cancel();
+    if (systemSpeechApi()) speechSynthesis.cancel();
   };
   const clearNativeDeadline = (): void => {
     if (nativeDeadline) { clearTimeout(nativeDeadline); nativeDeadline = null; }
@@ -870,19 +879,32 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         if (!reply.ok || answer !== current || nativePending !== pending) continue;
         if (typed && (typed !== typedWatch || epoch !== typedEpoch)) continue;
         if (selected()?.id !== sessionId || !consented || !preferences.enabled) { cancel(); return; }
+        let page = reply.data;
+        // The native outbox stores the exact inputId on its confirmed user bubble, but
+        // the ordinary timeline exposes only 80 recent events. A long tool-heavy turn
+        // can push that bubble out of the window before a response arrives. Expand
+        // this one read while pending, never guessing an answer from nearby messages.
+        if (pending && page.total > 80 && !page.events.some(event => event.kind === 'user_message' &&
+            event.inputId === pending.inputId && event.inputDelivery === 'confirmed')) {
+          const expanded = await api.getSession(sessionId, { limit: 1000 });
+          if (!expanded.ok || answer !== current || nativePending !== pending ||
+              (typed && (typed !== typedWatch || epoch !== typedEpoch))) continue;
+          if (selected()?.id !== sessionId || !consented || !preferences.enabled) { cancel(); return; }
+          page = expanded.data;
+        }
         if (typed && typedSelection()?.conversationId === typed.conversationId) {
-          readTypedFinal(typed, reply.data.events, reply.data.summary?.timelineTurns);
+          readTypedFinal(typed, page.events, page.summary?.timelineTurns);
         }
         if (pending) {
           if (pending.generation !== attempt || phase !== 'thinking') { nativePending = null; return; }
-          const submitted = reply.data.events.filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
+          const submitted = page.events.filter((event): event is Extract<SessionEvent, { kind: 'user_message' }> =>
             event.kind === 'user_message').find(event => event.inputId === pending.inputId &&
             event.inputDelivery === 'confirmed' && (!!event.messageId || !!event.turnId));
           if (!submitted) continue;
           // ChatGPT's native user-message turnId is not the response turnId. The recorder's
           // exact questionId -> response-turn relation is the only valid bridge between them.
           // The relation may arrive after the confirmed input: wait for the next session change.
-          const turns = reply.data.summary?.timelineTurns;
+          const turns = page.summary?.timelineTurns;
           const linked = turns && submitted.messageId
             ? [...new Set(Object.entries(turns)
               .filter(([, turn]) => turn.questionId === submitted.messageId)
@@ -899,8 +921,9 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
         if (!current) continue;
         const messages = new Map<string, Extract<SessionEvent, { kind: 'assistant_message' }>>();
         let ended = false;
-        for (const event of reply.data.events) {
-          if (event.turnId !== current.turnId) continue;
+        const turns = page.summary?.timelineTurns;
+        for (const event of page.events) {
+          if (!event.turnId || responseTurnId(turns, event.turnId) !== current.turnId) continue;
           if (event.kind === 'assistant_message') messages.set(event.messageId ?? String(event.seq), event);
           else if (event.kind === 'turn_end') ended = true;
         }
@@ -1053,14 +1076,14 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     });
   });
   const fillVoices = (): void => {
-    if (!systemSpeech()) return;
+    if (!systemSpeechApi()) return;
     const voices = speechSynthesis.getVoices();
     voice.replaceChildren(new Option(t('System default'), ''));
     for (const candidate of voices) voice.appendChild(new Option(`${candidate.name} (${candidate.lang})`, candidate.voiceURI));
     voice.value = speechVoice;
   };
   fillVoices();
-  if (systemSpeech()) speechSynthesis.addEventListener('voiceschanged', fillVoices);
+  if (systemSpeechApi()) speechSynthesis.addEventListener('voiceschanged', () => { fillVoices(); paint(); });
   voice.addEventListener('change', () => { speechVoice = voice.value; });
   maybe<HTMLButtonElement>('jarvisRefreshAudio')?.addEventListener('click', refresh);
   button.addEventListener('pointerdown', event => { if (event.button !== 0 || button.disabled) return; event.preventDefault(); held = true; button.setPointerCapture(event.pointerId); start(); });

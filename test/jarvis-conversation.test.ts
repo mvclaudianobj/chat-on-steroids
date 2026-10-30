@@ -32,7 +32,7 @@ afterEach(() => { page?.window.close(); page = null; vi.unstubAllGlobals(); vi.r
 async function fixture(options: { tts?: boolean; continuous?: boolean; providerTranscribe?: 'ok' | 'fail';
   selected?: { id: string; conversationId: string | null; engine?: string } | null; consent?: boolean; noAudioEngines?: boolean;
   g4f?: boolean; createFailure?: boolean; enabled?: boolean; noProvider?: boolean; providerUnavailable?: boolean; microphoneDenied?: boolean;
-  deferredProviderStatus?: boolean;
+  deferredProviderStatus?: boolean; pagedSession?: boolean; noSystemVoices?: boolean; lateSlotOnly?: boolean;
   google?: boolean; language?: string;
   routingMode?: 'off' | 'gemini-first' | 'g4f-first';
   initialEvents?: unknown[]; initialTurns?: Record<string, { origin: number; time: number; questionId: string }> } = {}) {
@@ -47,6 +47,12 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
       { baseUrl: 'https://voice-two.example/v1', ttsModel: 'gpt-4o-mini-tts', voice: 'nova' }
     ] }, version: 2 }));
   Object.assign(globalThis, { window, document: window.document, localStorage: window.localStorage, Event: window.Event, Option: window.Option });
+  if (options.noSystemVoices) {
+    const synthesis = { getVoices: () => [], speak: vi.fn(), cancel: vi.fn(), addEventListener: vi.fn() };
+    Object.defineProperty(window, 'speechSynthesis', { configurable: true, value: synthesis });
+    vi.stubGlobal('speechSynthesis', synthesis);
+    vi.stubGlobal('SpeechSynthesisUtterance', class { constructor(readonly text: string) {} });
+  }
   const tracks = [{ stop: vi.fn() }];
   const getUserMedia = vi.fn(async () => {
     if (options.microphoneDenied) throw new Error('NotAllowedError: synthetic denial');
@@ -100,14 +106,17 @@ async function fixture(options: { tts?: boolean; continuous?: boolean; providerT
         statusResolvers.push(resolve);
         statusRejectors.push(reject);
       })
-      : options.providerUnavailable ? { ok: false as const, error: 'Vault unreadable' } : ({ ok: true as const, data: { models: [], stt: ['whisper-1'], tts: ['gpt-4o-mini-tts'], primary: true, fallback: true, ffmpeg: true, error: null } }),
+      : options.providerUnavailable ? { ok: false as const, error: 'Vault unreadable' } : ({ ok: true as const, data: { models: [], stt: ['whisper-1'], tts: ['gpt-4o-mini-tts'], primary: !options.lateSlotOnly, fallback: !options.lateSlotOnly,
+        fallback2: !!options.lateSlotOnly, fallback3: false, ffmpeg: true, error: options.lateSlotOnly ? 'earlier key slots unavailable' : null } }),
     jarvisTranscribe: transcribe, jarvisSpeak: speak, jarvisSpeakCancel: speakCancel,
     jarvisVoiceRouteStatus: routeStatus, jarvisVoiceSetKey: setKey,
     jarvisCancel: async () => ({ ok: true as const, data: null }),
     startDictation: vi.fn(), stopDictation: vi.fn(async () => ({ ok: true, data: undefined })), apiChatSend: send, sendInput,
     onDictationEvent: () => () => undefined,
     onSessionChanged: (callback: typeof changed) => { changed = callback; return () => undefined; },
-    getSession: vi.fn(async () => ({ ok: true as const, data: { events, summary: sessionSummary, total: events.length, nextFrom: 0 } }))
+    getSession: vi.fn(async (_id: string, query?: { limit?: number }) => ({ ok: true as const, data: {
+      events: options.pagedSession ? events.slice(-(query?.limit ?? 160)) : events,
+      summary: sessionSummary, total: events.length, nextFrom: 0 } }))
   };
   let selected = options.selected === undefined
     ? ({ id: 'test-jarvis-0001', conversationId: 'cosapi-test-jarvis', engine: 'cliproxy' }) : options.selected;
@@ -444,6 +453,56 @@ describe('Jarvis native ChatGPT bridge ownership', () => {
   const normal = { id: 'native-chat-01', conversationId: 'chatgpt-realistic', engine: 'chatgpt' };
   const message = (turnId: string, text: string) => ({ kind: 'assistant_message', turnId, messageId: 'm-'+turnId,
     seq: 3, message: { text, truncated: false, chars: text.length }, final: false });
+
+  it('recovers a confirmed spoken question beyond the 80-event tail without guessing a response', async () => {
+    const f = await fixture({ selected: normal, g4f: true, pagedSession: true });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [input] = f.sendInput.mock.calls[0]!;
+    const question = { kind: 'user_message', messageId: 'q-outside-tail', inputId: input.id,
+      inputDelivery: 'confirmed', turnId: 'native-q', seq: 1 };
+    const unrelated = Array.from({ length: 85 }, (_, i) => ({ kind: 'tool_call', seq: 2 + i, turnId: 'foreign', call: { id: `x-${i}` } }));
+    const text = 'Resposta final depois de muitos eventos.';
+    await f.nativeEvents([question, ...unrelated,
+      { kind: 'assistant_message', turnId: 'response-linked', messageId: 'a-linked', seq: 87, final: true,
+        message: { text, chars: text.length, truncated: false } },
+      { kind: 'turn_end', turnId: 'response-linked', seq: 88, outcome: 'completed' }
+    ], { 'response-linked': { origin: 87, time: 100, questionId: 'q-outside-tail' } });
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual([text]);
+  });
+
+  it('speaks continued assistant turn events only when their canonical owner belongs to the spoken question', async () => {
+    const f = await fixture({ selected: normal, g4f: true });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [input] = f.sendInput.mock.calls[0]!;
+    const text = 'Resposta do turno continuado.';
+    await f.nativeEvents([
+      { kind: 'user_message', messageId: 'q-cont', inputId: input.id, inputDelivery: 'confirmed', seq: 1 },
+      { kind: 'assistant_message', messageId: 'a-cont', turnId: 'response-child', seq: 4, final: true,
+        message: { text, chars: text.length, truncated: false } },
+      { kind: 'turn_end', turnId: 'response-child', seq: 5, outcome: 'completed' }
+    ], { 'response-root': { origin: 2, time: 100, questionId: 'q-cont' },
+      'response-child': { origin: 3, time: 110, questionId: 'q-cont', responseTurnId: 'response-root' } } as never);
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual([text]);
+  });
+
+  it('never reports a silent Linux system synthesizer as available', async () => {
+    const f = await fixture({ selected: normal, noSystemVoices: true, noProvider: true });
+    expect(f.element('jarvisReadiness').textContent).toMatch(/need a working provider or system voice/i);
+    expect((globalThis.speechSynthesis as unknown as { speak: ReturnType<typeof vi.fn> }).speak).not.toHaveBeenCalled();
+  });
+
+  it('uses a configured fourth-key provider candidate even when earlier slots fail', async () => {
+    const f = await fixture({ selected: normal, g4f: true, noSystemVoices: true, lateSlotOnly: true });
+    f.hold(); await f.flush(); f.release(); await f.flush();
+    const [input] = f.sendInput.mock.calls[0]!;
+    await f.nativeEvents([
+      { kind: 'user_message', messageId: 'q-fallback', inputId: input.id, inputDelivery: 'confirmed', seq: 1 },
+      { kind: 'assistant_message', messageId: 'a-fallback', turnId: 'fallback-answer', seq: 2, final: true,
+        message: { text: 'Resposta pelo slot alternativo.', chars: 29, truncated: false } },
+      { kind: 'turn_end', turnId: 'fallback-answer', seq: 3, outcome: 'completed' }
+    ], { 'fallback-answer': { origin: 2, time: 100, questionId: 'q-fallback' } });
+    expect(f.speak.mock.calls.map(call => call[1])).toEqual(['Resposta pelo slot alternativo.']);
+  });
 
   it('never mistakes a completed microphone question for a new typed question after nativePending clears', async () => {
     const f = await fixture({ selected: normal, google: true, language: 'pt-BR' });
