@@ -1023,6 +1023,11 @@ export function capabilityTools(capability: Capability, platform?: PlatformFamil
   const browser = capability === 'screen' ? BROWSER_READ_TOOLS : capability === 'control' ? BROWSER_WRITE_TOOLS : [];
   if (!DESKTOP_CAPABILITIES.includes(capability)) return CAPABILITY_TOOLS[capability];
   if (platform === 'macos') return [...browser, ...CAPABILITY_TOOLS[capability]];
+  if (platform === 'linux') {
+    if (capability === 'clipboardRead') return ['read_clipboard'];
+    if (capability === 'clipboardWrite') return ['write_clipboard'];
+    return browser;
+  }
   if (platform !== 'windows') return browser;
   switch (capability) {
     case 'screen': return [...browser, ...WINDOWS_COMPUTER_READ_METHODS];

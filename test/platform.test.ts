@@ -7,6 +7,7 @@ import {
   macOSDesktopAutomationSupported
 } from '../src/main/platform.js';
 import { surfaceIsUseful } from '../src/main/mcp/surfaces.js';
+import { desktopToolNames } from '../src/main/mcp/surfaces.js';
 import { serverInstructions } from '../src/main/mcp/instructions.js';
 import { unifiedExecEnvForPlatform } from '../src/main/codex/unified-exec-constants.js';
 import { CAPABILITIES, DESKTOP_CAPABILITIES, type Capabilities } from '../src/shared/types.js';
@@ -56,25 +57,30 @@ describe('cross-platform product surface', () => {
       command: true,
       screen: true,
       control: true,
-      clipboardRead: false,
-      clipboardWrite: false
+      clipboardRead: true,
+      clipboardWrite: true
     });
     expect(surfaceIsUseful('core', config.capabilities, 'linux')).toBe(true);
     expect(surfaceIsUseful('desktop', allCapabilities(), 'linux')).toBe(true);
   });
 
-  it('masks native clipboard grants on Linux while retaining browser screen/control grants', () => {
+  it('keeps Linux clipboard grants and browser capabilities without native desktop automation', () => {
     const stored = allCapabilities();
     const config = { ...defaultConfig('linux'), capabilities: stored };
     const live = effectiveCapabilities(config, 'linux');
 
     expect(live.screen).toBe(true);
     expect(live.control).toBe(true);
-    expect(live.clipboardRead).toBe(false);
-    expect(live.clipboardWrite).toBe(false);
+    expect(live.clipboardRead).toBe(true);
+    expect(live.clipboardWrite).toBe(true);
     expect(live.command).toBe(true);
     expect(config.capabilities).toBe(stored);
     expect(config.capabilities.screen).toBe(true);
+    expect(desktopToolNames(live, 'linux')).toContain('read_clipboard');
+    expect(desktopToolNames(live, 'linux')).toContain('write_clipboard');
+    expect(desktopToolNames(live, 'linux')).not.toContain('computer');
+    expect(desktopToolNames(live, 'linux')).not.toContain('observe');
+    expect(surfaceIsUseful('desktop', { ...live, screen: false, control: false }, 'linux')).toBe(true);
   });
 
   it('reports the host family and Desktop support explicitly', () => {

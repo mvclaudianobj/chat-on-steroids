@@ -178,6 +178,7 @@ export function liveConnectorName(id: SurfaceId): string {
 /** Platform/capability projection used by setup; each registrar enforces the same split. */
 export function desktopToolNames(caps: Capabilities, platform: NodeJS.Platform = process.platform): string[] {
   const browser = [...(caps.screen ? BROWSER_READ_TOOLS : []), ...(caps.control ? BROWSER_WRITE_TOOLS : [])];
+  if (platform === 'linux') return [...browser, ...(caps.clipboardRead ? ['read_clipboard'] : []), ...(caps.clipboardWrite ? ['write_clipboard'] : [])];
   if (!desktopAutomationSupported(platform)) return browser;
   if (platform !== 'win32') return [...browser, ...(caps.screen ? ['observe'] : []), ...(caps.control || caps.clipboardRead || caps.clipboardWrite ? ['computer'] : [])];
   return [
@@ -210,7 +211,7 @@ export function surfaceIsUseful(
   // still gives this surface something real to advertise.
   if (id === 'desktop') {
     return (
-      caps.screen || caps.control || (desktopAutomationSupported(platform, release) && (caps.clipboardRead || caps.clipboardWrite))
+      caps.screen || caps.control || ((platform === 'linux' || desktopAutomationSupported(platform, release)) && (caps.clipboardRead || caps.clipboardWrite))
     );
   }
   return true;
