@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promises as fs } from 'node:fs';
 import { makeWASocket, DisconnectReason, useMultiFileAuthState, type WASocket } from '@whiskeysockets/baileys';
 import type { WhatsAppSetupIssue } from '../shared/notification-center.js';
+import { logInfo, logWarn } from './logger.js';
 
 export interface WhatsAppWebStatus { state: 'disconnected' | 'connecting' | 'qr' | 'connected' | 'error'; qr?: string; reason?: WhatsAppSetupIssue; stage?: 'storage' | 'auth' | 'socket' | 'network' | 'qr' | 'ready'; inboundDiagnostics?: Readonly<Record<InboundReason, number>>; outgoingDiagnostics?: Readonly<Record<DeliveryPhase, number>> }
 type DeliveryPhase = 'accepted' | 'server' | 'delivered' | 'read' | 'failed' | 'untracked';
@@ -53,6 +54,35 @@ function startupIssue(error: unknown, phase: 'storage' | 'auth' | 'runtime'): Wh
   if (phase === 'auth' && (error instanceof SyntaxError || code === 'ERR_INVALID_ARG_TYPE')) return 'session_invalid';
   if (phase === 'runtime' && ['MODULE_NOT_FOUND', 'ERR_MODULE_NOT_FOUND'].includes(code)) return 'runtime_unavailable';
   return phase === 'storage' ? 'storage_unavailable' : phase === 'auth' ? 'session_invalid' : 'initialization_failed';
+}
+/** A saved QR pairing can have registered=false in Baileys. Registration alone
+ * (or an account signature alone) is not enough to establish a usable session.
+ * Inspect only the shape of persisted identity/key material; never log its values.
+ */
+function record(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+function savedBytes(value: unknown): boolean {
+  if (!record(value)) return false;
+  if (value.type === 'Buffer') return typeof value.data === 'string' &&
+    value.data.length >= 4 && /^[A-Za-z0-9+/]+={0,2}$/.test(value.data);
+  // Older auth files may store Uint8Array indices directly (Baileys reviver accepts them).
+  const entries = Object.entries(value);
+  return entries.length > 0 && entries.every(([key, byte]) =>
+    /^\d+$/.test(key) && typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255);
+}
+function savedKeyPair(value: unknown): boolean {
+  return record(value) && savedBytes(value.public) && savedBytes(value.private);
+}
+function hasSavedPairing(value: unknown): boolean {
+  if (!record(value) || !record(value.me) || typeof value.me.id !== 'string' ||
+      !/^[^\s@]+@(?:s\.whatsapp\.net|lid)$/.test(value.me.id)) return false;
+  // account is optional for QR credentials and is never sufficient without me.id and keys.
+  return savedKeyPair(value.noiseKey) && savedKeyPair(value.signedIdentityKey) &&
+    record(value.signedPreKey) && savedKeyPair(value.signedPreKey.keyPair) &&
+    savedBytes(value.signedPreKey.signature) &&
+    typeof value.advSecretKey === 'string' && value.advSecretKey.length > 0 &&
+    typeof value.registrationId === 'number' && Number.isInteger(value.registrationId);
 }
 let socket: WASocket | null = null;
 let status: WhatsAppWebStatus = { state: 'disconnected' };
@@ -203,7 +233,7 @@ async function connect(): Promise<void> {
   // the socket alive and prevents automatic recovery indefinitely.
   qrDeadline = setTimeout(() => {
     if (epoch !== generation || status.state !== 'connecting') return;
-    status = state.creds.registered
+    status = state.creds.me?.id
       ? { state: 'error', reason: 'connection_failed', stage: 'network' }
       : { state: 'error', reason: 'qr_timeout', stage: 'qr' };
     closeSocket();
@@ -326,25 +356,38 @@ export async function stopWhatsAppWeb(): Promise<void> {
   status = { state: 'disconnected' };
 }
 export async function resumeWhatsAppWeb(): Promise<void> {
-  if (wantConnection || status.state === 'connected' || status.state === 'connecting' || status.state === 'qr') return;
+  if (wantConnection || status.state === 'connected' || status.state === 'connecting' || status.state === 'qr') {
+    logInfo('WhatsApp resume: already active');
+    return;
+  }
   const resumeEpoch = generation;
   try {
     const files = await fs.readdir(directory());
-    if (files.includes('creds.json')) {
-      const raw = await fs.readFile(path.join(directory(), 'creds.json'), 'utf8');
-      const creds = JSON.parse(raw) as { registered?: unknown };
-      if (creds.registered === true && resumeEpoch === generation && !disconnecting) {
-        // A resumed pairing is already authorized. Unlike an explicit Connect
-        // failure, a transient boot/network error must retain retry intent.
-        wantConnection = true;
-        try { await beginConnect(); }
-        catch (error) {
-          if (!wantConnection) return;
-          const reason = error instanceof WhatsAppPairingError ? error.issue : 'unknown';
-          status = { state: 'error', reason, stage: status.stage };
-          if (reason !== 'session_invalid') scheduleReconnect();
-        }
-      }
+    if (!files.includes('creds.json')) {
+      logInfo('WhatsApp resume: no saved pairing');
+      return;
     }
-  } catch { /* No existing pairing. */ }
+    const raw = await fs.readFile(path.join(directory(), 'creds.json'), 'utf8');
+    if (!hasSavedPairing(JSON.parse(raw) as unknown)) {
+      logInfo('WhatsApp resume: no valid saved pairing');
+      return;
+    }
+    if (resumeEpoch !== generation || disconnecting) return;
+    logInfo('WhatsApp resume: restoring saved pairing');
+    // A resumed pairing is already authorized. Unlike an explicit Connect
+    // failure, a transient boot/network error must retain retry intent.
+    wantConnection = true;
+    try { await beginConnect(); }
+    catch (error) {
+      if (!wantConnection) return;
+      const reason = error instanceof WhatsAppPairingError ? error.issue : 'unknown';
+      status = { state: 'error', reason, stage: status.stage };
+      logWarn(`WhatsApp resume: attempt failed (${reason})`);
+      if (reason !== 'session_invalid') scheduleReconnect();
+    }
+  } catch (error) {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    if (code === 'ENOENT' || error instanceof SyntaxError) logInfo('WhatsApp resume: no valid saved pairing');
+    else logWarn('WhatsApp resume: saved pairing could not be inspected');
+  }
 }

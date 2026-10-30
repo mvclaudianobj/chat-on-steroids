@@ -911,13 +911,18 @@ void app.whenReady().then(async () => {
     if (change.sessionIds?.length) void whatsappDuplex.changed(change.sessionIds).catch(() => undefined);
   });
   // The green connector transition is an independent opportunity to restore
-  // registered Baileys credentials. Resume is idempotent; explicit logout deletes
+  // an already paired Baileys session (including QR credentials). Explicit logout deletes
   // the saved auth and cannot be undone by this listener.
   const resumeEnabledWhatsApp = async (): Promise<void> => {
-    if ((await notificationSettings()).channels['whatsapp-web'].enabled && !quitting) await resumeWhatsAppWeb();
+    if (quitting) return;
+    if (!(await notificationSettings()).channels['whatsapp-web'].enabled) {
+      logInfo('WhatsApp resume: channel disabled');
+      return;
+    }
+    await resumeWhatsAppWeb();
   };
   watchWhatsAppResumeOnGreen(getStatus, onStatusChange, resumeEnabledWhatsApp, () => !quitting);
-  void resumeEnabledWhatsApp().catch(() => undefined);
+  void resumeEnabledWhatsApp().catch(() => logWarn('WhatsApp resume: startup check failed'));
   setInterval(() => {
     if (quitting) return;
     void getWhatsAppWebStatus().then(status => {
