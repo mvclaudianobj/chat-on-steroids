@@ -690,11 +690,12 @@ describe('settings migration', () => {
 
 /** Fresh-install defaults, while migrations above prove existing choices stay narrow. */
 describe('shipped defaults', () => {
-  // Windows starts the group on; Linux starts its extension browser capabilities on.
+  // Windows starts the group on; Linux starts browser and Electron clipboard on.
   // macOS preserves its existing off default and separate native OS consent.
   const expectedFreshCapability = (capability: Capability, platform: NodeJS.Platform): boolean =>
     platform === 'win32' || !DESKTOP_CAPABILITIES.includes(capability) ||
-    (platform !== 'darwin' && (capability === 'screen' || capability === 'control'));
+    (platform === 'linux' && (capability === 'screen' || capability === 'control' ||
+      capability === 'clipboardRead' || capability === 'clipboardWrite'));
 
   it('records sessions from first launch', () => {
     expect(defaultConfig().sessions).toMatchObject({ record: true, retainDays: 0 });

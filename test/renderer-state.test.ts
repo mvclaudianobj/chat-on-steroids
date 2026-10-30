@@ -3100,7 +3100,7 @@ it('says why an Activity list is empty, in the app language, and drops the note 
   expect(feed.dataset.empty).toBe('Nothing matches this filter.');
 });
 
-it('preserves native Desktop permissions when saving unrelated settings on Linux', async () => {
+it('exposes and preserves Linux clipboard permissions when saving unrelated settings', async () => {
   const mounted = await mountChat({
     platform: { family: 'linux', name: 'Linux', desktopAutomation: false }
   });
@@ -3109,7 +3109,8 @@ it('preserves native Desktop permissions when saving unrelated settings on Linux
   const desktopGroup = w.document.querySelector<HTMLElement>('[data-group="desktop"]')!;
   expect(desktopGroup.hidden).toBe(false);
   expect(w.document.querySelector<HTMLInputElement>('[data-cap="control"]')!.disabled).toBe(false);
-  expect(w.document.querySelector<HTMLInputElement>('[data-cap="clipboardWrite"]')!.disabled).toBe(true);
+  expect(w.document.querySelector<HTMLInputElement>('[data-cap="clipboardRead"]')!.disabled).toBe(false);
+  expect(w.document.querySelector<HTMLInputElement>('[data-cap="clipboardWrite"]')!.disabled).toBe(false);
 
   const autoConnect = w.document.getElementById('autoConnect') as HTMLInputElement;
   autoConnect.checked = true;
