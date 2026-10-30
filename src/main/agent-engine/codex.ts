@@ -57,7 +57,7 @@ import { connectWebSocket, JsonRpcPeer, type JsonRpcId } from './jsonrpc.js';
 import type { WebSocket } from 'ws';
 import { engineOf, chatRecords, routeOf, storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
 import {
-  chatRoutes, codexRouteOverrides, detectCodexRouter, effectiveRoute, localProxyAnswers, refreshRouterAvailability, registerRoutedTurnProbe, ROUTER_LABEL,
+  chatRoutes, codexRouteOverrides, CODEX_OFFICIAL_CATALOG, detectCodexRouter, effectiveRoute, localProxyAnswers, refreshRouterAvailability, registerRoutedTurnProbe, ROUTER_LABEL,
   ROUTER_UNAVAILABLE_TEXT, routerUsable, type CodexRouterDetection
 } from './router.js';
 import { TurnProjector, storeProjectorSink, type ProjectorSink } from './projector.js';
@@ -113,6 +113,22 @@ export interface CodexHost {
 }
 
 const run = promisify(execFile);
+
+/** Renders Codex's built-in catalog (`codex debug models`, empty CODEX_HOME) into `file`, at most daily. */
+async function ensureOfficialCodexCatalog(command: [string, string[]], file: string, env: NodeJS.ProcessEnv): Promise<boolean> {
+  const fresh = await fs.stat(file).then(stat => Date.now() - stat.mtimeMs < 24 * 60 * 60 * 1000, () => false);
+  if (fresh) return true;
+  const empty = await fs.mkdtemp(path.join(os.tmpdir(), 'chat-marks-codex-catalog-'));
+  try {
+    const [catalogFile, catalogArgs] = command;
+    const { stdout } = await run(catalogFile, catalogArgs, { timeout: 20_000, maxBuffer: 4 * 1024 * 1024, env: { ...env, CODEX_HOME: empty } });
+    const parsed = JSON.parse(stdout) as { models?: unknown };
+    if (!Array.isArray(parsed.models) || parsed.models.length === 0) return false;
+    await fs.writeFile(file, stdout, { mode: 0o600 });
+    return true;
+  } catch { return false; }
+  finally { await fs.rm(empty, { recursive: true, force: true }).catch(() => undefined); }
+}
 
 async function childEnvironment(): Promise<NodeJS.ProcessEnv> {
   const { normalizeEnvironment, deleteEnvValue } = await import('../env.js');
@@ -256,7 +272,13 @@ export function defaultCodexHost(): CodexHost {
       const detection = runtime.windows ? null : detectCodexRouter();
       // The user's own loopback openai_base_url proxy is used while it answers (router.ts `localProxy`).
       const proxyDown = !!detection?.localProxy && !(await localProxyAnswers(detection.localProxy));
-      const overrides = detection ? codexRouteOverrides(route, detection, proxyDown) : [];
+      let overrides = detection ? codexRouteOverrides(route, detection, proxyDown) : [];
+      // A direct server given Codex's own catalog needs that file to exist; it is rendered by this very
+      // CLI from an empty CODEX_HOME (no user config), so it lists the account's official models.
+      const catalogFile = CODEX_OFFICIAL_CATALOG(process.env.CODEX_HOME?.trim() || path.join(home, '.codex'));
+      if (overrides.includes(`model_catalog_json=${JSON.stringify(catalogFile)}`) && !(await ensureOfficialCodexCatalog(exec(runtime, ['debug', 'models']), catalogFile, env))) {
+        overrides = overrides.filter(value => !value.startsWith('model_catalog_json='));
+      }
       // Chat Marks: the Brain MCP server (H1c); its bearer token only in the server's environment.
       const brain = await codexBrainMcpLaunch(runtime.windows);
       const [serverFile, serverArgs] = exec(runtime, codexServerArgv(socket, overrides, brain?.args));

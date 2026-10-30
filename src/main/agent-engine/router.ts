@@ -231,6 +231,12 @@ export function detectClaudeRouter(environment: RoutingEnvironment = realEnviron
 const CCR_PROVIDER = /claude[-_ ]?code[-_ ]?router/i;
 
 /**
+ * Codex's own model catalog for the direct route, written by Chat Marks (`codex debug models` run
+ * with an empty CODEX_HOME, see codex.ts `ensureOfficialCodexCatalog`); the user's files stay untouched.
+ */
+export const CODEX_OFFICIAL_CATALOG = (codexHome: string): string => path.join(codexHome, 'chat-marks-official-models.json');
+
+/**
  * Codex is routed by CCR when config.toml's top-level `model_provider` is CCR's provider (by its
  * id, its table's `name`, or CCR's managed-block marker). The direct route then selects Codex's
  * built-in `openai` provider, when CCR replaced the model catalog Codex's own cached catalog, and
@@ -251,14 +257,20 @@ export function detectCodexRouter(environment: RoutingEnvironment = realEnvironm
   const provider = typeof config.model_provider === 'string' ? config.model_provider : null;
   const proxy = loopbackAddress(config.openai_base_url);
   const official = (): string => `openai_base_url=${JSON.stringify(codexOfficialBaseUrl(home))}`;
-  if (!provider || provider === 'openai') return proxy ? { ...none, localProxy: { ...proxy, override: official() } } : none;
+  // The direct route is the CLI's own account with no other module (CEO, 2026-10-30): another tool
+  // that rewrote config.toml (a loopback openai_base_url, a router's model catalog) must not reach it.
+  const foreignCatalog = typeof config.model_catalog_json === 'string' && config.model_catalog_json !== CODEX_OFFICIAL_CATALOG(home);
+  const catalog = (): string => `model_catalog_json=${JSON.stringify(CODEX_OFFICIAL_CATALOG(home))}`;
+  if (!provider || provider === 'openai') {
+    const direct = [...(proxy ? [official()] : []), ...(foreignCatalog ? [catalog()] : [])];
+    return { ...none, directOverrides: direct, ...(proxy ? { localProxy: { ...proxy, override: official() } } : {}) };
+  }
   const table = isRecord(config.model_providers) && isRecord(config.model_providers[provider]) ? config.model_providers[provider] as Record<string, unknown> : {};
   const name = typeof table.name === 'string' ? table.name : '';
   if (!CCR_PROVIDER.test(provider) && !CCR_PROVIDER.test(name) && !/^# BEGIN CCR managed/m.test(text)) return none;
   const overrides = ['model_provider="openai"'];
   if (proxy) overrides.push(official());
-  const ownCatalog = path.join(home, 'models_cache.json');
-  if (typeof config.model_catalog_json === 'string' && existsSync(ownCatalog)) overrides.push(`model_catalog_json=${JSON.stringify(ownCatalog)}`);
+  if (foreignCatalog) overrides.push(catalog());
   return withAvailability({ detected: true, provider: provider.slice(0, 100), directOverrides: overrides });
 }
 
@@ -268,7 +280,7 @@ export function detectCodexRouter(environment: RoutingEnvironment = realEnvironm
  */
 export const codexRouteOverrides = (route: AgentEngineRoute, detection: CodexRouterDetection, proxyDown = false): string[] =>
   effectiveRoute(route, detection) !== 'direct' ? []
-    : [...detection.directOverrides, ...(proxyDown && detection.localProxy ? [detection.localProxy.override] : [])];
+    : [...new Set([...detection.directOverrides, ...(proxyDown && detection.localProxy ? [detection.localProxy.override] : [])])];
 
 /** The `--settings` layer of one route's Claude Code process. */
 export const claudeRouteSettings = (route: AgentEngineRoute, detection: RouterDetection): string =>

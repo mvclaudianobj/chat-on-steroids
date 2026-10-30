@@ -4,7 +4,7 @@ import path from 'node:path';
 import { makeTempDir, removeTempDir, writeTree } from './helpers.js';
 import {
   CLAUDE_DIRECT_SETTINGS, CLAUDE_FLAG_SETTINGS, CLAUDE_ROUTER_ENV_KEYS, claudeRouteSettings, codexRouteOverrides, detectClaudeRouter,
-  CODEX_OFFICIAL_BASE_URLS, codexOfficialBaseUrl, detectCodexRouter, effectiveRoute, localProxyAnswers, type RoutingEnvironment
+  CODEX_OFFICIAL_BASE_URLS, CODEX_OFFICIAL_CATALOG, codexOfficialBaseUrl, detectCodexRouter, effectiveRoute, localProxyAnswers, type RoutingEnvironment
 } from '../src/main/agent-engine/router.js';
 import { codexServerArgv } from '../src/main/agent-engine/codex-protocol.js';
 import net from 'node:net';
@@ -83,17 +83,17 @@ describe('Claude Code Router detection: Claude Code', () => {
 });
 
 describe('Claude Code Router detection: Codex', () => {
-  it('detects CCR as the provider and uses the built-in provider and Codex\'s own catalog directly', async () => {
-    await writeTree(home, { '.codex/config.toml': CCR_CODEX_CONFIG, '.codex/models_cache.json': '{"models":[]}' });
+  it('detects CCR as the provider and uses the built-in provider and Codex\'s official catalog directly', async () => {
+    await writeTree(home, { '.codex/config.toml': CCR_CODEX_CONFIG });
     const detection = detectCodexRouter(environment());
     expect(detection).toEqual({
       detected: true, provider: 'claude-code-router',
-      directOverrides: ['model_provider="openai"', `model_catalog_json=${JSON.stringify(path.join(home, '.codex', 'models_cache.json'))}`]
+      directOverrides: ['model_provider="openai"', `model_catalog_json=${JSON.stringify(CODEX_OFFICIAL_CATALOG(path.join(home, '.codex')))}`]
     });
     expect(codexRouteOverrides('direct', detection)).toEqual(detection.directOverrides);
     expect(codexRouteOverrides('router', detection)).toEqual([]);
-    // No cached catalog of its own: only the provider is switched.
-    await fs.rm(path.join(home, '.codex', 'models_cache.json'));
+    // A router profile without a catalog of its own: only the provider is switched.
+    await writeTree(home, { '.codex/config.toml': CCR_CODEX_CONFIG.replace(/^model_catalog_json = .*$/m, '') });
     expect(detectCodexRouter(environment()).directOverrides).toEqual(['model_provider="openai"']);
   });
 
@@ -114,7 +114,8 @@ describe('Claude Code Router detection: Codex', () => {
     const proxied = `openai_base_url = "http://127.0.0.1:17841/v1"\n${CCR_CODEX_CONFIG}`;
     await writeTree(home, { '.codex/config.toml': proxied, '.codex/auth.json': JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'synthetic' } }) });
     const detection = detectCodexRouter(environment());
-    expect(detection.directOverrides).toEqual(['model_provider="openai"', `openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"`]);
+    expect(detection.directOverrides).toEqual(['model_provider="openai"', `openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"`,
+      `model_catalog_json=${JSON.stringify(CODEX_OFFICIAL_CATALOG(path.join(home, '.codex')))}`]);
     expect(detection.localProxy).toBeUndefined();
     expect(codexRouteOverrides('router', detection)).toEqual([]);
     expect(() => codexServerArgv('/tmp/s', codexRouteOverrides('direct', detection))).not.toThrow();
@@ -132,20 +133,25 @@ describe('Claude Code Router detection: Codex', () => {
     expect(codexOfficialBaseUrl(path.join(home, '.codex'))).toBe(CODEX_OFFICIAL_BASE_URLS.chatgpt);
   });
 
-  it('keeps a remote openai_base_url, and a loopback one without a router unless it does not answer', async () => {
+  it('keeps a remote openai_base_url; a loopback one or a foreign catalog never reaches the direct route', async () => {
+    const official = `model_catalog_json=${JSON.stringify(CODEX_OFFICIAL_CATALOG(path.join(home, '.codex')))}`;
     await writeTree(home, { '.codex/config.toml': `openai_base_url = "https://gateway.example.com/v1"\n${CCR_CODEX_CONFIG}` });
-    expect(detectCodexRouter(environment()).directOverrides).toEqual(['model_provider="openai"']);
+    expect(detectCodexRouter(environment()).directOverrides).toEqual(['model_provider="openai"', official]);
     await writeTree(home, { '.codex/config.toml': 'openai_base_url = "https://gateway.example.com/v1"\n' });
     expect(detectCodexRouter(environment())).toEqual({ detected: false, provider: null, directOverrides: [] });
 
     await writeTree(home, { '.codex/config.toml': 'openai_base_url = "http://127.0.0.1:17841/v1"\n', '.codex/auth.json': JSON.stringify({ auth_mode: 'chatgpt' }) });
     const detection = detectCodexRouter(environment());
     expect(detection).toEqual({
-      detected: false, provider: null, directOverrides: [],
+      detected: false, provider: null, directOverrides: [`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"`],
       localProxy: { host: '127.0.0.1', port: 17841, override: `openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"` }
     });
-    // Answering: the user's own proxy stays; not answering: the official endpoint, either route.
-    expect(codexRouteOverrides('direct', detection)).toEqual([]);
+    // The direct route is the CLI's own account (CEO, 2026-10-30): the proxy is set aside even while it answers.
+    expect(codexRouteOverrides('direct', detection)).toEqual([`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"`]);
+    // Without a router, a catalog another tool wrote (e.g. CCR's) is replaced by Codex's official one.
+    await writeTree(home, { '.codex/config.toml': 'model_provider = "openai"\nmodel_catalog_json = "/x/ccr-model-catalog.json"\n' });
+    expect(detectCodexRouter(environment()).directOverrides).toEqual([official]);
+    await writeTree(home, { '.codex/config.toml': 'openai_base_url = "http://127.0.0.1:17841/v1"\n' });
     expect(codexRouteOverrides('direct', detection, true)).toEqual([`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"`]);
     expect(codexRouteOverrides('router', detection, true)).toEqual([`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"`]);
     await writeTree(home, { '.codex/config.toml': 'model_provider = "openai"\nopenai_base_url = "http://localhost:17841/v1"\n' });
