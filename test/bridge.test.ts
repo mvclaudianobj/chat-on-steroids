@@ -49,6 +49,7 @@ vi.mock('electron', () => ({
 const { safeStorage } = await import('electron');
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
+const { cancelStepReview, startStepReview } = await import('../src/main/goal-reviewer.js');
 const { queueWorkerArchives, resetWorkerArchiveForTests } = await import('../src/main/worker-archive.js');
 const { initSecretsPath, resetSecretsCacheForTests, setSecret } = await import('../src/main/secrets.js');
 const {
@@ -162,6 +163,7 @@ const {
   requestWorkerBootstraps,
   requestWorkerRevivals,
   spawn,
+  REVIEW_MAX_MS,
   stageSpawn,
   stageMessages,
   pendingWorkerSpawns,
@@ -540,6 +542,46 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  // A chat tab the extension reloaded off Chrome's error page says so in the app's log, once (2.1.47 round).
+  it('logs the extension\'s error-page reloads once each', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const report = (count: number, lastAt: number) => request('POST', '/diagnostics', { body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+      preferences: { overwrite: true, durations: false }, errorPageReloads: { count, lastAt } } });
+    const lines = () => info.mock.calls.map(([line]) => String(line)).filter(line => line.includes("Chrome's error page"));
+    await report(0, 0);
+    await report(1, 5_000);
+    await report(1, 5_000);
+    await report(3, 9_000);
+    expect(lines()).toEqual([
+      "browser: reloaded 1 ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)",
+      "browser: reloaded 2 ChatGPT tab(s) left on Chrome's error page (loaded while offline; the browser is online again)"]);
+    // Each browser counts on its own (CodeRabbit on #1911): A at 8, B at 1, then A at 9 is one more.
+    const browser = (id: string, count: number, lastAt: number) => request('POST', '/diagnostics', { browser: id, body: { capturedAt: Date.now(),
+      status: { connected: true, paired: true }, preferences: { overwrite: true, durations: false }, errorPageReloads: { count, lastAt } } });
+    info.mockClear();
+    await browser('aaaaaaaaaaaaaaaa', 8, 20_000);
+    await browser('bbbbbbbbbbbbbbbb', 1, 21_000);
+    await browser('aaaaaaaaaaaaaaaa', 9, 22_000);
+    expect(lines().map(line => line.match(/reloaded (\d+)/)![1])).toEqual(['8', '1', '1']);
+    // A reload the extension skipped says why, once each (CodeRabbit on #1911).
+    const skipped = (value: Record<string, unknown>) => request('POST', '/diagnostics', { browser: 'aaaaaaaaaaaaaaaa', body: { capturedAt: Date.now(),
+      status: { connected: true, paired: true }, preferences: { overwrite: true, durations: false }, errorPageReloads: { count: 9, lastAt: 22_000, skipped: value } } });
+    info.mockClear();
+    await skipped({ reason: 'offline', at: 30_000 });
+    await skipped({ reason: 'offline', at: 30_000 });
+    await skipped({ reason: 'backoff', at: 31_000, nextAt: 151_000 });
+    await skipped({ reason: 'unreadable', at: 32_000 });
+    await skipped({ reason: 'whatever', at: 33_000 });
+    await skipped({ reason: 'constructor', at: 34_000 });
+    expect(lines()).toEqual([
+      "browser: a ChatGPT tab is on Chrome's error page; not reloaded while the browser is offline",
+      "browser: a ChatGPT tab is on Chrome's error page; the next reload is in 120 s (it backs off after each reload)",
+      "browser: a ChatGPT tab is on Chrome's error page; not reloaded, because the extension could not read when it last reloaded it"]);
+    info.mockRestore();
+  });
+
   it('bounds authenticated companion diagnostics and clears them with the bridge lifecycle', async () => {
     const body = { capturedAt: Date.now(), status: { connected: true, paired: true, appVersion: 'v'.repeat(200) },
       preferences: { overwrite: true, durations: false }, transcript: 'must not be forwarded',
@@ -2706,6 +2748,78 @@ describe('automatic compaction', () => {
    * can fire. Measured on 2026-09-21: one chat whose tab was gone took 645 offers in five and a
    * half hours, one of them ever confirmed, and it stopped only because the app was restarted.
    */
+  // #1922: a page kept its ten-minute stall clock for a turn that had already ended (stalled) and
+  // reported it after the replacement turn had completed; the app asked the browser to recover a
+  // chat that was fine. A recoverable error for an ended turn, with a newer turn since, is stale.
+  it('does not recover a chat for a stall report about a turn that ended before a newer one', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const t0 = Date.now();
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'user_message', time: t0, text: 'Continue the long job', messageId: 'stale-q-1' },
+      { kind: 'turn_start', time: t0 + 1, turnId: 'stale-old-turn' },
+      { kind: 'turn_end', time: t0 + 2, turnId: 'stale-old-turn', outcome: 'stalled' },
+      { kind: 'user_message', time: t0 + 3, text: 'Continue', messageId: 'stale-q-2' },
+      { kind: 'turn_start', time: t0 + 4, turnId: 'stale-new-turn' },
+      { kind: 'turn_end', time: t0 + 5, turnId: 'stale-new-turn', outcome: 'completed' }
+    ] } });
+    await settled();
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'chat_error', time: t0 + 6, turnId: 'stale-old-turn', recoverable: true,
+        text: 'No visible progress for ten minutes. The app could not confirm that this turn finished.' }
+    ] } });
+    await settled();
+    const status = await request('GET', '/status');
+    expect((status.body.repairs as Array<{ conversationId: string }>).some(row => row.conversationId === conversationId)).toBe(false);
+    const lines = info.mock.calls.map(([line]) => String(line));
+    expect(lines.some(line => line.includes('asking the browser to recover ' + conversationId))).toBe(false);
+    expect(lines).toContain(`bridge: ignored an error report for ${conversationId}: its turn stale-old-turn ended before a newer turn`);
+    info.mockRestore();
+  });
+
+  // CodeRabbit on #1927: turns are ordered by when the recorder saw them, not by their clock.
+  it('treats a report about an ended turn as stale when the newer turn has the same time, also when it comes in the same batch', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const t0 = Date.now();
+    const sameTime = randomUUID();
+    await request('POST', '/events', { body: { conversationId: sameTime, events: [
+      { kind: 'user_message', time: t0, text: 'Continue the long job', messageId: 'same-q-1' },
+      { kind: 'turn_start', time: t0, turnId: 'same-old' },
+      { kind: 'turn_end', time: t0, turnId: 'same-old', outcome: 'stalled' },
+      { kind: 'user_message', time: t0, text: 'Continue', messageId: 'same-q-2' },
+      { kind: 'turn_start', time: t0, turnId: 'same-new' },
+      { kind: 'turn_end', time: t0, turnId: 'same-new', outcome: 'completed' }
+    ] } });
+    await settled();
+    await request('POST', '/events', { body: { conversationId: sameTime, events: [
+      { kind: 'chat_error', time: t0, turnId: 'same-old', recoverable: true, text: 'No visible progress for ten minutes.' }
+    ] } });
+    const together = randomUUID();
+    await request('POST', '/events', { body: { conversationId: together, events: [
+      { kind: 'user_message', time: t0, text: 'Continue the long job', messageId: 'tog-q-1' },
+      { kind: 'turn_start', time: t0 + 1, turnId: 'tog-old' }
+    ] } });
+    await settled();
+    await request('POST', '/events', { body: { conversationId: together, events: [
+      { kind: 'turn_end', time: t0 + 2, turnId: 'tog-old', outcome: 'stalled' },
+      { kind: 'user_message', time: t0 + 3, text: 'Continue', messageId: 'tog-q-2' },
+      { kind: 'turn_start', time: t0 + 4, turnId: 'tog-new' },
+      { kind: 'chat_error', time: t0 + 5, turnId: 'tog-old', recoverable: true, text: 'No visible progress for ten minutes.' }
+    ] } });
+    await settled();
+    const repairs = ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string }>).map(row => row.conversationId);
+    expect(repairs).not.toContain(sameTime);
+    expect(repairs).not.toContain(together);
+    const lines = info.mock.calls.map(([line]) => String(line));
+    expect(lines).toContain(`bridge: ignored an error report for ${sameTime}: its turn same-old ended before a newer turn`);
+    expect(lines).toContain(`bridge: ignored an error report for ${together}: its turn tog-old ended before a newer turn`);
+    info.mockRestore();
+  });
+
   it('stops offering a repair the browser never claims, and says the chat has no page', async () => {
     await pair();
     const conversationId = randomUUID();
@@ -15009,6 +15123,82 @@ describe('the goal loop over the bridge', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // #1832: the Goal step reviewer holds its chat by itself, with its own deadline to show.
+  it('waits for the Goal step reviewer with its deadline, whatever the workers setting', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chat = 'cafe0097-0000-4000-8000-000000000097';
+      const previous = getConfig();
+      await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' },
+        multiAgent: { ...previous.multiAgent, enabled: true, waitForSubAgents: false, recoverAgentTabs: false } });
+      const recorded = await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-review-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'g-review' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'g-review', outcome: 'completed' },
+        { kind: 'assistant_message', time: Date.now(), turnId: 'g-review', messageId: 'a-review', text: 'Edited the file.',
+          state: 'final', final: true, goalEligible: true, activeNow: true }
+      ] } });
+      const sessionId = recorded.body.sessionId as string;
+      const asked = Date.now();
+      spawn({ workers: [{ task: 'Review this Goal step.', reviewer: true }], caller: { conversationId: chat } });
+      const held = { reason: 'reviewer', until: asked + REVIEW_MAX_MS };
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual(held);
+      expect((await request('GET', `/activity?conversationId=${chat}`)).body.goal.wait).toEqual(held);
+      await vi.advanceTimersByTimeAsync(REVIEW_MAX_MS);
+      expect((await sessionControlsFor(sessionId)).goalWait).toEqual({ reason: 'settling' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #1879: the next step's draft waits for the review, but both callers skip the wait
+  // while a draft exists, and a review still finding a worker slot has no reviewer hold to show.
+  it('shows the reviewer wait while the next step\'s draft waits for a review still finding a worker slot', async () => {
+    await pair();
+    const chat = 'cafe0098-0000-4000-8000-000000000098';
+    const turnId = 'g-review-slot';
+    const previous = getConfig();
+    await saveConfig({ ...previous, goal: { ...previous.goal, enabled: true, mode: 'goal' },
+      multiAgent: { ...previous.multiAgent, enabled: true, recoverAgentTabs: false } });
+    const recorded = await request('POST', '/events', { body: { conversationId: chat, events: [
+      { kind: 'user_message', time: Date.now(), text: 'keep going', messageId: 'm-review-slot' }
+    ] } });
+    const sessionId = recorded.body.sessionId as string;
+    await recordFinalForTest(chat, turnId);
+    let release!: () => void;
+    const slot = new Promise<void>(resolve => { release = resolve; });
+    const before = Date.now();
+    const reviewing = startStepReview({ conversationId: chat, sessionId, turnId }, {
+      settings: () => ({ reviewerModel: 'same', workersOn: true, profileId: 'default' }),
+      mode: () => 'goal', objective: () => '', offered: () => [], reviewer: () => null,
+      facts: async () => ({ files: [{ path: 'src/a.ts', state: 'edited', added: 1, removed: 1, approximate: false, edits: 1, diff: '' }],
+        more: 0, step: 'keep going', firstRequest: 'keep going', chatModel: null }),
+      spawn: async () => { throw new Error('NO_FREE_SLOT'); },
+      wake: async () => undefined, cancel: async () => undefined, now: () => Date.now(), wait: () => slot
+    });
+    let calls = 0;
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async () => { calls++; return Response.json({ choices: [{ message: { content: JSON.stringify({ action: 'continue', reply: 'Go on.' }) } }] }); }) as never;
+    try {
+      expect((await request('POST', '/goal/draft', { body: { conversationId: chat, turnId, clientId: 'tab-review' } })).status).toBe(200);
+      const held = { reason: 'reviewer', until: expect.any(Number) };
+      await vi.waitFor(async () => {
+        const controls = await sessionControlsFor(sessionId);
+        expect(controls.goalDraft).toMatchObject({ stage: 'sending' });
+        expect(controls.goalWait).toEqual(held);
+        expect((await request('GET', `/activity?conversationId=${chat}&goalClient=tab-review`)).body.goal.wait).toEqual(held);
+      });
+      const until = (await sessionControlsFor(sessionId)).goalWait!.until!;
+      expect(until).toBeGreaterThanOrEqual(before + REVIEW_MAX_MS);
+      expect(until).toBeLessThanOrEqual(Date.now() + REVIEW_MAX_MS);
+      expect(calls).toBe(0);
+    } finally {
+      await cancelStepReview(chat, { reviewer: () => null, cancel: async () => undefined });
+      release();
+      await reviewing;
+      globalThis.fetch = realFetch;
+    }
+  });
+
   it('never lets another chat’s sub-agents hold this one', async () => {
     vi.useFakeTimers();
     try {
@@ -17666,6 +17856,30 @@ describe('connector identity through the bridge', () => {
     await request('POST', '/events', { body: { conversationId: '6acb3e79-2cd4-83eb-b54b-f9d66653cf07', events: [{ kind: 'app_sightings', time: Date.now(),
       apps: [{ requestId: 'req-older-chat', ...app, appName: 'Original' }] }] } });
     expect((await request('GET', '/status')).body.connectorApps.core[0].name).toBe('Renamed');
+  });
+
+  // #1752 diagnostics: where a chat's stream named an id, for a call filed without page evidence.
+  it('logs where the page saw a request id it could not place, and stores no transcript for it', async () => {
+    await pair();
+    const { requestTraceNote, resetRequestTracesForTests } = await import('../src/main/session/request-trace.js');
+    resetRequestTracesForTests();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000c1d3', placed = '7482f9cb-689d-4ad0-aa6a-b7196a699840';
+    expect(requestTraceNote(placed)).toBe('');
+    await request('POST', '/events', { body: { conversationId, events: [{ kind: 'request_trace', time: Date.now(), traces: [
+      { requestId: placed, path: '/message:v.metadata.request_id' }, { requestId: 'not an id', path: 'x' }, { requestId: '11111111-2222-4333-8444-555555555555', path: 'bad path!' }
+    ] }] } });
+    expect(info.mock.calls.filter(([line]) => String(line).includes(placed))).toEqual([[
+      `request attribution: ${placed} had no page evidence in time; the stream of ${conversationId} names it at /message:v.metadata.request_id`]]);
+    expect(requestTraceNote(placed)).toBe(`; the stream of ${conversationId} named it at /message:v.metadata.request_id`);
+    expect(requestTraceNote('11111111-2222-4333-8444-555555555555')).toBe('');
+    // Each chat says once per run that its page's tracing works, and its limit: a quiet report then
+    // makes "the page never saw it" likely, not certain.
+    expect(info.mock.calls.filter(([line]) => String(line).includes('tracing works')).map(([line]) => line))
+      .toEqual([`request attribution: the page of ${conversationId} reports the ids in its streams (tracing works, up to 16 new ids per message)`]);
+    expect(await findSessionByConversation(conversationId)).toBeNull();
+    info.mockRestore();
   });
 
   it('does not store app_sightings as transcript content', async () => {

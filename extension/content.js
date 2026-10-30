@@ -1628,6 +1628,9 @@
     // here made a long service-worker outage look like a complete transcript even though item
     // 401 had already erased item 1 before the durable journal ever saw it.
     while (queue.length > 400 || queueBytes > MAX_PAGE_QUEUE_BYTES) {
+      // Diagnostic request traces (#1752) go first and leave no gap: they are not history.
+      const trace = queue.findIndex((entry) => entry.event?.kind === 'request_trace' && !queueGapKeys.has(entry));
+      if (trace >= 0) { removeQueueEntry(trace); continue; }
       const index = queue.findIndex((entry) => !queueGapKeys.has(entry));
       if (index < 0) break;
       const dropped = removeQueueEntry(index);
@@ -9449,22 +9452,25 @@
         ...bar(2, true)
       };
     }
-    if (goal.phase === 'settling' || (!draft && goal.wait)) {
+    // A next step's draft that waits for the Goal step reviewer (#1832) says so, with its deadline.
+    if (goal.phase === 'settling' || (!draft && goal.wait) || (draft?.stage === 'sending' && goal.wait?.reason === 'reviewer')) {
       const wait = goal.wait;
       const seconds = wait?.until ? Math.max(0, Math.ceil((wait.until - Date.now()) / 1000)) : 0;
-      const detail = seconds
-        ? t(
-          'content_goal_checking_again',
-          'Checking again in $1',
-          `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-        )
-        : '';
+      const left = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+      // The reviewer's deadline is when Goal goes on without the review (#1832), not another check.
+      const detail = !seconds
+        ? ''
+        : wait?.reason === 'reviewer'
+          ? t('content_goal_reviewer_deadline', 'Continues without the review in $1', left)
+          : t('content_goal_checking_again', 'Checking again in $1', left);
       const stage = wait?.reason === 'native-busy'
         ? t('content_goal_wait_resumed', 'ChatGPT resumed work · waiting before retry')
         : wait?.reason === 'silence'
           ? t('content_goal_wait_recovery_reload', 'Waiting before recovery reload')
           : wait?.reason === 'quiet'
             ? t('content_goal_wait_tool_inactivity', 'Waiting for tool inactivity')
+            : wait?.reason === 'reviewer'
+              ? t('content_goal_wait_reviewer', 'Waiting for the reviewer')
             : wait?.reason === 'workers'
               ? t('content_goal_wait_workers', 'Waiting for this chat’s sub-agents')
               : wait?.reason === 'tools'
@@ -12993,6 +12999,27 @@
     for (const sighting of fresh) sightingsReported.add(sighting.requestId);
     emit({ kind: 'app_sightings', apps: fresh });
   });
+  // #1752 diagnostics: request ids this chat's stream named in fields attribution does not trust,
+  // with the field's path, so the app's log says where an id it could not place did appear.
+  const requestTracesReported = new Set();
+  window.addEventListener('message', (event) => {
+    if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-trace') return;
+    if (temporaryPlannerPage()) return;
+    const claimed = typeof event.data.conversationId === 'string' ? event.data.conversationId : '';
+    if (!claimed || CLF_DOM.conversationId() !== claimed) return;
+    const traces = [];
+    for (const entry of (Array.isArray(event.data.traces) ? event.data.traces : []).slice(0, 16)) {
+      const requestId = cap(entry?.requestId, 100), path = cap(entry?.path, 200);
+      if (!requestId || !path || requestTracesReported.has(requestId) || !/^[A-Za-z0-9_./:>*\[\]-]{1,200}$/.test(path) ||
+          !/^(?:wfr_[a-zA-Z0-9_-]{1,96}|[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12})$/i.test(requestId)) continue;
+      traces.push({ requestId, path });
+    }
+    // Expendable: while the queue fills (the extension's worker away), history comes first.
+    if (!traces.length || queue.length >= 300) return;
+    if (requestTracesReported.size > 2000) requestTracesReported.clear();
+    for (const trace of traces) requestTracesReported.add(trace.requestId);
+    emit({ kind: 'request_trace', traces });
+  });
   window.addEventListener('message', (event) => {
     if (!alive || event.source !== window || event.origin !== location.origin || event.data?.type !== 'cos-request-origin') return;
     // A Goal/Loop helper page records nothing (see emit/flush). Its request origins would
@@ -13956,7 +13983,7 @@
   /**
    * Creates a new CoS project's native ChatGPT Project through ChatGPT's own dialog (#1176).
    *
-   * Only the helper the app opened for this exact request does it: ChatGPT's home with its marker.
+   * Only the helper the app opened for this exact request does it: the Projects index (or legacy home) with its marker.
    * Before the click that creates the Project nothing can exist remotely, so any failure is a plain
    * failure. The app records `arm` before that click; from there a missing id makes the request
    * uncertain in the app, never retried on its own. The id is taken only from the new Project's own
@@ -13988,7 +14015,8 @@
 
   async function createChatgptProject(request) {
     if (projectCreateBusy || !request || !/^[a-f0-9-]{36}$/i.test(String(request.id)) || typeof request.name !== 'string' || !request.name) return false;
-    const marked = () => alive && location.pathname === '/' && new URL(location.href).searchParams.get('cos-project-create') === request.id;
+    const marked = () => alive && (location.pathname === '/projects' || location.pathname === '/') &&
+      new URL(location.href).searchParams.get('cos-project-create') === request.id;
     if (!marked()) return false;
     projectCreateBusy = true;
     const report = (action, extra = {}) => ask({ type: 'project_create', action, id: request.id, ...extra });
@@ -14328,7 +14356,8 @@
         const box = CLF_DOM.composer();
         sendResponse({ safe: !projectCreateBusy && !CLF_DOM.conversationId() && !CLF_DOM.generating() &&
           !(box && CLF_DOM.composerText(box).trim()) && !CLF_DOM.hasComposerAttachments() &&
-          (location.pathname === '/' || !!CLF_DOM.projectHomeId()) });
+          !CLF_DOM.projectCreateForm() &&
+          (location.pathname === '/' || location.pathname === '/projects' || !!CLF_DOM.projectHomeId()) });
         return false;
       }
       if (message.type === 'clf-model-catalog-state') {

@@ -1,5 +1,6 @@
 import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 import type { ChatGroup, ChatGroupsState } from '../shared/chat-groups.js';
+import type { DesktopAskPending } from '../shared/desktop-ask.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
 import type { ApprovalCardView } from '../shared/approval-wait.js';
 import type { DictationEvent } from '../shared/dictation.js';
@@ -281,6 +282,14 @@ const api = {
   markWhatsNewSeen: () => call<void>('ui:whatsNewSeen'),
   /** #1833: the first-run tour was taken, skipped or declined. */
   markTourDone: () => call<void>('ui:tourDone'),
+  /** #1864: the desktop question waiting now, its answer from the app's window, and when it changes. */
+  desktopAskPending: () => call<DesktopAskPending | null>('desktopAsk:pending'),
+  answerDesktopAsk: (id: string, choice: 'go' | 'not-now') => call<boolean>('desktopAsk:answer', { id, choice }),
+  onDesktopAskPending: (listener: (pending: DesktopAskPending | null) => void): (() => void) => {
+    const wrapped = (_event: unknown, pending: DesktopAskPending | null): void => listener(pending);
+    ipcRenderer.on('desktopAsk:pending', wrapped);
+    return () => ipcRenderer.removeListener('desktopAsk:pending', wrapped);
+  },
   /** The one-time automatic plugin refresh offer: true turns it on; either answer is kept. */
   answerPluginRefreshOffer: (turnOn: boolean) => call<AppState>('pluginRefresh:offer', { turnOn }),
   petsImport: () => call<PetLibraryState | null>('pets:import'),

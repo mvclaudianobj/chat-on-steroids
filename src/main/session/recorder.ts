@@ -36,6 +36,7 @@ import { isApiConversationId } from '../../shared/api-chat.js';
 import { continuedRequestTurn, overlappingRequestTurns, recordedRequestTurn, responseTurnId, turnOpenAt } from '../../shared/chronology.js';
 import { getConfig } from '../config.js';
 import { logInfo, logWarn } from '../logger.js';
+import { requestTraceNote } from './request-trace.js';
 import { redactCredentialText } from '../redaction.js';
 import { currentCall, emptyEvidence, runningToolCalls, type CallEvidence } from '../mcp/call-context.js';
 import {
@@ -1272,7 +1273,7 @@ export function recordToolCall(input: ToolCallInput): Promise<ToolCallRecord | n
           if (!conversationId) {
             logWarn(
               `request attribution: no page evidence for ${input.requestId} within ` +
-                `${REQUEST_ID_GRACE_MS}ms; filing ${input.tool} under Unattributed activity`
+                `${REQUEST_ID_GRACE_MS}ms; filing ${input.tool} under Unattributed activity${requestTraceNote(input.requestId!)}`
             );
           }
           if (input.bind && conversationId) bindAgentConversation(input.bind, conversationId);
@@ -1535,22 +1536,30 @@ async function fileToolCall(input: ToolCallInput, target: Target): Promise<ToolC
   }
 }
 
-/** A fresh exact observation can disprove a failed view, including after reload/restart. */
-async function reopenThinkingFailure(sessionId: string, live: LiveConversation | undefined, at: number,
+/** The turn a fresh exact observation at `at` would reopen because its view failed while thinking, if any. */
+async function thinkingFailureToReopen(sessionId: string, live: LiveConversation | undefined, at: number,
   owner?: string): Promise<string | null> {
   if (!live || live.turnId) return null;
   const [boundary] = await readRecentEvents(sessionId, 1, { kinds: ['turn_start', 'turn_end', 'user_message'] });
   if (live.turnId || boundary?.kind !== 'turn_end' || boundary.reason !== 'thinking_failed' ||
       !boundary.turnId || (owner && boundary.turnId !== owner) || at <= boundary.time) return null;
-  await appendEvent(sessionId, { source: 'app', time: at, kind: 'turn_start', turnId: boundary.turnId,
+  return boundary.turnId;
+}
+
+/** A fresh exact observation can disprove a failed view, including after reload/restart. */
+async function reopenThinkingFailure(sessionId: string, live: LiveConversation | undefined, at: number,
+  owner?: string): Promise<string | null> {
+  const turnId = await thinkingFailureToReopen(sessionId, live, at, owner);
+  if (!turnId || !live || live.turnId) return null;
+  await appendEvent(sessionId, { source: 'app', time: at, kind: 'turn_start', turnId,
     detail: 'fresh work resumed the same turn after its native view failed' });
-  live.knownTurnEnds.delete(boundary.turnId);
-  live.openTurns.add(boundary.turnId);
-  live.turnId = boundary.turnId;
+  live.knownTurnEnds.delete(turnId);
+  live.openTurns.add(turnId);
+  live.turnId = turnId;
   live.turnStartedAt = live.lastTurnStartedAt ?? at;
   live.lastTurnOutcome = null;
   live.endedTurn = null;
-  return boundary.turnId;
+  return turnId;
 }
 
 /**
@@ -1811,10 +1820,13 @@ export interface ChatObservation {
     | 'turn_end'
     | 'chat_error'
     | 'tool_evidence'
-    | 'app_sightings';
+    | 'app_sightings'
+    | 'request_trace';
   time: number;
   /** app_sightings only: connector result rows as the page saw them (connector-identity.ts). */
   apps?: import('../connector-identity.js').AppSighting[];
+  /** request_trace only: where the page's stream named request ids (request-trace.ts, #1752). */
+  traces?: import('./request-trace.js').RequestTrace[];
   /** Current native selection evidence, not a historical message or requested worker model. */
   model?: string;
   reasoningEffort?: import('../../shared/session.js').ReasoningEffort;
@@ -2325,6 +2337,14 @@ async function recordChatObservationsNow(
           uncertainTurnStartedAt !== null &&
           item.time >= uncertainTurnStartedAt;
         const goalEligible = item.goalEligible === true || recoveredGoalEligible;
+        // A progress note of a turn that already ended is not new work, even reported as just
+        // appeared: ChatGPT draws a finished turn's steps as one collapsed group, and the note
+        // written before its tool calls can reach the page only then (2.1.48 release round). As
+        // new work it kept Goal waiting for a newer final forever. A final, or a reopened turn, counts.
+        // A turn whose view failed while thinking is reopened by its fresh note below, so that note is work.
+        const lateNoteOfEndedTurn = state !== 'final' && !!item.turnId && !!live &&
+          live.knownTurnEnds.has(item.turnId) && !live.openTurns.has(item.turnId) &&
+          !(item.activeNow === true && await thinkingFailureToReopen(sessionId, live, item.time, item.turnId));
         const written = await upsertMessageEvent(sessionId, {
           ...base,
           kind: 'assistant_message',
@@ -2341,7 +2361,10 @@ async function recordChatObservationsNow(
           ...(item.resolvedModel ? { resolvedModel: item.resolvedModel } : {}),
           ...(item.references ? { references: item.references } : {}),
           ...(goalEligible && state === 'final' ? { goalEligible: true } : {})
-        }, { preferTime: item.authoredTime === true, work: item.activeNow === true });
+        }, { preferTime: item.authoredTime === true, work: item.activeNow === true && !lateNoteOfEndedTurn });
+        if (lateNoteOfEndedTurn && item.activeNow === true && written.contentChanged) {
+          logInfo(`session recorder: ${conversationId} reported a message of turn ${item.turnId} after that turn ended; kept in history, not counted as new work`);
+        }
         const canonicalTurn = written.event.turnId;
         // A stopped partial answer stays streaming in history. Re-observing its
         // DOM after restart cannot renew work, nor can an old message borrow a
