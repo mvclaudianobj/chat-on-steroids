@@ -4634,5 +4634,10 @@
   "Chat engine unavailable": "Không thể sử dụng công cụ trò chuyện",
   "Choose Via Claude Code Router or sign in to the CLI account.": "Chọn Claude Code Router hoặc đăng nhập tài khoản CLI.",
   "Start Claude Code Router in Settings > Modules to continue this chat.": "Khởi động Claude Code Router tại Cài đặt > Mô-đun để tiếp tục cuộc trò chuyện.",
-  "Sign in to Claude Code": "Đăng nhập Claude Code"
+  "Sign in to Claude Code": "Đăng nhập Claude Code",
+  "Direct account connected": "Đã kết nối tài khoản trực tiếp",
+  "Direct account not signed in": "Chưa đăng nhập tài khoản trực tiếp",
+  "Account status unavailable": "Không thể xem trạng thái tài khoản",
+  "Sign in again": "Đăng nhập lại",
+  "Sign out of the direct CLI account?": "Đăng xuất khỏi tài khoản CLI trực tiếp?"
 }

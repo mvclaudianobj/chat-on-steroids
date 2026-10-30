@@ -4701,5 +4701,10 @@
   "Chat engine unavailable": "Chat-Engine nicht verfügbar",
   "Choose Via Claude Code Router or sign in to the CLI account.": "Claude Code Router wählen oder direkt bei der CLI anmelden.",
   "Start Claude Code Router in Settings > Modules to continue this chat.": "Claude Code Router unter Einstellungen > Module starten, um diesen Chat fortzusetzen.",
-  "Sign in to Claude Code": "Bei Claude Code anmelden"
+  "Sign in to Claude Code": "Bei Claude Code anmelden",
+  "Direct account connected": "Direktes Konto verbunden",
+  "Direct account not signed in": "Direktes Konto abgemeldet",
+  "Account status unavailable": "Kontostatus nicht verfügbar",
+  "Sign in again": "Erneut anmelden",
+  "Sign out of the direct CLI account?": "Vom direkten CLI-Konto abmelden?"
 }

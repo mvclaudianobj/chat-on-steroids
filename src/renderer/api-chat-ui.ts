@@ -152,13 +152,52 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   terminal.addEventListener('click', () => void openTerminal());
   const claudeLogin = document.createElement('button');
   claudeLogin.type = 'button';
-  claudeLogin.id = 'apiChatClaudeLogin';
+  claudeLogin.id = 'apiChatDirectLogin';
   claudeLogin.className = 'btn';
-  ui(claudeLogin, 'textContent', () => t('Sign in to Claude Code'));
+  ui(claudeLogin, 'textContent', () => t('Sign in'));
   claudeLogin.addEventListener('click', () => void (async () => {
-    const result = await api.cliCreateSession('claude', hooks.workspace(), 'claude-login');
+    const engine = engineOf();
+    if (engine !== 'claude' && engine !== 'codex') return;
+    const result = await api.cliCreateSession(engine, hooks.workspace(), engine === 'claude' ? 'claude-login' : 'codex-login');
     if (!result.ok) { toast(t(result.error)); return; }
     await hooks.openCliSession?.(result.data.id);
+  })());
+  const directAccountStatus = document.createElement('span');
+  directAccountStatus.id = 'apiChatDirectAccountStatus';
+  directAccountStatus.setAttribute('role', 'status');
+  let accountPolledAt = 0;
+  let accountPending = false;
+  async function refreshDirectAccount(): Promise<void> {
+    const engine = engineOf();
+    if (engine !== 'claude' && engine !== 'codex') return;
+    if (typeof api.cliDirectAccount !== 'function') return;
+    if (accountPending || Date.now() - accountPolledAt < 5_000) return;
+    accountPending = true;
+    accountPolledAt = Date.now();
+    try {
+      const result = await api.cliDirectAccount(engine);
+      directAccountStatus.textContent = result.ok
+        ? t(result.data.signedIn ? 'Direct account connected' : 'Direct account not signed in')
+        : t('Account status unavailable');
+    } finally { accountPending = false; }
+  }
+  const directLoginAgain = document.createElement('button');
+  directLoginAgain.type = 'button';
+  ui(directLoginAgain, 'textContent', () => t('Sign in again'));
+  directLoginAgain.addEventListener('click', () => void (async () => {
+    const engine = engineOf();
+    if (engine !== 'claude' && engine !== 'codex') return;
+    const result = await api.cliCreateSession(engine, hooks.workspace(), engine === 'claude' ? 'claude-login' : 'codex-login');
+    if (result.ok) await hooks.openCliSession?.(result.data.id); else toast(t(result.error));
+  })());
+  const directLogout = document.createElement('button');
+  directLogout.type = 'button';
+  ui(directLogout, 'textContent', () => t('Sign out'));
+  directLogout.addEventListener('click', () => void (async () => {
+    const engine = engineOf();
+    if ((engine !== 'claude' && engine !== 'codex') || !window.confirm(t('Sign out of the direct CLI account?'))) return;
+    const result = await api.cliCreateSession(engine, null, engine === 'claude' ? 'claude-logout' : 'codex-logout');
+    if (result.ok) await hooks.openCliSession?.(result.data.id); else toast(t(result.error));
   })());
   // A chat on "Via Claude Code Router" whose router is configured but not installed or not running,
   // or a Codex chat whose own local openai_base_url proxy is not running: a row of the composer
@@ -168,7 +207,7 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   routeNotice.className = 'api-chat-route-notice';
   routeNotice.setAttribute('role', 'status');
   routeNotice.hidden = true;
-  controls.append(route, model, effort, approval, terminal, claudeLogin);
+  controls.append(route, model, effort, approval, terminal, claudeLogin, directAccountStatus, directLoginAgain, directLogout);
 
   // The paused call of the running turn: tool, readable arguments and the three answers.
   const card = document.createElement('section');
@@ -339,7 +378,12 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     for (const choice of effort.options) choice.disabled = !!choice.value && !!efforts?.length && !efforts.includes(choice.value);
     const mode = terminalEngines.get(engineOf()) ?? null;
     terminal.hidden = !view || !mode;
-    claudeLogin.hidden = !view || engineOf() !== 'claude' || view.route !== 'direct';
+    claudeLogin.hidden = !view || (engineOf() !== 'claude' && engineOf() !== 'codex') || view.route !== 'direct';
+    const directAccountShown = !!view && (engineOf() === 'claude' || engineOf() === 'codex') && view.route === 'direct';
+    directAccountStatus.hidden = !directAccountShown;
+    directLoginAgain.hidden = !directAccountShown;
+    directLogout.hidden = !directAccountShown;
+    if (directAccountShown) void refreshDirectAccount();
     // A hand-over stops the app's own session, so it waits for the turn; a live attach does not.
     terminal.disabled = !view || busy || (mode === 'handover' && view.running);
     terminal.title = mode === 'live'

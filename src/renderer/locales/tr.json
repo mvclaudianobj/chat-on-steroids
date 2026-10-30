@@ -4701,5 +4701,10 @@
   "Chat engine unavailable": "Sohbet motoru kullanılamıyor",
   "Choose Via Claude Code Router or sign in to the CLI account.": "Claude Code Router seçin veya CLI hesabında oturum açın.",
   "Start Claude Code Router in Settings > Modules to continue this chat.": "Bu sohbete devam etmek için Ayarlar > Modüller bölümünden Claude Code Router başlatın.",
-  "Sign in to Claude Code": "Claude Code hesabında oturum aç"
+  "Sign in to Claude Code": "Claude Code hesabında oturum aç",
+  "Direct account connected": "Doğrudan hesap bağlı",
+  "Direct account not signed in": "Doğrudan hesapta oturum yok",
+  "Account status unavailable": "Hesap durumu kullanılamıyor",
+  "Sign in again": "Yeniden giriş yap",
+  "Sign out of the direct CLI account?": "Doğrudan CLI hesabından çıkılsın mı?"
 }

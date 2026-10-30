@@ -4634,5 +4634,10 @@
   "Chat engine unavailable": "聊天引擎不可用",
   "Choose Via Claude Code Router or sign in to the CLI account.": "选择 Claude Code Router 或登录 CLI 帐户。",
   "Start Claude Code Router in Settings > Modules to continue this chat.": "在设置 > 模块中启动 Claude Code Router 以继续此聊天。",
-  "Sign in to Claude Code": "登录 Claude Code"
+  "Sign in to Claude Code": "登录 Claude Code",
+  "Direct account connected": "直连账户已连接",
+  "Direct account not signed in": "直连账户未登录",
+  "Account status unavailable": "账户状态不可用",
+  "Sign in again": "重新登录",
+  "Sign out of the direct CLI account?": "退出直连 CLI 账户？"
 }

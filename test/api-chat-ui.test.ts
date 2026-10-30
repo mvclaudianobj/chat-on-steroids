@@ -68,6 +68,35 @@ function apiMock(over: Record<string, unknown> = {}) {
 const $ = <T extends HTMLElement>(id: string) => dom.window.document.getElementById(id) as T;
 const submit = (submitter?: HTMLElement) => $('composer').dispatchEvent(new dom.window.SubmitEvent('submit', { bubbles: true, cancelable: true, submitter: submitter ?? null }));
 
+it('offers direct Codex account controls and opens an authentication terminal', async () => {
+  const openCliSession = vi.fn();
+  const api = apiMock({
+    apiChatChatSettings: vi.fn(async () => ({ ok: true, data: { ...view(), engine: 'codex', route: 'direct', routes: ['direct'], approval: 'ask', pending: null } })),
+    cliDirectAccount: vi.fn(async () => ({ ok: true, data: { signedIn: false, detail: '' } })),
+    cliCreateSession: vi.fn(async () => ({ ok: true, data: { id: 'auth-terminal' } }))
+  });
+  const chat = createApiChatUi(api, { showTab: vi.fn(), workspace: () => null, openCliSession,
+    selectedChat: () => ({ id: 'session-api', conversationId: 'cosapi-1' }) });
+  chat.sync();
+  await vi.waitFor(() => expect($('apiChatDirectAccountStatus').textContent).toContain('not signed in'));
+  $<HTMLButtonElement>('apiChatDirectLogin').click();
+  await vi.waitFor(() => expect(api.cliCreateSession).toHaveBeenCalledWith('codex', null, 'codex-login'));
+  expect(openCliSession).toHaveBeenCalledWith('auth-terminal');
+  const buttons = [...$('apiChatControls').querySelectorAll('button')];
+  const again = buttons.find(button => button.textContent === 'Sign in again');
+  expect(again).toBeDefined();
+  again!.click();
+  await vi.waitFor(() => expect(api.cliCreateSession).toHaveBeenCalledTimes(2));
+  const logout = buttons.find(button => button.textContent === 'Sign out');
+  expect(logout).toBeDefined();
+  dom.window.confirm = vi.fn(() => false);
+  logout!.click();
+  expect(api.cliCreateSession).toHaveBeenCalledTimes(2);
+  dom.window.confirm = vi.fn(() => true);
+  logout!.click();
+  await vi.waitFor(() => expect(api.cliCreateSession).toHaveBeenCalledWith('codex', null, 'codex-logout'));
+});
+
 it('offers CLIProxy after ChatGPT in New chat and opens the created API chat in the chat view', async () => {
   const api = { ...apiMock(),
     cliStatus: async () => ({ ok: true as const, data: [] }), cliSessions: async () => ({ ok: true as const, data: [] }),

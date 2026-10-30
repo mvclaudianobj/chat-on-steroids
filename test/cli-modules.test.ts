@@ -15,7 +15,8 @@ const fixture = vi.hoisted(() => ({
   probes: [] as string[][],
   tmuxCreated: 0,
   save: vi.fn(),
-  managedNonExecutable: false
+  managedNonExecutable: false,
+  accountLogged: false
 }));
 vi.mock('electron', () => ({
   app: { getPath: (name: string) => name === 'home' ? '/home/test' : '/home/test/.config/chat-marks', on: vi.fn() },
@@ -73,7 +74,9 @@ vi.mock('node:child_process', () => {
       callback(null, args.at(-2)!.endsWith('opencode') ? 'opencode v2.1.2\n' : 'zeroclaw 0.8.6 (c473221)\n', '');
     } else if (args.includes('display-message')) {
       callback(null, `${fixture.tmuxCreated}\n`, '');
-    } else if (file === '/usr/local/bin/codex') callback(null, 'codex-cli 1.0\n', '');
+    } else if (file === '/usr/local/bin/codex' && args.includes('status')) callback(null, fixture.accountLogged ? 'Logged in using ChatGPT\n' : 'Not logged in\n', '');
+    else if (file === '/usr/local/bin/claude' && args.includes('status')) callback(null, JSON.stringify({ loggedIn: fixture.accountLogged, authMethod: fixture.accountLogged ? 'claude.ai' : 'none' }), '');
+    else if (file === '/usr/local/bin/codex') callback(null, 'codex-cli 1.0\n', '');
     else callback(null, '', '');
   };
   (execFile as any)[Symbol.for('nodejs.util.promisify.custom')] = (file: string, args: string[], options: unknown) => new Promise((resolve, reject) => {
@@ -93,11 +96,41 @@ vi.mock('../src/main/durable.js', () => ({
 vi.mock('../src/main/cli-source-install.js', () => ({ installPublishedCli: vi.fn(), publishedLatest: vi.fn(async () => null), publishedUpdateAvailable: vi.fn(() => false), verifiedVersion: vi.fn(async () => '1.0.0'), externalNpmPrefix: vi.fn(async () => null) }));
 
 import {
-  cliAction, cliChatRuntime, cliCreateSession, cliEndEngineTerminal, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
+  cliAction, cliChatRuntime, cliCreateSession, cliDirectAccount, cliEndEngineTerminal, cliEngineRuntime, cliEngineTerminal, cliEngineTerminalState, cliModuleState, cliOpen, cliSessions, cliStatus,
   OPENCODE_TERMINAL_SCRIPT, ZEROCLAW_TERMINAL_SCRIPT, registerCliEngineOpenHook, registerCliModuleIpc, registerCliModuleStopHook
 } from '../src/main/cli-modules.js';
 
 beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.clients = ''; fixture.resumeHasSession = null; fixture.commands.length = 0; fixture.managedNonExecutable = false; vi.clearAllMocks(); });
+
+it('queries direct Claude and Codex account status using only their CLIs, without proxy credentials', async () => {
+  await cliAction('claude', 'enable');
+  fixture.accountLogged = false;
+  expect((await cliDirectAccount('claude')).signedIn).toBe(false);
+  expect((await cliDirectAccount('codex')).signedIn).toBe(false);
+  fixture.accountLogged = true;
+  expect((await cliDirectAccount('claude')).signedIn).toBe(true);
+  expect((await cliDirectAccount('codex')).signedIn).toBe(true);
+  expect(fixture.commands.some(command => command.includes('--settings') && command.includes('status'))).toBe(true);
+  fixture.accountLogged = false;
+  await cliAction('claude', 'disable');
+});
+
+it('opens dedicated login and logout terminals for each direct CLI account', async () => {
+  await cliAction('claude', 'enable');
+  fixture.missingSession = true;
+  try {
+    for (const id of ['claude', 'codex'] as const) {
+      for (const action of ['login', 'logout'] as const) {
+        const session = await cliCreateSession(id, null, id === 'claude' ? (action === 'login' ? 'claude-login' : 'claude-logout') : (action === 'login' ? 'codex-login' : 'codex-logout'));
+        await cliOpen(session.id, 80, 24, 'account-' + id + '-' + action);
+        const argv = fixture.commands.filter(command => command.includes('new-session')).at(-1)!;
+        expect(argv).toContain(action);
+        expect(argv).toContain('/usr/local/bin/' + id);
+        if (id === 'claude') expect(argv).toContain('--settings');
+      }
+    }
+  } finally { fixture.missingSession = false; await cliAction('claude', 'disable'); }
+});
 
 describe('Codex standalone and Claude npm update routes (synthetic)', () => {
   it('does not advertise npm in-place update for a standalone external Codex', async () => {

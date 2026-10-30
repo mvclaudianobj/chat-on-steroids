@@ -75,11 +75,35 @@ export function createCliModulesUi(api: AppApi, hooks: {
   if (pets?.parentElement === sidebarPrimary) pets.after(zeroclawLink); else sidebarPrimary.append(zeroclawLink);
   const rows = new Map<Id, { navigation: HTMLButtonElement | null; panel: HTMLElement; row: HTMLElement; active: HTMLInputElement; detail: HTMLElement; output: HTMLElement; project: HTMLSelectElement; manage: UpstreamManageUi | null }>();
   const current = new Map<Id, Status>();
+  const accountPanels = new Map<'claude' | 'codex', { status: HTMLElement; buttons: HTMLButtonElement[] }>();
   const sessions = new Map<string, CliSession>();
   const terminalManagers = new Map<string, ReturnType<typeof createWorkspaceTerminal>>();
   const terminalMounts = new Map<string, HTMLElement>();
   const sessionButtons = new Map<string, HTMLButtonElement>();
   let selectedSessionId: string | null = null;
+  async function refreshAccount(id: 'claude' | 'codex'): Promise<void> {
+    const panel = accountPanels.get(id);
+    if (!panel) return;
+    if (typeof api.cliDirectAccount !== 'function') return;
+    const result = await api.cliDirectAccount(id);
+    panel.status.textContent = result.ok
+      ? (result.data.signedIn ? t('Direct account connected') : t('Direct account not signed in')) + (result.data.detail ? ' · ' + t(result.data.detail) : '')
+      : t('Account status unavailable');
+  }
+  async function accountTerminal(id: 'claude' | 'codex', action: 'login' | 'logout'): Promise<void> {
+    if (action === 'logout' && !window.confirm(t('Sign out of the direct CLI account?'))) return;
+    const panel = accountPanels.get(id);
+    if (!panel) return;
+    for (const button of panel.buttons) button.disabled = true;
+    try {
+      const reply = await api.cliCreateSession(id, null, `${id}-${action}`);
+      if (!reply.ok) { panel.status.textContent = t(reply.error); return; }
+      sessions.set(reply.data.id, reply.data);
+      paintSessions();
+      await showSession(reply.data.id);
+      await refreshAccount(id);
+    } finally { for (const button of panel.buttons) button.disabled = false; }
+  }
   let zeroclaw: { panel: HTMLElement; status: HTMLElement; versions: HTMLElement; output: HTMLElement; terminal: HTMLElement; facts: HTMLElement; close: HTMLButtonElement } | null = null;
 
   /**
@@ -288,6 +312,24 @@ export function createCliModulesUi(api: AppApi, hooks: {
     }
     surface.append(enableLabel, detail, actions); row.append(surface); parent.append(row);
     if (id === 'codex' || id === 'claude') {
+      const accountStatus = text('p', '', 'modules-detail');
+      accountStatus.id = id + 'DirectAccountStatus';
+      accountStatus.setAttribute('role', 'status');
+      const accountActions = document.createElement('div');
+      accountActions.className = 'modules-service-actions';
+      const accountButtons: HTMLButtonElement[] = [];
+      for (const [action, label, suffix] of [['login', 'Sign in', 'SignIn'], ['login', 'Sign in again', 'SignInAgain'], ['logout', 'Sign out', 'SignOut']] as const) {
+        const control = document.createElement('button');
+        control.type = 'button';
+        control.className = 'btn';
+        control.id = id + 'Account' + suffix;
+        ui(control, 'textContent', () => t(label));
+        control.addEventListener('click', () => void accountTerminal(id, action));
+        accountActions.append(control);
+        accountButtons.push(control);
+      }
+      accountPanels.set(id, { status: accountStatus, buttons: accountButtons });
+      surface.append(accountStatus, accountActions);
       const installedLine = text('p', '', 'modules-detail'); installedLine.id = `${id}InstalledVersion`;
       const latestLine = text('p', '', 'modules-detail'); latestLine.id = `${id}LatestVersion`;
       const badge = text('span', '', 'modules-status'); badge.id = `${id}UpdateBadge`; badge.dataset.state = 'update'; badge.hidden = true;
@@ -435,6 +477,7 @@ export function createCliModulesUi(api: AppApi, hooks: {
         row.detail.textContent = status.legacy ? status.detail
           : `${status.version ?? 'Not installed'}${status.upstream && status.installed && !status.managed ? ` (${t('not installed by Chat Marks')})` : ''} · ${status.running ? 'Running · ' : ''}${status.detail}`;
         if (status.id === 'codex' || status.id === 'claude') {
+          void refreshAccount(status.id);
           const installed = document.getElementById(`${status.id}InstalledVersion`)!;
           const latest = document.getElementById(`${status.id}LatestVersion`)!;
           const badge = document.getElementById(`${status.id}UpdateBadge`)!;

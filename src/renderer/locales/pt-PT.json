@@ -4768,5 +4768,10 @@
   "Chat engine unavailable": "Motor de chat indisponível",
   "Choose Via Claude Code Router or sign in to the CLI account.": "Escolha Via Claude Code Router ou inicie sessão na conta da CLI.",
   "Start Claude Code Router in Settings > Modules to continue this chat.": "Inicie o Claude Code Router em Definições > Módulos para continuar esta conversa.",
-  "Sign in to Claude Code": "Iniciar sessão no Claude Code"
+  "Sign in to Claude Code": "Iniciar sessão no Claude Code",
+  "Direct account connected": "Conta direta ligada",
+  "Direct account not signed in": "Conta direta sem sessão",
+  "Account status unavailable": "Estado da conta indisponível",
+  "Sign in again": "Entrar novamente",
+  "Sign out of the direct CLI account?": "Sair da conta direta da CLI?"
 }

@@ -141,7 +141,11 @@ const validEngineArgs = (module: CliId, args: unknown): args is string[] => {
 };
 /** Arguments of an ordinary (not engine) module terminal: only ZeroClaw's `quickstart`. */
 const validTerminalArgs = (module: CliId, args: unknown): boolean =>
-  module === 'zeroclaw' && Array.isArray(args) && args.length === 1 && args[0] === 'quickstart';
+  Array.isArray(args) && (
+    (module === 'zeroclaw' && args.length === 1 && args[0] === 'quickstart') ||
+    (module === 'claude' && args.length === 2 && args[0] === 'auth' && ['login', 'logout'].includes(args[1])) ||
+    (module === 'codex' && args.length === 1 && ['login', 'logout'].includes(args[0]))
+  );
 export function registerCliModuleStopHook(listener: (id: CliId) => void): () => void {
   stopListeners.add(listener);
   return () => { stopListeners.delete(listener); };
@@ -503,12 +507,47 @@ export async function cliSessions(): Promise<CliSession[]> {
   return sessions.slice().sort((a, b) => b.updatedAt - a.updatedAt).map(session => ({ ...session }));
 }
 
-export async function cliCreateSession(id: CliId, projectId: string | null, kind?: 'quickstart' | 'claude-login'): Promise<CliSession> {
+export type DirectAccountAction = 'login' | 'logout';
+export type DirectAccountState = { signedIn: boolean; detail: string };
+
+export async function cliDirectAccount(id: 'claude' | 'codex'): Promise<DirectAccountState> {
+  await loadCliModules();
+  if (!enabled.has(id)) return { signedIn: false, detail: 'Module disabled' };
+  const bin = await runtimeBinary(id);
+  if (!bin) return { signedIn: false, detail: 'CLI not installed' };
+  const args = id === 'claude' ? ['auth', 'status', '--json'] : ['login', 'status'];
+  try {
+    const env = normalizeEnvironment(process.env);
+    // Prevent a configured router from impersonating the direct account.
+    for (const key of ['ANTHROPIC_BASE_URL', 'ANTHROPIC_API_BASE_URL', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'OPENAI_BASE_URL']) delete env[key];
+    const directArgs = id === 'claude' ? ['--settings', CLAUDE_DIRECT_SETTINGS, ...args] : args;
+    const output = await run(process.platform === 'win32' ? 'wsl.exe' : bin,
+      process.platform === 'win32' ? ['--exec', bin, ...directArgs] : directArgs,
+      { timeout: 15_000, maxBuffer: 64 * 1024, env });
+    if (id === 'claude') {
+      const info = JSON.parse(output.stdout) as Record<string, unknown>;
+      const method = typeof info.authMethod === 'string' ? info.authMethod : '';
+      const source = typeof info.tokenSource === 'string' ? info.tokenSource : '';
+      const logged = info.loggedIn === true && !/apiKeyHelper/i.test(method + source);
+      const account = typeof info.email === 'string' && /^[^\s@]+@[^\s@]+$/.test(info.email) ? info.email.slice(0, 120) : '';
+      const plan = typeof info.subscriptionType === 'string' && /^[a-zA-Z0-9 -]{1,40}$/.test(info.subscriptionType) ? info.subscriptionType : '';
+      return { signedIn: logged, detail: logged ? [account, plan].filter(Boolean).join(' · ') : '' };
+    }
+    const outputText = output.stdout.trim();
+    const signedIn = /logged in|authenticated|signed in/i.test(outputText) && !/not logged in|not authenticated|not signed in/i.test(outputText);
+    return { signedIn, detail: signedIn && /ChatGPT/i.test(outputText) ? 'ChatGPT' : '' };
+  } catch { return { signedIn: false, detail: 'Account status unavailable' }; }
+}
+
+export async function cliCreateSession(id: CliId, projectId: string | null, kind?: 'quickstart' | 'claude-login' | 'claude-logout' | 'codex-login' | 'codex-logout'): Promise<CliSession> {
   if (kind === 'quickstart' && id !== 'zeroclaw') throw new Error('Only ZeroClaw has a quickstart terminal');
   if (kind === 'claude-login' && id !== 'claude') throw new Error('Only Claude Code has a login terminal');
+  if (kind?.startsWith('claude-') && id !== 'claude') throw new Error('Invalid account terminal');
+  if (kind?.startsWith('codex-') && id !== 'codex') throw new Error('Invalid account terminal');
   return createSessionRecord(id, projectId, null, kind === 'quickstart'
     ? { args: ['quickstart'], title: 'ZeroClaw quickstart' }
-    : kind === 'claude-login' ? { args: ['auth', 'login'], title: 'Claude Code login' } : undefined);
+    : kind?.startsWith('claude-') ? { args: ['auth', kind.slice(7)], title: 'Claude Code account' }
+    : kind?.startsWith('codex-') ? { args: [kind.slice(6)], title: 'Codex account' } : undefined);
 }
 
 /**
@@ -744,6 +783,10 @@ async function terminalCommand(id: CliId, bin: string, session: Readonly<CliSess
     if (validTerminalArgs(id, session.args)) return ['sh', '-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', bin, ...session.args!];
     return ['sh', '-c', ZEROCLAW_TERMINAL_SCRIPT, 'marks-cli', `${bin.slice(0, bin.lastIndexOf('/') + 1)}${terminalBin}`];
   }
+  if (validTerminalArgs(id, session.args)) {
+    const args = id === 'claude' ? ['--settings', CLAUDE_DIRECT_SETTINGS, ...session.args!] : session.args!;
+    return ['sh', '-c', script, 'marks-cli', bin, ...args];
+  }
   return ['sh', '-c', script, 'marks-cli', bin];
 }
 
@@ -761,7 +804,8 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
   const request = z.discriminatedUnion('action', [
     z.object({ action: z.literal('status') }).strict(),
     z.object({ action: z.literal('sessions') }).strict(),
-    z.object({ action: z.literal('create'), module: id, projectId: z.string().uuid().nullable(), kind: z.enum(['quickstart', 'claude-login']).optional() }).strict(),
+    z.object({ action: z.literal('account'), module: z.enum(['claude', 'codex']) }).strict(),
+    z.object({ action: z.literal('create'), module: id, projectId: z.string().uuid().nullable(), kind: z.enum(['quickstart', 'claude-login', 'claude-logout', 'codex-login', 'codex-logout']).optional() }).strict(),
     z.object({ action: z.enum(['enable', 'disable', 'install', 'update', 'update-external', 'stop']), module: id, version: z.string().regex(UPSTREAM_VERSION).optional() }).strict(),
     z.object({ action: z.literal('open'), sessionId: z.string().uuid(), attachmentId: z.string().uuid(), cols: z.number().int().min(2).max(500), rows: z.number().int().min(2).max(200) }).strict(),
     z.object({ action: z.literal('write'), attachmentId: z.string().uuid(), data: z.string().max(16_384) }).strict(),
@@ -788,6 +832,7 @@ export function registerCliModuleIpc(getWindow: () => BrowserWindow | null): voi
       const input = request.parse(payload);
       const data = input.action === 'status' ? await cliStatus()
         : input.action === 'sessions' ? await cliSessions()
+        : input.action === 'account' ? await cliDirectAccount(input.module)
           : input.action === 'create' ? await cliCreateSession(input.module, input.projectId, input.kind)
         : ['enable', 'disable', 'install', 'update', 'update-external', 'stop'].includes(input.action) ? await cliAction((input as { module: CliId }).module, input.action as 'enable' | 'disable' | 'install' | 'update' | 'update-external' | 'stop', (input as { version?: string }).version)
           : input.action === 'open' ? await cliOpen(input.sessionId, input.cols, input.rows, input.attachmentId,
