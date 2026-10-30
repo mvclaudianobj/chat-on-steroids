@@ -201,11 +201,12 @@ function serviceHost(fake: FakeOpenCode, state: ServiceState): void {
 
 describe('OpenCode 2.x agent engine (fake HTTP+SSE service)', () => {
   let directory = '';
+  const homeDirectory = '/home/user';
   const fake = new FakeOpenCode();
   const state: ServiceState = { registration: null, exe: BINARY, binaryVersion: '2.1.2', actions: [] };
   let module = { enabled: true, command: true, binary: BINARY as string | null, managed: true };
   let version: string | null = '2.1.2';
-  const openTerminal = vi.fn(async (_chat: { sessionId: string; projectId: string; args: string[]; title: string }) => ({ id: 'cli-opencode-1' }));
+  const openTerminal = vi.fn(async (_chat: { sessionId: string; projectId: string | null; args: string[]; title: string }) => ({ id: 'cli-opencode-1' }));
   let terminalCheck: (() => Promise<void>) | null = null;
 
   beforeAll(async () => {
@@ -242,6 +243,7 @@ describe('OpenCode 2.x agent engine (fake HTTP+SSE service)', () => {
       moduleState: async () => ({ ...module }),
       version: async () => version,
       projectFolder: async projectId => {
+        if (projectId === null) return homeDirectory;
         if (projectId !== PROJECT) throw new Error('Project not found');
         return directory;
       },
@@ -318,8 +320,14 @@ describe('OpenCode 2.x agent engine (fake HTTP+SSE service)', () => {
     expect(state.actions.map(item => item.action)).toEqual(['start']);
   });
 
+  it('creates a standalone chat in the home folder when no project is chosen', async () => {
+    const before = fake.calls('POST', '/api/session').length;
+    await engine.openCodeEngine.create({ projectId: null });
+    const call = fake.calls('POST', '/api/session')[before];
+    expect((call!.body as { location: { directory: string } }).location.directory).toBe(homeDirectory);
+  });
+
   it('creates the session at the project folder with a ruleset that asks for shell/edit and denies question, the outside and .markscode', async () => {
-    await expect(engine.openCodeEngine.create({ projectId: null })).rejects.toThrow('Choose a project for an OpenCode chat first');
     const view = await create();
     const [call] = fake.calls('POST', '/api/session');
     expect(call!.body).toEqual({

@@ -76,7 +76,8 @@ export interface OpenCodeDeps {
   version(binary: string): Promise<string | null>;
   support(version: string | null): UpstreamSupport | null;
   /** The approved project's canonical folder as the service sees it (WSL path on Windows). */
-  projectFolder(projectId: string): Promise<string>;
+  /** A project's local folder; null (a standalone chat) is the user's home folder, as for Codex. */
+  projectFolder(projectId: string | null): Promise<string>;
   /** The running service, started (by the resolved binary) when none runs. */
   service(): Promise<{ client: OpenCodeClient }>;
   /** The service running now, without starting one (recovery); null when stopped or not the app's. */
@@ -86,7 +87,7 @@ export interface OpenCodeDeps {
   bindService(options: { busy(): boolean }): void;
   turnsSettled(): void;
   /** The chat's durable module terminal (cli-modules `cliEngineTerminal('opencode', …)`). */
-  openTerminal(chat: { sessionId: string; projectId: string; args: string[]; title: string }): Promise<{ id: string }>;
+  openTerminal(chat: { sessionId: string; projectId: string | null; args: string[]; title: string }): Promise<{ id: string }>;
   /** Registers the check every OpenCode terminal runs before it attaches (cli-modules open hook). */
   onTerminalOpen(check: () => Promise<void>): void;
   reconnectDelaysMs?: readonly number[];
@@ -106,9 +107,14 @@ const defaultDeps: OpenCodeDeps = {
   },
   support: version => opencodeSupport(version),
   async projectFolder(projectId) {
-    const { projectWorkspace, localProjectPath } = await import('../projects.js');
-    const local = localProjectPath(await projectWorkspace(projectId));
-    if (!local) throw new Error('OpenCode chats need a project folder on this computer');
+    let local: string | null;
+    if (projectId) {
+      const { projectWorkspace, localProjectPath } = await import('../projects.js');
+      local = localProjectPath(await projectWorkspace(projectId));
+      if (!local) throw new Error('OpenCode chats need a project folder on this computer');
+    } else {
+      local = (await import('electron')).app.getPath('home');
+    }
     if (process.platform !== 'win32') return local;
     const { cliWslPath } = await import('../cli-modules.js');
     const mapped = (await cliWslPath(local)).trim();
@@ -737,7 +743,7 @@ async function recoverChat(sessionId: string, chat: ChatRecord): Promise<void> {
       messageId: event.messageId, message: event.message, state: 'final', final: true });
   }
   let cwd: string | null = null;
-  if (session.projectId) cwd = await deps.projectFolder(session.projectId).catch(() => null);
+  cwd = await deps.projectFolder(session.projectId ?? null).catch(() => null);
   const turn = newTurn({
     sessionId, conversationId: session.conversationId!, backendId: chat.backendSessionId, turnId: open.turnId,
     question: question?.kind === 'user_message' ? question.message.text : '', cwd, firstStep: streaming ? lastStep : lastStep + 1
@@ -813,8 +819,7 @@ function terminalOf(backendSessionId: string | null, cwd: string | null): Engine
 async function openTerminal(sessionId: string): Promise<{ cliSessionId: string }> {
   hookTerminals();
   const { session, record: chat } = await openCodeChat(sessionId);
-  if (!session.projectId) throw new Error('This OpenCode chat has no project');
-  const directory = await deps.projectFolder(session.projectId);
+  const directory = await deps.projectFolder(session.projectId ?? null);
   const terminal = terminalOf(chat.backendSessionId ?? null, directory);
   if (!terminal) throw new Error('This chat has no engine session yet');
   await terminalReady();
@@ -874,8 +879,8 @@ export const openCodeEngine: AgentEngine = {
 
   async create(options) {
     await recoverOpenCodeChats();
-    if (!options.projectId) throw new Error('Choose a project for an OpenCode chat first');
-    const directory = await deps.projectFolder(options.projectId);
+    // Without a project the chat is standalone and works in the home folder, like a Codex chat.
+    const directory = await deps.projectFolder(options.projectId ?? null);
     const client = await connect();
     const fallback = options.model ? null : await client.defaultModel(directory).catch(() => null);
     const model = options.model ? modelId.parse(options.model) : fallback ? modelRowId(fallback) : null;
@@ -884,7 +889,7 @@ export const openCodeEngine: AgentEngine = {
     });
     if (!OPENCODE_SESSION.test(backend.id)) throw new Error('OpenCode returned an unexpected session id');
     const summary = await createSession({ title: 'New OpenCode chat', titleSource: 'fallback', conversationId: `${API_CONVERSATION_PREFIX}${randomUUID()}` });
-    await bindSessionProject(summary.id, options.projectId);
+    if (options.projectId) await bindSessionProject(summary.id, options.projectId);
     await updateChatRecord(summary.id, () => ({ engine: ENGINE, backendSessionId: backend.id, model, effort: null }));
     notifyChanged(summary.id);
     return view(summary.id);
