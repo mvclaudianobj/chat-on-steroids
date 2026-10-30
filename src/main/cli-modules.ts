@@ -15,7 +15,7 @@ import { normalizeEnvironment, deleteEnvValue } from './env.js';
 import { installPublishedCli, publishedLatest, publishedUpdateAvailable, verifiedVersion, externalNpmPrefix } from './cli-source-install.js';
 import { localRunner, probeVersion, wslRunner } from './upstream/install.js';
 import { markspanelAccessBlocked } from './markspanel-auth.js';
-import { CLAUDE_DIRECT_SETTINGS } from './agent-engine/router.js';
+import { CLAUDE_DIRECT_SETTINGS, detectCodexRouter } from './agent-engine/router.js';
 
 export const CLI_IDS = ['opencode', 'codex', 'claude', 'zeroclaw', 'markscode', 'marksclaw'] as const;
 export type CliId = typeof CLI_IDS[number];
@@ -803,6 +803,10 @@ async function terminalCommand(id: CliId, bin: string, session: Readonly<CliSess
     const args = id === 'claude' ? ['--settings', CLAUDE_DIRECT_SETTINGS, ...session.args!] : session.args!;
     return ['sh', '-c', script, 'marks-cli', bin, ...args];
   }
+  // A plain terminal is the CLI's own account, like a new chat: without this, the user's router
+  // settings (apiKeyHelper, ANTHROPIC_BASE_URL, Codex's CCR provider) took it through the proxy.
+  if (id === 'claude') return ['sh', '-c', script, 'marks-cli', bin, '--settings', CLAUDE_DIRECT_SETTINGS];
+  if (id === 'codex') return ['sh', '-c', script, 'marks-cli', bin, ...detectCodexRouter().directOverrides.flatMap(value => ['-c', value])];
   return ['sh', '-c', script, 'marks-cli', bin];
 }
 
