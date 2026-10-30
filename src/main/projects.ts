@@ -8,7 +8,7 @@ import { nativePathIdentity, resolvePath, uniqueRootName } from './sandbox.js';
 import { parseRemote, remoteIdentity, sftpFor } from './remote/ssh.js';
 import { SftpError, type SftpClient } from './remote/sftp.js';
 import type { RemoteFolder, Root } from '../shared/types.js';
-import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
+import { bindSessionProject, findSessionByConversation, getSession, setSessionRemoteMode } from './session/store.js';
 import { workspaceForChat } from './workspace.js';
 import { logInfo } from './logger.js';
 import { isListedChatgptProject } from './chatgpt-project-catalog.js';
@@ -29,6 +29,7 @@ const projectSchema = z.object({
   color: z.enum(PROJECT_COLORS).optional(),
   createdAt: z.number().finite().nonnegative(), ungrouped: z.boolean().optional(), secretsShieldOff: z.boolean().optional(),
   chatgpt: chatgptSchema.optional(),
+  remoteProfile: z.object({ profileId: z.string().uuid(), folder: z.string().min(1).max(4096) }).strict().optional(),
   remote: z.object({ host: z.string().min(1).max(255), port: z.number().int().min(1).max(65535).optional(), path: z.string().min(1).max(4096) }).optional()
 });
 const catalogSchema = z.array(projectSchema).max(200);
@@ -70,6 +71,31 @@ export function addProject(folderPath: string, options: { chatgpt?: 'later' } = 
       ...(options.chatgpt === 'later' ? {} : { chatgpt: { state: 'requested', requestId: randomUUID(), updatedAt: Date.now() } as const }) };
     await writeDurableNow('projects', [...projects, project]);
     logInfo(`projects: project ${project.id} asks for a new ChatGPT Project`);
+    return project;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
+/** A local, already-approved folder; SFTP never makes it a remote workspace/root. */
+export function addRemoteProfileProject(folderPath: string, profileId: string, remoteFolder: string): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    if (!path.isAbsolute(folderPath) || !/^[a-f0-9-]{36}$/i.test(profileId)) throw new Error('Invalid local folder or profile');
+    const { listRemoteHosts } = await import('./remote/hosts.js');
+    const host = (await listRemoteHosts()).find(row => row.id === profileId && row.type === 'ssh');
+    if (!host) throw new Error('SSH profile no longer exists');
+    const checked = parseRemote(`${host.user}@${host.host}:${host.port}`, remoteFolder);
+    const resolved = await resolvePath(getConfig().roots, folderPath);
+    if (!(await fs.stat(resolved.real)).isDirectory()) throw new Error('Choose a local project folder');
+    const projects = await listProjects();
+    const existing = projects.find(row => samePath(row.path, resolved.real));
+    if (existing && !existing.remoteProfile) throw new Error('This folder already belongs to another project');
+    if (existing && (existing.remoteProfile?.profileId !== profileId || existing.remoteProfile.folder !== checked.path)) throw new Error('This mirror belongs to another remote profile or folder');
+    if (existing) return existing;
+    if (projects.length >= 200) throw new Error('Project catalog limit reached');
+    const project: LocalProject = { id: randomUUID(), name: (path.basename(resolved.real) || resolved.real).slice(0, 160), path: resolved.real,
+      remoteProfile: { profileId, folder: checked.path }, createdAt: Date.now() };
+    await writeDurableNow('projects', [...projects, project]);
     return project;
   });
   mutations = operation.catch(() => undefined);
@@ -239,6 +265,10 @@ export async function assignSessionProject(sessionId: string, projectId: string)
   if (!project) throw new Error('Project not found');
   await resolveProject(project);
   await bindSessionProject(sessionId, project.id);
+  if (project.remoteProfile) {
+    const session = await getSession(sessionId);
+    if (session?.remoteMode === undefined) await setSessionRemoteMode(sessionId, project.remoteProfile.profileId);
+  }
 }
 export async function projectWorkspace(projectId: string): Promise<{ virtual: string; real: string }> {
   const project = await getProject(projectId);

@@ -18,6 +18,9 @@ import { queueWorkerArchives, workerArchiveFinishDelayMs } from './worker-archiv
 import { registerDictationIpc } from './dictation.js';
 import { registerRemoteHostsIpc } from './remote/hosts-ipc.js';
 import { revokeRemoteChat } from './remote/approval.js';
+import { remoteModeInstructions } from './remote/mode.js';
+import { syncRemoteProfileProject } from './remote/mirror.js';
+import { prependUserPrompt } from '../shared/user-prompt.js';
 import { registerJarvisAudioIpc } from './jarvis-audio.js';
 import { registerVaultIpc } from './marks-vault-ipc.js';
 import { registerBrainIpc } from './brain/ipc.js';
@@ -1438,6 +1441,37 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return project;
   });
   // A folder on a server (#1469): the address and folder as typed; the server is asked once.
+  handle('projects:addRemoteProfile', async payload => {
+    const { profileId, folder } = z.object({ profileId: z.string().uuid(), folder: z.string().min(1).max(4096) }).strict().parse(payload);
+    const window = getWindow();
+    if (!window) throw new Error('No window');
+    const result = await dialog.showOpenDialog(window, { ...dialogLabel('Choose a project folder for ChatGPT'), properties: ['openDirectory', 'createDirectory'] });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const local = result.filePaths[0];
+    try { await resolvePath(getConfig().roots, local); }
+    catch (error) {
+      if (!(error instanceof SandboxError)) throw error;
+      const state = await approveRoot(local);
+      push('state:changed', state);
+    }
+    const { addRemoteProfileProject } = await import('./projects.js');
+    const project = await addRemoteProfileProject(local, profileId, folder);
+    push('session:changed');
+    return project;
+  });
+  handle('projects:syncRemoteProfile', async payload => {
+    const { projectId, direction } = z.object({ projectId: z.string().uuid(), direction: z.enum(['pull', 'push']) }).strict().parse(payload);
+    const window = getWindow();
+    if (!window) throw new Error('No window');
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'warning', buttons: [mainText('Cancel'), mainText('Synchronize')], defaultId: 0, cancelId: 0, noLink: true,
+      title: mainText('SFTP mirror synchronization'),
+      message: direction === 'push' ? mainText('Upload local files to the selected SSH profile?') : mainText('Download remote files into the local mirror?'),
+      detail: mainText('Existing files can be overwritten. No files are deleted. Secrets and common credential files are excluded.')
+    });
+    if (response !== 1) return null;
+    return syncRemoteProfileProject(projectId, direction);
+  });
   handle('projects:addRemote', async payload => {
     const { address, folder, chatgpt } = (payload ?? {}) as { address?: unknown; folder?: unknown; chatgpt?: unknown };
     if (typeof address !== 'string' || typeof folder !== 'string' || address.length > 300 || folder.length > 4096) throw new Error('Enter an SSH address and a folder');
@@ -2666,8 +2700,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     prepareText: async (entry, limits, authored) => {
       const control = entry.conversationId ? goalSwitchFor(entry.conversationId) : getConfig().goal;
       const mode = entry.automation ?? (control.enabled ? control.mode : 'off');
-      const text = mode === 'goal' && goalBackendFor('goal') === 'templates' && !entry.text.includes(GOAL_MARKER_INSTRUCTION)
+      const baseText = mode === 'goal' && goalBackendFor('goal') === 'templates' && !entry.text.includes(GOAL_MARKER_INSTRUCTION)
         ? entry.text + GOAL_MARKER_INSTRUCTION : entry.text;
+      const remote = !entry.finishOwner && entry.purpose !== 'decision'
+        ? await remoteModeInstructions(entry.sessionId, entry.projectId) : '';
+      const text = remote ? prependUserPrompt(baseText, remote) : baseText;
       // Only the opening user input owns executor setup. Existing chats, queued
       // checkpoints and automatic continuations already have their instructions.
       // An edit of a chat's first question (#365) replaces the message that carried its setup.

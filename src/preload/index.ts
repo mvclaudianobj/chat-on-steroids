@@ -384,7 +384,7 @@ const api = {
     return () => ipcRenderer.removeListener('vault:pending-changed', wrapped);
   },
   remoteHosts: (action: string, payload?: unknown) => {
-    if (!['list', 'save', 'delete', 'test', 'install', 'unlock', 'fingerprint', 'trust', 'project', 'preview', 'import', 'pending', 'decide'].includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown remote action' });
+    if (!['list', 'save', 'delete', 'test', 'install', 'unlock', 'fingerprint', 'trust', 'project', 'preview', 'import', 'pending', 'decide', 'mode', 'modeView'].includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown remote action' });
     return call<unknown>(`remoteHosts:${action}`, payload);
   },
   onRemoteApprovalsChanged: (listener: () => void): (() => void) => {
@@ -518,6 +518,8 @@ const api = {
   // `chatgpt: 'later'`: the person picks a new or an existing ChatGPT Project next (#1756).
   addProject: (options?: { chatgpt?: 'later' }) => call<LocalProject | null>('projects:add', options ?? {}),
   addRemoteProject: (address: string, folder: string, options?: { chatgpt?: 'later' }) => call<LocalProject>('projects:addRemote', { address, folder, ...(options ?? {}) }),
+  addRemoteProfileProject: (profileId: string, folder: string) => call<LocalProject | null>('projects:addRemoteProfile', { profileId, folder }),
+  syncRemoteProfileProject: (projectId: string, direction: 'pull' | 'push') => call<{ files: number; bytes: number; skipped: number } | null>('projects:syncRemoteProfile', { projectId, direction }),
   retryChatgptProject: (id: string) => call<LocalProject | null>('projects:chatgpt-retry', { id }),
   chatgptProjectChoices: () => call<ChatgptProjectChoice[]>('projects:chatgpt-choices'),
   linkChatgptProject: (id: string, chatgptId: string) => call<LocalProject>('projects:chatgpt-link', { id, chatgptId }),

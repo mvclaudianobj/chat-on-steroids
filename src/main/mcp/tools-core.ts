@@ -282,11 +282,17 @@ export function registerCoreTools(reg: SurfaceRegistrar, brainAudience: 'core' |
     try {
       const profile = await remoteHostByName(name);
       if (profile.type !== 'ssh') return fail('This remote type is not available yet');
+      const { remoteProfileForChat } = await import('../remote/mode.js');
+      const assigned = await remoteProfileForChat(caller.sessionId);
+      if (assigned && assigned.id !== profile.id) return fail('This chat is bound to a different remote profile');
       const address = `${profile.user}@${profile.host}:${profile.port}`;
       if (!await requestRemoteApproval(caller.conversationId, address, command)) return fail('Remote command denied or timed out');
       if (!caps.command) return fail('Remote execution permission was revoked');
       const owner = await findSessionByConversation(caller.conversationId);
       if (!owner || owner.id !== caller.sessionId) return failIdentity('This chat no longer owns the approved remote operation');
+      const liveProfile = await remoteProfileForChat(caller.sessionId);
+      if ((assigned?.id ?? null) !== (liveProfile?.id ?? null) || (liveProfile && liveProfile.id !== profile.id))
+        return fail('Remote mode changed during approval');
       // The profile may have been removed or changed while the approval card was open.
       if (JSON.stringify(await remoteHostByName(name)) !== JSON.stringify(profile)) return fail('Remote host changed; request approval again');
       return ok(await executeRemoteHost(profile, command));
