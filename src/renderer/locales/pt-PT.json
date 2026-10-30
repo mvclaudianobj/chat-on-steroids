@@ -4808,5 +4808,8 @@
   "End only this chat’s workers, preserving their conversations, reports and worktrees": "Termina apenas os workers deste chat, preservando as conversas, relatórios e worktrees",
   "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "Terminar e arquivar todos os workers deste chat? Os turnos serão interrompidos; os históricos, relatórios e worktrees serão preservados.",
   "{0} workers archived; {1} pending. No history or checkout was deleted.": "{0} workers arquivados; {1} pendentes. Nenhum histórico ou checkout foi eliminado.",
-  "Owner session not found": "Sessão proprietária não encontrada"
+  "Owner session not found": "Sessão proprietária não encontrada",
+  "Copy URL": "Copiar URL",
+  "Paste code": "Colar código",
+  "Authentication code": "Código de autenticação"
 }

@@ -4674,5 +4674,8 @@
   "End only this chat’s workers, preserving their conversations, reports and worktrees": "이 채팅의 워커만 종료하고 대화, 보고서 및 작업 트리는 보존합니다",
   "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "이 채팅의 모든 워커를 종료하고 보관할까요? 턴은 중지하지만 기록, 보고서 및 작업 트리는 보존합니다.",
   "{0} workers archived; {1} pending. No history or checkout was deleted.": "워커 {0}개 보관 완료, {1}개 대기 중. 기록이나 작업 트리는 삭제하지 않았습니다.",
-  "Owner session not found": "소유자 세션을 찾을 수 없습니다"
+  "Owner session not found": "소유자 세션을 찾을 수 없습니다",
+  "Copy URL": "URL 복사",
+  "Paste code": "코드 붙여넣기",
+  "Authentication code": "인증 코드"
 }

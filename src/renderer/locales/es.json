@@ -4808,5 +4808,8 @@
   "End only this chat’s workers, preserving their conversations, reports and worktrees": "Finaliza solo los agentes de este chat, conservando sus conversaciones, informes y árboles de trabajo",
   "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "¿Finalizar y archivar todos los agentes de este chat? Se detendrán sus turnos; se conservarán historiales, informes y árboles de trabajo.",
   "{0} workers archived; {1} pending. No history or checkout was deleted.": "{0} agentes archivados; {1} pendientes. No se eliminó ningún historial ni árbol de trabajo.",
-  "Owner session not found": "No se encontró la sesión propietaria"
+  "Owner session not found": "No se encontró la sesión propietaria",
+  "Copy URL": "Copiar URL",
+  "Paste code": "Pegar código",
+  "Authentication code": "Código de autenticación"
 }

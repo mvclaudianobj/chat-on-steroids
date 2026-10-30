@@ -4674,5 +4674,8 @@
   "End only this chat’s workers, preserving their conversations, reports and worktrees": "只結束此聊天的工作代理，保留對話、報告和工作樹",
   "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "結束並封存此聊天的所有工作代理？它們的回合將停止；歷史記錄、報告和工作樹會保留。",
   "{0} workers archived; {1} pending. No history or checkout was deleted.": "已封存 {0} 個工作代理；{1} 個待處理。未刪除歷史記錄或工作樹。",
-  "Owner session not found": "找不到所屬工作階段"
+  "Owner session not found": "找不到所屬工作階段",
+  "Copy URL": "複製 URL",
+  "Paste code": "貼上代碼",
+  "Authentication code": "驗證代碼"
 }

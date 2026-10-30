@@ -4674,5 +4674,8 @@
   "End only this chat’s workers, preserving their conversations, reports and worktrees": "Chỉ kết thúc worker của cuộc trò chuyện này, giữ nguyên hội thoại, báo cáo và cây làm việc",
   "End and archive all workers in this chat? Their turns will be stopped; histories, reports and worktrees will be preserved.": "Kết thúc và lưu trữ tất cả worker trong cuộc trò chuyện này? Các lượt sẽ dừng; lịch sử, báo cáo và cây làm việc được giữ nguyên.",
   "{0} workers archived; {1} pending. No history or checkout was deleted.": "Đã lưu trữ {0} worker; còn {1} đang chờ. Không xóa lịch sử hoặc cây làm việc.",
-  "Owner session not found": "Không tìm thấy phiên chủ sở hữu"
+  "Owner session not found": "Không tìm thấy phiên chủ sở hữu",
+  "Copy URL": "Sao chép URL",
+  "Paste code": "Dán mã",
+  "Authentication code": "Mã xác thực"
 }
