@@ -4059,6 +4059,7 @@
   "Claude Code Router is not installed. Install it from Settings > Modules.": "Claude Code Router 未安装。请在“设置 > 模块”中安装。",
   "Claude Code Router is not running. Start it from Settings > Modules.": "Claude Code Router 未运行。请在“设置 > 模块”中启动。",
   "This Codex chat cannot answer until then; switch to \"CLI account (direct)\" to continue in a new Codex thread.": "在此之前，这个 Codex 聊天无法回答；切换到“CLI 账户（直连）”即可在新的 Codex 线程中继续。",
+  "The local proxy at {0} (openai_base_url in the Codex config.toml) is not running; start it to use it. Until then Codex uses the official endpoint of the CLI account.": "位于 {0} 的本地代理（Codex config.toml 中的 openai_base_url）未运行；请启动它以使用。在此之前，Codex 使用 CLI 账户的官方端点。",
   "Until then this chat answers with the CLI account (direct).": "在此之前，这个聊天使用 CLI 账户（直连）回答。",
   "Claude Code Router needs Node.js 22 or newer, and none was found.": "Claude Code Router 需要 Node.js 22 或更高版本，但未找到。",
   "Claude Code Router needs Node.js 22 or newer.": "Claude Code Router 需要 Node.js 22 或更高版本。",

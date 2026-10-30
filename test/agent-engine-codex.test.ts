@@ -99,7 +99,7 @@ function fakeHost(options: { script?: Record<string, unknown>; version?: string;
   const env = { ...process.env, CODEX_FAKE_LOG: logFile, CODEX_FAKE_SCRIPT: scriptFile, CODEX_FAKE_VERSION: options.version ?? '0.163.0' };
   const opened: string[][] = [];
   // `unavailable`: the router is configured but not installed or not answering (main/ccr).
-  const routing: { detected: boolean; provider: string | null; directOverrides: string[]; unavailable?: 'not_installed' | 'stopped' } = options.router
+  const routing: { detected: boolean; provider: string | null; directOverrides: string[]; unavailable?: 'not_installed' | 'stopped'; localProxy?: { host: string; port: number; override: string } } = options.router
     ? { detected: true, provider: 'claude-code-router', directOverrides: ['model_provider="openai"', 'model_catalog_json="/home/user/.codex/models_cache.json"'] }
     : { detected: false, provider: null, directOverrides: [] };
   const terminals: Array<{ sessionId: string; projectId: string | null; args: string[]; title: string }> = [];
@@ -617,6 +617,20 @@ describe('Codex engine: routes (one app-server per route)', () => {
     const direct = await engine.create({ projectId: null });
     expect(direct).toMatchObject({ route: 'direct', routes: [] });
     expect(direct.routeNotice).toBeUndefined();
+  });
+
+  it('tells a chat when the loopback openai_base_url proxy of the user\'s config does not answer', async () => {
+    const { fake, engine } = start();
+    const chat = await engine.create({ projectId: null });
+    expect((await engine.view(chat.sessionId)).localProxyDown).toBeUndefined();
+    const { createServer } = await import('node:net');
+    const server = createServer(socket => socket.destroy());
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as { port: number }).port;
+    fake.routing.localProxy = { host: '127.0.0.1', port, override: 'openai_base_url="https://chatgpt.com/backend-api/codex"' };
+    expect((await engine.view(chat.sessionId)).localProxyDown).toBeUndefined();
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    expect((await engine.view(chat.sessionId)).localProxyDown).toBe(`127.0.0.1:${port}`);
   });
 
   it('refuses a route change while a turn runs', async () => {

@@ -4,8 +4,10 @@ import path from 'node:path';
 import { makeTempDir, removeTempDir, writeTree } from './helpers.js';
 import {
   CLAUDE_DIRECT_SETTINGS, CLAUDE_FLAG_SETTINGS, CLAUDE_ROUTER_ENV_KEYS, claudeRouteSettings, codexRouteOverrides, detectClaudeRouter,
-  detectCodexRouter, effectiveRoute, type RoutingEnvironment
+  CODEX_OFFICIAL_BASE_URLS, codexOfficialBaseUrl, detectCodexRouter, effectiveRoute, localProxyAnswers, type RoutingEnvironment
 } from '../src/main/agent-engine/router.js';
+import { codexServerArgv } from '../src/main/agent-engine/codex-protocol.js';
+import net from 'node:net';
 
 // Synthetic copies of what Claude Code Router writes into the user's files (no real key or home).
 const CCR_CLAUDE_SETTINGS = JSON.stringify({
@@ -106,6 +108,63 @@ describe('Claude Code Router detection: Codex', () => {
     await writeTree(home, { '.codex/config.toml': CCR_CODEX_CONFIG });
     expect(detectCodexRouter(environment({}, 'win32')).detected).toBe(false);
     expect(detectCodexRouter(environment({ CODEX_HOME: path.join(home, 'nowhere') })).detected).toBe(false);
+  });
+
+  it('resets a loopback openai_base_url to the official endpoint of the sign-in on the direct route', async () => {
+    const proxied = `openai_base_url = "http://127.0.0.1:17841/v1"\n${CCR_CODEX_CONFIG}`;
+    await writeTree(home, { '.codex/config.toml': proxied, '.codex/auth.json': JSON.stringify({ auth_mode: 'chatgpt', tokens: { access_token: 'synthetic' } }) });
+    const detection = detectCodexRouter(environment());
+    expect(detection.directOverrides).toEqual(['model_provider="openai"', `openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"`]);
+    expect(detection.localProxy).toBeUndefined();
+    expect(codexRouteOverrides('router', detection)).toEqual([]);
+    expect(() => codexServerArgv('/tmp/s', codexRouteOverrides('direct', detection))).not.toThrow();
+    // An API-key sign-in (or none) gets the API endpoint; other loopback spellings count too.
+    await writeTree(home, { '.codex/auth.json': JSON.stringify({ auth_mode: 'apikey' }) });
+    expect(detectCodexRouter(environment()).directOverrides).toContain(`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.api}"`);
+    await fs.rm(path.join(home, '.codex', 'auth.json'));
+    expect(codexOfficialBaseUrl(path.join(home, '.codex'))).toBe(CODEX_OFFICIAL_BASE_URLS.api);
+    for (const base of ['http://localhost:9/v1', 'http://[::1]:9/v1', 'http://127.1.2.3:9/v1']) {
+      await writeTree(home, { '.codex/config.toml': `openai_base_url = "${base}"\n${CCR_CODEX_CONFIG}` });
+      expect(detectCodexRouter(environment()).directOverrides).toContain(`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.api}"`);
+    }
+  });
+
+  it('keeps a remote openai_base_url, and a loopback one without a router unless it does not answer', async () => {
+    await writeTree(home, { '.codex/config.toml': `openai_base_url = "https://gateway.example.com/v1"\n${CCR_CODEX_CONFIG}` });
+    expect(detectCodexRouter(environment()).directOverrides).toEqual(['model_provider="openai"']);
+    await writeTree(home, { '.codex/config.toml': 'openai_base_url = "https://gateway.example.com/v1"\n' });
+    expect(detectCodexRouter(environment())).toEqual({ detected: false, provider: null, directOverrides: [] });
+
+    await writeTree(home, { '.codex/config.toml': 'openai_base_url = "http://127.0.0.1:17841/v1"\n', '.codex/auth.json': JSON.stringify({ auth_mode: 'chatgpt' }) });
+    const detection = detectCodexRouter(environment());
+    expect(detection).toEqual({
+      detected: false, provider: null, directOverrides: [],
+      localProxy: { host: '127.0.0.1', port: 17841, override: `openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"` }
+    });
+    // Answering: the user's own proxy stays; not answering: the official endpoint, either route.
+    expect(codexRouteOverrides('direct', detection)).toEqual([]);
+    expect(codexRouteOverrides('direct', detection, true)).toEqual([`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"`]);
+    expect(codexRouteOverrides('router', detection, true)).toEqual([`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.chatgpt}"`]);
+    await writeTree(home, { '.codex/config.toml': 'model_provider = "openai"\nopenai_base_url = "http://localhost:17841/v1"\n' });
+    expect(detectCodexRouter(environment()).localProxy?.port).toBe(17841);
+    expect(detectCodexRouter(environment({}, 'win32')).localProxy).toBeUndefined();
+  });
+
+  it('probes a local proxy port', async () => {
+    const server = net.createServer(socket => socket.destroy());
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as net.AddressInfo).port;
+    expect(await localProxyAnswers({ host: '127.0.0.1', port })).toBe(true);
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    expect(await localProxyAnswers({ host: '127.0.0.1', port })).toBe(false);
+  });
+
+  it('accepts only the two official openai_base_url overrides', () => {
+    for (const url of Object.values(CODEX_OFFICIAL_BASE_URLS)) expect(() => codexServerArgv('/tmp/s', [`openai_base_url="${url}"`])).not.toThrow();
+    for (const bad of ['openai_base_url="http://127.0.0.1:17841/v1"', 'openai_base_url="https://evil.example.com/v1"',
+      'openai_base_url="https://api.openai.com/v1/../x"', 'openai_base_url="https://chatgpt.com/backend-api/codex" ', 'openai_base_url=https://api.openai.com/v1']) {
+      expect(() => codexServerArgv('/tmp/s', [bad])).toThrow('Invalid Codex route override');
+    }
   });
 
   it('runs one process for both routes without a router', () => {

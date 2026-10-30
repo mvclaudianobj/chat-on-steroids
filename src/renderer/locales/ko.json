@@ -4059,6 +4059,7 @@
   "Claude Code Router is not installed. Install it from Settings > Modules.": "Claude Code Router가 설치되어 있지 않습니다. 설정 > 모듈에서 설치하세요.",
   "Claude Code Router is not running. Start it from Settings > Modules.": "Claude Code Router가 실행 중이 아닙니다. 설정 > 모듈에서 시작하세요.",
   "This Codex chat cannot answer until then; switch to \"CLI account (direct)\" to continue in a new Codex thread.": "그때까지 이 Codex 채팅은 응답할 수 없습니다. 새 Codex 스레드로 계속하려면 \"CLI 계정(직접)\"으로 전환하세요.",
+  "The local proxy at {0} (openai_base_url in the Codex config.toml) is not running; start it to use it. Until then Codex uses the official endpoint of the CLI account.": "{0}의 로컬 프록시(Codex config.toml의 openai_base_url)가 실행 중이 아닙니다. 사용하려면 시작하세요. 그때까지 Codex는 CLI 계정의 공식 엔드포인트를 사용합니다.",
   "Until then this chat answers with the CLI account (direct).": "그때까지 이 채팅은 CLI 계정(직접)으로 응답합니다.",
   "Claude Code Router needs Node.js 22 or newer, and none was found.": "Claude Code Router에는 Node.js 22 이상이 필요한데 찾지 못했습니다.",
   "Claude Code Router needs Node.js 22 or newer.": "Claude Code Router에는 Node.js 22 이상이 필요합니다.",

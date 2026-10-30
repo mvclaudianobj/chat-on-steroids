@@ -57,7 +57,7 @@ import { connectWebSocket, JsonRpcPeer, type JsonRpcId } from './jsonrpc.js';
 import type { WebSocket } from 'ws';
 import { engineOf, chatRecords, routeOf, storedChatRecord, updateChatRecord, type ChatRecord } from './ledger.js';
 import {
-  chatRoutes, codexRouteOverrides, detectCodexRouter, effectiveRoute, refreshRouterAvailability, registerRoutedTurnProbe, ROUTER_LABEL,
+  chatRoutes, codexRouteOverrides, detectCodexRouter, effectiveRoute, localProxyAnswers, refreshRouterAvailability, registerRoutedTurnProbe, ROUTER_LABEL,
   ROUTER_UNAVAILABLE_TEXT, routerUsable, type CodexRouterDetection
 } from './router.js';
 import { TurnProjector, storeProjectorSink, type ProjectorSink } from './projector.js';
@@ -253,7 +253,10 @@ export function defaultCodexHost(): CodexHost {
       if (!runtime.windows) await stopOrphan(socket);
       else await run('wsl.exe', ['--exec', 'rm', '-f', socket], { timeout: 8_000 }).catch(() => undefined);
       // Windows: Codex runs in WSL, whose config.toml is not read here, so no router is detected.
-      const overrides = runtime.windows ? [] : codexRouteOverrides(route, detectCodexRouter());
+      const detection = runtime.windows ? null : detectCodexRouter();
+      // The user's own loopback openai_base_url proxy is used while it answers (router.ts `localProxy`).
+      const proxyDown = !!detection?.localProxy && !(await localProxyAnswers(detection.localProxy));
+      const overrides = detection ? codexRouteOverrides(route, detection, proxyDown) : [];
       // Chat Marks: the Brain MCP server (H1c); its bearer token only in the server's environment.
       const brain = await codexBrainMcpLaunch(runtime.windows);
       const [serverFile, serverArgs] = exec(runtime, codexServerArgv(socket, overrides, brain?.args));
@@ -633,10 +636,14 @@ export function createCodexEngine(options: CodexEngineOptions = {}): CodexEngine
     await refreshRouterAvailability();
     const session = await codexSession(sessionId);
     const turn = running.get(session.id);
+    const detection = routing();
+    const proxy = detection.localProxy;
+    const proxyDown = !!proxy && !(await localProxyAnswers(proxy));
     return {
       sessionId: session.id, conversationId: session.conversationId, engine: 'codex', model: session.record.model,
       effort: session.record.effort, running: !!turn, approval: session.record.approval ?? 'ask', pending: turn?.gate.view() ?? null,
-      route: routeOf(session.record), ...chatRoutes(routeOf(session.record), routing())
+      route: routeOf(session.record), ...chatRoutes(routeOf(session.record), detection),
+      ...(proxy && proxyDown ? { localProxyDown: `${proxy.host.includes(':') ? `[${proxy.host}]` : proxy.host}:${proxy.port}` } : {})
     };
   }
 

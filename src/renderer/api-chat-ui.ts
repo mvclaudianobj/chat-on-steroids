@@ -150,8 +150,9 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   terminal.hidden = true;
   ui(terminal, 'textContent', () => t('Open in terminal'));
   terminal.addEventListener('click', () => void openTerminal());
-  // A chat on "Via Claude Code Router" whose router is configured but not installed or not running:
-  // a row of the composer dock (above the composer), like the approval card.
+  // A chat on "Via Claude Code Router" whose router is configured but not installed or not running,
+  // or a Codex chat whose own local openai_base_url proxy is not running: a row of the composer
+  // dock (above the composer), like the approval card.
   const routeNotice = document.createElement('p');
   routeNotice.id = 'apiChatRouteNotice';
   routeNotice.className = 'api-chat-route-notice';
@@ -303,12 +304,16 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     for (const option of route.options) option.disabled = !routes.includes(option.value as AgentEngineRoute) && option.value !== chosenRoute;
     route.value = chosenRoute ?? DEFAULT_AGENT_ENGINE_ROUTE;
     const notice = chosenRoute === 'router' ? view?.routeNotice : undefined;
-    routeNotice.hidden = !notice;
-    routeNotice.textContent = !notice ? '' : `${notice === 'not_installed'
-      ? t('Claude Code Router is not installed. Install it from Settings > Modules.')
-      : t('Claude Code Router is not running. Start it from Settings > Modules.')} ${engineOf() === 'codex'
-      ? t('This Codex chat cannot answer until then; switch to "CLI account (direct)" to continue in a new Codex thread.')
-      : t('Until then this chat answers with the CLI account (direct).')}`;
+    // Codex without a router: the loopback openai_base_url proxy of its config.toml is not answering.
+    const proxyDown = !notice ? view?.localProxyDown : undefined;
+    routeNotice.hidden = !notice && !proxyDown;
+    routeNotice.textContent = proxyDown
+      ? t('The local proxy at {0} (openai_base_url in the Codex config.toml) is not running; start it to use it. Until then Codex uses the official endpoint of the CLI account.', [proxyDown])
+      : !notice ? '' : `${notice === 'not_installed'
+        ? t('Claude Code Router is not installed. Install it from Settings > Modules.')
+        : t('Claude Code Router is not running. Start it from Settings > Modules.')} ${engineOf() === 'codex'
+        ? t('This Codex chat cannot answer until then; switch to "CLI account (direct)" to continue in a new Codex thread.')
+        : t('Until then this chat answers with the CLI account (direct).')}`;
     // Between turns only: the next message runs on the other route.
     route.disabled = !view || busy || view.running;
     model.disabled = !view || busy;
