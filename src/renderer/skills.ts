@@ -204,7 +204,11 @@ export function initSkills(options: Options) {
       if (!current() || range?.kind !== 'remote' || painted !== selectionKey() || composing) { close(); return; }
       const value = skill.remote === 'off' ? 'off' : `"${skill.remote}"`;
       const text = input.value.slice(0, range.start) + value + input.value.slice(range.end);
-      close(); project((prefixOwner === options.owner() ? displayedPrefix : '') + text, 'authored', range.start + value.length);
+      // /remotemode is an app command, not a Skill directive: never pass it through
+      // split()/project(), which would strip its leading command into a chip.
+      close(); input.value = text; input.setSelectionRange(range.start + value.length, range.start + value.length);
+      options.saveDraft((prefixOwner === options.owner() ? displayedPrefix : '') + text);
+      input.dispatchEvent(new input.ownerDocument.defaultView!.Event('input', { bubbles: true }));
       input.focus(); return;
     }
     if ('file' in skill) {
