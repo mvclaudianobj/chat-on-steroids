@@ -1,4 +1,9 @@
 {
+  "Current task": "현재 작업",
+  "Last report": "최근 보고서",
+  "COO approvals": "COO 승인",
+  "No approvals recorded": "기록된 승인이 없습니다",
+  "approval-wait": "승인 대기 중",
   "Select Company worker for local grants": "로컬 권한을 부여할 회사 작업자 선택",
   "Archive finished workers after (minutes)": "완료된 작업자 보관 지연 시간(분)",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1~1440분. 기존 설치에는 기본값 2분이 유지됩니다.",

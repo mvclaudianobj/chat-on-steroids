@@ -6,6 +6,11 @@ import { companySnapshotSchema, companySeats, demoCompany, emptyCompany, type Co
 
 let root = '';
 let queue: Promise<void> = Promise.resolve();
+const companySubscribers = new Set<() => void>();
+export function onCompanySaved(listener: () => void): () => void {
+  companySubscribers.add(listener);
+  return () => { companySubscribers.delete(listener); };
+}
 export function initCompanyStore(userData: string): void { root = path.join(userData, 'company'); }
 export function resetCompanyStoreForTests(): void { root = ''; queue = Promise.resolve(); }
 
@@ -30,7 +35,9 @@ async function save(value: CompanySnapshot): Promise<void> {
   const target = path.join(await directory(), 'company.json');
   const next = companySnapshotSchema.parse(value);
   const tmp = path.join(root, `.${randomUUID()}.tmp`);
-  try { await fs.writeFile(tmp, JSON.stringify(next), { encoding: 'utf8', flag: 'wx', mode: 0o600 }); await fs.rename(tmp, target); }
+  try { await fs.writeFile(tmp, JSON.stringify(next), { encoding: 'utf8', flag: 'wx', mode: 0o600 }); await fs.rename(tmp, target);
+    for (const listener of companySubscribers) { try { listener(); } catch { /* persisted authority is independent of a view */ } }
+  }
   finally { await fs.rm(tmp, { force: true }); }
 }
 function serialized<T>(fn: () => Promise<T>): Promise<T> {

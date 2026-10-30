@@ -10,7 +10,7 @@ export function companyLiveSeatState(view: CompanyObservabilityView | null, seat
   if (!view || demo || view.demo || !Number.isFinite(view.at) || view.at > now + 5000 || now - view.at > 90_000) return unknown;
   const row = view.seats.find(item => item.seat === seat);
   if (!row || row.error) return unknown;
-  if (row.state === 'working' || row.state === 'shell-wait') {
+  if (row.state === 'working' || row.state === 'shell-wait' || row.state === 'approval-wait') {
     if (row.source !== 'broker' || row.observedAt === null || row.observedAt > now + 5000 || now - row.observedAt > 90_000) return unknown;
   }
   if (row.state === 'meeting-present' && row.source !== 'meeting') return unknown;

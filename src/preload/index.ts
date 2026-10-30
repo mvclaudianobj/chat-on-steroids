@@ -121,6 +121,11 @@ export interface SessionDetail {
 const api = {
   companyObserve: () => call<import('../main/company-observability.js').CompanyObservabilityView>('marksCompany:request', {action:'observe'}),
   company: (request: import('../main/company-ipc.js').CompanyIpcRequest) => call<import('../shared/company.js').CompanySnapshot>('marksCompany:request', request),
+  onCompanyChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('marksCompany:changed', wrapped);
+    return () => ipcRenderer.removeListener('marksCompany:changed', wrapped);
+  },
   companyLocalGrants: (subject?: import('../main/company-local-grants.js').CompanyLocalSubject) =>
     call<import('../main/company-local-grants.js').CompanyLocalGrantsView>('marksCompany:request',
       { action: 'localGrants', ...(subject ? { payload: { subject } } : {}) }),

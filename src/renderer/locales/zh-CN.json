@@ -1,4 +1,9 @@
 {
+  "Current task": "当前任务",
+  "Last report": "最新报告",
+  "COO approvals": "COO 审批",
+  "No approvals recorded": "没有审批记录",
+  "approval-wait": "等待审批",
   "Select Company worker for local grants": "选择要授予本地权限的公司员工",
   "Archive finished workers after (minutes)": "完成任务后归档工作者聊天的延迟（分钟）",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1 至 1440 分钟。现有安装保留默认的两分钟。",

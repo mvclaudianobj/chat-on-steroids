@@ -1,7 +1,7 @@
 import { dialog, ipcMain, type BrowserWindow } from 'electron';
 import { z } from 'zod';
 import { companyRoleSchema, companyPresenceSchema, companySeatSchema, companyStateNameSchema, companyMeetingKindSchema, companyChiefSchema, companyDelegationScopeSchema, companyChiefTitleSchema, cooHostApprovalTermSchema } from '../shared/company.js';
-import { activateRealCompany, restoreDemoCompany, getCompany, mutateCompany } from './company-store.js';
+import { activateRealCompany, restoreDemoCompany, getCompany, mutateCompany, onCompanySaved } from './company-store.js';
 import { createCompanyBroker } from './company-broker.js';
 import { createCompanyOrchestrator } from './company-orchestrator.js';
 import { createCompanyObserver } from './company-observability.js';
@@ -60,6 +60,10 @@ export function registerCompanyIpc(
 ): void {
   const broker = createCompanyBroker();
   const observer = createCompanyObserver();
+  onCompanySaved(() => {
+    const window = getWindow();
+    if (window && !window.isDestroyed()) window.webContents.send('marksCompany:changed');
+  });
   ipcMain.handle('marksCompany:request', async (event, payload: unknown) => {
     const window = getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents || event.senderFrame !== window.webContents.mainFrame)

@@ -1,4 +1,9 @@
 {
+  "Current task": "現在のタスク",
+  "Last report": "最新のレポート",
+  "COO approvals": "COOの承認",
+  "No approvals recorded": "記録された承認はありません",
+  "approval-wait": "承認待ち",
   "Select Company worker for local grants": "ローカル権限の対象となる企業ワーカーを選択",
   "Archive finished workers after (minutes)": "完了したワーカーをアーカイブするまでの時間（分）",
   "From 1 to 1440 minutes. Existing installations keep the two-minute default.": "1～1440分。既存の環境では標準の2分が維持されます。",

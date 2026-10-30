@@ -4,7 +4,7 @@
  * Inspired by office simulations, but all elements here are original artwork.
  */
 export type CompanyRpgState =
-  'working' | 'shell-wait' | 'needs-ceo' | 'review' | 'available-confirmed' |
+  'working' | 'approval-wait' | 'shell-wait' | 'needs-ceo' | 'review' | 'available-confirmed' |
   'meeting-present' | 'disconnected' | 'unverified';
 export type CompanyRpgRoom = 'desks' | 'meeting' | 'rest' | 'attention' | 'offline';
 export interface CompanyRpgObservation {
@@ -17,7 +17,7 @@ export interface CompanyRpgObservation {
 export function companyRpgRoom(state: CompanyRpgState): CompanyRpgRoom {
   if (state === 'meeting-present') return 'meeting';
   if (state === 'available-confirmed') return 'rest';
-  if (state === 'needs-ceo') return 'attention';
+  if (state === 'needs-ceo' || state === 'approval-wait') return 'attention';
   if (state === 'working' || state === 'shell-wait' || state === 'review') return 'desks';
   return 'offline';
 }
@@ -26,13 +26,13 @@ const definitions: Array<[CompanyRpgRoom, string]> = [
   ['attention', 'Needs CEO'], ['offline', 'Unverified / disconnected']
 ];
 const valid = new Set<CompanyRpgState>([
-  'working', 'shell-wait', 'needs-ceo', 'review', 'available-confirmed',
+  'working', 'approval-wait', 'shell-wait', 'needs-ceo', 'review', 'available-confirmed',
   'meeting-present', 'disconnected', 'unverified'
 ]);
 function safeState(observation: CompanyRpgObservation | undefined, demo: boolean): CompanyRpgState {
   if (!observation || demo || observation.error || !valid.has(observation.state as CompanyRpgState)) return 'unverified';
   const state = observation.state as CompanyRpgState;
-  if (state === 'working' && observation.source !== 'broker') return 'unverified';
+  if ((state === 'working' || state === 'approval-wait') && observation.source !== 'broker') return 'unverified';
   if (state === 'meeting-present' && observation.source !== 'meeting') return 'unverified';
   if (state === 'available-confirmed' && observation.source !== 'company') return 'unverified';
   return state;

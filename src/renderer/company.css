@@ -66,3 +66,19 @@
 .company-observe-panel{margin-top:16px}.company-observe-head{display:flex;justify-content:space-between;align-items:center;gap:8px}
 .company-observe-events{max-height:180px;overflow:auto;font-size:11px;color:var(--soft);padding-left:22px}
 @media(prefers-reduced-motion:reduce){.company-rpg *{transition:none!important;animation:none!important}}
+.company-office{align-items:stretch;gap:16px}
+.company-room{position:relative;background:color-mix(in srgb,var(--sunk) 86%,var(--accent) 14%);box-shadow:inset 0 0 0 3px var(--card),0 8px 26px #00000009}
+.company-room-head{border-bottom:1px solid var(--line);padding-bottom:13px}
+.company-desks{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));gap:12px}
+.company-desk{position:relative;min-width:0;min-height:110px;justify-content:center;transition:transform .18s,border-color .18s;box-shadow:0 3px 0 var(--line)}
+.company-desk:hover{transform:translateY(-2px)}
+.company-desk:not(.manager)::before{content:'';width:30px;height:7px;border:2px solid var(--line);border-bottom:0;border-radius:6px 6px 0 0;position:absolute;bottom:-8px}
+.company-desk-task{font-size:11px;line-height:1.3;max-width:100%;overflow-wrap:anywhere;text-align:center;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.company-desk[data-state='working']{border-color:var(--accent)}
+.company-desk[data-state='approval-wait'],.company-desk[data-state='needs-ceo']{border-color:var(--red)}
+.company-rest-worker-open{cursor:pointer;display:flex;align-items:center;gap:10px;flex:1;min-width:0;background:transparent;border:0;color:var(--ink);text-align:left;font:inherit}
+.company-rest-worker-open:focus-visible,.company-desk:focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.company-meeting{grid-column:span 2;border-style:solid;background:color-mix(in srgb,var(--accent-wash) 65%,var(--card) 35%)}
+.company-meeting .company-desk{display:inline-flex;margin:6px;vertical-align:top}
+@media(max-width:750px){.company-meeting{grid-column:span 1}}
+@media(prefers-reduced-motion:reduce){.company-desk{transition:none}.company-desk:hover{transform:none}}
