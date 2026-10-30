@@ -175,12 +175,14 @@ export const CODEX_OFFICIAL_BASE_URLS = { chatgpt: 'https://chatgpt.com/backend-
 
 /**
  * The official endpoint for the CLI's sign-in: only `auth.json`'s `auth_mode` is looked at (no
- * token is read out or logged); a ChatGPT sign-in gets the ChatGPT endpoint, anything else the API.
+ * token is read out or logged); an API-key sign-in gets the API endpoint, anything else ChatGPT's.
  */
 export function codexOfficialBaseUrl(codexHome: string): string {
   const auth = readJson(path.join(codexHome, 'auth.json'));
   const mode = isRecord(auth) && typeof auth.auth_mode === 'string' ? auth.auth_mode.toLowerCase() : '';
-  return mode.startsWith('chatgpt') ? CODEX_OFFICIAL_BASE_URLS.chatgpt : CODEX_OFFICIAL_BASE_URLS.api;
+  // Only an explicit API-key sign-in gets the API. An unreadable or half-written auth.json (a
+  // `codex login` rewrites it) must not send a ChatGPT account to the API, which answers 401.
+  return /^api/.test(mode) ? CODEX_OFFICIAL_BASE_URLS.api : CODEX_OFFICIAL_BASE_URLS.chatgpt;
 }
 
 /** Whether something accepts TCP connections at a local proxy's address now (bounded). */

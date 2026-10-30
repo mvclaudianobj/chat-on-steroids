@@ -167,6 +167,15 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
   directAccountStatus.setAttribute('role', 'status');
   let accountPolledAt = 0;
   let accountPending = false;
+  // The composer row has room for one account action: Sign in, only while signed out. Status, Sign in
+  // again and Sign out live in Settings > Modules; shown here they overlapped the route and model.
+  let accountSignedIn: boolean | null = null;
+  const paintAccount = (shown: boolean): void => {
+    claudeLogin.hidden = !shown || accountSignedIn !== false;
+    directAccountStatus.hidden = true;
+    directLoginAgain.hidden = true;
+    directLogout.hidden = true;
+  };
   async function refreshDirectAccount(): Promise<void> {
     const engine = engineOf();
     if (engine !== 'claude' && engine !== 'codex') return;
@@ -175,10 +184,13 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     accountPending = true;
     accountPolledAt = Date.now();
     try {
-      const result = await api.cliDirectAccount(engine);
-      directAccountStatus.textContent = result.ok
+      const result = await api.cliDirectAccount(engine).catch(() => null);
+      accountSignedIn = result?.ok && result.data ? result.data.signedIn : null;
+      directAccountStatus.textContent = result?.ok && result.data
         ? t(result.data.signedIn ? 'Direct account connected' : 'Direct account not signed in')
         : t('Account status unavailable');
+      claudeLogin.title = directAccountStatus.textContent;
+      paintAccount(engineOf() === engine && !claudeLogin.dataset.offRoute);
     } finally { accountPending = false; }
   }
   const directLoginAgain = document.createElement('button');
@@ -378,11 +390,9 @@ export function createApiChatUi(api: AppApi, hooks: ApiChatUiHooks, onAvailabili
     for (const choice of effort.options) choice.disabled = !!choice.value && !!efforts?.length && !efforts.includes(choice.value);
     const mode = terminalEngines.get(engineOf()) ?? null;
     terminal.hidden = !view || !mode;
-    claudeLogin.hidden = !view || (engineOf() !== 'claude' && engineOf() !== 'codex') || view.route !== 'direct';
     const directAccountShown = !!view && (engineOf() === 'claude' || engineOf() === 'codex') && view.route === 'direct';
-    directAccountStatus.hidden = !directAccountShown;
-    directLoginAgain.hidden = !directAccountShown;
-    directLogout.hidden = !directAccountShown;
+    if (directAccountShown) delete claudeLogin.dataset.offRoute; else claudeLogin.dataset.offRoute = '1';
+    paintAccount(directAccountShown);
     if (directAccountShown) void refreshDirectAccount();
     // A hand-over stops the app's own session, so it waits for the turn; a live attach does not.
     terminal.disabled = !view || busy || (mode === 'handover' && view.running);

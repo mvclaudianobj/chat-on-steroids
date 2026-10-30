@@ -118,15 +118,18 @@ describe('Claude Code Router detection: Codex', () => {
     expect(detection.localProxy).toBeUndefined();
     expect(codexRouteOverrides('router', detection)).toEqual([]);
     expect(() => codexServerArgv('/tmp/s', codexRouteOverrides('direct', detection))).not.toThrow();
-    // An API-key sign-in (or none) gets the API endpoint; other loopback spellings count too.
+    // Only an API-key sign-in gets the API endpoint; other loopback spellings count too.
     await writeTree(home, { '.codex/auth.json': JSON.stringify({ auth_mode: 'apikey' }) });
     expect(detectCodexRouter(environment()).directOverrides).toContain(`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.api}"`);
-    await fs.rm(path.join(home, '.codex', 'auth.json'));
-    expect(codexOfficialBaseUrl(path.join(home, '.codex'))).toBe(CODEX_OFFICIAL_BASE_URLS.api);
     for (const base of ['http://localhost:9/v1', 'http://[::1]:9/v1', 'http://127.1.2.3:9/v1']) {
       await writeTree(home, { '.codex/config.toml': `openai_base_url = "${base}"\n${CCR_CODEX_CONFIG}` });
       expect(detectCodexRouter(environment()).directOverrides).toContain(`openai_base_url="${CODEX_OFFICIAL_BASE_URLS.api}"`);
     }
+    // A missing or half-written auth.json (during `codex login`) must not send a ChatGPT account to the API.
+    await fs.rm(path.join(home, '.codex', 'auth.json'));
+    expect(codexOfficialBaseUrl(path.join(home, '.codex'))).toBe(CODEX_OFFICIAL_BASE_URLS.chatgpt);
+    await writeTree(home, { '.codex/auth.json': '{"auth_mode": "chat' });
+    expect(codexOfficialBaseUrl(path.join(home, '.codex'))).toBe(CODEX_OFFICIAL_BASE_URLS.chatgpt);
   });
 
   it('keeps a remote openai_base_url, and a loopback one without a router unless it does not answer', async () => {
