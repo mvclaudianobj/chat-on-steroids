@@ -4430,7 +4430,25 @@ it('tells a Firefox user how Firefox updates its add-on instead of pointing at t
   const text = mounted.window.document.getElementById('updateText')!.textContent!;
   expect(text).toContain('2.0.1');
   expect(text).toContain('about:addons');
+  expect(text).toContain('Mozilla Firefox');
   expect(text).not.toContain('folder');
+});
+
+it('names the selected ChatGPT browser when explaining which stale extension blocks Jarvis', async () => {
+  const mounted = await mountChat({ bridge: {
+    running: true, port: 8765, paired: true, present: true, lastSeenAt: Date.now(), extensionVersion: '2.0.1'
+  } });
+  const next = structuredClone(mounted.state) as any;
+  next.config.ui.chatBrowser = 'cos';
+  mounted.push(next);
+  const builtIn = mounted.window.document.getElementById('updateText')!.textContent!;
+  expect(builtIn).toContain('Chat Marks browser (built-in)');
+  expect(builtIn).toContain('2.0.1');
+  next.config.ui.chatBrowser = 'brave';
+  mounted.push(next);
+  const external = mounted.window.document.getElementById('updateText')!.textContent!;
+  expect(external).toContain('Brave Browser');
+  expect(external).toContain('Reload the extension');
 });
 
 // The outdated copy may be Firefox's while Chrome, current, was the last browser to report in.
