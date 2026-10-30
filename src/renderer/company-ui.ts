@@ -366,8 +366,9 @@ export function initCompanyUi(api: AppApi, openWorkerChat: (sessionId:string)=>v
     panel.append(feed);
   }
   function paintRpg():void {
-    if(!snapshot)return;
-    rpgWorld??=createCompanyRpgWorld($('companyRpg'),t,undefined,undefined,workerInspector);
+    if(!snapshot||view!=='rpg'){rpgWorld?.setVisible(false);return;}
+    rpgWorld??=createCompanyRpgWorld($('companyRpg'),t,undefined,undefined,workerInspector,
+      role=>roleInspector(role as typeof COMPANY_ROLES[number]));
     const safeRows=(observed?.seats??[]).map(row=>{
       const safe=companyLiveSeatState(observed,row.seat,snapshot!.demo);
       const ticket=snapshot!.requests.find(item=>item.id===row.ticketId && item.seat===row.seat &&
@@ -375,7 +376,21 @@ export function initCompanyUi(api: AppApi, openWorkerChat: (sessionId:string)=>v
       return {...row,state:safe.state,source:safe.source,error:safe.state==='unverified',
         taskTitle:safe.state==='working'&&safe.source==='broker'?ticket?.title:null};
     });
-    rpgWorld.update(snapshot.company.seats,safeRows,snapshot.demo || observed?.demo===true);
+    const employees=companyOfficeEmployees(snapshot,observed);
+    const active=snapshot.requests.filter(item=>item.status!=='done');
+    const projects=[...new Set(active.map(row=>row.project))].map(title=>({id:title,title}));
+    const assignments:Record<string,string>={};
+    const seatRoles:Record<string,string>={};
+    for(const employee of employees){
+      seatRoles[employee.seat]=employee.role;
+      if(employee.ticket && active.some(item=>item.id===employee.ticket!.id))
+        assignments[employee.seat]=employee.ticket.project;
+    }
+    rpgWorld.update(snapshot.company.seats,safeRows,snapshot.demo || observed?.demo===true,{
+      projects,assignments,seatRoles,
+      areas:COMPANY_ROLES.map((role,index)=>({role,name:t(COMPANY_AREAS[index]!)}))
+    });
+    rpgWorld.setVisible(view==='rpg' && document.visibilityState!=='hidden');
   }
   async function loadObservation():Promise<void>{
     const generation=++observationGeneration;
@@ -508,6 +523,7 @@ export function initCompanyUi(api: AppApi, openWorkerChat: (sessionId:string)=>v
   $('companyBoardTab').addEventListener('click', () => switchView('board'));
   $('companyOfficeTab').addEventListener('click', () => switchView('office'));
   $('companyRpgTab').addEventListener('click', () => switchView('rpg'));
+  document.addEventListener('visibilitychange',()=>rpgWorld?.setVisible(view==='rpg'&&document.visibilityState!=='hidden'));
   onLanguageChange(() => { if (snapshot) paint(); });
   return { refresh };
 }
