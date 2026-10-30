@@ -52,6 +52,7 @@ const sendBody = z
     sessionId: z.string().regex(/^[0-9a-z-]{8,64}$/).optional(),
     // The project a new chat starts in. An existing chat keeps the one it has.
     projectId: lowerUuid.optional(),
+    temporaryChat: z.boolean().optional(),
     text: z.string().max(MAX_TEXT).refine((value) => value.trim().length > 0, 'text is empty'),
     // Consent to a send that would stop the answer ChatGPT is writing right now.
     interrupt: z.boolean().optional(),
@@ -61,6 +62,7 @@ const sendBody = z
   })
   .strict()
   .refine((body) => body.sessionId === undefined || body.projectId === undefined, { path: ['projectId'], message: 'a project belongs to a new chat' })
+  .refine((body) => body.sessionId === undefined || body.temporaryChat !== true, { path: ['temporaryChat'], message: 'a temporary chat must be new' })
   .refine((body) => (body.model === undefined) === (body.reasoningEffort === undefined), { path: ['reasoningEffort'], message: 'model and reasoningEffort go together' });
 
 const cancelBody = z.object({}).strict();
@@ -142,7 +144,8 @@ async function send(rawBody: unknown): Promise<ActionReply> {
   if (existing) {
     // A new chat's first message is filed under its own id.
     if (existing.purpose === 'decision' || existing.sessionId !== (body.sessionId ?? body.id) || existing.text !== text ||
-        existing.model !== selection.model || existing.reasoningEffort !== selection.reasoningEffort) {
+        existing.model !== selection.model || existing.reasoningEffort !== selection.reasoningEffort ||
+        (existing.temporaryChat === true) !== (body.temporaryChat === true)) {
       throw new RequestError(409, 'id_conflict', 'this id belongs to a different message');
     }
     const replay: ControlApiSendResult = { input: projectInput(existing), replayed: true };
@@ -170,6 +173,7 @@ async function send(rawBody: unknown): Promise<ActionReply> {
     // The outbox opens a chat for a message without a session, exactly as the composer's New chat does.
     sessionId: body.sessionId ?? null,
     ...(body.projectId !== undefined ? { projectId: body.projectId } : {}),
+    ...(body.temporaryChat === true ? { temporaryChat: true as const } : {}),
     text,
     mode: 'auto',
     dueAt: Date.now(),

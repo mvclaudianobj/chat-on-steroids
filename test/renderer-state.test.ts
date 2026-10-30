@@ -618,7 +618,7 @@ it('starts project groups collapsed and deliberately expands the project selecte
   expect(create.dataset.newProject).toBe(project.id);
   expect(create.nextElementSibling?.classList.contains('project-menu')).toBe(true);
   const item = rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')!;
-  expect([...mounted.window.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(row => row.dataset.rowAction)).toEqual(['new-chat', 'group-new', 'chatgpt-link', 'color', 'secrets-shield', 'remove']);
+  expect([...mounted.window.document.querySelectorAll<HTMLElement>('.row-menu > .row-menu-item')].map(row => row.dataset.rowAction)).toEqual(['new-chat', 'temporary-chat', 'group-new', 'chatgpt-link', 'color', 'secrets-shield', 'remove']);
   expect(item.textContent).toBe('New chat in this project');
   expect(item.dataset.newProject).toBe(project.id);
   expect(mounted.window.document.activeElement).toBe(item);

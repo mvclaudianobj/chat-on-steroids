@@ -106,6 +106,7 @@ export interface ControlApiText {
 }
 
 export interface ControlApiSession {
+  temporaryChat?: boolean;
   id: string;
   title: string;
   conversationId: string | null;

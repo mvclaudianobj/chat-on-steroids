@@ -4623,5 +4623,10 @@
   "60 days": "60일",
   "90 days": "90일",
   "180 days": "180일",
-  "365 days": "365일"
+  "365 days": "365일",
+  "Temporary chat": "임시 채팅",
+  "Temporary chat without local recording": "로컬 기록 없는 임시 채팅",
+  "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "이 대화는 ChatGPT 기록에 표시되지 않습니다. Chat Marks에는 로컬 기록이 남습니다.",
+  "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "ChatGPT를 직접 엽니다. Chat Marks는 로컬 채팅을 만들거나 메시지를 기록하지 않습니다.",
+  "Temporary chats cannot use Compact & Resume.": "임시 채팅에서는 압축 후 계속를 사용할 수 없습니다."
 }

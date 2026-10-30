@@ -4623,5 +4623,10 @@
   "60 days": "60 日",
   "90 days": "90 日",
   "180 days": "180 日",
-  "365 days": "365 日"
+  "365 days": "365 日",
+  "Temporary chat": "一時チャット",
+  "Temporary chat without local recording": "ローカル記録なしの一時チャット",
+  "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "この会話はChatGPTの履歴に表示されません。Chat Marksにはローカル記録が残ります。",
+  "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "ChatGPTを直接開きます。Chat Marksはローカルチャットを作成せず、メッセージを記録しません。",
+  "Temporary chats cannot use Compact & Resume.": "一時チャットでは 圧縮して再開 を使用できません。"
 }

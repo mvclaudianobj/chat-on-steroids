@@ -4623,5 +4623,10 @@
   "60 days": "60 天",
   "90 days": "90 天",
   "180 days": "180 天",
-  "365 days": "365 天"
+  "365 days": "365 天",
+  "Temporary chat": "暫時聊天",
+  "Temporary chat without local recording": "不保留本機記錄的暫時聊天",
+  "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "此對話不會顯示在 ChatGPT 歷史記錄中。Chat Marks 仍會保留本機記錄。",
+  "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "直接開啟 ChatGPT。Chat Marks 不會建立本機聊天或記錄訊息。",
+  "Temporary chats cannot use Compact & Resume.": "暫時聊天不支援 壓縮並繼續。"
 }

@@ -581,6 +581,7 @@ export async function createSession(options: {
   reservedId?: string;
   title?: string;
   titleSource?: SessionSummary['titleSource'];
+  temporaryChat?: boolean;
   conversationId?: string | null;
   origin?: SessionOrigin | null;
 }): Promise<SessionSummary> {
@@ -594,6 +595,7 @@ export async function createSession(options: {
     }
   }
   const summary = emptySummary(id, options.title?.trim() || 'ChatGPT session', options.conversationId ?? null);
+  if (options.temporaryChat || options.origin?.temporaryChat) summary.temporaryChat = true;
   summary.origin = options.origin ?? null;
   if (options.titleSource) summary.titleSource = options.titleSource;
   if (options.origin?.fromSessionId) {
@@ -3621,8 +3623,20 @@ export async function setSessionOrigin(id: string, origin: SessionOrigin, title:
     if (inheritedProject && entry.summary.projectId && entry.summary.projectId !== inheritedProject) throw new Error('Session origin belongs to another project');
     // A name the user gave the chat stays; the origin's title becomes the one clearing it restores.
     const named = entry.summary.titleSource === 'manual';
-    const staged = { ...entry.summary, origin, ...(named ? { autoTitle: { title: title.slice(0, 120), source: 'fallback' as const } } : { title: title.slice(0, 120) }),
+    const staged = { ...entry.summary, origin, ...(origin.temporaryChat ? { temporaryChat: true } : {}), ...(named ? { autoTitle: { title: title.slice(0, 120), source: 'fallback' as const } } : { title: title.slice(0, 120) }),
       ...(inheritedProject ? { projectId: inheritedProject } : {}) };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+  });
+}
+
+/** Observed provider UI, for a native Temporary chat opened outside Chat Marks' own menu. */
+export async function markSessionTemporaryChat(id: string, conversationId: string): Promise<void> {
+  const entry = await ensureOpen(id);
+  await enqueueSessionOperation(entry, 'temporary chat proof', async () => {
+    if (entry.summary.conversationId !== conversationId || entry.summary.temporaryChat) return;
+    const staged = { ...entry.summary, temporaryChat: true };
     await writeSummary(staged, entry.historySeq);
     entry.summary = staged;
     publishAttachmentSummary(staged);

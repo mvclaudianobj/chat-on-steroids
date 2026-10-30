@@ -37,6 +37,33 @@
   // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
   // A healthy incumbent in this context still wins the static/recovery injection race.
   const RECORDER_VERSION = 22;
+  // A user who opened ChatGPT directly using "Temporary chat without local recording"
+  // has no outbox/session in Chat Marks. Follow the provider's SPA transition to its
+  // temporary conversation in this tab, and stop reporting that chat to our service worker.
+  // This marker contains a route, never authored text; a different chat clears it.
+  const NO_LOCAL_STORAGE = 'clf-no-local-temporary-route';
+  let noLocalRoute = '';
+  try { noLocalRoute = sessionStorage.getItem(NO_LOCAL_STORAGE) || ''; } catch { /* storage unavailable */ }
+  function localRecordingDisabled() {
+    const url = new URL(location.href);
+    const temporary = url.searchParams.get('temporary-chat') === 'true';
+    if (temporary && url.pathname === '/' && url.searchParams.get('clf-no-local-recording') === 'true') {
+      noLocalRoute = 'opening';
+    } else if (noLocalRoute === 'opening' && /^\/c\/[0-9a-f-]{36}$/i.test(url.pathname)) {
+      noLocalRoute = url.pathname;
+    } else if ((noLocalRoute === 'opening' && (!temporary || url.pathname !== '/')) ||
+      (noLocalRoute.startsWith('/c/') && url.pathname !== noLocalRoute)) {
+      noLocalRoute = '';
+    }
+    try {
+      if (noLocalRoute) sessionStorage.setItem(NO_LOCAL_STORAGE, noLocalRoute);
+      else sessionStorage.removeItem(NO_LOCAL_STORAGE);
+    } catch { /* current document still remembers */ }
+    // ChatGPT may discard the query during SPA navigation. After the private
+    // opening binds to a conversation, prevent recording on its exact route.
+    return !!noLocalRoute &&
+      (noLocalRoute === 'opening' ? url.pathname === '/' : url.pathname === noLocalRoute);
+  }
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -1400,7 +1427,7 @@
   let documentReady = null;
 
   async function sendToWorker(message) {
-    if (!alive) return null;
+    if (!alive || localRecordingDisabled()) return null;
     try {
       return await chrome.runtime.sendMessage(message);
     } catch (err) {
@@ -1470,6 +1497,7 @@
 
   /** Talks to the service worker. Returns null once the extension is reloaded. */
   async function ask(message, current = null) {
+    if (typeof localRecordingDisabled === 'function' && localRecordingDisabled()) return null;
     // A new/reloaded document claims its browser-supplied MessageSender.documentId before
     // any observation or mutation. This is what lets the worker retain a terminal tombstone
     // across external navigation and still admit the genuinely new page, without accepting
@@ -1652,7 +1680,7 @@
    * renames them when bindConversation() reports the real id.
    */
   async function flush() {
-    if (temporaryPlannerPage()) { while (queue.length) removeQueueEntry(0); return true; }
+    if (temporaryPlannerPage() || localRecordingDisabled()) { while (queue.length) removeQueueEntry(0); return true; }
     if (commandJournalGate) return false;
     if (queue.length === 0) return true;
     if (flushWork) return flushWork;
@@ -1672,7 +1700,8 @@
         type: 'events',
         entries: batch,
         projectInput,
-        conversationId: conversationId || undefined
+        conversationId: conversationId || undefined,
+        ...(CLF_DOM.temporaryChatReady() ? { temporaryChat: true } : {})
       });
       // `ok` means the service worker handled the message, not necessarily that its journal
       // reached chrome.storage.session. Release page ownership only when the worker says the
@@ -12228,6 +12257,17 @@
       'ChatGPT never exposed a usable composer for bootstrap'
     ), 'transient'));
     if (await failIfRetargeted()) return;
+    if (boot.type === 'worker' && boot.temporaryChat === true) {
+      const nativeTemporary = async () => { await askFiber(); return CLF_DOM.temporaryChatSurface() && CLF_DOM.temporaryChatReady(); };
+      if (!await nativeTemporary()) {
+        CLF_DOM.confirmTemporaryChatIntroduction();
+        await waitPageView(nativeTemporary, stillOnTarget, 3000);
+      }
+      if (!await nativeTemporary()) return void (await fail(t(
+        'content_delivery_temporary_chat_unconfirmed',
+        'Temporary Chat was not confirmed. Open the helper tab and complete its Temporary Chat introduction.'
+      )));
+    }
 
     if (boot.model || boot.reasoningEffort) step('model');
     if ((boot.model || boot.reasoningEffort) && !(await CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget))) {
@@ -13467,6 +13507,9 @@
       (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
       (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length));
     if (!target && !ownsFreshPage()) return false;
+    // A normal root composer can never spend a temporary opening. The browser must
+    // prove the provider's own temporary route before it may claim the first Send.
+    if (!target && message.temporaryChat === true && !CLF_DOM.temporaryChatSurface()) return false;
     // A linked Project ChatGPT no longer has (#1759). ChatGPT used to send its page home, which the
     // extension reports; since October 2026 the page stays on "loading", with no composer, for good.
     // Gone only when the page has had its time and the open Projects list does not name it.
@@ -13575,7 +13618,7 @@
       }
       // A message for the running turn keeps that turn's model: the picker belongs to the next turn.
       const intoRunningTurn = () => !!message.directTurn && CLF_DOM.generating();
-      const temporary = input.lifetime === 'temporary-planner';
+      const temporary = input.lifetime === 'temporary-planner' || input.temporaryChat === true;
       // On the newer shell an empty temporary chat is proven only by the page-model stamp, and
       // nothing else scans a document with no conversation yet: ask for one before judging.
       const temporaryProven = async () => { await askFiber(); return CLF_DOM.temporaryChatReady(); };
@@ -13583,7 +13626,7 @@
         CLF_DOM.confirmTemporaryChatIntroduction();
         await waitPageView(temporaryProven, onTarget, 3000);
       }
-      if (temporary && (!temporaryPlannerPage() || !CLF_DOM.temporaryChatReady())) return fail(t(
+      if (temporary && (!(input.temporaryChat === true ? CLF_DOM.temporaryChatSurface() : temporaryPlannerPage()) || !CLF_DOM.temporaryChatReady())) return fail(t(
         'content_delivery_temporary_chat_unconfirmed',
         'Temporary Chat was not confirmed. Open the helper tab and complete its Temporary Chat introduction.'
       ));

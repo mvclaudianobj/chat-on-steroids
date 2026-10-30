@@ -144,6 +144,7 @@ import {
   conversationWasSuperseded,
   findSessionByConversation,
   getSession,
+  markSessionTemporaryChat,
   readSessionPlan,
   listUsageSessions,
   readRecentEvents,
@@ -418,6 +419,7 @@ type CommandSpec =
        * value; only the chat's own picker state proves what ChatGPT applied.
        */
       reasoningEffort: ReasoningEffort | null;
+      temporaryChat?: boolean;
       runId: string;
     }
   /**
@@ -561,6 +563,8 @@ interface DurableCommandSnapshot {
 
 /** The wire form the extension receives. */
 export interface BridgeCommand {
+  /** Worker explicitly opened with ChatGPT's native temporary mode. */
+  temporaryChat?: boolean;
   id: string;
   /** Absolute browser-delivery deadline for this leased command. */
   expiresAt: number;
@@ -2347,6 +2351,7 @@ export async function setSessionAutomation(sessionId: string, automation: Sessio
 /** One ticket publication boundary shared by browser and app controls. */
 async function fileCompactionTicket(sessionId: string, id: string, automatic = false) {
   if (await controlledConversation(sessionId) !== id) throw new Error('conversation_changed');
+  if ((await getSession(sessionId))?.temporaryChat) throw new Error('Temporary chats cannot use Compact & Resume: ChatGPT does not save the conversation in history. Start a new regular chat to continue.');
   if (goalWorkerChat(id)) throw new Error('worker_compaction_disabled');
   if (isChatBlocked(id)) throw new Error('chat_blocked');
   if (automatic && !automaticCompactionAllowed(await getSession(sessionId))) throw new Error('automatic_compaction_disabled');
@@ -3296,7 +3301,8 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
             kind: 'worker',
             fromSessionId: prime ? (await findSessionByConversation(prime, { requireUnique: true }))?.id ?? null : null,
             agentId: worker.id,
-            task: worker.task
+            task: worker.task,
+            ...(worker.temporaryChat ? { temporaryChat: true } : {})
           });
         }
       }
@@ -3311,6 +3317,7 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse): Prom
         }
         throw err;
       }
+      if (body['temporaryChat'] === true && result.sessionId) await markSessionTemporaryChat(result.sessionId, id);
       const superseded = await conversationWasSuperseded(id);
       if (!superseded && !isChatBlocked(id) && result.activity.working && result.activity.at) {
         const woke = result.activity.startedAt !== undefined
@@ -6008,7 +6015,7 @@ async function startBridgeOnce(epoch: number, prepared?: PreparedBridge): Promis
   retireInactiveWorkerRecovery();
   dropSpawnRequestListener?.();
   dropSpawnRequestListener = onSpawnRequest((workers) => {
-    for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId);
+    for (const worker of workers) queueWorkerBootstrap(worker.id, worker.task, worker.model, worker.reasoningEffort, worker.runId, worker.temporaryChat === true);
   });
   // The same replay contract for waking a worker that already has a chat. A run restored
   // from disk can hold a worker left in `waking` by a crash mid-revival; registering here
@@ -6719,12 +6726,12 @@ async function cancelAutomaticResumesNow(sessionId?: string): Promise<number> {
  * stored: the chat this opens is bound to the slot by the extension's report, and the
  * recovery key exists only if the user asks the app for one after that has failed.
  */
-export function queueWorkerBootstrap(agent: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, runId: string): BridgeCommand | null {
+export function queueWorkerBootstrap(agent: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, runId: string, temporaryChat = false): BridgeCommand | null {
   // A worker bootstrap is authority for one concrete broker incarnation. There is no safe
   // meaning for one outside a run, and manufacturing an unscoped command here is exactly how
   // stale durable work later becomes somebody else's `worker-1`.
   if (!runId || !swarmRunning(runId)) return null;
-  const command = queue({ type: 'worker', agent, task, model, reasoningEffort, runId });
+  const command = queue({ type: 'worker', agent, task, model, reasoningEffort, runId, ...(temporaryChat ? { temporaryChat: true } : {}) });
   // Start the clock at broker admission, exactly as a revival does. A bootstrap that never
   // reaches a page is the case that has no other clock at all.
   armDeadline(command);
@@ -6883,7 +6890,8 @@ export function commandUrl(
   model?: string | null,
   reasoningEffort?: ReasoningEffort | null,
   project?: string | null,
-  sourceConversationId?: string | null
+  sourceConversationId?: string | null,
+  temporaryChat = false
 ): string {
   // Both a query and a fragment: ChatGPT is a single-page app that rewrites its own URL
   // during boot, and which of the two survives has changed between builds. The content
@@ -6903,6 +6911,7 @@ export function commandUrl(
   const params = [marker];
   if (model) params.push(`model=${encodeURIComponent(model)}`);
   if (reasoningEffort) params.push(`reasoning_effort=${encodeURIComponent(reasoningEffort)}`);
+  if (temporaryChat && !entry) params.push('temporary-chat=true');
   const base = entry ? chatUrl(entry) : 'https://chatgpt.com/';
   return `${base}?${params.join('&')}#${marker}`;
 }
@@ -10921,7 +10930,7 @@ async function openFreshChatInBrowser(command: Command): Promise<void> {
     command.progress = { ...command.progress, opened: 'os' };
     await openInBrowser(
       command.spec.type === 'worker'
-        ? commandUrl(command.id, command.spec.model, command.spec.reasoningEffort)
+        ? commandUrl(command.id, command.spec.model, command.spec.reasoningEffort, null, null, command.spec.temporaryChat === true)
         : commandUrl(command.id, null, null, commandProject(command), commandHomeConversation(command.spec))
     );
   } catch (err) {
@@ -11248,6 +11257,7 @@ function describe(command: Command, client: string | null, claimedSummary?: stri
     agent: spec.type === 'resume' ? null : spec.agent,
     model: spec.type === 'worker' ? spec.model : selection?.model ?? null,
     reasoningEffort: spec.type === 'worker' ? spec.reasoningEffort : selection?.reasoningEffort ?? null,
+    ...(spec.type === 'worker' && spec.temporaryChat ? { temporaryChat: true } : {}),
     // The fence the page enforces before it types. Only a revival has one: the other two
     // kinds open a chat that does not exist yet, so there is nothing to compare against.
     conversationId: spec.type === 'revive' ? spec.conversationId : null
@@ -11508,7 +11518,8 @@ async function specOrigin(spec: CommandSpec | undefined): Promise<SessionOrigin 
       fromSessionId: swarmRunning(spec.runId) && primeConversation(spec.runId)
         ? (await findSessionByConversation(primeConversation(spec.runId)!, { requireUnique: true }))?.id ?? null : null,
       agentId: spec.agent,
-      task: spec.task
+      task: spec.task,
+      ...(spec.temporaryChat ? { temporaryChat: true } : {})
     };
   // A revival opens no chat, so it names none. The conversation it lands in was recorded as a
   // worker chat when it was first opened, and rewriting that origin now would only overwrite
@@ -11648,6 +11659,7 @@ function restoredCommandSpec(version: number, raw: Partial<CommandSpec>): Comman
       task: worker.task.slice(0, 512 * 1024),
       model: isModelSlug(worker.model) ? worker.model : null,
       reasoningEffort: isReasoningEffort(worker.reasoningEffort) ? worker.reasoningEffort : null,
+      ...(worker.temporaryChat === true ? { temporaryChat: true } : {}),
       runId: worker.runId
     };
   }

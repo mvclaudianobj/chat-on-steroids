@@ -4623,5 +4623,10 @@
   "60 days": "60 ngày",
   "90 days": "90 ngày",
   "180 days": "180 ngày",
-  "365 days": "365 ngày"
+  "365 days": "365 ngày",
+  "Temporary chat": "Cuộc trò chuyện tạm thời",
+  "Temporary chat without local recording": "Trò chuyện tạm thời không lưu cục bộ",
+  "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "Cuộc trò chuyện này sẽ không xuất hiện trong lịch sử ChatGPT. Chat Marks vẫn lưu bản ghi cục bộ.",
+  "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "Mở ChatGPT trực tiếp. Chat Marks không tạo cuộc trò chuyện cục bộ hoặc lưu tin nhắn.",
+  "Temporary chats cannot use Compact & Resume.": "Trò chuyện tạm thời không hỗ trợ Compact & Resume."
 }

@@ -1365,7 +1365,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 .optional()
                 .describe(
                   'Only for an effort the user asked for; app settings supply the default. Selects reasoning only, never a model.'
-                )
+                ),
+              temporary_chat: z.boolean().optional().describe('A temporary ChatGPT chat has no provider history.')
             }).strict()
           )
           .min(1)
@@ -1494,7 +1495,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               run_id: runId,
               self: PRIME_ID,
               became_prime: becamePrime,
-              workers: created.map((info) => ({ id: info.id, label: info.label, state: info.state, model: info.model, reasoning_effort: info.reasoningEffort }))
+              workers: created.map((info) => ({ id: info.id, label: info.label, state: info.state, model: info.model, reasoning_effort: info.reasoningEffort, temporary_chat: info.temporaryChat === true }))
             }
           };
         }

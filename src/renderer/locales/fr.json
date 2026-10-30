@@ -4757,5 +4757,10 @@
   "60 days": "60 jours",
   "90 days": "90 jours",
   "180 days": "180 jours",
-  "365 days": "365 jours"
+  "365 days": "365 jours",
+  "Temporary chat": "Discussion temporaire",
+  "Temporary chat without local recording": "Discussion temporaire sans enregistrement local",
+  "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "Cette conversation ne figurera pas dans l’historique de ChatGPT. Chat Marks conserve un enregistrement local.",
+  "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "Ouvre ChatGPT directement. Chat Marks ne crée pas de discussion locale et n’enregistre pas les messages.",
+  "Temporary chats cannot use Compact & Resume.": "Les discussions temporaires ne prennent pas en charge Compacter et reprendre."
 }

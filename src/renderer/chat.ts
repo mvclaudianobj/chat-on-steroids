@@ -200,6 +200,14 @@ let selectedId: string | null = null;
 /** #1826: the chat's schedule dialog, opened from its ⋯ menu and its schedule line. */
 let scheduleDialog: { open(sessionId: string, draft: string): Promise<void> } | null = null;
 let newChatSelected = true;
+let newTemporaryChat = false;
+/** Choose ChatGPT's temporary mode for the first message of the next chat. */
+export function selectTemporaryChat(): void {
+  selectNewChat();
+  newTemporaryChat = true;
+  const heading = document.getElementById('chatTitle');
+  if (heading) heading.textContent = t('Temporary chat');
+}
 let selectedProjectId: string | null = null;
 /** Branch in new chat (#482): the reply the new chat being written will branch from, if any. */
 let newChatBranch: { sessionId: string; conversationId: string; messageId: string; title: string } | null = null;
@@ -327,6 +335,11 @@ function projectMenuItems(id: string): RowMenuItem[] {
       action: 'new-chat', icon: chatTypeIcon('chatgpt'), label: () => t('New chat in this project'), data: { newProject: id },
       run: () => selectNewChat(id)
     } satisfies RowMenuItem,
+    ...(!link || link.state !== 'linked' ? [{
+      action: 'temporary-chat', icon: 'i-shield', label: () => t('Temporary chat'),
+      title: () => t('This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.'),
+      run: () => { selectNewChat(id); newTemporaryChat = true; }
+    } satisfies RowMenuItem] : []),
     // Chat Marks: a CLIProxy chat that belongs to this project.
     ...(project ? deps.projectChatItems?.(project.id) ?? [] : []),
     ...(newTerminal ? [newTerminal] : []),
@@ -6914,7 +6927,20 @@ function paintDetail(followBottom = historyBefore === null): void {
   const project = selectedLocalProject();
   $('chatProjectContext').hidden = !project;
   $('chatProjectName').textContent = project?.name ?? '';
-  ui($('chatTitle'), 'textContent', () => summary ? shownSessionTitle(summary) : t("New chat"));
+  const temporaryLabel = summary?.temporaryChat ? t('Temporary chat') : '';
+  $('chatTitle').title = temporaryLabel ? t('This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.') : '';
+  ui($('chatTitle'), 'textContent', () => summary ? shownSessionTitle(summary) : newTemporaryChat ? t('Temporary chat') : t("New chat"));
+  let tempNotice = document.getElementById('chatTemporaryNotice');
+  if (!tempNotice) {
+    tempNotice = document.createElement('span');
+    tempNotice.id = 'chatTemporaryNotice';
+    tempNotice.className = 'chat-temporary-notice';
+    $('chatTitle').after(tempNotice);
+  }
+  tempNotice.hidden = !(summary?.temporaryChat || (newChatSelected && newTemporaryChat));
+  tempNotice.textContent = t('This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.');
+  $<HTMLButtonElement>('compactSession').disabled = summary?.temporaryChat === true;
+  $<HTMLButtonElement>('compactSession').title = summary?.temporaryChat ? t('Temporary chats cannot use Compact & Resume.') : '';
 
   paintDeliveryControls();
   paintAgentFilter();
@@ -9371,7 +9397,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
     ? { sessionId: newChatBranch.sessionId, conversationId: newChatBranch.conversationId, messageId: newChatBranch.messageId }
     : reserved?.origin?.branchOf && reserved.origin.fromSessionId && !reserved.conversationId
       ? { sessionId: reserved.origin.fromSessionId, ...reserved.origin.branchOf } : undefined;
-  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
+  startingInputs.set(id, { id, sessionId, projectId, text, ...attachmentPayload, ...(newTemporaryChat && !sessionId ? { temporaryChat: true as const } : {}), ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn',
     dueAt, ...modelSettings, state: 'queued', owner: null, createdAt: dueAt, conversationId: null });
   replaceComposerDraft();
   input.value = ''; inputDrafts.delete(key);
@@ -9391,7 +9417,7 @@ async function sendComposer(delivery?: 'finish' | 'auto' | 'after-turn', plan?: 
   void refreshInputQueue();
   paintDeliveryControls();
   try {
-    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(picture ? { imageRequest: true as const } : {}), ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
+    const result = await run(api.sendInput({ id, sessionId, projectId, text, ...attachmentPayload, ...(newTemporaryChat && !sessionId ? { temporaryChat: true as const } : {}), ...(picture ? { imageRequest: true as const } : {}), ...(branch ? { branch } : {}), ...(edit ? { edit } : {}), stages: plan?.slice(1), objective, authoredSource, automation: mode === 'finish' ? undefined : $<HTMLSelectElement>('chatAutomation').value as InputAutomation, loopAfterTurn: openingLoopDelivery(), mode: mode === 'finish' ? 'finish' : mode === 'auto' ? 'auto' : 'after-turn', dueAt, ...modelSettings }));
     if (cancelledStarts.has(id)) return;
     if (!result) {
       // A disk failure after outbox commit still owns this input. Keep its exact
@@ -9551,6 +9577,7 @@ function selectSession(id: string): void {
 }
 
 function selectNewChat(projectId: string | null = null, branch: typeof newChatBranch = null): void {
+  newTemporaryChat = false;
   quoteSelection?.reset();
   if (editingQuestion) endEditing(true);
   newChatBranch = branch;
@@ -9577,6 +9604,7 @@ function selectNewChat(projectId: string | null = null, branch: typeof newChatBr
 
 export function initChat(next: Deps): void {
   if (initialized) { deps = next; return; }
+  document.addEventListener('marks:temporary-chat', () => selectTemporaryChat());
   initialized = true;
   sidebarCompletion = createSidebarCompletionState();
   sidebarPins = createSidebarPins();

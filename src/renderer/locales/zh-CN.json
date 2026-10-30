@@ -4623,5 +4623,10 @@
   "60 days": "60 天",
   "90 days": "90 天",
   "180 days": "180 天",
-  "365 days": "365 天"
+  "365 days": "365 天",
+  "Temporary chat": "临时聊天",
+  "Temporary chat without local recording": "不保留本地记录的临时聊天",
+  "This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.": "此对话不会显示在 ChatGPT 历史记录中。Chat Marks 仍会保留本地记录。",
+  "Opens ChatGPT directly. Chat Marks does not create a local chat or record its messages.": "直接打开 ChatGPT。Chat Marks 不会创建本地聊天或记录消息。",
+  "Temporary chats cannot use Compact & Resume.": "临时聊天不支持 压缩并继续。"
 }

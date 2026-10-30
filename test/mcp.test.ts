@@ -707,7 +707,7 @@ describe('surface boundaries', () => {
     const agentsTool = toolList(await core('tools/list')).find((tool) => tool.name === 'agents')!;
     const worker = agentsTool.inputSchema.properties.workers.items;
 
-    expect(Object.keys(worker.properties).sort()).toEqual(['label', 'model', 'reasoning_effort', 'task']);
+    expect(Object.keys(worker.properties).sort()).toEqual(['label', 'model', 'reasoning_effort', 'task', 'temporary_chat']);
     // Only `task` is required: omitting both keeps exactly the previous behaviour, which is
     // the account default, or whatever the user chose in settings.
     expect(worker.required).toEqual(['task']);

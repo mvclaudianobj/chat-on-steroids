@@ -689,6 +689,7 @@ export interface RetiredChat {
 
 /** A worker whose chat still has to be opened. Carries no credential. */
 export interface WorkerSpawn {
+  temporaryChat?: boolean;
   runId: string;
   primeConversationId: string | null;
   id: string;
@@ -706,7 +707,7 @@ export function pendingWorkerSpawns(): WorkerSpawn[] {
       (agent) =>
         agent.info.role === 'worker' && agent.info.state === 'invited' && !unpublishedAgents.has(agent)
     )
-    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort })));
+    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort, ...(agent.info.temporaryChat ? { temporaryChat: true } : {}) })));
 }
 
 /**
@@ -1449,7 +1450,7 @@ export function identify(caller: Caller): AgentInfo {
  * cannot tell them apart is one that reports back on the house rules.
  */
 const briefFor = workerBrief;
-function makeWorker(id: string, label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): Agent {
+function makeWorker(id: string, label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, temporaryChat = false): Agent {
   return {
     info: {
       id,
@@ -1459,6 +1460,7 @@ function makeWorker(id: string, label: string, task: string, model: string | nul
       jobTitle: (workerOwnTask(task).split(/[\r\n]/, 1)[0]?.trim() ?? '').slice(0, 160) || undefined,
       model,
       reasoningEffort,
+      ...(temporaryChat ? { temporaryChat: true } : {}),
       state: 'invited',
       createdAt: Date.now(),
       activatedAt: null,
@@ -1738,7 +1740,7 @@ export function hasRetiredWorkerLeases(): boolean {
 // -------------------------------------------------------------------- spawn
 
 export interface SpawnInput {
-  workers: ReadonlyArray<{ label?: string; task: string; model?: string | null; reasoning_effort?: string | null }>;
+  workers: ReadonlyArray<{ label?: string; task: string; model?: string | null; reasoning_effort?: string | null; temporary_chat?: boolean }>;
   /**
    * What every worker in this spawn needs to know, written once.
    *
@@ -2099,7 +2101,7 @@ export function requestWorkerBootstraps(ids: readonly string[], runId?: string):
         !unpublishedAgents.has(agent) &&
         wanted.has(agent.info.id)
     )
-    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort }));
+    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort, ...(agent.info.temporaryChat ? { temporaryChat: true } : {}) }));
   if (owed.length === 0) return 0;
   if (spawnRequest) spawnRequest(owed);
   else logWarn('multi-agent: no browser extension is paired, so worker chats cannot be opened automatically');
@@ -2158,7 +2160,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     // the browser types, the repeated-spawn match, the status table, the snapshot — then
     // sees the same single string a worker actually receives, with no second field to keep
     // in step and no way for the two halves to be delivered apart.
-    return { label, task: briefFor(context, task), model, reasoningEffort };
+    return { label, task: briefFor(context, task), model, reasoningEffort, temporaryChat: worker.temporary_chat === true };
   });
 
   const conversationId = input.caller.conversationId ?? null;
@@ -2281,7 +2283,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
   const createdAgents: Agent[] = [];
   for (const [index, worker] of planned.entries()) {
     const id = ids[index] as string;
-    const agent = makeWorker(id, worker.label || id, worker.task, worker.model, worker.reasoningEffort);
+    const agent = makeWorker(id, worker.label || id, worker.task, worker.model, worker.reasoningEffort, worker.temporaryChat);
     agent.info.workerAllocationRunId = activeRun.runId;
     activeRun.agents.set(id, agent);
     stampOwner(activeRun);
@@ -2327,7 +2329,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
  * worker still gets one; only an exact repetition of work already under way is folded back.
  */
 function matchExistingRequest(
-  requested: ReadonlyArray<{ label: string; task: string; model: string | null; reasoningEffort: ReasoningEffort | null }>,
+  requested: ReadonlyArray<{ label: string; task: string; model: string | null; reasoningEffort: ReasoningEffort | null; temporaryChat?: boolean }>,
   live: readonly Agent[]
 ): Agent[] | null {
   if (requested.length === 0 || live.length === 0) return null;
@@ -2338,8 +2340,8 @@ function matchExistingRequest(
   // file plain text: the NUL that used to do this job was a literal byte, which made every
   // text tool treat the source as binary. Model and reasoning ride along because a retry that
   // asks for a different model or level is new intent, not the same request arriving twice.
-  const shape = (label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): string =>
-    JSON.stringify([label.trim(), task.trim(), model, reasoningEffort]);
+  const shape = (label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, temporaryChat = false): string =>
+    JSON.stringify([label.trim(), task.trim(), model, reasoningEffort, temporaryChat]);
   const taken = new Set<Agent>();
   const matched: Agent[] = [];
   for (const worker of requested) {
@@ -2348,10 +2350,10 @@ function matchExistingRequest(
     const found = live.find(
       (agent) =>
         !taken.has(agent) &&
-        (shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort) ===
-          shape(worker.label || agent.info.id, worker.task, worker.model, worker.reasoningEffort) ||
-          shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort) ===
-            shape(worker.label, worker.task, worker.model, worker.reasoningEffort))
+        (shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort, agent.info.temporaryChat) ===
+          shape(worker.label || agent.info.id, worker.task, worker.model, worker.reasoningEffort, worker.temporaryChat) ||
+          shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort, agent.info.temporaryChat) ===
+            shape(worker.label, worker.task, worker.model, worker.reasoningEffort, worker.temporaryChat))
     );
     if (!found) return null;
     taken.add(found);
@@ -5727,6 +5729,7 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
         jobTitle: typeof entry.info.jobTitle === 'string' && entry.info.jobTitle ? entry.info.jobTitle.slice(0, 160) : undefined,
         model: isModelSlug(entry.info.model) ? entry.info.model : null,
         reasoningEffort: isReasoningEffort(entry.info.reasoningEffort) ? entry.info.reasoningEffort : null,
+        temporaryChat: entry.info.temporaryChat === true,
         sleptAt: typeof entry.info.sleptAt === 'number' ? entry.info.sleptAt : null,
         contextTokens: Number.isFinite(entry.info.contextTokens) ? entry.info.contextTokens : 0,
         lastRevivalCommandId:

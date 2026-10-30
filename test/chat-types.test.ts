@@ -43,13 +43,14 @@ it('draws ChatGPT chats with the app\'s fox, terminals with the terminal glyph, 
   expect(iconsCss).toMatch(/\.cm-glyph-fox \{[^}]*mask-image: url\('\.\/browser-icons\/cos\.png'\)/);
   expect(chatTypeIcon('terminal')).toBe('i-terminal');
   expect(chatTypeIcon('api')).toBe('i-chat');
-  const all: ChatType[] = ['chatgpt', 'terminal', 'api', ...AGENT_ENGINE_IDS];
+  const all: ChatType[] = ['chatgpt', 'temporary', 'terminal', 'api', ...AGENT_ENGINE_IDS];
   expect(new Set(all.map(chatTypeIcon)).size).toBe(all.length);
   for (const type of all) expect(vocabulary.has(chatTypeIcon(type)), type).toBe(true);
 });
 
 it('reads a listed chat\'s type from its conversation and projected engine', () => {
   expect(chatTypeOf({ conversationId: '6a1f0c2e-0000-4000-8000-000000000001' })).toBe('chatgpt');
+  expect(chatTypeOf({ conversationId: '6a1f0c2e-0000-4000-8000-000000000001', temporaryChat: true })).toBe('temporary');
   expect(chatTypeOf({ conversationId: 'cosapi-1', engine: 'claude' })).toBe('claude');
   expect(chatTypeOf({ conversationId: 'cosapi-1', engine: 'codex' })).toBe('codex');
   expect(chatTypeOf({ conversationId: 'cosapi-1' })).toBe('api');

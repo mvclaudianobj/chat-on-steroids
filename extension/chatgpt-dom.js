@@ -3794,6 +3794,12 @@ var CLF_DOM = (() => {
       toggle.click(); check();
     });
   }
+  /** ChatGPT stamps its temporary frontend after Send as well as on the new-chat route. */
+  function temporaryChatSurface() {
+    const route = new URL(location.href);
+    return route.searchParams.get('temporary-chat') === 'true' &&
+      (route.pathname === '/' || /^\/c\/[0-9a-f-]{36}$/i.test(route.pathname));
+  }
   return {
     TURN_SELECTOR: TURN,
     AUTHORED_SELECTOR: '[data-message-author-role="assistant"], .markdown, [data-content-search-unit-key], [data-markdown-text-style="assistant-message"]',
@@ -3811,6 +3817,7 @@ var CLF_DOM = (() => {
     prepareChatModelSurface,
     modelPickerReadable,
     newChatControl,
+    temporaryChatSurface,
     branchInNewChat,
     openQuestionEdit,
     projectCreateControl,
