@@ -343,6 +343,9 @@ function projectMenuItems(id: string): RowMenuItem[] {
     // Chat Marks: a CLIProxy chat that belongs to this project.
     ...(project ? deps.projectChatItems?.(project.id) ?? [] : []),
     ...(newTerminal ? [newTerminal] : []),
+    ...(project?.remoteProfile ? [{ action: 'mirror-pull', icon: 'i-folder', label: () => t('Download from SSH profile (SFTP)…'),
+      run: () => void syncRemoteMirror(project.id, 'pull') }, { action: 'mirror-push', icon: 'i-folder', label: () => t('Upload to SSH profile (SFTP)…'),
+      run: () => void syncRemoteMirror(project.id, 'push') }] satisfies RowMenuItem[] : []),
     { action: 'group-new', icon: 'i-group', label: () => t('New group'), title: () => t('Add a group to sort this project\'s chats'),
       run: () => void newChatGroup(id) },
     // A project without a ChatGPT Project, or whose creation failed, can take a new or an existing one (#1756).
@@ -400,6 +403,13 @@ function projectMenuItems(id: string): RowMenuItem[] {
       run: () => void removeProjectFromSidebar(id)
     }
   ];
+}
+
+async function syncRemoteMirror(projectId: string, direction: 'pull' | 'push'): Promise<void> {
+  const project = projects.find(row => row.id === projectId);
+  if (!project?.remoteProfile) return;
+  const result = await run(api.syncRemoteProfileProject(projectId, direction));
+  if (result) toast(t('SFTP sync completed: {0} files.', [result.files]));
 }
 
 const chatgptProjectPicker = createChatgptProjectPicker({
@@ -1447,6 +1457,7 @@ let pictureRequestFor: string | null = null;
 
 /** What a slash command does, picked from the composer menu or typed at the start of a message. */
 function runComposerCommand(name: string): void {
+  if (name === 'remotemode') { void remoteModeCommand(); return; }
   if (name === 'plan') { $('createPlan').click(); return; }
   if (name === 'compact') { $('compactSession').click(); return; }
   if (name === 'goal' || name === 'loop') {
@@ -1468,6 +1479,7 @@ async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'aft
   const typed = /^\s*\/([a-z][a-z-]*)(?=\s|$)/i.exec(input.value);
   const name = typed?.[1]!.toLowerCase();
   const known = name && APP_COMMANDS.some(row => row.command === name) && (!CHAT_COMMANDS.has(name) || openChatSummary() !== null);
+  if (name === 'remotemode') { await remoteModeCommand(input.value.slice(typed![0].length).trim()); return; }
   const selection = selectionGeneration, draft = input.value;
   const library = known ? await run(api.skillLibrary({ sessionId: selectedId, projectId: selectedLocalProject()?.id ?? selectedProjectId })) : null;
   // Another chat opened or the draft changed while the Skills loaded: this command was typed for neither.
@@ -1505,6 +1517,31 @@ async function sendTypedCommand(controlAction: boolean, delivery?: 'auto' | 'aft
   // Cmd/Ctrl+Shift+Enter's other way reaches the rest too; a typed /plan drafts the plan as Enter does.
   if (delivery && name !== 'plan') void sendComposer(delivery);
   else $<HTMLFormElement>('composer').requestSubmit();
+}
+type RemoteProfileChoice = { id: string; name: string; type: string };
+function remoteArgument(text: string): string | null {
+  const match = /^(?:"([^"\n]{1,80})"|'([^'\n]{1,80})'|([^\s"']{1,80}))$/.exec(text.trim());
+  return match ? (match[1] ?? match[2] ?? match[3] ?? null) : null;
+}
+async function remoteModeCommand(argument = ''): Promise<void> {
+  const generation = selectionGeneration, sessionId = selectedId;
+  if (!sessionId) { toast(t('Select an existing chat before enabling remote mode.')); return; }
+  const list = await api.remoteHosts('list') as { ok: boolean; data?: RemoteProfileChoice[] };
+  if (!list.ok || !list.data) { toast(t('Could not load SSH profiles.')); return; }
+  const ssh = list.data.filter(row => row.type === 'ssh');
+  const selected = argument ? remoteArgument(argument) : window.prompt(t('Remote SSH profile name:'), ssh[0]?.name ?? '');
+  if (selected === null) { if (argument) toast(t('Use /remotemode "profile name" or /remotemode off.')); return; }
+  const off = selected.toLowerCase() === 'off';
+  const profile = off ? null : ssh.find(row => row.name.toLowerCase() === selected.toLowerCase());
+  if (!off && !profile) { toast(t('SSH profile not found.')); return; }
+  if (generation !== selectionGeneration || selectedId !== sessionId) return;
+  const response = await api.remoteHosts('mode', { sessionId, profileId: profile?.id ?? null }) as { ok: boolean };
+  if (!response.ok) { toast(t('Could not update remote mode.')); return; }
+  if (generation !== selectionGeneration || selectedId !== sessionId) return;
+  const input = $<HTMLTextAreaElement>('chatInput');
+  input.value = ''; input.dispatchEvent(new Event('input', { bubbles: true }));
+  await loadSessions('changed'); paintDetail(false);
+  toast(off ? t('Remote mode disabled.') : t('Remote mode: {0}', [profile!.name]));
 }
 function openChatSummary(): SessionSummary | null {
   return selectedId === null ? null : sessions.find(row => row.id === selectedId) ?? null;
@@ -6930,6 +6967,19 @@ function paintDetail(followBottom = historyBefore === null): void {
   const temporaryLabel = summary?.temporaryChat ? t('Temporary chat') : '';
   $('chatTitle').title = temporaryLabel ? t('This conversation will not appear in ChatGPT history. Chat Marks keeps a local recording.') : '';
   ui($('chatTitle'), 'textContent', () => summary ? shownSessionTitle(summary) : newTemporaryChat ? t('Temporary chat') : t("New chat"));
+  let remoteBadge = document.getElementById('chatRemoteProfileBadge');
+  if (!remoteBadge) {
+    remoteBadge = document.createElement('span'); remoteBadge.id = 'chatRemoteProfileBadge';
+    remoteBadge.className = 'chat-remote-profile-badge'; $('chatTitle').after(remoteBadge);
+  }
+  remoteBadge.hidden = true;
+  const owner = selectedId, projectId = summary?.projectId ?? selectedProjectId, generation = selectionGeneration;
+  if (owner || projectId) void api.remoteHosts('modeView', { sessionId: owner, projectId }).then(reply => {
+    if (generation !== selectionGeneration || owner !== selectedId) return;
+    const result = reply as { ok: boolean; data?: { name: string } | null };
+    remoteBadge!.hidden = !result.ok || !result.data;
+    remoteBadge!.textContent = result.ok && result.data ? `SSH · ${result.data.name}` : '';
+  });
   let tempNotice = document.getElementById('chatTemporaryNotice');
   if (!tempNotice) {
     tempNotice = document.createElement('span');
@@ -9921,6 +9971,11 @@ export function initChat(next: Deps): void {
     scope: () => ({ sessionId: selectedId, projectId: selectedLocalProject()?.id ?? selectedProjectId }),
     draft: () => inputDrafts.get(draftKey()), saveDraft: text => inputDrafts.set(draftKey(), text),
     list: scope => api.skillLibrary(scope), command: runComposerCommand,
+    listRemoteProfiles: async () => {
+      const result = await api.remoteHosts('list') as { ok: boolean; data?: RemoteProfileChoice[] };
+      if (!result.ok || !result.data) throw new Error('Could not load SSH profiles.');
+      return result.data;
+    },
     commandAvailable: name => !CHAT_COMMANDS.has(name) || openChatSummary() !== null,
     listFiles: async (projectId, directory) => {
       const result = await api.listProjectFiles(projectId, directory);
@@ -9996,6 +10051,20 @@ export function initChat(next: Deps): void {
       if (project) { showAddedProject(project, generation); offerChatgptProject(project, known, asked); }
     } finally { button.disabled = false; }
   };
+  const addRemoteProfileFolder = async (): Promise<void> => {
+    const generation = selectionGeneration;
+    const result = await api.remoteHosts('list') as { ok: boolean; data?: RemoteProfileChoice[] };
+    if (!result.ok || !result.data) { toast(t('Could not load SSH profiles.')); return; }
+    const hosts = result.data.filter(row => row.type === 'ssh');
+    const name = window.prompt(t('Remote SSH profile name:'), hosts[0]?.name ?? '');
+    if (!name) return;
+    const profile = hosts.find(row => row.name.toLowerCase() === name.trim().toLowerCase());
+    if (!profile) { toast(t('SSH profile not found.')); return; }
+    const folder = window.prompt(t('Remote folder for SFTP (absolute path):'), '~/');
+    if (!folder) return;
+    const added = await run(api.addRemoteProfileProject(profile.id, folder));
+    if (added) showAddedProject(added, generation);
+  };
   // The composer's Share a folder means a folder on this computer: straight to the picker.
   $('composerFolder').addEventListener('click', () => void addLocalProject());
   scheduleDialog = initScheduleDialog(api, () => void paintScheduleLine());
@@ -10015,6 +10084,7 @@ export function initChat(next: Deps): void {
       items: () => [
         { action: 'add-local-project', label: () => t('Folder on this computer…'), icon: 'i-folder', run: () => void addLocalProject() },
         { action: 'add-ssh-project', label: () => t('Folder on a server (SSH)…'), icon: 'i-terminal', run: () => { sshDialogGeneration = selectionGeneration; sshProjectDialog.open(); } }
+        ,{ action: 'add-remote-profile-folder', label: () => t('Remote profile folder…'), icon: 'i-folder', run: () => void addRemoteProfileFolder() }
       ]
     });
   });

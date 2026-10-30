@@ -10,6 +10,11 @@ import type { MainText } from '../shared/main-texts.js';
 export function mainTexts(): Record<MainText, string> {
   return {
     'Cancel': t('Cancel'),
+    'Synchronize': t('Synchronize'),
+    'SFTP mirror synchronization': t('SFTP mirror synchronization'),
+    'Upload local files to the selected SSH profile?': t('Upload local files to the selected SSH profile?'),
+    'Download remote files into the local mirror?': t('Download remote files into the local mirror?'),
+    'Existing files can be overwritten. No files are deleted. Secrets and common credential files are excluded.': t('Existing files can be overwritten. No files are deleted. Secrets and common credential files are excluded.'),
     'Authorize': t('Authorize'),
     'Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?': t('Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?'),
     'Open': t('Open'),

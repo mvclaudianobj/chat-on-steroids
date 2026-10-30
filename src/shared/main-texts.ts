@@ -10,6 +10,11 @@
  */
 export const MAIN_TEXTS = [
   'Cancel',
+  'Synchronize',
+  'SFTP mirror synchronization',
+  'Upload local files to the selected SSH profile?',
+  'Download remote files into the local mirror?',
+  'Existing files can be overwritten. No files are deleted. Secrets and common credential files are excluded.',
   'Authorize',
   'Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?',
   'Open',

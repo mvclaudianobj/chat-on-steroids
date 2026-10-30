@@ -67,6 +67,34 @@ it('opens Skill completion at an inline slash while leaving paths, links and cod
   expect(skillCompletion(prompt, prompt.length)).toMatchObject({ query: 'plan', kind: 'skill' });
 });
 
+it('completes remote profile arguments with spaces without running an installed Skill of the same name', async () => {
+  const { initSkills } = await import('../src/renderer/skills.js');
+  const input = document.getElementById('input') as HTMLTextAreaElement;
+  const host = document.getElementById('picker')!;
+  const listRemoteProfiles = vi.fn(async () => [
+    { id: 'a', name: 'Server Lab', type: 'ssh' },
+    { id: 'b', name: 'Server WinRM', type: 'winrm' }
+  ]);
+  const picker = initSkills({ input, host, selectedHost: document.getElementById('selected')!,
+    openButton: document.getElementById('skills')!, addButton: document.getElementById('add')!,
+    owner: () => 'remote-test', scope: () => ({ sessionId: 'chat', projectId: null }),
+    draft: () => input.value, saveDraft: () => undefined,
+    list: async () => ({ ok: true, data: library([{ ...skill, id: 'server', name: 'Server' }]) }),
+    listFiles: async () => ({ projectId: '', projectName: '', directory: '', entries: [], truncated: false }),
+    listRemoteProfiles });
+  const command = '/remotemode "Ser';
+  expect(skillCompletion(command, command.length)).toMatchObject({ kind: 'remote', query: 'ser' });
+  input.value = command; input.setSelectionRange(command.length, command.length); input.dispatchEvent(new Event('input'));
+  await settle();
+  expect(listRemoteProfiles).toHaveBeenCalledTimes(1);
+  const names = [...host.querySelectorAll('strong')].map(row => row.textContent);
+  expect(names).toContain('Server Lab');
+  expect(names).not.toContain('Server WinRM');
+  (host.querySelector('.slash-menu-option') as HTMLButtonElement).click();
+  expect(input.value).toBe('/remotemode "Server Lab"');
+  expect(picker.authoredText()).toBe('/remotemode "Server Lab"');
+});
+
 it('offers only literal-safe file references and supports escaped spaces', async () => {
   const f = await fixture();
   f.listFiles.mockResolvedValueOnce({ projectId: 'project-a', projectName: 'Project', directory: '', truncated: false,

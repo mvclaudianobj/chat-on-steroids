@@ -3608,6 +3608,21 @@ export async function bindSessionProject(id: string, projectId: string): Promise
   });
 }
 
+/** Durable per-chat remote binding, including an explicit Off overriding project defaults. */
+export async function setSessionRemoteMode(id: string, profileId: string | null): Promise<SessionSummary> {
+  if (profileId !== null && !/^[a-f0-9-]{36}$/i.test(profileId)) throw new Error('Invalid remote profile id');
+  const entry = await ensureOpen(id);
+  return enqueueSessionOperation(entry, 'remote-mode', async () => {
+    const remoteMode = profileId === null ? null : { profileId };
+    if (JSON.stringify(entry.summary.remoteMode) === JSON.stringify(remoteMode)) return { ...entry.summary };
+    const staged = { ...entry.summary, remoteMode, updatedAt: Date.now() };
+    await writeSummary(staged, entry.historySeq);
+    entry.summary = staged;
+    publishAttachmentSummary(staged);
+    return { ...staged };
+  });
+}
+
 /**
  * Records that this app opened the chat, and names the session accordingly.
  *

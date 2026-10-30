@@ -684,6 +684,8 @@ export interface SessionSummary {
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */
   projectId?: string;
+  /** Explicit remote profile selection for this local chat; null means mode disabled. */
+  remoteMode?: { profileId: string } | null;
   /**
    * Chat Marks: the agent engine of an API chat, projected from its ledger record when the
    * renderer reads the list (`agent-engine/ledger.ts` `withChatEngines`). Never stored here.

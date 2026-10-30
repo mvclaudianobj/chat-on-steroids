@@ -5,6 +5,7 @@ import { remoteApprovals, decideRemoteApproval, onRemoteApprovalsChanged } from 
 import { addRemoteProject } from '../projects.js';
 import { importRemoteHosts } from './hosts.js';
 import { dialogLabel, mainText } from '../main-texts.js';
+import { remoteModeView, setChatRemoteMode } from './mode.js';
 
 let preview: HostProfile[] | null = null;
 const fingerprints = new Map<string, { fingerprint: string; keys: string }>();
@@ -21,6 +22,14 @@ export function registerRemoteHostsIpc(getWindow: () => BrowserWindow | null): v
   });
   const name = z.object({ name: z.string().min(1).max(80) }).strict();
   register('list', () => listRemoteHosts());
+  register('mode', async raw => {
+    const args = z.object({ sessionId: z.string().min(8).max(64), profileId: z.string().uuid().nullable() }).strict().parse(raw);
+    return setChatRemoteMode(args.sessionId, args.profileId);
+  });
+  register('modeView', async raw => {
+    const args = z.object({ sessionId: z.string().min(8).max(64).nullable(), projectId: z.string().uuid().nullable().optional() }).strict().parse(raw);
+    return remoteModeView(args.sessionId, args.projectId);
+  });
   register('save', raw => saveRemoteHost(raw));
   register('delete', async raw => { await deleteRemoteHost(z.object({ id: z.string().uuid() }).strict().parse(raw).id); });
   register('test', async raw => executeRemoteHost(await remoteHostByName(name.parse(raw).name), 'true'));

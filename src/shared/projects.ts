@@ -8,6 +8,8 @@ export interface LocalProject {
   path: string;
   /** A folder on a server (#1469); `path` is then its `host[:port]:/path` identity. */
   remote?: import('./types.js').RemoteFolder;
+  /** Local mirror with an SSH profile and a specific SFTP folder; never a server root. */
+  remoteProfile?: { profileId: string; folder: string };
   /** Optional presentation-only sidebar accent. Never changes workspace or permission semantics. */
   color?: ProjectColor;
   createdAt: number;
