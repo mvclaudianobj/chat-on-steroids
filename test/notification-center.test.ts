@@ -9,7 +9,7 @@ vi.mock('../src/main/notification-credentials.js', () => ({
 vi.mock('../src/main/durable.js', () => ({ readDurable: vi.fn(async () => state.snapshot), writeDurableNow: vi.fn(async (_key, next) => { state.snapshot = next; }) }));
 vi.mock('../src/main/notification-smtp.js', () => ({ sendSmtp: vi.fn(async () => undefined) }));
 vi.mock('../src/main/notification-whatsapp-web.js', () => ({ sendWhatsAppWeb: vi.fn(async () => { throw new Error('synthetic disconnected socket'); }) }));
-import { dispatchNotice, notificationSettings, saveNotificationSettings, setNotificationCredential } from '../src/main/notification-center.js';
+import { dispatchNotice, notificationSettings, saveNotificationSettings, setNotificationCredential, setWhatsAppApprovalCodes } from '../src/main/notification-center.js';
 import { sendSmtp } from '../src/main/notification-smtp.js';
 import { sendWhatsAppWeb } from '../src/main/notification-whatsapp-web.js';
 
@@ -33,6 +33,34 @@ describe('notification center outbound channels', () => {
     expect(result.settings.channels.telegram.destinations).toEqual(['original-id']);
     expect(result.settings.channels['whatsapp-web'].enabled).toBe(false);
     expect(result.settings.channels['whatsapp-web'].destinations).toEqual([]);
+  });
+  it('puts a reply code bound to the exact approval card into the WhatsApp approval-pending notice', async () => {
+    const settings = structuredClone(await notificationSettings());
+    for (const channel of Object.values(settings.channels)) channel.enabled = false;
+    settings.channels['whatsapp-web'] = {
+      ...settings.channels['whatsapp-web'], enabled: true,
+      events: { ...settings.channels['whatsapp-web'].events, 'approval-pending': true },
+      destinations: ['5511999999999']
+    };
+    await saveNotificationSettings(settings);
+    vi.mocked(sendWhatsAppWeb).mockResolvedValueOnce(undefined).mockResolvedValueOnce(undefined);
+    const minted = vi.fn(async (_number: string, _conversation: string, _card: string) => '4821');
+    setWhatsAppApprovalCodes(minted);
+    try {
+      expect(await dispatchNotice({ event: 'approval-pending', title: 'Approval pending', project: 'Chat Marks',
+        approvals: [{ conversationId: 'chat-alpha', cardId: 'card-1', allow: true }] }, { now: 50_000_000 })).toBe(1);
+      expect(minted).toHaveBeenCalledExactlyOnceWith('5511999999999', 'chat-alpha', 'card-1');
+      expect(vi.mocked(sendWhatsAppWeb).mock.calls.at(-1)![1]).toContain('Responda: aprovar 4821 ou negar 4821');
+      // Duplex off: the minter declines and the notice carries no reply line.
+      minted.mockResolvedValue(null as unknown as string);
+      await dispatchNotice({ event: 'approval-pending', title: 'Approval pending', project: 'Chat Marks', dedupeKey: 'other',
+        approvals: [{ conversationId: 'chat-alpha', cardId: 'card-2', allow: true }] }, { now: 60_000_000 });
+      expect(vi.mocked(sendWhatsAppWeb).mock.calls.at(-1)![1]).not.toContain('Responda');
+    } finally {
+      setWhatsAppApprovalCodes(null);
+      settings.channels['whatsapp-web'].enabled = false;
+      await saveNotificationSettings(settings);
+    }
   });
   it('reports a disconnected WhatsApp socket without a misleading SMTP/TLS error or duplicate delivery', async () => {
     const settings = structuredClone(await notificationSettings());

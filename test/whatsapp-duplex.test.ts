@@ -298,3 +298,117 @@ describe('WhatsApp bidirectional owner-only routing', () => {
     expect(app.sendText.mock.calls.at(-1)![1]).toMatch(/encaminhada|aguard/i);
   });
 });
+describe('WhatsApp approval straight from the approval-pending notice', () => {
+  function direct(options: { allow?: boolean; phase?: () => 'pending' | 'clicked' | 'not_confirmed' | null } = {}) {
+    let state: unknown = null;
+    let cards = [{ conversationId: 'chat-beta', cardId: 'card-beta-1', title: 'Solicitação', allow: options.allow ?? true, outcome: null as string | null }];
+    const sendText = vi.fn(async (_number: string, _text: string) => {});
+    const send = vi.fn(async () => ({ id: 'queued', state: 'queued' }));
+    const answer = vi.fn((_conversation: string, _card: string, _choice: 'allow' | 'deny') => ({ ok: true as const }));
+    const duplex = createWhatsAppDuplex({
+      allowed: async () => [sender], sessions: async () => sessions, active: async () => null,
+      sendText, send, approvals: () => cards, answer,
+      ...(options.phase ? { approvalStatus: options.phase } : {}),
+      latest: async () => null, delivered: async () => null,
+      load: async () => state, save: async value => { state = structuredClone(value); }
+    });
+    return { duplex, sendText, send, answer, setCards: (value: typeof cards) => { cards = value; }, getState: () => state as any };
+  }
+  it('answers the exact notified card by its code, without a slash and without selecting a chat', async () => {
+    const app = direct();
+    const code = await app.duplex.approvalCode(sender, 'chat-beta', 'card-beta-1');
+    expect(code).toMatch(/^\d{4}$/);
+    expect(await app.duplex.approvalCode(sender, 'chat-beta', 'card-beta-1')).toBe(code);
+    await app.duplex.incoming(sender, 'reply-1', `Aprovar ${code}`);
+    expect(app.answer).toHaveBeenCalledExactlyOnceWith('chat-beta', 'card-beta-1', 'allow');
+    expect(app.send).not.toHaveBeenCalled();
+    expect(app.sendText.mock.calls.at(-1)![1]).toContain('Projeto Beta');
+    expect(JSON.stringify(app.getState())).not.toContain('Projeto Beta');
+  });
+  it('accepts commands case- and accent-insensitively, with or without the slash', async () => {
+    const app = direct();
+    const code = await app.duplex.approvalCode(sender, 'chat-beta', 'card-beta-1');
+    await app.duplex.incoming(sender, 'deny', `NEGAR ${code}`);
+    expect(app.answer).toHaveBeenCalledExactlyOnceWith('chat-beta', 'card-beta-1', 'deny');
+    await app.duplex.incoming(sender, 'chats', 'Chats');
+    expect(app.sendText.mock.calls.at(-1)![1]).toContain('Conversas:');
+    await app.duplex.incoming(sender, 'pick', 'usar 2');
+    expect(app.sendText.mock.calls.at(-1)![1]).toContain('Conversa selecionada: Projeto Beta');
+    await app.duplex.incoming(sender, 'list', 'Aprovações');
+    expect(app.sendText.mock.calls.at(-1)![1]).not.toContain('Comando não reconhecido');
+    await app.duplex.incoming(sender, 'list-slash', '/APROVAÇÕES');
+    expect(app.sendText.mock.calls.at(-1)![1]).not.toContain('Comando não reconhecido');
+    expect(app.send).not.toHaveBeenCalled();
+    // Ordinary text that merely starts with a command word still reaches the selected chat.
+    await app.duplex.incoming(sender, 'prose', 'usar o arquivo de configuração');
+    expect(app.send).toHaveBeenCalledExactlyOnceWith('session-second-456', 'usar o arquivo de configuração');
+  });
+  it('never forwards a slashless aprovar/negar to the chat and explains an invalid code', async () => {
+    const app = direct();
+    await app.duplex.incoming(sender, 'pick', '/usar 1');
+    for (const [id, text] of [['a', 'aprovar 9999'], ['b', 'aprovar 1'], ['c', 'aprovar'], ['d', 'negar tudo isso por favor']]) {
+      await app.duplex.incoming(sender, id!, text!);
+    }
+    expect(app.send).not.toHaveBeenCalled();
+    expect(app.answer).not.toHaveBeenCalled();
+    expect(app.sendText.mock.calls[1]![1]).toMatch(/9999 não vale.*10 minutos/);
+  });
+  it('rejects an expired code', async () => {
+    vi.useFakeTimers();
+    try {
+      const app = direct();
+      const code = await app.duplex.approvalCode(sender, 'chat-beta', 'card-beta-1');
+      vi.advanceTimersByTime(10 * 60_000 + 1);
+      await app.duplex.incoming(sender, 'late', `aprovar ${code}`);
+      expect(app.answer).not.toHaveBeenCalled();
+      expect(app.sendText.mock.calls.at(-1)![1]).toMatch(/não vale.*validade/);
+    } finally { vi.useRealTimers(); }
+  });
+  it('refuses a card already answered, by this code or elsewhere', async () => {
+    const app = direct();
+    const code = await app.duplex.approvalCode(sender, 'chat-beta', 'card-beta-1');
+    await app.duplex.incoming(sender, 'first', `aprovar ${code}`);
+    await app.duplex.incoming(sender, 'again', `aprovar ${code}`);
+    expect(app.answer).toHaveBeenCalledTimes(1);
+    expect(app.sendText.mock.calls.at(-1)![1]).toContain('já foi respondido');
+    const other = direct();
+    const second = await other.duplex.approvalCode(sender, 'chat-beta', 'card-beta-1');
+    other.setCards([{ conversationId: 'chat-beta', cardId: 'card-beta-1', title: 'Solicitação', allow: true, outcome: 'clicked' }]);
+    await other.duplex.incoming(sender, 'desktop-answered', `aprovar ${second}`);
+    expect(other.answer).not.toHaveBeenCalled();
+    expect(other.sendText.mock.calls.at(-1)![1]).toContain('já foi respondido');
+  });
+  it('allows only what the card permits and never mints or answers for an unauthorized number', async () => {
+    const app = direct({ allow: false });
+    const code = await app.duplex.approvalCode(sender, 'chat-beta', 'card-beta-1');
+    await app.duplex.incoming(sender, 'allow', `aprovar ${code}`);
+    expect(app.answer).not.toHaveBeenCalled();
+    expect(app.sendText.mock.calls.at(-1)![1]).toContain('não permite aprovar');
+    expect(await app.duplex.approvalCode('5511888888888', 'chat-beta', 'card-beta-1')).toBeNull();
+    app.sendText.mockClear();
+    await app.duplex.incoming('5511888888888', 'intruder', `negar ${code}`);
+    expect(app.answer).not.toHaveBeenCalled();
+    expect(app.sendText).not.toHaveBeenCalled();
+  });
+  it('replies with the outcome the app confirmed, once', async () => {
+    let phase: 'pending' | 'clicked' | 'not_confirmed' = 'pending';
+    const app = direct({ phase: () => phase });
+    const code = await app.duplex.approvalCode(sender, 'chat-beta', 'card-beta-1');
+    await app.duplex.incoming(sender, 'ok', `aprovar ${code}`);
+    app.sendText.mockClear();
+    app.setCards([]);
+    await app.duplex.pollApprovals();
+    expect(app.sendText).not.toHaveBeenCalled();
+    phase = 'clicked';
+    await app.duplex.pollApprovals();
+    await app.duplex.pollApprovals();
+    expect(app.sendText).toHaveBeenCalledTimes(1);
+    expect(app.sendText.mock.calls[0]![1]).toMatch(/^Aprovado no chat Projeto Beta/);
+    const failed = direct({ phase: () => 'not_confirmed' });
+    const again = await failed.duplex.approvalCode(sender, 'chat-beta', 'card-beta-1');
+    await failed.duplex.incoming(sender, 'try', `aprovar ${again}`);
+    failed.setCards([]);
+    await failed.duplex.pollApprovals();
+    expect(failed.sendText.mock.calls.at(-1)![1]).toMatch(/Não foi possível aprovar no chat Projeto Beta: a página do ChatGPT não confirmou/);
+  });
+});

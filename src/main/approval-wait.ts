@@ -236,7 +236,10 @@ export async function noteApprovalCard(
     // Chat Marks: the outbound channels (Notification center) hear of each wait once, retries or not.
     if (!wait.outboundNoticed) {
       wait.outboundNoticed = true;
-      void queueOutboundNotice({ event: 'approval-pending', title: 'Approval pending', project: 'Chat Marks' }).catch(() => undefined);
+      // Keyed per card: the per-minute throttle otherwise swallowed a second card (and its reply code).
+      void queueOutboundNotice({ event: 'approval-pending', title: 'Approval pending', project: 'Chat Marks',
+        dedupeKey: wait.card ? `${conversationId}:${wait.card.id}` : conversationId,
+        ...(wait.card ? { approvals: [{ conversationId, cardId: wait.card.id, allow: wait.card.allow }] } : {}) }).catch(() => undefined);
     }
   }
 }

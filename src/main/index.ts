@@ -60,7 +60,7 @@ import { getWhatsAppWebStatus, getWhatsAppWebDeliveryStatus, resumeWhatsAppWeb, 
 import { createWhatsAppDuplex, lastRelayableWhatsAppAnswer, completedWhatsAppAnswers } from './whatsapp-duplex.js';
 import { redactSecretText } from './redaction.js';
 import { watchWhatsAppResumeOnGreen } from './whatsapp-resume-on-green.js';
-import { notificationSettings, queueOutboundNotice } from './notification-center.js';
+import { notificationSettings, queueOutboundNotice, setWhatsAppApprovalCodes } from './notification-center.js';
 import { listProjects } from './projects.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
@@ -910,6 +910,7 @@ void app.whenReady().then(async () => {
     save: state => writeDurableNow('whatsapp-duplex-control', state)
   });
   setWhatsAppWebInbound((number, messageId, text) => whatsappDuplex.incoming(number, messageId, text));
+  setWhatsAppApprovalCodes(whatsappDuplex.approvalCode);
   onSessionChange(change => {
     if (change.sessionIds?.length) void whatsappDuplex.changed(change.sessionIds).catch(() => undefined);
   });
