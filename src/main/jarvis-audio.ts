@@ -16,12 +16,20 @@ import { jarvisVoiceConfigSchema, jarvisVoiceRoutingSchema } from '../shared/jar
 import { jarvisVoiceStatus, jarvisVoiceRouteStatus, speakJarvisVoice, storeJarvisVoiceKey, streamJarvisVoice, transcribeJarvisVoice } from './jarvis-voice.js';
 import { logInfo } from './logger.js';
 import { jarvisLocalStatus, installJarvisLocal, speakJarvisLocal, transcribeJarvisLocal } from './jarvis-local.js';
+import { listPiperVoices, savePiperVoiceSettings, installPiperVoice } from './jarvis-local.js';
+import { PIPER_PT_BR_VOICES, type PiperVoiceId } from '../shared/jarvis-piper-voices.js';
 
 const audio = z.object({ action: z.literal('transcribe'), engine: z.enum(['cliproxy', 'local', 'provider']), model: z.string().max(128),
   language: z.string().max(35), mime: z.enum(['audio/webm', 'audio/ogg', 'audio/mp4']), bytes: z.instanceof(Uint8Array).refine(b => b.length > 0 && b.length <= 12_000_000),
   voice: jarvisVoiceConfigSchema.optional() }).strict();
 const status = z.object({ action: z.literal('status') }).strict();
 const localInstall = z.object({ action: z.literal('local-install'), model: z.enum(['base', 'small']) }).strict();
+const piperVoiceId = z.enum(PIPER_PT_BR_VOICES.map(voice => voice.id) as [PiperVoiceId, ...PiperVoiceId[]]);
+const piperSettings = z.object({ voice: piperVoiceId, lengthScale: z.number().finite().min(0.7).max(1.4),
+  noiseW: z.number().finite().min(0.3).max(1.4), sentenceSilence: z.number().finite().min(0).max(0.8) }).strict();
+const localVoiceSave = z.object({ action: z.literal('local-voice-save'), settings: piperSettings }).strict();
+const localVoiceInstall = z.object({ action: z.literal('local-voice-install'), voice: piperVoiceId }).strict();
+const localVoicePreview = z.object({ action: z.literal('local-voice-preview'), settings: piperSettings }).strict();
 const voiceStatus = z.object({ action: z.literal('voice-status'), voice: jarvisVoiceConfigSchema }).strict();
 const voiceKey = z.object({ action: z.literal('voice-key'), slot: z.enum(['primary', 'fallback', 'fallback2', 'fallback3', 'g4f1', 'g4f2']), baseUrl: z.string().min(1).max(300),
   value: z.string().trim().min(1).max(16384), password: z.string().min(1).max(1024) }).strict();
@@ -145,6 +153,23 @@ export function registerJarvisAudioIpc(getWindow: () => BrowserWindow | null): v
       if (status.safeParse(payload).success) return { ok: true, data: await jarvisAudioStatus() };
       const action = payload && typeof payload === 'object' ? (payload as { action?: unknown }).action : undefined;
       if (action === 'local-status') return { ok: true, data: await jarvisLocalStatus() };
+      if (action === 'local-voices') return { ok: true, data: await listPiperVoices() };
+      if (action === 'local-voice-save') return { ok: true, data: await savePiperVoiceSettings(localVoiceSave.parse(payload).settings) };
+      if (action === 'local-voice-install') {
+        const input = localVoiceInstall.parse(payload);
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 180_000);
+        try { return { ok: true, data: await installPiperVoice(input.voice, controller.signal) }; }
+        finally { clearTimeout(timer); }
+      }
+      if (action === 'local-voice-preview') {
+        const input = localVoicePreview.parse(payload);
+        if (speaking.size >= 3) throw new Error('Jarvis speech is already busy.');
+        const controller = new AbortController(); speaking.add(controller);
+        const timer = setTimeout(() => controller.abort(), 60_000);
+        try { return { ok: true, data: await speakJarvisLocal('Olá! Esta é uma prévia da voz local do Jarvis, em português do Brasil.', controller.signal, input.settings) }; }
+        finally { clearTimeout(timer); speaking.delete(controller); }
+      }
       if (action === 'local-install') {
         const input = localInstall.parse(payload);
         return { ok: true, data: await installJarvisLocal(input.model, new AbortController().signal) };

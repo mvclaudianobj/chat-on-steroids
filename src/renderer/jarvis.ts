@@ -18,6 +18,9 @@ import { JarvisSpeechQueue, JarvisStreamingSplitter, playEarcon, watchSilence } 
 import { JarvisProgressiveAudio } from './jarvis-progressive.js';
 import { JarvisPlaybackMetrics } from './jarvis-playback-metrics.js';
 import type { JarvisTrace } from '../shared/jarvis-trace.js';
+import {
+  DEFAULT_PIPER_VOICE_SETTINGS, parsePiperVoiceSettings, type PiperVoiceSettings, type PiperVoiceId
+} from '../shared/jarvis-piper-voices.js';
 
 const KEY = 'chat-marks.jarvis.settings.v1';
 type Engine = 'provider' | 'cliproxy' | 'local' | 'windows';
@@ -103,6 +106,15 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   const localStatus = maybe<HTMLElement>('jarvisLocalStatus');
   const localInstall = maybe<HTMLButtonElement>('jarvisLocalInstall');
   const localModel = maybe<HTMLSelectElement>('jarvisLocalModel');
+  const piperVoice = maybe<HTMLSelectElement>('jarvisPiperVoice');
+  const piperSpeed = maybe<HTMLInputElement>('jarvisPiperSpeed');
+  const piperVariation = maybe<HTMLInputElement>('jarvisPiperVariation');
+  const piperPause = maybe<HTMLInputElement>('jarvisPiperPause');
+  const piperStatus = maybe<HTMLElement>('jarvisPiperStatus');
+  const piperPreview = maybe<HTMLButtonElement>('jarvisPiperPreview');
+  const piperSave = maybe<HTMLButtonElement>('jarvisPiperSave');
+  const piperDefaults = maybe<HTMLButtonElement>('jarvisPiperDefaults');
+  const piperDownload = maybe<HTMLButtonElement>('jarvisPiperDownload');
   const routeMode = maybe<HTMLSelectElement>('jarvisRoutingMode');
   const routeStatus = maybe<HTMLElement>('jarvisG4fStatus');
   const routeFields = [1, 2].map(n => ({
@@ -226,6 +238,90 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
       paint();
     }).catch(() => { if (localStatus) localStatus.textContent = 'Local voice status unavailable.'; });
   };
+  let piperInstalled = new Set<PiperVoiceId>();
+  let piperPreviewAudio: HTMLAudioElement | null = null;
+  let piperPreviewUrl: string | null = null;
+  const showPiperSettings = (value: PiperVoiceSettings): void => {
+    if (piperVoice) piperVoice.value = value.voice;
+    if (piperSpeed) piperSpeed.value = String(value.lengthScale);
+    if (piperVariation) piperVariation.value = String(value.noiseW);
+    if (piperPause) piperPause.value = String(value.sentenceSilence);
+  };
+  const currentPiperSettings = (): PiperVoiceSettings => parsePiperVoiceSettings({
+    voice: piperVoice?.value,
+    lengthScale: Number(piperSpeed?.value),
+    noiseW: Number(piperVariation?.value),
+    sentenceSilence: Number(piperPause?.value)
+  });
+  const piperNotice = (label: string): void => { if (piperStatus) piperStatus.textContent = t(label); };
+  const refreshPiper = (): void => {
+    if (!api.jarvisLocalVoices) return;
+    void api.jarvisLocalVoices().then(result => {
+      if (!result.ok) { piperNotice('Local voice status unavailable.'); return; }
+      piperInstalled = new Set(result.data.voices.filter(item => item.installed).map(item => item.id));
+      showPiperSettings(result.data.settings);
+      if (piperVoice) {
+        for (const option of Array.from(piperVoice.options)) {
+          const item = result.data.voices.find(voice => voice.id === option.value);
+          option.text = item ? item.label + ' (' + item.quality + ', ' + item.datasetLicense + (item.installed ? '' : ', ' + t('not installed')) + ')' : option.text;
+        }
+      }
+      piperNotice('Local Piper voice settings loaded.');
+    }).catch(() => piperNotice('Local voice status unavailable.'));
+  };
+  refreshPiper();
+  piperDefaults?.addEventListener('click', () => {
+    showPiperSettings(DEFAULT_PIPER_VOICE_SETTINGS);
+    piperSave?.click();
+  });
+  piperSave?.addEventListener('click', () => {
+    if (!api.jarvisLocalVoiceSave) return;
+    piperSave.disabled = true;
+    void api.jarvisLocalVoiceSave(currentPiperSettings()).then(result => {
+      piperNotice(result.ok ? 'Local Piper voice saved.' : 'Could not save local Piper voice.');
+      if (result.ok) refreshLocal();
+    }).catch(() => piperNotice('Could not save local Piper voice.'))
+      .finally(() => { piperSave.disabled = false; });
+  });
+  piperDownload?.addEventListener('click', () => {
+    if (!api.jarvisLocalVoiceInstall || !piperVoice) return;
+    const chosen = currentPiperSettings().voice;
+    if (chosen === 'faber' || piperInstalled.has(chosen)) {
+      piperNotice('This Piper voice is already available.');
+      return;
+    }
+    piperDownload.disabled = true;
+    piperNotice('Downloading and verifying local voice models…');
+    void api.jarvisLocalVoiceInstall(chosen).then(result => {
+      piperNotice(result.ok ? 'Verified Piper voice installed.' : 'Piper voice download failed.');
+      if (result.ok) refreshPiper();
+    }).catch(() => piperNotice('Piper voice download failed.'))
+      .finally(() => { piperDownload.disabled = false; });
+  });
+  piperPreview?.addEventListener('click', () => {
+    if (!api.jarvisLocalVoicePreview) return;
+    piperPreviewAudio?.pause();
+    if (piperPreviewUrl) URL.revokeObjectURL(piperPreviewUrl);
+    piperPreview.disabled = true;
+    piperNotice('Preparing local voice preview…');
+    void api.jarvisLocalVoicePreview(currentPiperSettings()).then(async result => {
+      if (!result.ok) { piperNotice('Local voice preview failed.'); return; }
+      piperPreviewUrl = URL.createObjectURL(new Blob([new Uint8Array(result.data.bytes)], { type: result.data.mime }));
+      piperPreviewAudio = new Audio(piperPreviewUrl);
+      const preview = piperPreviewAudio;
+      const previewUrl = piperPreviewUrl;
+      preview.addEventListener('ended', () => {
+        URL.revokeObjectURL(previewUrl);
+        if (piperPreviewAudio === preview) {
+          piperPreviewAudio = null;
+          piperPreviewUrl = null;
+        }
+      }, { once: true });
+      await piperPreviewAudio.play();
+      piperNotice('Playing local voice preview.');
+    }).catch(() => piperNotice('Local voice preview failed.'))
+      .finally(() => { piperPreview.disabled = false; });
+  });
   let provider: ProviderCapability = { checked: false, primary: false, fallback: false, ffmpeg: false, stt: [], tts: [], error: null };
   let providerCheckGeneration = 0;
   let providerStatusConfig: string | null = null;

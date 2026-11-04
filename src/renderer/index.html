@@ -362,6 +362,17 @@
               <div class="settings-surface pane appearance-settings-card">
                 <label class="setting"><span class="setting-text"><b>Whisper model</b><em>Base downloads faster; small generally recognizes speech more accurately.</em></span><select id="jarvisLocalModel"><option value="base">Base</option><option value="small">Small</option></select></label>
                 <button type="button" class="btn" id="jarvisLocalInstall">Install local speech</button>
+                <label class="setting"><span class="setting-text"><b>Piper PT-BR voice</b><em>Faber remains the default. Other voices require verified, optional downloads.</em></span><select id="jarvisPiperVoice"><option value="faber" translate="no">Faber</option><option value="cadu" translate="no">Cadu</option><option value="jeff" translate="no">Jeff</option><option value="edresson" translate="no">Edresson</option></select></label>
+                <label class="setting"><span class="setting-text"><b>Speech speed</b><em>Lower values speak faster.</em></span><input id="jarvisPiperSpeed" type="range" min="0.7" max="1.4" step="0.05" value="1" /></label>
+                <label class="setting"><span class="setting-text"><b>Speech variation</b><em>Adjust the local Piper voice variation.</em></span><input id="jarvisPiperVariation" type="range" min="0.3" max="1.4" step="0.05" value="0.8" /></label>
+                <label class="setting"><span class="setting-text"><b>Sentence pauses</b><em>Silence between sentences, in seconds.</em></span><input id="jarvisPiperPause" type="range" min="0" max="0.8" step="0.05" value="0.2" /></label>
+                <div class="settings-actions">
+                  <button type="button" class="btn" id="jarvisPiperPreview">Preview local voice</button>
+                  <button type="button" class="btn" id="jarvisPiperSave">Apply voice</button>
+                  <button type="button" class="btn" id="jarvisPiperDefaults">Restore voice defaults</button>
+                  <button type="button" class="btn" id="jarvisPiperDownload">Download selected voice (verified)</button>
+                </div>
+                <p id="jarvisPiperStatus" role="status" aria-live="polite"></p>
                 <p id="jarvisLocalStatus" role="status" aria-live="polite">Checking installed local engines…</p>
               </div>
             </section>

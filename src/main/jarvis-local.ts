@@ -7,6 +7,10 @@ import { access, mkdir, mkdtemp, open, readFile, rename, rm, stat, writeFile } f
 import os from 'node:os';
 import path from 'node:path';
 import { logInfo } from './logger.js';
+import {
+  PIPER_PT_BR_VOICES, DEFAULT_PIPER_VOICE_SETTINGS, parsePiperVoiceSettings,
+  type PiperVoiceId, type PiperVoiceSettings, type PiperVoiceView
+} from '../shared/jarvis-piper-voices.js';
 
 export type LocalWhisperModel = 'base' | 'small';
 export interface JarvisLocalStatus {
@@ -41,12 +45,85 @@ const whisperPath = () => path.join(bundle(), 'whisper-bin-ubuntu-x64', 'whisper
 const piperPath = () => path.join(bundle(), 'piper', 'piper');
 const modelPath = (model: LocalWhisperModel) => path.join(bundle(), `ggml-${model}.bin`);
 const voicePath = () => path.join(bundle(), 'pt_BR-faber-medium.onnx');
+const voiceRoot = () => path.join(root(), 'voices');
+const voiceFile = (id: PiperVoiceId): string => {
+  if (id === 'faber') return voicePath();
+  const info = PIPER_PT_BR_VOICES.find(item => item.id === id)!;
+  return path.join(voiceRoot(), id, 'pt_BR-' + id + '-' + info.quality + '.onnx');
+};
+const voiceSettingsFile = () => path.join(root(), 'piper-voice.json');
 const exists = async (file: string, mode = constants.R_OK): Promise<boolean> => {
   try { await access(file, mode); return true; } catch { return false; }
 };
 const supported = () => process.platform === 'linux' && process.arch === 'x64';
 let installing = false;
 const now = () => performance.now();
+
+/** A missing or corrupt preference file never switches the voice or requests network access. */
+export async function readPiperVoiceSettings(): Promise<PiperVoiceSettings> {
+  try {
+    const raw = await readFile(voiceSettingsFile(), 'utf8');
+    if (raw.length > 4096) return { ...DEFAULT_PIPER_VOICE_SETTINGS };
+    return parsePiperVoiceSettings(JSON.parse(raw) as unknown);
+  } catch { return { ...DEFAULT_PIPER_VOICE_SETTINGS }; }
+}
+
+async function voiceInstalled(id: PiperVoiceId): Promise<boolean> {
+  const file = voiceFile(id);
+  return await exists(file) && await exists(file + '.json');
+}
+
+export async function listPiperVoices(): Promise<PiperVoiceView> {
+  return {
+    settings: await readPiperVoiceSettings(),
+    voices: await Promise.all(PIPER_PT_BR_VOICES.map(async entry => ({
+      id: entry.id, label: entry.label, quality: entry.quality,
+      datasetLicense: entry.datasetLicense, installed: await voiceInstalled(entry.id)
+    })))
+  };
+}
+
+/** Voice choice and prosody are kept per OS user. A missing voice can never be selected. */
+export async function savePiperVoiceSettings(input: unknown): Promise<PiperVoiceSettings> {
+  const settings = parsePiperVoiceSettings(input);
+  if (settings.voice !== 'faber' && !await voiceInstalled(settings.voice)) {
+    throw new Error('Install this verified Piper voice before selecting it.');
+  }
+  await mkdir(root(), { recursive: true, mode: 0o700 });
+  const temporary = path.join(root(), '.piper-voice-' + randomUUID() + '.tmp');
+  try {
+    await writeFile(temporary, JSON.stringify(settings), { flag: 'wx', mode: 0o600 });
+    await rename(temporary, voiceSettingsFile());
+  } finally { await rm(temporary, { force: true }).catch(() => undefined); }
+  return settings;
+}
+
+/** Only a UI opt-in calls this; downloads are SHA-256 pinned and published atomically. */
+export async function installPiperVoice(id: PiperVoiceId, signal: AbortSignal): Promise<PiperVoiceView> {
+  const info = PIPER_PT_BR_VOICES.find(item => item.id === id);
+  if (!info) throw new Error('Unknown Piper voice.');
+  if (!supported()) throw new Error('Offline Piper voices currently require Linux x64.');
+  if (id === 'faber') throw new Error('Faber is installed with the local speech engine.');
+  if (installing) throw new Error('Another local voice installation is in progress.');
+  if (!await exists(piperPath(), constants.X_OK)) throw new Error('Install local Piper before adding another voice.');
+  if (await voiceInstalled(id)) return listPiperVoices();
+  installing = true;
+  let stage: string | null = null;
+  try {
+    await mkdir(voiceRoot(), { recursive: true, mode: 0o700 });
+    stage = await mkdtemp(path.join(voiceRoot(), '.stage-'));
+    const prefix = 'pt_BR-' + id + '-' + info.quality + '.onnx';
+    const url = 'https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/pt/pt_BR/' + id + '/' + info.quality + '/';
+    await download({ url: url + prefix, sha256: info.modelSha256, max: 80_000_000 }, path.join(stage, prefix), signal);
+    await download({ url: url + prefix + '.json', sha256: info.configSha256, max: 20_000 }, path.join(stage, prefix + '.json'), signal);
+    await rename(stage, path.join(voiceRoot(), id));
+    stage = null;
+    return listPiperVoices();
+  } finally {
+    if (stage) await rm(stage, { recursive: true, force: true });
+    installing = false;
+  }
+}
 
 async function execute(binary: string, args: string[], options: {
   stdin?: Uint8Array | string; signal?: AbortSignal; cwd?: string; env?: NodeJS.ProcessEnv; timeout?: number;
@@ -93,8 +170,8 @@ export async function jarvisLocalStatus(): Promise<JarvisLocalStatus> {
   const ffmpeg = await ffmpegReady();
   const model = await selectedModel();
   const stt = !!model && await exists(whisperPath(), constants.X_OK) && await exists(modelPath(model));
-  const tts = await exists(piperPath(), constants.X_OK) && await exists(voicePath()) &&
-    await exists(`${voicePath()}.json`);
+  const selection = await readPiperVoiceSettings();
+  const tts = await exists(piperPath(), constants.X_OK) && await voiceInstalled(selection.voice);
   return { supported: supported(), installed: stt && tts, stt, tts, ffmpeg, model,
     version: `whisper.cpp ${WHISPER_VERSION} / Piper ${PIPER_VERSION} / voices ${VOICE_VERSION}`,
     detail: !supported() ? 'Managed local voice is verified on Linux x64; Windows is experimental and unavailable here.'
@@ -195,13 +272,22 @@ export async function transcribeJarvisLocal(bytes: Uint8Array, language: string,
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
 
-export async function speakJarvisLocal(text: string, signal: AbortSignal): Promise<{ mime: string; bytes: Uint8Array }> {
-  if (!(await jarvisLocalStatus()).tts) throw new Error('Install the local Piper voice in Jarvis settings.');
+export async function speakJarvisLocal(text: string, signal: AbortSignal, preview?: PiperVoiceSettings): Promise<{ mime: string; bytes: Uint8Array }> {
+  if (!text.trim() || text.length > 4000) throw new Error('Invalid local speech text.');
+  const settings = preview ? parsePiperVoiceSettings(preview) : await readPiperVoiceSettings();
+  if (!await exists(piperPath(), constants.X_OK) || !await voiceInstalled(settings.voice)) {
+    throw new Error('Install the local Piper voice in Jarvis settings.');
+  }
   const started = now();
   const dir = await mkdtemp(path.join(os.tmpdir(), 'marks-jarvis-local-'));
   try {
     const wav = path.join(dir, 'voice.wav');
-    await execute(piperPath(), ['--model', voicePath(), '--output_file', wav],
+    await execute(piperPath(), [
+      '--model', voiceFile(settings.voice), '--output_file', wav,
+      '--length_scale', String(settings.lengthScale),
+      '--noise_w', String(settings.noiseW),
+      '--sentence_silence', String(settings.sentenceSilence)
+    ],
       { stdin: text, signal, cwd: path.dirname(piperPath()), env: piperEnvironment(), timeout: 60_000 });
     if ((await stat(wav)).size > 20_000_000) throw new Error('Local speech output exceeded the size limit.');
     const bytes = new Uint8Array(await readFile(wav));
