@@ -40,7 +40,7 @@ describe('ZeroClaw migration with synthetic HOME', () => {
     expect(content).not.toContain('model_provider = "marks"');
     expect(await readFile(path.join(source, 'config.toml'), 'utf8')).toBe(sample);
     const backup = path.join(root, result.backupName);
-    expect((await lstat(backup)).mode & 0o777).toBe(0o700);
+    if (process.platform !== 'win32') expect((await lstat(backup)).mode & 0o777).toBe(0o700);
     expect(await readFile(path.join(backup, 'marksclaw', '.secret_key'), 'utf8')).toBe('never-expose-secret');
     expect(await readFile(path.join(backup, 'marksclaw', 'data', 'sessions', 'sessions.db'), 'utf8')).toBe('synthetic-session');
     expect(await readFile(path.join(backup, 'zeroclaw-config.toml'), 'utf8')).toBe('[agents.old]\nenabled = true\n');

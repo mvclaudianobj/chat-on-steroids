@@ -44,7 +44,7 @@ if (!compiledOutput.includes('compiled')) throw new Error('The recognizer did no
 // 2. Substitute only the recognizer setup. The real while/Wait-Event loop, parent-PID check,
 // Stop file check, cleanup/finally and stdout status are unchanged.
 function loopScript(parentPid, stopFile) {
-  const script = original.replace(/  # BEGIN recognizer[\s\S]*?  # END recognizer\r\n/,
+  const script = original.replace(/  # BEGIN recognizer[\s\S]*?  # END recognizer(?:\r\n|\n)/,
     "  $engine = 'fixture'\r\n  Send 'status' 'listening'\r\n")
     .replace('__COS_PARENT_PID__', String(parentPid)).replace('__COS_STOP_FILE__', () => stopFile.replaceAll("'", "''"));
   if (script === original || script.includes('__COS_') || script.includes('SetInputToDefaultAudioDevice') ||

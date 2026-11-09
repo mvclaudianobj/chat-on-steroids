@@ -43,7 +43,7 @@ describe('company durable store', () => {
     const file=path.join(dir,'company','demo-backups',`${real.demoRecovery!.backupId}.json`);
     const persisted=JSON.parse(await fs.readFile(file,'utf8'));
     expect(persisted).toMatchObject({version:1,snapshot:source});
-    expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect((await fs.stat(file)).mode & 0o777).toBe(0o600);
     resetCompanyStoreForTests();initCompanyStore(dir);
     expect(await getCompany()).toEqual(real);
     expect(await restoreDemoCompany()).toEqual(source);
