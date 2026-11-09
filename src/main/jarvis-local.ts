@@ -106,7 +106,10 @@ export async function installPiperVoice(id: PiperVoiceId, signal: AbortSignal): 
   if (id === 'faber') throw new Error('Faber is installed with the local speech engine.');
   if (installing) throw new Error('Another local voice installation is in progress.');
   if (!await exists(piperPath(), constants.X_OK)) throw new Error('Install local Piper before adding another voice.');
-  if (await voiceInstalled(id)) return listPiperVoices();
+  if (await voiceInstalled(id)) {
+    logInfo('jarvis local: action=local-voice-install result=skipped reason=already-installed');
+    return listPiperVoices();
+  }
   installing = true;
   let stage: string | null = null;
   try {

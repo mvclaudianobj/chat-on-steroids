@@ -6,6 +6,7 @@ import path from 'node:path';
 const local = vi.hoisted(() => ({ userData: '' }));
 vi.mock('electron', () => ({ app: { getPath: () => local.userData, getLocale: () => 'pt-BR' } }));
 vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn() }));
+import { logInfo } from '../src/main/logger.js';
 
 import { DEFAULT_PIPER_VOICE_SETTINGS, PIPER_PT_BR_VOICES, parsePiperVoiceSettings } from '../src/shared/jarvis-piper-voices.js';
 import { installPiperVoice, listPiperVoices, readPiperVoiceSettings, savePiperVoiceSettings, speakJarvisLocal } from '../src/main/jarvis-local.js';
@@ -39,6 +40,34 @@ it('does not download voices just by listing and refuses to choose an uninstalle
       .rejects.toThrow(/install|voice/i);
     expect(fetcher).not.toHaveBeenCalled();
   } finally { vi.unstubAllGlobals(); }
+});
+
+it('logs the reason and skips the download when the selected voice is already installed', async () => {
+  const current = path.join(local.userData, 'modules', 'jarvis-local', 'current');
+  const voices = path.join(local.userData, 'modules', 'jarvis-local', 'voices', 'cadu');
+  await mkdir(path.join(current, 'piper'), { recursive: true });
+  await mkdir(voices, { recursive: true });
+  await writeFile(path.join(current, 'piper', 'piper'), '#!/bin/sh\nexit 0\n');
+  await chmod(path.join(current, 'piper', 'piper'), 0o700);
+  await writeFile(path.join(voices, 'pt_BR-cadu-medium.onnx'), 'fixture');
+  await writeFile(path.join(voices, 'pt_BR-cadu-medium.onnx.json'), '{}');
+  const fetcher = vi.fn(); vi.stubGlobal('fetch', fetcher);
+  try {
+    expect((await installPiperVoice('cadu', new AbortController().signal)).voices.find(voice => voice.id === 'cadu'))
+      .toMatchObject({ installed: true });
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(logInfo).toHaveBeenCalledWith('jarvis local: action=local-voice-install result=skipped reason=already-installed');
+  } finally { vi.unstubAllGlobals(); }
+});
+
+it('falls back to Faber when the saved voice preferences are damaged or oversized', async () => {
+  const root = path.join(local.userData, 'modules', 'jarvis-local');
+  await mkdir(root, { recursive: true });
+  const preferences = path.join(root, 'piper-voice.json');
+  await writeFile(preferences, '{broken json');
+  expect(await readPiperVoiceSettings()).toEqual(DEFAULT_PIPER_VOICE_SETTINGS);
+  await writeFile(preferences, 'x'.repeat(4097));
+  expect(await readPiperVoiceSettings()).toEqual(DEFAULT_PIPER_VOICE_SETTINGS);
 });
 
 it('persists validated controls and refuses a Piper voice when its engine is missing', async () => {

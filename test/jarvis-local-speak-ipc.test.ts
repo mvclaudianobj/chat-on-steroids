@@ -1,13 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({ handler: null as null | ((event: unknown, payload: unknown) => Promise<unknown>) }));
+const logger = vi.hoisted(() => ({ logInfo: vi.fn() }));
 vi.mock('electron', () => ({
   app: { on: vi.fn(), getPath: () => '/tmp/marks-jarvis-test-uninstalled' },
   ipcMain: { handle: vi.fn((_channel: string, handler: typeof state.handler) => { state.handler = handler; }) }
 }));
 vi.mock('../src/main/platform.js', () => ({ requireMarksFeature: vi.fn() }));
 vi.mock('../src/main/markspanel-auth.js', () => ({ markspanelAccessBlocked: () => false }));
-vi.mock('../src/main/logger.js', () => ({ logInfo: vi.fn() }));
+vi.mock('../src/main/logger.js', () => logger);
 const local = vi.hoisted(() => ({
   speakJarvisLocal: vi.fn(async (_text: string, _signal: AbortSignal) => ({ mime: 'audio/wav', bytes: new Uint8Array([82, 73, 70, 70]) })),
   jarvisLocalStatus: vi.fn(async () => ({ stt: false })), installJarvisLocal: vi.fn(), transcribeJarvisLocal: vi.fn(),
@@ -44,6 +45,11 @@ describe('Jarvis offline Piper IPC', () => {
   it('rejects empty or oversized local speech text', async () => {
     expect(await call({ action: 'local-speak', text: '' })).toMatchObject({ ok: false });
     expect(await call({ action: 'local-speak', text: 'x'.repeat(4001) })).toMatchObject({ ok: false });
+  });
+
+  it('logs a bounded reason when a local voice request is refused', async () => {
+    await call({ action: 'local-voice-install', voice: '../unsafe' });
+    expect(logger.logInfo).toHaveBeenCalledWith('jarvis local: action=local-voice-install result=refused reason=invalid-request');
   });
 
   it('exposes the dedicated Piper selector and audible local preview, not the provider voice picker', async () => {

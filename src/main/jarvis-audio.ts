@@ -48,6 +48,21 @@ const trace = z.object({ action: z.literal('trace'),
   engine: z.enum(['auto', 'provider', 'local', 'system']).optional()
 }).strict();
 const MAX_RESPONSE = 64_000;
+const LOCAL_ACTIONS = new Set(['local-status', 'local-speak', 'local-voices', 'local-voice-save', 'local-voice-install', 'local-voice-preview', 'local-install']);
+
+function localFailureReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (/checksum/i.test(message)) return 'checksum-mismatch';
+  if (/returned HTTP/i.test(message)) return 'download-http-error';
+  if (/size limit|exceeded the size/i.test(message)) return 'size-limit';
+  if (/Linux x64|supported on Linux/i.test(message)) return 'unsupported-platform';
+  if (/ffmpeg/i.test(message)) return 'ffmpeg-unavailable';
+  if (/already (?:in progress|running|busy)/i.test(message)) return 'already-running';
+  if (/cancel|timed out/i.test(message)) return 'canceled';
+  if (/install|not installed/i.test(message)) return 'not-installed';
+  if (/invalid|unknown/i.test(message)) return 'invalid-request';
+  return 'local-engine-error';
+}
 
 /** Only recognize an already provisioned whisper.cpp executable and model. */
 async function localEngine(): Promise<{ executable: string; model: string } | null> {
@@ -233,6 +248,12 @@ export function registerJarvisAudioIpc(getWindow: () => BrowserWindow | null): v
       const timeout = setTimeout(() => controller.abort(), 45_000);
       try { return { ok: true, data: await transcribeJarvis(input, controller.signal) }; }
       finally { clearTimeout(timeout); if (active === controller) active = null; }
-    } catch (reason) { return { ok: false, error: reason instanceof Error ? reason.message : 'Transcription unavailable' }; }
+    } catch (reason) {
+      const action = payload && typeof payload === 'object' ? (payload as { action?: unknown }).action : undefined;
+      if (typeof action === 'string' && LOCAL_ACTIONS.has(action)) {
+        logInfo(`jarvis local: action=${action} result=refused reason=${localFailureReason(reason)}`);
+      }
+      return { ok: false, error: reason instanceof Error ? reason.message : 'Transcription unavailable' };
+    }
   });
 }

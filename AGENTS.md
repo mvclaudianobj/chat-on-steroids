@@ -3619,6 +3619,19 @@ OS with CLIProxy `/audio/transcriptions` and an already installed whisper.cpp
 - **Engine order** `auto` = provider → CLIProxy → local Whisper → Windows; a recorder engine that
   fails or returns no text hands the same bytes to the next usable one. Stored J1/J2 preferences
   without `version: 2` migrate their old default `cliproxy` to `auto`.
+- **Managed offline speech (2.1.51.5)**: on Linux x64, Settings → Jarvis can explicitly install
+  pinned whisper.cpp plus the `base` or `small` Whisper model, and Piper with Faber as the default
+  Brazilian Portuguese voice. Cadu, Jeff and Edresson are optional voice-model downloads. Every
+  archive/model is size-bounded and SHA-256 checked before atomic installation; there is no
+  administrator step, and inference stays local. A voice can be previewed and adjusted for speed,
+  variation and sentence pauses. Selection is stored per user at
+  `userData/modules/jarvis-local/piper-voice.json`; missing, damaged or unsupported preferences
+  resolve to Faber. A voice cannot be selected until both its model and config are installed.
+  `jarvis:audio` exposes `local-status`, `local-install`, `local-speak`, `local-voices`,
+  `local-voice-save`, `local-voice-install` and `local-voice-preview` through the fixed preload
+  API. Other platforms retain their provider and installed system-voice paths; managed Whisper/Piper
+  installation is not available there. Tests: `test/jarvis-local.test.ts`,
+  `test/jarvis-piper-voices.test.ts`, `test/jarvis-local-speak-ipc.test.ts`.
 - **Turn-taking** (after JARVIS-OS-V.2): the streamed `assistant_message` rows of the voice turn
   feed `JarvisSentenceSplitter`; complete sentences go to `JarvisSpeechQueue`
   (`src/renderer/jarvis-speech.ts`), which synthesizes one sentence ahead while the current one
