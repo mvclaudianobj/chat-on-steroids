@@ -11,6 +11,8 @@ import { releaseTargets } from './release-targets.mjs';
  */
 export const RELEASE_FILES = [...releaseTargets('all').files, 'Chat-Marks-Linux-x64.deb', 'ChatMarks-Firefox.xpi', 'firefox-updates.json'];
 const EXTENSION = 'ChatMarks-Extension.zip';
+const LINUX_DEB = 'ChatMarks-Linux-x64.deb';
+const LEGACY_LINUX_DEB = 'Chat-Marks-Linux-x64.deb';
 const FIREFOX = 'ChatMarks-Firefox.xpi';
 const FIREFOX_UPDATES = 'firefox-updates.json';
 
@@ -37,6 +39,11 @@ export async function verifyReleaseAssets({ dir, tag }) {
     if (!existsSync(file)) { problems.push(`${name} is missing from the release.`); continue; }
     if (!sums.has(name)) { problems.push(`${name} is not listed in SHA256SUMS.txt.`); continue; }
     if (await sha256(file) !== sums.get(name)) problems.push(`${name} does not match its SHA256SUMS.txt checksum.`);
+  }
+  const linuxDeb = path.join(dir, LINUX_DEB);
+  const legacyLinuxDeb = path.join(dir, LEGACY_LINUX_DEB);
+  if (existsSync(linuxDeb) && existsSync(legacyLinuxDeb) && await sha256(linuxDeb) !== await sha256(legacyLinuxDeb)) {
+    problems.push(`${LEGACY_LINUX_DEB} must be a byte-for-byte copy of ${LINUX_DEB}.`);
   }
   const wanted = tag.replace(/^v/, '');
   const extension = path.join(dir, EXTENSION);

@@ -16,7 +16,7 @@ let dir = '';
 afterEach(() => { if (dir) rmSync(dir, { recursive: true, force: true }); dir = ''; });
 
 /** A complete, correct release folder; `change` edits it before the checksums are written. */
-function release(change: { manifest?: object; stamp?: string | null; omit?: string; afterSums?: () => void; firefoxVersion?: string; updatesVersion?: string; updatesHash?: string; updatesRelease?: string; updatesLink?: string; version?: string } = {}) {
+function release(change: { manifest?: object; stamp?: string | null; omit?: string; afterSums?: () => void; firefoxVersion?: string; updatesVersion?: string; updatesHash?: string; updatesRelease?: string; updatesLink?: string; version?: string; legacyDeb?: string } = {}) {
   dir = mkdtempSync(path.join(tmpdir(), 'release-'));
   const extensionEntries: Record<string, Uint8Array> = {
     'manifest.json': strToU8(JSON.stringify(change.manifest ?? { version: change.version ?? '2.1.21' }))
@@ -35,8 +35,10 @@ function release(change: { manifest?: object; stamp?: string | null; omit?: stri
   for (const name of RELEASE_FILES) {
     const bytes = name === 'ChatMarks-Extension.zip' ? zipSync(extensionEntries)
       : name === 'ChatMarks-Firefox.xpi' ? xpi : name === 'firefox-updates.json' ? updates : Buffer.from(`contents of ${name}`);
-    sums.push(`${createHash('sha256').update(bytes).digest('hex')}  ${name}`);
-    if (name !== change.omit) writeFileSync(path.join(dir, name), bytes);
+    const actualBytes = name === 'Chat-Marks-Linux-x64.deb'
+      ? Buffer.from(change.legacyDeb ?? 'contents of ChatMarks-Linux-x64.deb') : bytes;
+    sums.push(`${createHash('sha256').update(actualBytes).digest('hex')}  ${name}`);
+    if (name !== change.omit) writeFileSync(path.join(dir, name), actualBytes);
   }
   writeFileSync(path.join(dir, 'SHA256SUMS.txt'), sums.join('\n') + '\n');
   change.afterSums?.();
@@ -46,6 +48,13 @@ function release(change: { manifest?: object; stamp?: string | null; omit?: stri
 it('accepts a complete release whose files match their checksums and whose extension is the tagged build', async () => {
   expect(RELEASE_FILES).not.toContain('ChatMarks-Firefox.zip');
   expect(await verifyReleaseAssets({ dir: release(), tag: 'v2.1.21' })).toEqual([]);
+});
+
+it('requires the legacy Linux updater filename and identical Debian package bytes', async () => {
+  expect(await verifyReleaseAssets({ dir: release({ omit: 'Chat-Marks-Linux-x64.deb' }), tag: 'v2.1.21' }))
+    .toContain('Chat-Marks-Linux-x64.deb is missing from the release.');
+  expect(await verifyReleaseAssets({ dir: release({ legacyDeb: 'different but checksummed bytes' }), tag: 'v2.1.21' }))
+    .toContain('Chat-Marks-Linux-x64.deb must be a byte-for-byte copy of ChatMarks-Linux-x64.deb.');
 });
 
 it('reports a file whose bytes differ from the published checksum', async () => {
