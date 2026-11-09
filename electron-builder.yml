@@ -1,5 +1,5 @@
 appId: com.chatonsteroids.app
-productName: Chat Marks
+productName: ChatMarks
 copyright: MIT licensed
 # Product revision 2.1.51.2; npm uses SemVer build metadata +2.
 buildVersion: 2.1.51.2
@@ -101,7 +101,7 @@ nsis:
   include: scripts/windows-installer-acl.nsh
   installerIcon: build/icon.ico
   uninstallerIcon: build/icon.ico
-  # Drawn by scripts/make-icon.mjs from the app icon: the installer an update shows is CoS's own.
+  # Drawn by scripts/make-icon.mjs from the app icon and shown in the installer header.
   installerHeader: build/installerHeader.bmp
   installerSidebar: build/installerSidebar.bmp
   oneClick: false
@@ -110,9 +110,9 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Chat Marks
-  artifactName: Chat-Marks-Setup-${arch}.${ext}
-  uninstallDisplayName: Chat Marks
+  shortcutName: ChatMarks
+  artifactName: ChatMarks-Setup-${arch}.${ext}
+  uninstallDisplayName: ChatMarks
   deleteAppDataOnUninstall: false
 
 mac:
@@ -124,8 +124,8 @@ mac:
   minimumSystemVersion: "13.0"
   extendInfo:
     NSUserNotificationAlertStyle: alert
-    NSScreenCaptureUsageDescription: Chat Marks captures a display or window only when the enabled Desktop connector asks to observe it.
-    NSLocalNetworkUsageDescription: Chat Marks connects to devices and services on your local network when you run approved tools or commands.
+    NSScreenCaptureUsageDescription: ChatMarks captures a display or window only when the enabled Desktop connector asks to observe it.
+    NSLocalNetworkUsageDescription: ChatMarks connects to devices and services on your local network when you run approved tools or commands.
   # v2.0.2 intentionally ships unsigned/unnotarized macOS artifacts. Make that policy
   # deterministic instead of depending on whatever identities or Apple env vars happen to be
   # present on a hosted runner. Remove these two lines when real signing credentials are wired.
@@ -137,7 +137,7 @@ mac:
   # nothing Gatekeeper will vouch for — and verifies the result.
   identity: null
   notarize: false
-  artifactName: Chat-Marks-macOS-${arch}.${ext}
+  artifactName: ChatMarks-macOS-${arch}.${ext}
   files:
     - from: resources/packaging/native/darwin/${arch}/node_modules
       to: node_modules
@@ -164,11 +164,11 @@ linux:
   icon: build/icons
   category: Development
   executableName: chat-marks
-  maintainer: Chat Marks <mvclaudianobj@users.noreply.github.com>
+  maintainer: ChatMarks <mvclaudianobj@users.noreply.github.com>
   syncDesktopName: true
   # electron-builder rewrites x64 to x86_64 for AppImage and amd64 for DEB when ${arch}
   # is used. Keep one stable public architecture label across formats/releases instead.
-  artifactName: Chat-Marks-Linux-${env.COS_PACKAGE_ARCH}.${ext}
+  artifactName: ChatMarks-Linux-${env.COS_PACKAGE_ARCH}.${ext}
   files:
     - from: resources/packaging/native/linux/${arch}/node_modules
       to: node_modules

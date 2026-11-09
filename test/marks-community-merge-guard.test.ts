@@ -83,22 +83,22 @@ it('recovers in a fresh worktree from the reviewed baseline without removing fai
 it('verifies exact commit and checksums while refusing mismatches, traversal, duplicates and links', async () => {
   const { parent, worktree, marks } = fixture();
   const dir = path.join(parent, 'release'); mkdirSync(dir);
-  const file = path.join(dir, 'Chat-Marks-Linux-x64.deb');
+  const file = path.join(dir, 'ChatMarks-Linux-x64.deb');
   writeFileSync(file, 'fixture package bytes');
   const sha = createHash('sha256').update('fixture package bytes').digest('hex');
   const sums = path.join(dir, 'SHA256SUMS.txt');
-  writeFileSync(sums, `${sha}  Chat-Marks-Linux-x64.deb\n`);
+  writeFileSync(sums, `${sha}  ChatMarks-Linux-x64.deb\n`);
   expect((await compareSha({ repo: worktree, ref: 'HEAD', expected: marks, directory: dir, sums })).artifacts)
-    .toEqual([{ name: 'Chat-Marks-Linux-x64.deb', sha256: sha }]);
+    .toEqual([{ name: 'ChatMarks-Linux-x64.deb', sha256: sha }]);
   await expect(compareSha({ repo: worktree, ref: 'HEAD', expected: '0'.repeat(40), directory: dir, sums })).rejects.toThrow(/expected/);
   writeFileSync(file, 'tampered');
   await expect(compareSha({ repo: worktree, ref: 'HEAD', expected: marks, directory: dir, sums })).rejects.toThrow(/SHA256 mismatch/);
   writeFileSync(sums, `${sha}  ../outside\n`);
   await expect(compareSha({ repo: worktree, ref: 'HEAD', expected: marks, directory: dir, sums })).rejects.toThrow(/unsafe checksum/);
-  writeFileSync(sums, `${sha}  Chat-Marks-Linux-x64.deb\n${sha}  Chat-Marks-Linux-x64.deb\n`);
+  writeFileSync(sums, `${sha}  ChatMarks-Linux-x64.deb\n${sha}  ChatMarks-Linux-x64.deb\n`);
   await expect(compareSha({ repo: worktree, ref: 'HEAD', expected: marks, directory: dir, sums })).rejects.toThrow(/duplicated/);
   rmSync(file); symlinkSync(path.join(worktree, 'package.json'), file);
-  writeFileSync(sums, `${sha}  Chat-Marks-Linux-x64.deb\n`);
+  writeFileSync(sums, `${sha}  ChatMarks-Linux-x64.deb\n`);
   await expect(compareSha({ repo: worktree, ref: 'HEAD', expected: marks, directory: dir, sums })).rejects.toThrow(/regular artifact/);
 });
 

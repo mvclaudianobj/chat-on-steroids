@@ -13,24 +13,24 @@ const script = fileURLToPath(new URL('../scripts/smoke-macos-bundle.mjs', import
 function auditPlist(npmVersion: string, shortVersion: string, bundleVersion: string) {
   const cwd = mkdtempSync(path.join(tmpdir(), 'marks-macos-plist-'));
   try {
-    const app = path.join(cwd, 'Chat Marks.app');
+    const app = path.join(cwd, 'ChatMarks.app');
     const contents = path.join(app, 'Contents');
     mkdirSync(contents, { recursive: true });
     writeFileSync(path.join(cwd, 'package.json'), JSON.stringify({ version: npmVersion }));
     writeFileSync(path.join(contents, 'Info.plist'), JSON.stringify({
       CFBundleIdentifier: 'com.chatonsteroids.app',
-      CFBundleExecutable: 'Chat Marks',
-      CFBundleName: 'Chat Marks',
-      CFBundleDisplayName: 'Chat Marks',
+      CFBundleExecutable: 'ChatMarks',
+      CFBundleName: 'ChatMarks',
+      CFBundleDisplayName: 'ChatMarks',
       CFBundleIconFile: 'icon.icns',
       CFBundleShortVersionString: shortVersion,
       CFBundleVersion: bundleVersion,
       LSApplicationCategoryType: 'public.app-category.developer-tools',
       LSMinimumSystemVersion: '13.0',
       NSScreenCaptureUsageDescription:
-        'Chat Marks captures a display or window only when the enabled Desktop connector asks to observe it.',
+        'ChatMarks captures a display or window only when the enabled Desktop connector asks to observe it.',
       NSLocalNetworkUsageDescription:
-        'Chat Marks connects to devices and services on your local network when you run approved tools or commands.'
+        'ChatMarks connects to devices and services on your local network when you run approved tools or commands.'
     }));
     const preload = path.join(cwd, 'mock-macos.mjs');
     writeFileSync(preload, `

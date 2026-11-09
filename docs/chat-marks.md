@@ -17,7 +17,7 @@ and connector installations. Third-party license, authorship and upstream source
 references remain attributed to their owners.
 
 The customized updater targets `mvclaudianobj/chat-on-steroids` and the fork's
-`Chat-Marks-*` release assets. A fork release must publish matching
+`ChatMarks-*` release assets. A fork release must publish matching
 artifacts and checksums before automatic updates can be applied.
 
 ## Manually reviewed releases and application updates

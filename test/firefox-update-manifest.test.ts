@@ -24,7 +24,7 @@ describe('Firefox update manifest', () => {
     expect(FIREFOX_SIGN_CHECK_ADDON_ID).toBe('companion-signcheck@chatmarks.app');
     expect(FIREFOX_SIGN_CHECK_ADDON_ID).not.toBe(FIREFOX_ADDON_ID);
     expect(FIREFOX_ADDON_ASSET).toBe(FIREFOX_XPI);
-    expect(firefoxAddonUrl('2.1.38.1')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.38.1/Chat-Marks-Firefox.xpi');
+    expect(firefoxAddonUrl('2.1.38.1')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.38.1/ChatMarks-Firefox.xpi');
     expect(() => firefoxAddonUrl('2.1.38+1')).toThrow();
   });
 

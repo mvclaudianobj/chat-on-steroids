@@ -1,9 +1,9 @@
 <p align="center"><img src="docs/images/readme-hero.svg?v=2" width="960" alt="Turn ChatGPT into Codex-style local coding. Chat Marks: Your files. Your terminal. Your ChatGPT plan." /></p>
 
 <p align="center">
-  <a href="https://github.com/mvclaudianobj/chat-on-steroids/releases/latest/download/Chat-Marks-Setup-x64.exe"><img src="docs/images/download-windows.svg" width="208" height="56" alt="Download for Windows x64" /></a>&nbsp;
-  <a href="https://github.com/mvclaudianobj/chat-on-steroids/releases/latest/download/Chat-Marks-macOS-arm64.dmg"><img src="docs/images/download-macos.svg" width="208" height="56" alt="Download for macOS Apple silicon" /></a>&nbsp;
-  <a href="https://github.com/mvclaudianobj/chat-on-steroids/releases/latest/download/Chat-Marks-Linux-x64.deb"><img src="docs/images/download-linux.svg" width="208" height="56" alt="Download for Linux x64" /></a>
+  <a href="https://github.com/mvclaudianobj/chat-on-steroids/releases/latest/download/ChatMarks-Setup-x64.exe"><img src="docs/images/download-windows.svg" width="208" height="56" alt="Download for Windows x64" /></a>&nbsp;
+  <a href="https://github.com/mvclaudianobj/chat-on-steroids/releases/latest/download/ChatMarks-macOS-arm64.dmg"><img src="docs/images/download-macos.svg" width="208" height="56" alt="Download for macOS Apple silicon" /></a>&nbsp;
+  <a href="https://github.com/mvclaudianobj/chat-on-steroids/releases/latest/download/ChatMarks-Linux-x64.deb"><img src="docs/images/download-linux.svg" width="208" height="56" alt="Download for Linux x64" /></a>
 </p>
 
 <p align="center"><a href="https://github.com/mvclaudianobj/chat-on-steroids/releases/latest">All downloads</a></p>
@@ -93,7 +93,7 @@ Use Chat Marks in accordance with OpenAI's applicable [Terms of Use](https://ope
 
 - **Respect limits and access decisions.** Workers, Goal/Loop, Compact & Resume and finish checkpoints organize work; they do not grant extra quota or model access and must not be used to evade rate limits, usage caps or account restrictions. Do not switch accounts, chats, plugins or tunnels to evade a restriction.
 - **Respect safety decisions.** Do not use local tools, browser control, plugins or another worker to carry out an action that the provider blocked for safety. A local permission or an enabled MCP plugin is not permission to override a provider refusal.
-- **Understand the integration.** Chat Marks connects local tools through MCP. Its browser extension also observes and automates the ChatGPT browser UI and records conversation content locally. This browser integration is not a public ChatGPT automation API. MCP availability does not establish permission for every form of browser automation or recording; OpenAI's terms also restrict automated or programmatic extraction of data or output.
+- **Understand the integration.** ChatMarks connects local tools through MCP. Its browser extension also observes and automates the ChatGPT browser UI and records conversation content locally. This browser integration is not a public ChatGPT automation API. MCP availability does not establish permission for every form of browser automation or recording; OpenAI's terms also restrict automated or programmatic extraction of data or output.
 - **Use at your own risk.** Review the rules for your account and intended workflow before connecting, supervise automation and review tool actions and outputs. Chat Marks cannot guarantee policy compliance, continued service access or protection from account warnings, restrictions or suspension. If a workflow is restricted or receives a policy warning, stop that workflow and seek clarification through the provider's support or appeal process.
 
 This notice states the project's intended use; it does not certify compliance or change provider rules. Chat Marks is not affiliated with, endorsed by or approved by OpenAI. The software is provided as-is under the [MIT license](LICENSE); applicable statutory rights remain unaffected. See [Security](SECURITY.md) for local permissions and risks.

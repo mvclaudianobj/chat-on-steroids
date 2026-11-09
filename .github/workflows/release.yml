@@ -53,7 +53,7 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-native-sources
-          path: release/Chat-Marks-Native-Sources.tar.gz
+          path: release/ChatMarks-Native-Sources.tar.gz
           if-no-files-found: error
           retention-days: 30
 
@@ -162,8 +162,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dmg="$PWD/release/Chat-Marks-macOS-${{ matrix.arch }}.dmg"
-          zip="$PWD/release/Chat-Marks-macOS-${{ matrix.arch }}.zip"
+          dmg="$PWD/release/ChatMarks-macOS-${{ matrix.arch }}.dmg"
+          zip="$PWD/release/ChatMarks-macOS-${{ matrix.arch }}.zip"
           test -f "$dmg"
           test -f "$zip"
           hdiutil verify "$dmg"
@@ -195,18 +195,18 @@ jobs:
           }
           trap cleanup EXIT
           hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg" >/dev/null
-          test -d "$mount_dir/Chat Marks.app"
+          test -d "$mount_dir/ChatMarks.app"
           test -L "$mount_dir/Applications"
           test "$(readlink "$mount_dir/Applications")" = /Applications
-          test -x "$mount_dir/Chat Marks.app/Contents/MacOS/Chat Marks"
-          test -f "$mount_dir/Chat Marks.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/Chat Marks.app"
+          test -x "$mount_dir/ChatMarks.app/Contents/MacOS/ChatMarks"
+          test -f "$mount_dir/ChatMarks.app/Contents/Info.plist"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/ChatMarks.app"
           # ditto is the macOS-native ZIP extractor and preserves executable modes/metadata.
           ditto -x -k "$zip" "$zip_dir"
-          test -d "$zip_dir/Chat Marks.app"
-          test -x "$zip_dir/Chat Marks.app/Contents/MacOS/Chat Marks"
-          test -f "$zip_dir/Chat Marks.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/Chat Marks.app"
+          test -d "$zip_dir/ChatMarks.app"
+          test -x "$zip_dir/ChatMarks.app/Contents/MacOS/ChatMarks"
+          test -f "$zip_dir/ChatMarks.app/Contents/Info.plist"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/ChatMarks.app"
 
       - name: Launch packaged macOS app normally
         if: matrix.platform == 'darwin'
@@ -217,7 +217,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deb="$PWD/release/Chat-Marks-Linux-${{ matrix.arch }}.deb"
+          deb="$PWD/release/ChatMarks-Linux-${{ matrix.arch }}.deb"
           test -f "$deb"
           echo "Generated control metadata:"
           dpkg-deb --field "$deb" Package Version Architecture Depends
@@ -235,7 +235,7 @@ jobs:
           dpkg-query -W -f='${Status}\n' chat-on-steroids | grep -Fxq 'install ok installed'
           desktop=/usr/share/applications/com.chatonsteroids.app.desktop
           test -f "$desktop"
-          grep -Fxq 'Name=Chat Marks' "$desktop"
+          grep -Fxq 'Name=ChatMarks' "$desktop"
           grep -Fxq 'Icon=chat-marks' "$desktop"
           grep -Fxq 'StartupWMClass=com.chatonsteroids.app' "$desktop"
           # electron-builder's DEB postinstall registers /usr/bin through update-alternatives.
@@ -304,7 +304,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          appimage="$PWD/release/Chat-Marks-Linux-${{ matrix.arch }}.AppImage"
+          appimage="$PWD/release/ChatMarks-Linux-${{ matrix.arch }}.AppImage"
           test -x "$appimage"
           # Exercise the actual static-runtime artifact through Chromium/Electron startup and
           # require login-or-workspace readiness proof rather than accepting a process that merely hangs.
@@ -391,11 +391,11 @@ jobs:
           set -euo pipefail
           # Same stamp as the packaged app, so a ZIP-loaded extension reports its build (#568).
           node scripts/write-extension-stamp.mjs
-          (cd extension && zip -qr ../release/Chat-Marks-Extension.zip . -x '*.map')
-          zip -q release/Chat-Marks-Extension.zip LICENSE
+          (cd extension && zip -qr ../release/ChatMarks-Extension.zip . -x '*.map')
+          zip -q release/ChatMarks-Extension.zip LICENSE
           node scripts/verify-release-version.mjs --package-only
           for required in manifest.json build-stamp.txt background.js chatgpt-dom.js content.js fiber.js overlay.css popup.html popup.css popup.js icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png LICENSE; do
-            unzip -Z1 release/Chat-Marks-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
+            unzip -Z1 release/ChatMarks-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
           done
 
       - name: Create SHA-256 checksums
@@ -413,13 +413,13 @@ jobs:
       # but offer people a versioned download without changing those filenames.
       - name: Prepare versioned Linux installer
         id: linux_download
-        if: contains(needs.plan.outputs.files, 'Chat-Marks-Linux-x64.deb')
+        if: contains(needs.plan.outputs.files, 'ChatMarks-Linux-x64.deb')
         shell: bash
         run: |
           set -euo pipefail
           version="$(node scripts/release-version.mjs --deb)"
-          source=release/Chat-Marks-Linux-x64.deb
-          target="release/Chat-Marks-Linux-${version}-amd64.deb"
+          source=release/ChatMarks-Linux-x64.deb
+          target="release/ChatMarks-Linux-${version}-amd64.deb"
           test -s "$source"
           test "$(dpkg-deb --field "$source" Version)" = "$version"
           test "$(dpkg-deb --field "$source" Architecture)" = amd64
@@ -432,10 +432,10 @@ jobs:
         if: steps.linux_download.outputs.version != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: Chat-Marks-Linux-${{ steps.linux_download.outputs.version }}-amd64
+          name: ChatMarks-Linux-${{ steps.linux_download.outputs.version }}-amd64
           path: |
-            release/Chat-Marks-Linux-${{ steps.linux_download.outputs.version }}-amd64.deb
-            release/Chat-Marks-Linux-${{ steps.linux_download.outputs.version }}-amd64.deb.sha256
+            release/ChatMarks-Linux-${{ steps.linux_download.outputs.version }}-amd64.deb
+            release/ChatMarks-Linux-${{ steps.linux_download.outputs.version }}-amd64.deb.sha256
           if-no-files-found: error
           retention-days: 30
 
@@ -444,9 +444,9 @@ jobs:
         with:
           # Artifact names reject `/`, so direct candidate runs from feature/foo refs must not
           # fail after all six package jobs. A run id is filesystem-safe and caller-stable.
-          name: chat-on-steroids-candidate-${{ github.run_id }}
+          name: chatmarks-candidate-${{ github.run_id }}
           path: |
-            release/Chat-Marks-*
+            release/ChatMarks-*
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30

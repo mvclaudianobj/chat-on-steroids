@@ -9,7 +9,7 @@ Never change the ID to fix an update: that would break existing installations.
 **Why an installed add-on remains at 2.1.44.1:** changing the desktop app, the source
 manifest or the staged tree does not install a Firefox update. Firefox obtains updates
 only from the **published** `firefox-updates.json`, which must point to a real Mozilla-
-signed `Chat-Marks-Firefox.xpi` with the exact Gecko ID, matching version and SHA-256.
+signed `ChatMarks-Firefox.xpi` with the exact Gecko ID, matching version and SHA-256.
 The public `v2.1.46.1` release inspected on 2026-10-29 contains only a Debian QA
 asset, without either Firefox asset. Consequently that release cannot update the
 installed add-on. A future release must provide both assets and pass the checks below;
@@ -26,7 +26,7 @@ held, publish the next legitimate Chat Marks revision instead of reusing a versi
 
 After publishing, check these independently:
 
-1. Release `vX.Y.Z[.N]` contains `Chat-Marks-Firefox.xpi` and `firefox-updates.json`.
+1. Release `vX.Y.Z[.N]` contains `ChatMarks-Firefox.xpi` and `firefox-updates.json`.
 2. The `/releases/latest/download/firefox-updates.json` endpoint is publicly readable
    and its `addons["companion@chatmarks.app"].updates[0]` names the expected version.
 3. Its `update_link` downloads the signed XPI; `update_hash` matches that file's SHA-256.

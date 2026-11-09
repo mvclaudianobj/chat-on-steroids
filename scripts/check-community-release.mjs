@@ -113,7 +113,7 @@ async function getLatestRelease() {
     response = await fetch(latestReleaseApi, {
       headers: {
         'Accept': 'application/vnd.github+json',
-        'User-Agent': 'Chat-Marks-community-merge-planner'
+        'User-Agent': 'ChatMarks-community-merge-planner'
       },
       signal: AbortSignal.timeout(15000)
     });

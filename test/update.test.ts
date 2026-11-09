@@ -112,9 +112,9 @@ const {
 } = await import('../src/main/update.js');
 
 const NEXT = '99.0.0';
-const WINDOWS_ASSET = `Chat-Marks-Setup-${process.arch}.exe`;
-const APPIMAGE_ASSET = `Chat-Marks-Linux-${process.arch}.AppImage`;
-const DEB_ASSET = `Chat-Marks-Linux-${process.arch}.deb`;
+const WINDOWS_ASSET = `ChatMarks-Setup-${process.arch}.exe`;
+const APPIMAGE_ASSET = `ChatMarks-Linux-${process.arch}.AppImage`;
+const DEB_ASSET = `ChatMarks-Linux-${process.arch}.deb`;
 
 const sha256 = (body: string): string => createHash('sha256').update(body).digest('hex');
 
@@ -221,8 +221,8 @@ afterEach(() => {
 
 describe('the file Get update opens for an installation that cannot update itself', () => {
   it('names the exact macOS disk image or Linux package for this machine', () => {
-    expect(manualDownloadName('darwin', 'arm64', undefined, true)).toBe('Chat-Marks-macOS-arm64.dmg');
-    expect(manualDownloadName('darwin', 'x64', undefined, true)).toBe('Chat-Marks-macOS-x64.dmg');
+    expect(manualDownloadName('darwin', 'arm64', undefined, true)).toBe('ChatMarks-macOS-arm64.dmg');
+    expect(manualDownloadName('darwin', 'x64', undefined, true)).toBe('ChatMarks-macOS-x64.dmg');
     expect(manualDownloadName('linux', 'x64', undefined, true)).toBeNull();
     // Installations that update themselves, a dev tree and an unpublished architecture get none.
     expect(manualDownloadName('linux', 'x64', '/opt/cos.AppImage', true)).toBeNull();
@@ -231,9 +231,9 @@ describe('the file Get update opens for an installation that cannot update itsel
     expect(manualDownloadName('darwin', 'ia32', undefined, true)).toBeNull();
   });
   it('links that file for the announced version, and the release page otherwise', () => {
-    expect(manualDownloadUrl('2.1.17', 'Chat-Marks-macOS-arm64.dmg'))
-      .toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.17/Chat-Marks-macOS-arm64.dmg');
-    expect(manualDownloadUrl(null, 'Chat-Marks-macOS-arm64.dmg')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
+    expect(manualDownloadUrl('2.1.17', 'ChatMarks-macOS-arm64.dmg'))
+      .toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.17/ChatMarks-macOS-arm64.dmg');
+    expect(manualDownloadUrl(null, 'ChatMarks-macOS-arm64.dmg')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
     expect(manualDownloadUrl('2.1.17', null)).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
     expect(manualDownloadUrl('../evil', 'x.dmg')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
   });
@@ -549,16 +549,16 @@ describe('cleanup of updater-owned downloads', () => {
 
 describe('which installations update themselves', () => {
   it('takes the Windows installer and the Linux AppImage, and nothing else', () => {
-    expect(stagedArtifact('win32', 'x64')).toMatchObject({ name: 'Chat-Marks-Setup-x64.exe', kind: 'installer' });
+    expect(stagedArtifact('win32', 'x64')).toMatchObject({ name: 'ChatMarks-Setup-x64.exe', kind: 'installer' });
     expect(stagedArtifact('linux', 'arm64', '/opt/cos.AppImage')).toMatchObject({
-      name: 'Chat-Marks-Linux-arm64.AppImage',
+      name: 'ChatMarks-Linux-arm64.AppImage',
       kind: 'appimage',
       target: '/opt/cos.AppImage'
     });
   });
 
   it('stages a digest-verified Linux package, but requires an explicit install click', async () => {
-    expect(stagedArtifact('linux', 'x64', undefined)).toMatchObject({ kind: 'deb', name: 'Chat-Marks-Linux-x64.deb' });
+    expect(stagedArtifact('linux', 'x64', undefined)).toMatchObject({ kind: 'deb', name: 'ChatMarks-Linux-x64.deb' });
     expect(stagedArtifact('darwin', 'arm64')).toBeNull();
     const { asked } = github();
     await asPlatform('linux', undefined, () => checkForUpdates());
@@ -618,7 +618,7 @@ describe('finding a newer release', () => {
     expect(releaseVersion('2.1.0')).toBe('2.1.0');
     expect(releaseVersion('v2.1.37.1')).toBe('2.1.37.1');
     expect(releaseVersion('v2.1.37.1.2')).toBeNull();
-    expect(manualDownloadUrl('2.1.37.1', 'Chat-Marks-Linux-x64.deb')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37.1/Chat-Marks-Linux-x64.deb');
+    expect(manualDownloadUrl('2.1.37.1', 'ChatMarks-Linux-x64.deb')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37.1/ChatMarks-Linux-x64.deb');
     expect(releaseVersion('v2.1.0-rc.1')).toBeNull();
     expect(releaseVersion(null)).toBeNull();
   });
@@ -845,7 +845,7 @@ describe('staging the new version', () => {
   });
 
   it('stages nothing when the release does not publish an artifact for this installation', async () => {
-    github({ checksums: `${sha256('x')}  Chat-Marks-Extension.zip\n` });
+    github({ checksums: `${sha256('x')}  ChatMarks-Extension.zip\n` });
     await asPlatform('win32', undefined, () => checkForUpdates());
     expect(updateStatus().stage).toBe('failed');
     expect(updateStatus().error).toContain(`publishes no ${WINDOWS_ASSET}`);

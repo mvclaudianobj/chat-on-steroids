@@ -14,16 +14,16 @@ it('checks only the Marks GitHub release and downloads its platform-specific bin
   const update = read('src/main/update.ts');
   expect(update).toContain("const REPO = 'mvclaudianobj/chat-on-steroids'");
   expect(update).not.toContain("const REPO = 'totec448-spec/chat-on-steroids'");
-  expect(stagedArtifact('win32', 'x64', undefined, true)?.name).toBe('Chat-Marks-Setup-x64.exe');
-  expect(stagedArtifact('linux', 'x64', '/opt/marks.AppImage', true)?.name).toBe('Chat-Marks-Linux-x64.AppImage');
+  expect(stagedArtifact('win32', 'x64', undefined, true)?.name).toBe('ChatMarks-Setup-x64.exe');
+  expect(stagedArtifact('linux', 'x64', '/opt/marks.AppImage', true)?.name).toBe('ChatMarks-Linux-x64.AppImage');
   // The generic packaged-Linux case is deliberately not classified as a Debian install.
-  expect(stagedArtifact('linux', 'arm64', undefined, true)?.name).not.toBe('Chat-Marks-Linux-arm64.deb');
+  expect(stagedArtifact('linux', 'arm64', undefined, true)?.name).not.toBe('ChatMarks-Linux-arm64.deb');
   expect(manualDownloadName('linux', 'arm64', undefined, true)).toBeNull();
-  expect(manualDownloadUrl('2.1.37', 'Chat-Marks-Linux-arm64.deb')).toBe(
-    'https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37/Chat-Marks-Linux-arm64.deb'
+  expect(manualDownloadUrl('2.1.37', 'ChatMarks-Linux-arm64.deb')).toBe(
+    'https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37/ChatMarks-Linux-arm64.deb'
   );
   expect(extensionDownloadUrl('2.1.37')).toBe(
-    'https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37/Chat-Marks-Extension.zip'
+    'https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37/ChatMarks-Extension.zip'
   );
 });
 
@@ -35,13 +35,13 @@ it('makes the published file list exactly match the release planner and the pack
   const targets = JSON.parse(read('.github/release-targets.json')) as Array<{ platform: string; enabled?: boolean }>;
   expect(targets.filter(target => target.platform === 'darwin').map(target => target.enabled)).toEqual([false, false]);
   expect(planned.some(name => name.includes('macOS'))).toBe(false);
-  expect(RELEASE_FILES).toEqual([...planned, 'Chat-Marks-Firefox.xpi', 'firefox-updates.json']);
-  expect(planned.every(name => name.startsWith('Chat-Marks-'))).toBe(true);
+  expect(RELEASE_FILES).toEqual([...planned, 'ChatMarks-Firefox.xpi', 'firefox-updates.json']);
+  expect(planned.every(name => name.startsWith('ChatMarks-'))).toBe(true);
   const builder = loadYaml(read('electron-builder.yml')) as any;
-  expect(builder.nsis.artifactName).toBe('Chat-Marks-Setup-${arch}.${ext}');
-  expect(builder.mac.artifactName).toBe('Chat-Marks-macOS-${arch}.${ext}');
-  expect(builder.linux.artifactName).toBe('Chat-Marks-Linux-${env.COS_PACKAGE_ARCH}.${ext}');
-  expect(read('scripts/package-native-sources.mjs')).toContain('Chat-Marks-Native-Sources.tar.gz');
+  expect(builder.nsis.artifactName).toBe('ChatMarks-Setup-${arch}.${ext}');
+  expect(builder.mac.artifactName).toBe('ChatMarks-macOS-${arch}.${ext}');
+  expect(builder.linux.artifactName).toBe('ChatMarks-Linux-${env.COS_PACKAGE_ARCH}.${ext}');
+  expect(read('scripts/package-native-sources.mjs')).toContain('ChatMarks-Native-Sources.tar.gz');
 });
 
 it('builds and publishes Marks tag releases, with checksums and post-release verification', () => {
@@ -58,7 +58,7 @@ it('builds and publishes Marks tag releases, with checksums and post-release ver
   const assembly = workflow.jobs.assemble.steps.find((step: any) => step.name === 'Create SHA-256 checksums').run;
   expect(assembly).toContain('sha256sum');
   expect(verification.jobs.verify.if).toBe("github.repository == 'mvclaudianobj/chat-on-steroids'");
-  expect(read('.github/workflows/release.yml')).toContain('release/Chat-Marks-Extension.zip');
+  expect(read('.github/workflows/release.yml')).toContain('release/ChatMarks-Extension.zip');
   const preflight = publish.jobs.preflight.steps.find((step: any) => step.name === 'Verify tag and release metadata agree');
   expect(preflight.run).toContain('node scripts/verify-release-version.mjs');
   // Complete platform suites run alongside packaging but still gate assembly. No architecture

@@ -122,10 +122,10 @@ export function stagedArtifact(
 ): { name: string; kind: 'installer' | 'appimage' | 'deb'; target: string } | null {
   if (!packaged) return null;
   if (arch !== 'x64' && arch !== 'arm64') return null;
-  if (platform === 'win32') return { name: `Chat-Marks-Setup-${arch}.exe`, kind: 'installer', target: '' };
+  if (platform === 'win32') return { name: `ChatMarks-Setup-${arch}.exe`, kind: 'installer', target: '' };
   if (platform === 'linux') {
-    if (appImage) return { name: `Chat-Marks-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
-    if (debPackageProof()) return { name: `Chat-Marks-Linux-${arch}.deb`, kind: 'deb', target: '' };
+    if (appImage) return { name: `ChatMarks-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
+    if (debPackageProof()) return { name: `ChatMarks-Linux-${arch}.deb`, kind: 'deb', target: '' };
     return null;
   }
   return null;
@@ -146,7 +146,7 @@ export function manualDownloadName(
   packaged: boolean = app.isPackaged
 ): string | null {
   if (!packaged || (arch !== 'x64' && arch !== 'arm64')) return null;
-  if (platform === 'darwin') return `Chat-Marks-macOS-${arch}.dmg`;
+  if (platform === 'darwin') return `ChatMarks-macOS-${arch}.dmg`;
   return null;
 }
 
@@ -731,7 +731,7 @@ export const DEBIAN_ROOT_INSTALL_SCRIPT = [
   'if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):',
   '    raise ValueError("Invalid expected Debian release digest")',
   'with tempfile.TemporaryDirectory(prefix="chat-marks-deb-", dir="/var/tmp") as private:',
-  '    target = os.path.join(private, "Chat-Marks-update.deb")',
+  '    target = os.path.join(private, "ChatMarks-update.deb")',
   '    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)',
   '    with os.fdopen(fd, "rb") as untrusted:',
   '        size = os.fstat(untrusted.fileno())',

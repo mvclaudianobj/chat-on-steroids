@@ -9,9 +9,9 @@ import { releaseTargets } from './release-targets.mjs';
  * The files a release publishes, in its SHA256SUMS.txt order: every enabled target in
  * .github/release-targets.json, then the extension, native sources and Firefox add-on.
  */
-export const RELEASE_FILES = [...releaseTargets('all').files, 'Chat-Marks-Firefox.xpi', 'firefox-updates.json'];
-const EXTENSION = 'Chat-Marks-Extension.zip';
-const FIREFOX = 'Chat-Marks-Firefox.xpi';
+export const RELEASE_FILES = [...releaseTargets('all').files, 'ChatMarks-Firefox.xpi', 'firefox-updates.json'];
+const EXTENSION = 'ChatMarks-Extension.zip';
+const FIREFOX = 'ChatMarks-Firefox.xpi';
 const FIREFOX_UPDATES = 'firefox-updates.json';
 
 function sha256(file) {

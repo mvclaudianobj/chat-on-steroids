@@ -8,7 +8,7 @@
  */
 import { isReleaseVersion } from './types.js';
 
-export const FIREFOX_ADDON_ASSET = 'Chat-Marks-Firefox.xpi';
+export const FIREFOX_ADDON_ASSET = 'ChatMarks-Firefox.xpi';
 const RELEASES = 'https://github.com/mvclaudianobj/chat-on-steroids/releases/download';
 
 export function firefoxAddonUrl(version: string): string {

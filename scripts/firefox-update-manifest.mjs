@@ -17,7 +17,7 @@ import { productVersion } from './release-version.mjs';
 export const FIREFOX_ADDON_ID = 'companion@chatmarks.app';
 // Signing probes never claim a production add-on version or Gecko identity.
 export const FIREFOX_SIGN_CHECK_ADDON_ID = 'companion-signcheck@chatmarks.app';
-export const FIREFOX_XPI = 'Chat-Marks-Firefox.xpi';
+export const FIREFOX_XPI = 'ChatMarks-Firefox.xpi';
 export const FIREFOX_UPDATES = 'firefox-updates.json';
 const RELEASES = 'https://github.com/mvclaudianobj/chat-on-steroids/releases';
 export const FIREFOX_UPDATE_URL = `${RELEASES}/latest/download/${FIREFOX_UPDATES}`;

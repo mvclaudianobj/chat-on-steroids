@@ -19,7 +19,7 @@ export const APP_VERSION = '2.1.51.2';
  * `latest` asset can pair an older installed app with a newer, incompatible bridge protocol.
  */
 export function extensionDownloadUrl(version = APP_VERSION): string {
-  return `https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v${encodeURIComponent(version)}/Chat-Marks-Extension.zip`;
+  return `https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v${encodeURIComponent(version)}/ChatMarks-Extension.zip`;
 }
 
 /**

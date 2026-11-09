@@ -65,7 +65,7 @@ export function agencyCatalogFromTree(commit: string, tree: unknown): MarksAgenc
 
 async function github(endpoint: string, limit = 4 * 1024 * 1024): Promise<unknown> {
   const response = await fetch(`${API}${endpoint}`, {
-    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'Chat-Marks-Agency-Agents' },
+    headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'ChatMarks-Agency-Agents' },
     redirect: 'error', signal: AbortSignal.timeout(20_000)
   });
   if (!response.ok) throw new Error(response.status === 403 ? 'GitHub API rate limit or access denied' : `Agency Agents GitHub request failed (${response.status})`);
