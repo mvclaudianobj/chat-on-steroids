@@ -9,9 +9,9 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [2.1.51.1] — ChatMarks integration of community v2.1.51
+## [2.1.51.2] — Chat Marks integration of current community main
 
-ChatMarks carries the community v2.1.51 features and fixes, integrated with ChatMarks identity, agent engines, local CLI and API chats, Vault, Agency skills, and the existing Marks workspace. The release uses the ChatMarks version suffix so the community release remains identifiable as its source.
+Carries the community updates after v2.1.51, including the scheduled chats list, full-history search, and Compact & Resume recovery after reload, while preserving Chat Marks identity and modules.
 
 ## [2.1.51] — Steps for you, a limit on busy chats, and Telegram
 ChatGPT can now hand you a step it cannot do itself, you can limit how many chats work at once, and you can get your chat notifications in Telegram. Chats that get stuck after a Stop or a reload now end up where you expect, and the browser extension and ChatGPT's page share the app's look.
@@ -2029,7 +2029,7 @@ Windows/macOS/Linux build matrix can be published under a fresh tag instead of t
 This is the post-2.0 hardening pass. It is unusually broad because it combines the reusable-worker
 rewrite, a live transcript/Goal investigation, session-store recovery work, the first Computer Use
 overhaul tranche, and an adversarial restart/race audit. The detailed engineering log is in
-`docs/bughunt-2026-08-25.md`.
+`docs/archive/bughunt-2026-08-25.md`.
 
 ### Added
 - **Workers are reusable ChatGPT conversations.** A worker that finishes normally now sleeps,
@@ -2249,7 +2249,7 @@ against the removed internals, or against the old pass-through behaviour, will n
   wrapper, and two dead MCP formatting exports.
 
 ### Fixed
-Full write-up, defect by defect, in `docs/bughunt-follow-up-2026-08-24.md`. Credible leads that
+Full write-up, defect by defect, in `docs/archive/bughunt-follow-up-2026-08-24.md`. Credible leads that
 were reviewed but not reproducible enough to fix are tracked privately rather than published, as
 `SECURITY.md` and the documentation rule in `AGENTS.md` require.
 
@@ -2354,8 +2354,8 @@ were reviewed but not reproducible enough to fix are tracked privately rather th
   worth spending a token on is asking it to think before it starts.
 
 ### Fixed
-Full write-up, with what each defect actually did, in `docs/bug-audit-2026-08-23.md` and
-`docs/bug-audit-2026-08-24.md` — the second pass audited the merged tree for ordering at the
+Full write-up, with what each defect actually did, in `docs/archive/bug-audit-2026-08-23.md` and
+`docs/archive/bug-audit-2026-08-24.md` — the second pass audited the merged tree for ordering at the
 crash, reload and navigation boundaries, where several of these were correct a second later and
 wrong at the moment a caller decides whether its operation happened.
 

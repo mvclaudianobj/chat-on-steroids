@@ -14,6 +14,15 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.51.2': {
+    lead: () => t("Search complete chat histories, manage scheduled messages in one place, and resume project chats reliably after a reload."),
+    highlights: [
+      { icon: 'i-clock', title: () => t("Scheduled chats in one list"), text: () => t("Review, pause, run now, or remove scheduled messages across your chats.") },
+      { icon: 'i-search', title: () => t("Search every chat"), text: () => t("Find messages across complete conversation histories.") },
+      { icon: 'i-folder', title: () => t("Resume keeps its place"), text: () => t("After a reload, the app recognises and clears its old project brief.") },
+      { icon: 'i-check-circle', title: () => t("Safer scheduled delivery"), text: () => t("Schedule changes are preserved when saved state is unreadable or belongs to a newer version.") }
+    ]
+  },
   '2.1.51.1': {
     lead: () => `${t("A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard.")} ${t("Vault, notifications, Brain memory and new ways to work with agents.")}`,
     highlights: [
