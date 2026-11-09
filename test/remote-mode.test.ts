@@ -1,5 +1,5 @@
 import { beforeEach, afterEach, expect, it } from 'vitest';
-import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { initDurableStore, resetDurableForTests } from '../src/main/durable.js';
@@ -12,7 +12,9 @@ import { remoteApprovals, requestRemoteApproval, decideRemoteApproval, resetRemo
 
 let directory: string;
 beforeEach(async () => {
-  directory = await mkdtemp(path.join(os.tmpdir(), 'marks-mode-'));
+  // macOS exposes /var as a link to /private/var. Approved roots are canonical
+  // identities, so store the same real path that resolvePath will later compare.
+  directory = await realpath(await mkdtemp(path.join(os.tmpdir(), 'marks-mode-')));
   initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);
   remoteHostsFileForTests(path.join(directory, 'hosts.json'));
   await mkdir(path.join(directory, 'local'));

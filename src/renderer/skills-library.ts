@@ -11,6 +11,10 @@ export function initSkillsLibrary(api: AppApi): () => void {
   initCardMenuDismissal();
   let skills: ManagedSkill[] = [];
   let epoch = 0;
+  // Until a list arrives the header says Loading…; a failed first load says so instead of loading for good.
+  let loaded = false;
+  // The first load failed and no list arrived since: the list says so, also when the search repaints it.
+  let loadFailed = false;
   const checks = new Map<string, GitHubSkillUpdateCheck>();
   const checking = new Set<string>();
   let linkTarget: ManagedSkill | null = null;
@@ -115,6 +119,11 @@ export function initSkillsLibrary(api: AppApi): () => void {
     agency.render();
     aihero.render();
     const host = $('skillsInstalled');
+    if (loadFailed) {
+      ui($('skillsCount'), 'textContent', () => '');
+      host.replaceChildren(el('p', 'plugin-no-results muted', () => t('Skills could not be loaded.')));
+      return;
+    }
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
     const visible = skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
     ui($('skillsCount'), 'textContent', () => tn('{0} skill', '{0} skills', skills.length));
@@ -163,7 +172,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   const setSkills = (next: ManagedSkill[]): void => {
-    skills = next;
+    skills = next; loaded = true; loadFailed = false;
     for (const [id, check] of checks) {
       if (skills.find(skill => skill.id === id)?.origin?.revision !== check.originRevision) checks.delete(id);
     }
@@ -171,11 +180,18 @@ export function initSkillsLibrary(api: AppApi): () => void {
     render();
   };
 
-  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>): Promise<boolean> => {
+  /**
+   * Applies the newest request's list. While no list has arrived yet, the newest request ending without one
+   * decides what the page shows: a failed load says so, and a change that ended without a list (a cancelled
+   * import) loads again rather than leaving "Loading…" for good. An older request says nothing (CodeRabbit on #2002).
+   */
+  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>, load = false): Promise<boolean> => {
     const own = ++epoch;
     const next = await run(request);
-    if (!next || own !== epoch) return false;
-    setSkills(next); return true;
+    if (own !== epoch) return false;
+    if (next) { setSkills(next); return true; }
+    if (!loaded) { if (load) { loadFailed = true; render(); } else void loadList(); }
+    return false;
   };
 
   const checkUpdates = (force: boolean): Promise<void> => {
@@ -301,8 +317,9 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   $('skillsSearch').addEventListener('input', render);
+  const loadList = (): Promise<boolean> => update(api.listManagedSkills(), true);
   const refresh = (force: boolean): void => {
-    void (async () => { if (await update(api.listManagedSkills())) await checkUpdates(force); })();
+    void (async () => { if (await loadList()) await checkUpdates(force); })();
   };
   $('skillsRefresh').addEventListener('click', () => refresh(true));
   for (const [id, kind] of [['skillsImportFolder', 'folder'], ['skillsImportFile', 'file']] as const) {
@@ -374,7 +391,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
       ui(githubSubmit, 'textContent', () => t(linkTarget ? 'Link source' : 'Import skill'));
     }
   })());
-  void update(api.listManagedSkills());
+  void loadList();
   if (typeof api.listRecommendedSkills === 'function') void run(api.listRecommendedSkills()).then(list => { if (list) { recommended = list; renderRecommended(); } });
   return () => { refresh(false); void agency.refresh(false); };
 }

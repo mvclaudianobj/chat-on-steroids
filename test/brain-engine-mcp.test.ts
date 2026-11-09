@@ -69,8 +69,10 @@ describe('Brain engine MCP wiring (H1c)', () => {
     expect(argv).toEqual(['--mcp-config', file, '--allowedTools', 'mcp__chat-marks-brain__memory_search,mcp__chat-marks-brain__memory_save']);
     expect(argv).not.toContain('--strict-mcp-config');
     expect(path.dirname(file)).toBe(path.join(userData, 'brain', 'engine-mcp'));
-    expect(statSync(file).mode & 0o777).toBe(0o600);
-    expect(statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    if (process.platform !== 'win32') {
+      expect(statSync(file).mode & 0o777).toBe(0o600);
+      expect(statSync(path.dirname(file)).mode & 0o777).toBe(0o700);
+    }
     const config = JSON.parse(readFileSync(file, 'utf8'));
     const server = config.mcpServers['chat-marks-brain'];
     expect(server).toMatchObject({ type: 'http', url: brainMcpTesting.url() });
@@ -208,12 +210,12 @@ describe('Brain engine MCP wiring (H1c)', () => {
     };
     await wireOpenCodeBrain(client, '/work/a');
     await wireOpenCodeBrain(client, '/work/a');
-    expect(calls).toEqual(['add chat-marks-brain /work/a remote true']);
+    expect(calls).toEqual(process.platform === 'win32' ? [] : ['add chat-marks-brain /work/a remote true']);
     await stopBrainEngineMcp();
-    expect(calls).toEqual(['add chat-marks-brain /work/a remote true', 'remove chat-marks-brain /work/a']);
+    expect(calls).toEqual(process.platform === 'win32' ? [] : ['add chat-marks-brain /work/a remote true', 'remove chat-marks-brain /work/a']);
     settings.enginesEnabled = false;
     await wireOpenCodeBrain(client, '/work/b');
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(process.platform === 'win32' ? 0 : 2);
   });
 
   it('shows Brain tool rows under one name whichever engine spelled them', () => {

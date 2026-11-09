@@ -115,11 +115,13 @@ it('connects, emits pairing QR without real network and sends to a validated JID
   expect(await web.startWhatsAppWeb()).toMatchObject({ state: 'connecting' });
   const sock = mocks.sockets.at(-1)!;
   const dir = path.join(mocks.directory, 'notifications', 'whatsapp-web');
-  expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
+  if (process.platform !== 'win32') expect((await fs.stat(dir)).mode & 0o777).toBe(0o700);
   sock.ev.emit('connection.update', { qr: 'fake-qr-text' });
   expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'qr', qr: 'fake-qr-text' });
   sock.ev.emit('creds.update', {});
-  await vi.waitFor(async () => expect((await fs.stat(path.join(dir, 'creds.json'))).mode & 0o777).toBe(0o600));
+  const creds = path.join(dir, 'creds.json');
+  await vi.waitFor(async () => expect(await fs.stat(creds).then(() => true, () => false)).toBe(true));
+  if (process.platform !== 'win32') expect((await fs.stat(creds)).mode & 0o777).toBe(0o600);
   sock.ev.emit('connection.update', { connection: 'open' });
   expect(await web.getWhatsAppWebStatus()).toMatchObject({ state: 'connected' });
   await web.sendWhatsAppWeb('5511999999999', 'synthetic notice');
@@ -237,8 +239,10 @@ it('hardens legacy WhatsApp auth metadata before connecting without replacing fi
   await fs.chmod(creds, 0o664);
   await fs.chmod(legacy, 0o664);
   await web.startWhatsAppWeb();
-  expect((await fs.stat(creds)).mode & 0o777).toBe(0o600);
-  expect((await fs.stat(legacy)).mode & 0o777).toBe(0o600);
+  if (process.platform !== 'win32') {
+    expect((await fs.stat(creds)).mode & 0o777).toBe(0o600);
+    expect((await fs.stat(legacy)).mode & 0o777).toBe(0o600);
+  }
   expect(await fs.readFile(creds, 'utf8')).toBe('{"synthetic":true}');
   expect(await fs.readFile(legacy, 'utf8')).toBe('{"synthetic":"legacy"}');
 });
@@ -606,7 +610,7 @@ it('refuses a session directory symlink without inspecting its target', async ()
   await fs.symlink(target, path.join(mocks.directory, 'notifications', 'whatsapp-web'));
   await expect(web.startWhatsAppWeb()).rejects.toMatchObject({ issue: 'storage_unavailable' });
   expect(mocks.sockets).toHaveLength(0);
-  expect((await fs.stat(target)).mode & 0o777).not.toBe(0o700);
+  if (process.platform !== 'win32') expect((await fs.stat(target)).mode & 0o777).not.toBe(0o700);
 });
 
 it('uses one socket for concurrent start requests and one socket on retry', async () => {

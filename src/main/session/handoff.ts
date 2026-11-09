@@ -12,7 +12,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Handoff } from '../../shared/session.js';
 import { continuationMarkerOf, unescapeMarkdown } from '../../shared/session.js';
 import { logInfo } from '../logger.js';
-import { getSession, readEvents, readSessionPlan, saveHandoff } from './store.js';
+import { getSession, readEvents, readSessionPlan, readSessionUserRequests, saveHandoff } from './store.js';
+import type { UserRequest } from '../../shared/user-requests.js';
 import { destinationContinuationMarker } from './handoff-prompt.js';
 import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
 import { remoteModeInstructions } from '../remote/mode.js';
@@ -135,6 +136,17 @@ function handoffPlanNotice(plan: AgentPlan | null): string {
   return '\n\nSaved task plan at handoff (reported progress, not verification evidence):\n' +
     (plan.explanation ? `${plan.explanation}\n` : '') + steps +
     '\nContinue the unfinished work using this plan and the brief. Report progress with update_plan.';
+}
+
+/** Steps still waiting for the person (#1695): the next chat must not assume their results. */
+export function handoffUserRequestsNotice(requests: readonly UserRequest[]): string {
+  const open = requests.filter(request => request.state === 'open');
+  if (!open.length) return '';
+  return '\n\nSteps still waiting for the person (handed over with ask_user_to_run; they run them, not you):\n' +
+    // Bounded, so many open steps cannot crowd out the brief itself; status names every one.
+    open.slice(0, 10).map(request => `- ${request.id}: ${request.purpose}\n  Command: ${request.command.length > 300 ? `${request.command.slice(0, 300)}…` : request.command}\n  Folder: ${request.folder}`).join('\n') +
+    (open.length > 10 ? `\n- and ${open.length - 10} more` : '') +
+    '\nDo not assume their results. Check them with user_request_status before relying on them.';
 }
 
 /**
@@ -262,7 +274,8 @@ export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handof
   if (remote && remote.startsWith('[CHAT REMOTE MODE]')) text = prependUserPrompt(text, remote);
   // Freeze the actual saved plan with the brief. A pointer to the removed session
   // tool cannot supply it to the replacement model. Budget this same snapshot once.
-  const planNotice = handoffPlanNotice(await readSessionPlan(input.sessionId));
+  const planNotice = handoffPlanNotice(await readSessionPlan(input.sessionId)) +
+    handoffUserRequestsNotice(await readSessionUserRequests(input.sessionId));
   // Reserve exactly the frame that the bridge adds to the destination's first message.
   const marks = currentMarksSystemPrompt('chatgpt');
   const overhead = (marks ? prependUserPrompt(resumeBootstrapText('', input.continuationToken), marks)

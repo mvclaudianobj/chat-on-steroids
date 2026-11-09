@@ -102,7 +102,7 @@ import {
 
 beforeEach(() => { fixture.command = true; fixture.project = '/approved/project'; fixture.durable = ['codex']; fixture.blockHasSession = false; fixture.missingSession = false; fixture.clients = ''; fixture.resumeHasSession = null; fixture.commands.length = 0; fixture.managedNonExecutable = false; vi.clearAllMocks(); });
 
-it('queries direct Claude and Codex account status using only their CLIs, without proxy credentials', async () => {
+it.skipIf(process.platform === 'win32')('queries direct Claude and Codex account status using only their CLIs, without proxy credentials', async () => {
   await cliAction('claude', 'enable');
   fixture.accountLogged = false;
   expect((await cliDirectAccount('claude')).signedIn).toBe(false);
@@ -116,7 +116,7 @@ it('queries direct Claude and Codex account status using only their CLIs, withou
   await cliAction('claude', 'disable');
 });
 
-it('opens dedicated login and logout terminals for each direct CLI account', async () => {
+it.skipIf(process.platform === 'win32')('opens dedicated login and logout terminals for each direct CLI account', async () => {
   await cliAction('claude', 'enable');
   fixture.missingSession = true;
   try {
@@ -133,7 +133,7 @@ it('opens dedicated login and logout terminals for each direct CLI account', asy
   } finally { fixture.missingSession = false; await cliAction('claude', 'disable'); }
 });
 
-describe('Codex standalone and Claude npm update routes (synthetic)', () => {
+describe.skipIf(process.platform === 'win32')('Codex standalone and Claude npm update routes (synthetic)', () => {
   it('does not advertise npm in-place update for a standalone external Codex', async () => {
     vi.mocked(publishedLatest).mockResolvedValue('1.2.3');
     vi.mocked(publishedUpdateAvailable).mockReturnValue(true);

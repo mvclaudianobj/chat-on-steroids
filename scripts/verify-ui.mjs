@@ -11,14 +11,28 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { buildProblem, needsBuild } from './ui-build-state.mjs';
+import { parseShard, readWeights, shardChecks } from './shard-plan.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = createRequire(import.meta.url)('electron');
 const filter = process.argv[2] ?? '';
+// Some developer Linux checkouts cannot run Chromium's SUID sandbox helper: it
+// needs root ownership/mode 4755, which must not be applied to the npm cache as
+// an incidental UI test setup. Explicitly opt into unsandboxed, isolated test
+// Electron windows instead; this never changes the actual packaged app's flags.
+const linuxTestDisplay = process.platform !== 'linux' ? null
+  : process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1' ? 'wayland'
+    : process.env.COS_VERIFY_UI_LINUX_X11 === '1' ? 'x11' : null;
+const linuxTestFlags = linuxTestDisplay
+  ? ['--no-sandbox', `--ozone-platform=${linuxTestDisplay}`, ...(process.env.COS_VERIFY_UI_RENDER_NODE
+    ? [`--render-node-override=${process.env.COS_VERIFY_UI_RENDER_NODE}`] : [])]
+  : [];
 // CI runners have no real GPU and slower timers, so checks that compare pixels or watch an animation
 // fail there although they pass on a real machine. CI names them here; they still run locally.
 const skip = new Set((process.env.VERIFY_UI_SKIP ?? '').split(',').map(name => name.trim()).filter(Boolean));
-const TIMEOUT_MS = 6 * 60_000;
+const requestedTimeout = Number(process.env.COS_VERIFY_UI_TIMEOUT_MS);
+const TIMEOUT_MS = Number.isFinite(requestedTimeout) && requestedTimeout >= 15_000 && requestedTimeout <= 6 * 60_000
+  ? requestedTimeout : 6 * 60_000;
 
 // How each check has to be started, where that differs from `electron <script>`.
 const special = {
@@ -33,8 +47,18 @@ const requiredSuccessOutput = {
   'verify-pet-overlay-electron.cjs': 'petContextHide='
 };
 
-const scripts = readdirSync(path.join(root, 'scripts'))
+const found = readdirSync(path.join(root, 'scripts'))
   .filter(name => /^verify-.*\.cjs$/.test(name) && name.includes(filter)).sort();
+// CI runs the checks in parallel jobs: VERIFY_UI_SHARD=2/3 runs this job's third, balanced by the
+// seconds in ui-check-weights.json (a check not listed weighs the median), longest first.
+const shard = parseShard(process.env.VERIFY_UI_SHARD);
+if (process.env.VERIFY_UI_SHARD && !shard) { console.error(`VERIFY_UI_SHARD must look like 1/3, not "${process.env.VERIFY_UI_SHARD}"`); process.exit(2); }
+let weights = new Map();
+try { weights = readWeights(readFileSync(path.join(root, 'scripts', 'ui-check-weights.json'), 'utf8')); } catch { /* every check weighs the same */ }
+// Only the checks that run are planned: a skipped one would take a share of a shard's time while
+// running nowhere. The first shard names the skipped ones, once (CodeRabbit on #1983).
+const scripts = shardChecks(found, skip, weights, shard);
+if (shard) console.log(`UI checks shard ${shard.index} of ${shard.count}: ${scripts.length} of ${found.length} checks`);
 // CI runners are shared and uneven: a different check timed out on each run while all of them
 // passed on a real machine. With VERIFY_UI_RETRY a failed check runs once more; a pass on retry
 // counts, and is named as a flake (a GitHub warning in CI) so it stays visible.
@@ -76,7 +100,10 @@ for (const name of scripts) {
   const run = () => new Promise(resolve => {
     // Electron/Chromium switches belong before the app entrypoint; after it, --lang is
     // handed to the verification script instead and the UI inherits the host locale.
-    const argv = special[name] ? [path.join('scripts', name), ...how.args] : [...how.args, path.join('scripts', name)];
+    const scriptPath = path.join('scripts', name);
+    const argv = how.command === electron
+      ? [...linuxTestFlags, ...how.args, scriptPath]
+      : [scriptPath, ...how.args];
     const child = spawn(how.command, argv, { cwd: root, env, windowsHide: true });
     let output = '';
     // A check that throws inside its async body and then quits in a finally block exits 0: its

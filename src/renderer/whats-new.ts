@@ -14,7 +14,16 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
-  '2.1.48.3': {
+  '2.1.51.2': {
+    lead: () => t("Search complete chat histories, manage scheduled messages in one place, and resume project chats reliably after a reload."),
+    highlights: [
+      { icon: 'i-clock', title: () => t("Scheduled chats in one list"), text: () => t("Review, pause, run now, or remove scheduled messages across your chats.") },
+      { icon: 'i-search', title: () => t("Search every chat"), text: () => t("Find messages across complete conversation histories.") },
+      { icon: 'i-folder', title: () => t("Resume keeps its place"), text: () => t("After a reload, the app recognises and clears its old project brief.") },
+      { icon: 'i-check-circle', title: () => t("Safer scheduled delivery"), text: () => t("Schedule changes are preserved when saved state is unreadable or belongs to a newer version.") }
+    ]
+  },
+  '2.1.51.1': {
     lead: () => `${t("A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard.")} ${t("Vault, notifications, Brain memory and new ways to work with agents.")}`,
     highlights: [
       { icon: 'i-check-circle', title: () => t("Goal step reviewer"), text: () => t("A second chat checks each Goal step's file changes before the next one.") },
@@ -25,6 +34,33 @@ const RELEASES: Readonly<Record<string, Release>> = {
       { icon: 'i-terminal', title: () => t("Agent routes and remote labs"), text: () => t("Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.") },
       { icon: 'i-lock', title: () => t("Vault and notifications"), text: () => t("Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.") },
       { icon: 'i-search', title: () => t("Brain memory"), text: () => t("Recall and save local memories, connect optional sources and selectively import past conversations.") }
+    ]
+  },
+  '2.1.51': {
+    lead: () => t("Steps for you, a limit on busy chats, and Telegram notifications."),
+    highlights: [
+      { icon: 'i-terminal', title: () => t("Steps for you"), text: () => t("When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.") },
+      { icon: 'i-agents', title: () => t("A limit on busy chats"), text: () => t("Choose how many chats may work at once. Your own messages always go out.") },
+      { icon: 'i-phone', title: () => t("Telegram notifications"), text: () => t("Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.") },
+      { icon: 'i-stop', title: () => t("Stop works all the way"), text: () => t("After a Stop, a chat no longer stays busy, and your next message goes out.") }
+    ]
+  },
+  '2.1.50': {
+    lead: () => t("Move chats between projects, chats that keep going, and an extension that updates during long runs."),
+    highlights: [
+      { icon: 'i-folder', title: () => t("Move chats between projects"), text: () => t("Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.") },
+      { icon: 'i-retry', title: () => t("Chats keep going"), text: () => t("When a chat's next step is not picked up, the app keeps trying, tells you, and offers Continue now.") },
+      { icon: 'i-plug', title: () => t("The extension updates itself"), text: () => t("It no longer waits for every long-running chat to finish first.") },
+      { icon: 'i-bolt', title: () => t("Big chats stay fast"), text: () => t("Very long chats no longer slow the app down.") }
+    ]
+  },
+  '2.1.49': {
+    lead: () => t("Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times."),
+    highlights: [
+      { icon: 'i-chat', title: () => t("Long chats keep going"), text: () => t("When ChatGPT limits a long chat's history, the app waits instead of reloading it.") },
+      { icon: 'i-check-circle', title: () => t("Pop-ups out of the way"), text: () => t("ChatGPT's announcements no longer block new chats or your messages.") },
+      { icon: 'i-lock', title: () => t("Your mouse stays yours"), text: () => t("Only chats this app can name use your screen, mouse and keyboard.") },
+      { icon: 'i-clock', title: () => t("Message times"), text: () => t("Turn on Show message times in Settings → General to see when each message was sent.") }
     ]
   },
   '2.1.48': {

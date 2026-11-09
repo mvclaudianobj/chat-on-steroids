@@ -76,6 +76,7 @@ let localKey: string | null = null;
 afterEach(() => { for (const list of Object.values(seen)) list.length = 0; aiWrites.length = 0; marksHang = false; });
 afterAll(async () => {
   for (const server of servers) await new Promise(resolve => server.close(resolve));
+  configureBrainForTests(path.join(tmpdir(), 'marks-brain-providers-closed.sqlite'));
   for (const dir of folders) rmSync(dir, { recursive: true, force: true });
 });
 function configure(overrides: { remoteRecall?: boolean; remoteSync?: boolean; ai?: object; ov?: object; marks?: object } = {}): void {

@@ -882,10 +882,10 @@
     "message": "待機中"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "アプリは $1 件の呼び出しをリクエスト ID で割り当てられなかったため、$2 を使用しました。"
+    "message": "アプリはリクエスト ID で割り当てられなかった $1 件の呼び出し: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "アプリは呼び出しをリクエスト ID で割り当てられなかったため、$1 を使用しました。"
+    "message": "アプリはリクエスト ID で割り当てられなかった呼び出し: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "アプリが接続され、プロトコルの互換性が確認されるまで送信をブロックします。"
@@ -1216,5 +1216,14 @@
   },
   "content_task_waiting_app": {
     "message": "Chat Marks の応答を待っています。"
+  },
+  "content_goal_wait_slots": {
+    "message": "空きを待っています（同時に作業するチャット数）"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT から速度を落とすよう求められました · 指定時刻まで待機"
+  },
+  "content_revival_draft_appeared": {
+    "message": "ワーカーの起動を準備している間にチャットに入力があったため、起動メッセージはそれを置き換えませんでした。"
   }
 }

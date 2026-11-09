@@ -89,7 +89,13 @@ export const companySchema = z.object({
   name: safeText(100),
   seatCount: z.number().int().min(1).max(99).default(5),
   roles: z.tuple([z.literal('marks-coo'), z.literal('marks-cto'), z.literal('marks-cio'), z.literal('marks-cpo'), z.literal('marks-cko'), z.literal('marks-cqo'), z.literal('marks-cco')]),
-  seats: z.array(companySeatSchema).min(1).max(99)
+  seats: z.array(companySeatSchema).min(1).max(99),
+  // Persisted by the Company project/engine selector in earlier Marks builds.
+  // This candidate does not consume these fields as execution authority, but must
+  // retain them when an unrelated Company setting is saved.
+  executionProfiles: z.record(z.string(), z.unknown()).optional(),
+  projectCoordinators: z.record(z.string(), z.unknown()).optional(),
+  projectCoordinatorModes: z.record(z.string(), z.unknown()).optional()
 }).strict().superRefine((data, context) => {
   if (data.seats.length !== data.seatCount || data.seats.some((seat, index) => seat !== `marks${index + 1}`))
     context.addIssue({ code: 'custom', path: ['seats'], message: 'Seats must be marks1..N' });
@@ -126,6 +132,12 @@ export const companyMeetingSchema = z.object({
 }).strict();
 export const companyActivitySchema = z.object({ id: z.string().uuid(), at: tick, actor, kind: z.enum(['request', 'move', 'seat', 'meeting', 'company']), requestId: z.string().uuid().optional(), message: safeText(400) }).strict();
 export const companySnapshotSchema = z.object({ version: z.literal(1), company: companySchema, requests: z.array(companyRequestSchema).max(500), meetings: z.array(companyMeetingSchema).max(150), activities: z.array(companyActivitySchema).max(1000), demo: z.boolean(),
+  // Older Company project bindings are inert for this build; keep their exact
+  // provenance instead of rejecting the entire existing Company snapshot.
+  projectChatBindings: z.array(z.object({
+    projectId: safeText(160), principal: safeText(80), sessionId: safeText(160),
+    openingEngine: safeText(80)
+  }).strict()).max(500).optional(),
   cooHostApproval: cooHostApprovalSchema.default(defaultCooHostApproval),
   demoRecovery: z.object({ backupId: z.string().uuid(), startedAt: tick }).strict().optional(),
   delegation: companyDelegationSchema.default({mode:'manual',delegate:null,chiefTitle:null,binding:null,scopes:[],epoch:0,grantedAt:null,revokedAt:null}),

@@ -27,7 +27,9 @@ const connect = async (): Promise<SftpClient> => {
 };
 
 beforeEach(async () => {
-  directory = await fs.mkdtemp(path.join(os.tmpdir(), 'marks-mirror-'));
+  // macOS exposes /var as a link to /private/var. Approved roots are canonical
+  // identities, so store the same real path that resolvePath will later compare.
+  directory = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'marks-mirror-')));
   local = path.join(directory, 'local'); remote = path.join(directory, 'remote');
   await fs.mkdir(local); await fs.mkdir(remote);
   initConfigPath(directory); initDurableStore(directory); initSessionStore(directory);

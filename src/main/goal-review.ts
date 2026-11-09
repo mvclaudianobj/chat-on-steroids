@@ -69,7 +69,7 @@ export function reviewBrief(input: ReviewBriefInput): string {
     `The Goal: ${clip(input.objective.trim(), TEXT_CHARS)}`,
     `This step's instruction: ${clip(input.step.trim(), TEXT_CHARS)}`,
     '',
-    'Changed in this step, as recorded by Chat On Steroids\' edit tools (files changed by commands are not listed):',
+    'Changed in this step, as recorded by Chat Marks\' edit tools (files changed by commands are not listed):',
     ...input.files.map(listed),
     ...(input.more > 0 ? [`- and ${input.more} more files not listed`] : [])
   ].join('\n');

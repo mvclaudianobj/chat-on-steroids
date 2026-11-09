@@ -183,7 +183,7 @@ describe('H2 administrator export script', () => {
     expect(run.stdout).toContain(`export-complete ${id}`);
     const folder = path.join(base, id);
     expect(statSync(folder).uid).toBe(uid);
-    expect(statSync(folder).mode & 0o777).toBe(0o700);
+    if (process.platform !== 'win32') expect(statSync(folder).mode & 0o777).toBe(0o700);
     const manifest = readManifest(folder)!;
     expect(manifest.complete).toBe(true);
     const byId = Object.fromEntries(manifest.sources.map(source => [source.id, source]));
@@ -226,7 +226,7 @@ describe('H2 user-readable export, index and search', () => {
     ]);
     userStaging = stagingId;
     const folder = path.join(stagingRoot, stagingId);
-    expect(statSync(folder).mode & 0o777).toBe(0o700);
+    if (process.platform !== 'win32') expect(statSync(folder).mode & 0o777).toBe(0o700);
     expect(manifest.sources.map(source => [source.id, source.status, source.unchanged])).toEqual([['home-opencode', 'copied', true], ['marksclaw', 'copied', true]]);
     expect(manifest.sources[1]!.counts).toMatchObject({ sessions: 2, conversations: 1 });
     const claw = new DatabaseSync(path.join(folder, 'db', 'marksclaw.sqlite'), { readOnly: true });
@@ -308,7 +308,7 @@ describe('H2 confirmed imports', () => {
     expect(kept).toEqual({ key: 'opencode:ses_aaa', added: true });
     expect(await handleBrainImport('import.archive', { ref: hit.ref, confirmed: true }, () => undefined)).toEqual({ key: 'opencode:ses_aaa', added: false });
     const archive = path.join(dir, 'userData', 'brain', 'archive.sqlite');
-    expect(statSync(archive).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(statSync(archive).mode & 0o777).toBe(0o600);
     expect(readFileSync(archive).includes('ghp_')).toBe(false);
     const again = await handleBrainImport('history.search', { query: 'flicker' }, () => undefined) as HistorySearchResult;
     expect(again.hits.find(item => item.ref.key === 'opencode:ses_aaa')?.archived).toBe(true);

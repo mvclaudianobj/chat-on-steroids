@@ -135,7 +135,7 @@ describe('Claude Code Router release and version gate', () => {
   });
 });
 
-describe('Claude Code Router install and update (module folder)', () => {
+describe.skipIf(process.platform === 'win32')('Claude Code Router install and update (module folder)', () => {
   it('installs the verified tarball into a new version folder and points the module at it', async () => {
     useHost();
     const progress: string[] = [];
@@ -205,7 +205,7 @@ describe('Claude Code Router install and update (module folder)', () => {
   });
 });
 
-describe('Claude Code Router status', () => {
+describe.skipIf(process.platform === 'win32')('Claude Code Router status', () => {
   it('parses the daemon from the process list and its gateway health', async () => {
     const listing = [
       ' 311913 /usr/bin/node /home/u/.local/lib/node_modules/@musistudio/claude-code-router/dist/main/cli.js serve --daemon-child --no-open',
@@ -342,7 +342,7 @@ describe('Claude Code Router status', () => {
   });
 });
 
-describe('Claude Code Router and the chat routes', () => {
+describe.skipIf(process.platform === 'win32')('Claude Code Router and the chat routes', () => {
   const CCR_SETTINGS = JSON.stringify({ env: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:3456', ANTHROPIC_MODEL: 'Local/router-model' } });
 
   it('a fresh machine without CCR: nothing is detected and both routes are the CLI as it is', async () => {

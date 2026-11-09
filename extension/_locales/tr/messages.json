@@ -882,10 +882,10 @@
     "message": "beklemede"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi — bunun yerine $2 kullandı."
+    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "Uygulama çağrıyı istek kimliğiyle eşleştiremedi — bunun yerine $1 kullandı."
+    "message": "Uygulama çağrıyı istek kimliğiyle eşleştiremedi: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "Uygulama bağlanıp protokol uyumluluğu doğrulanana kadar iletim engellenir."
@@ -1206,7 +1206,7 @@
     "message": "$1 sayfada bekletiliyor"
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi — bunun yerine $2 kullandı."
+    "message": "Uygulama $1 çağrıyı istek kimliğiyle eşleştiremedi: $2"
   },
   "popup_pipeline_request_id_matched_many__one": {
     "message": "$1 istek kimliği kaydedilmiş araç etkinliğiyle eşleştirildi."
@@ -1267,5 +1267,14 @@
   },
   "content_task_waiting_app": {
     "message": "Chat Marks yanıtı bekleniyor."
+  },
+  "content_goal_wait_slots": {
+    "message": "Boş yer bekleniyor (Aynı anda çalışan sohbetler)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT yavaşlamayı istedi · belirttiği saate kadar bekler"
+  },
+  "content_revival_draft_appeared": {
+    "message": "Çalışanın uyandırması hazırlanırken sohbete bir şey yazıldı, bu yüzden uyandırma onun yerine geçmedi."
   }
 }
