@@ -5,8 +5,11 @@ const settings = vi.hoisted(() => ({ install: vi.fn(), configure: vi.fn() }));
 const rearm = vi.hoisted(() => vi.fn(async () => true));
 const onChanged = vi.hoisted(() => vi.fn());
 const refreshPublication = vi.hoisted(() => vi.fn());
+const vaultStatus = vi.hoisted(() => ({ readable: true, unreadable: false, snapshotSecret: false }));
+const secretPresence = vi.hoisted(() => vi.fn(async () => { vaultStatus.unreadable = true; return false; }));
 vi.mock('electron', () => ({ app: {}, dialog: {}, shell: {} }));
-vi.mock('../src/main/plugins/manager.js', () => ({ pluginManager: { ...actions, ...settings, snapshot: () => ({ plugins: [] }), onChanged } }));
+vi.mock('../src/main/plugins/manager.js', () => ({ pluginManager: { ...actions, ...settings, snapshot: () => ({ plugins: vaultStatus.snapshotSecret ? [{ id: 'fake', credentialKeys: ['TOKEN'], fields: [], credentialPresence: undefined }] : [] }), onChanged } }));
+vi.mock('../src/main/secrets.js', () => ({ secureStorageStatus: async () => ({ available: vaultStatus.readable }), storedSecretsUnreadable: () => vaultStatus.unreadable, hasSecret: secretPresence }));
 vi.mock('../src/main/plugin-refresh.js', () => ({ rearmPluginRefresh: rearm }));
 vi.mock('../src/main/connection.js', () => ({ refreshPluginPublication: refreshPublication }));
 import { registerPluginIpc } from '../src/main/plugins-ipc.js';
@@ -16,6 +19,7 @@ let publishStateChange = vi.fn<() => void>();
 let sendToRenderer = vi.fn();
 beforeEach(() => {
   vi.clearAllMocks();
+  vaultStatus.readable = true; vaultStatus.unreadable = false; vaultStatus.snapshotSecret = false;
   handlers = new Map();
   publishStateChange = vi.fn<() => void>();
   sendToRenderer = vi.fn();
@@ -56,13 +60,24 @@ it('validates per-plugin Longest call boundaries and type for install and config
   expect(settings.install).toHaveBeenCalledExactlyOnceWith({ catalogId: 'memory', longestCallSeconds: 120 });
 });
 
-it('publishes fresh AppState after a plugin catalog change updates the connector schema', () => {
+it('publishes fresh AppState after a plugin catalog change updates the connector schema', async () => {
   const changed = onChanged.mock.calls[0]?.[0] as (() => void) | undefined;
   expect(changed).toBeTypeOf('function');
   changed!();
   expect(refreshPublication).toHaveBeenCalledExactlyOnceWith('plugins');
-  expect(sendToRenderer).toHaveBeenCalledExactlyOnceWith('plugins:changed', { plugins: [] });
+  await vi.waitFor(() => expect(sendToRenderer).toHaveBeenCalledExactlyOnceWith('plugins:changed', { plugins: [] }));
   expect(publishStateChange).toHaveBeenCalledTimes(1);
   expect(sendToRenderer.mock.invocationCallOrder[0]).toBeGreaterThan(refreshPublication.mock.invocationCallOrder[0]!);
-  expect(publishStateChange.mock.invocationCallOrder[0]).toBeGreaterThan(sendToRenderer.mock.invocationCallOrder[0]!);
+  // The AppState refresh is published synchronously; the verified credential snapshot
+  // follows asynchronously after its OS-store presence checks.
+  expect(publishStateChange.mock.invocationCallOrder[0]).toBeLessThan(sendToRenderer.mock.invocationCallOrder[0]!);
+});
+
+
+it('does not mark a credential absent when secure storage becomes unreadable during probing', async () => {
+  vaultStatus.snapshotSecret = true;
+  const state = await handlers.get('plugins:snapshot')!(undefined) as { plugins: Array<{ credentialPresence?: Record<string, boolean> }> };
+  expect(secretPresence).toHaveBeenCalledExactlyOnceWith('plugin:fake:TOKEN');
+  expect(vaultStatus.unreadable).toBe(true);
+  expect(state.plugins[0]?.credentialPresence).toBeUndefined();
 });

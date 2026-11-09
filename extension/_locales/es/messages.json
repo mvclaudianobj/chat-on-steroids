@@ -6,7 +6,7 @@
     "message": "la aplicación no respondió"
   },
   "content_app_not_running": {
-    "message": "Chat On Steroids no se está ejecutando en este PC."
+    "message": "Chat Marks no se está ejecutando en este PC."
   },
   "content_auto_compaction": {
     "message": "Compactación automática"
@@ -37,9 +37,6 @@
   },
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT sustituyó el redactor mientras se insertaba el inicio"
-  },
-  "content_bootstrap_composer_never_ready": {
-    "message": "ChatGPT no mostró un editor utilizable para el arranque"
   },
   "content_bootstrap_composer_unavailable": {
     "message": "ChatGPT no volvió a mostrar un editor utilizable tras seleccionar el modelo"
@@ -84,7 +81,7 @@
     "message": "la página abierta para ello mostraba una conversación distinta"
   },
   "content_browser_disconnected": {
-    "message": "La conexión del navegador está desconectada en Chat On Steroids."
+    "message": "La conexión del navegador está desconectada en Chat Marks."
   },
   "content_cancel": {
     "message": "Cancelar"
@@ -93,7 +90,7 @@
     "message": "Chat bloqueado"
   },
   "content_chat_blocked_tip": {
-    "message": "Este chat está bloqueado en la aplicación Chat On Steroids: se rechazan sus llamadas a herramientas y Objetivo, Bucle y la compactación automática están desactivados. Para desbloquearlo, abre el menú ⋯ de este chat en la barra lateral de la aplicación y elige «Desbloquear chat»."
+    "message": "Este chat está bloqueado en la aplicación Chat Marks: se rechazan sus llamadas a herramientas y Objetivo, Bucle y la compactación automática están desactivados. Para desbloquearlo, abre el menú ⋯ de este chat en la barra lateral de la aplicación y elige «Desbloquear chat»."
   },
   "content_chat_still_opening": {
     "message": "este chat aún se está abriendo — inténtalo de nuevo"
@@ -326,9 +323,6 @@
   "content_delivery_existing_draft": {
     "message": "ChatGPT ya contiene un borrador sin enviar. Envía o borra ese borrador en Chrome antes de volver a intentarlo."
   },
-  "content_delivery_signed_out": {
-    "message": "ChatGPT no tiene una sesión iniciada en este navegador. Inicia sesión en ChatGPT allí y vuelve a enviar."
-  },
   "content_delivery_model_unconfirmed": {
     "message": "No se pudo confirmar el modelo o el razonamiento solicitado"
   },
@@ -457,12 +451,6 @@
   },
   "content_goal_retrying": {
     "message": "Reintentando Objetivo en $1 segundos"
-  },
-  "content_goal_retrying__one": {
-    "message": "Reintentando Objetivo en $1 segundo"
-  },
-  "content_goal_retrying__many": {
-    "message": "Reintentando Objetivo en $1 de segundos"
   },
   "content_goal_save": {
     "message": "Guardar como Objetivo"
@@ -603,7 +591,7 @@
     "message": "Guardando…"
   },
   "content_settings_aria": {
-    "message": "Ajustes de Chat On Steroids"
+    "message": "Ajustes de Chat Marks"
   },
   "content_stage_handoff_attention": {
     "message": "La respuesta de traspaso necesita atención"
@@ -647,20 +635,8 @@
   "content_tokens_from": {
     "message": "desde $1 tokens"
   },
-  "content_tokens_from__one": {
-    "message": "desde $1 token"
-  },
-  "content_tokens_from__many": {
-    "message": "desde $1 de tokens"
-  },
   "content_tool_calls_count": {
     "message": "$1 llamadas a herramientas"
-  },
-  "content_tool_calls_count__one": {
-    "message": "$1 llamada a herramienta"
-  },
-  "content_tool_calls_count__many": {
-    "message": "$1 de llamadas a herramientas"
   },
   "content_tool_details_loading": {
     "message": "Cargando detalles registrados…"
@@ -670,12 +646,6 @@
   },
   "content_tool_more_changed_files": {
     "message": "$1 archivos modificados más"
-  },
-  "content_tool_more_changed_files__one": {
-    "message": "$1 archivo modificado más"
-  },
-  "content_tool_more_changed_files__many": {
-    "message": "$1 de archivos modificados más"
   },
   "content_tool_outcome_completed": {
     "message": "completado"
@@ -694,12 +664,6 @@
   },
   "content_tool_preview_truncated": {
     "message": "Vista previa truncada desde $1 caracteres."
-  },
-  "content_tool_preview_truncated__one": {
-    "message": "Vista previa truncada desde $1 carácter."
-  },
-  "content_tool_preview_truncated__many": {
-    "message": "Vista previa truncada desde $1 de caracteres."
   },
   "content_tool_ran": {
     "message": "Se ejecutó $1"
@@ -752,12 +716,6 @@
   "content_waiting_local_tools": {
     "message": "Esperando a que terminen $1 herramientas locales"
   },
-  "content_waiting_local_tools__one": {
-    "message": "Esperando a que termine $1 herramienta local"
-  },
-  "content_waiting_local_tools__many": {
-    "message": "Esperando a que terminen $1 de herramientas locales"
-  },
   "content_worker_generic": {
     "message": "un subagente"
   },
@@ -773,12 +731,6 @@
   "content_workers_still_running": {
     "message": "$1 subagentes aún en ejecución"
   },
-  "content_workers_still_running__one": {
-    "message": "$1 subagente aún en ejecución"
-  },
-  "content_workers_still_running__many": {
-    "message": "$1 de subagentes aún en ejecución"
-  },
   "content_working": {
     "message": "trabajando…"
   },
@@ -786,13 +738,13 @@
     "message": "Escribiendo…"
   },
   "extension_action_title": {
-    "message": "Chat On Steroids"
+    "message": "Chat Marks"
   },
   "extension_description": {
-    "message": "Conecta ChatGPT con Chat On Steroids y controla pestañas del navegador en segundo plano mediante DOM, capturas de pantalla y herramientas para desarrolladores."
+    "message": "Conecta ChatGPT con Chat Marks y controla pestañas del navegador en segundo plano mediante DOM, capturas de pantalla y herramientas para desarrolladores."
   },
   "extension_name": {
-    "message": "Extensión de navegador de Chat On Steroids"
+    "message": "Extensión de navegador de Chat Marks"
   },
   "popup_advanced": {
     "message": "Avanzado"
@@ -848,19 +800,7 @@
   "popup_count_held": {
     "message": "$1 retenidos"
   },
-  "popup_count_held__one": {
-    "message": "$1 retenido"
-  },
-  "popup_count_held__many": {
-    "message": "$1 retenidos"
-  },
   "popup_count_held_in_page": {
-    "message": "$1 retenidos en la página"
-  },
-  "popup_count_held_in_page__one": {
-    "message": "$1 retenido en la página"
-  },
-  "popup_count_held_in_page__many": {
     "message": "$1 retenidos en la página"
   },
   "popup_count_queued": {
@@ -942,16 +882,10 @@
     "message": "pendiente"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud — recurrió a $2."
-  },
-  "popup_pipeline_call_fallback_many__one": {
-    "message": "La aplicación no pudo ubicar $1 llamada por ID de solicitud — recurrió a $2."
-  },
-  "popup_pipeline_call_fallback_many__many": {
-    "message": "La aplicación no pudo ubicar $1 de llamadas por ID de solicitud — recurrió a $2."
+    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "La aplicación no pudo ubicar una llamada por ID de solicitud — recurrió a $1."
+    "message": "La aplicación no pudo ubicar una llamada por ID de solicitud: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "El envío está bloqueado hasta conectar la aplicación y confirmar la compatibilidad del protocolo."
@@ -979,12 +913,6 @@
   },
   "popup_pipeline_request_id_matched_many": {
     "message": "$1 ID de solicitud coincidieron con actividad de herramientas registrada."
-  },
-  "popup_pipeline_request_id_matched_many__one": {
-    "message": "$1 ID de solicitud coincidió con actividad de herramientas registrada."
-  },
-  "popup_pipeline_request_id_matched_many__many": {
-    "message": "$1 de ID de solicitud coincidieron con actividad de herramientas registrada."
   },
   "popup_pipeline_request_id_matched_one": {
     "message": "1 ID de solicitud coincidió con actividad de herramientas registrada."
@@ -1020,7 +948,7 @@
     "message": "Registro de la sesión"
   },
   "popup_secure_storage_unavailable": {
-    "message": "El almacenamiento seguro de credenciales no está disponible. Abre Chat On Steroids para ver las instrucciones de configuración."
+    "message": "El almacenamiento seguro de credenciales no está disponible. Abre Chat Marks para ver las instrucciones de configuración."
   },
   "popup_sent_to_app": {
     "message": "Enviado a la aplicación"
@@ -1110,7 +1038,7 @@
     "message": "Intentar de nuevo"
   },
   "popup_version_mismatch_help": {
-    "message": "Aplicación v$1 (protocolo $2); extensión v$3 (protocolo $4). Abre la página Extensiones del navegador, activa el modo de desarrollador y después actualiza o recarga esta extensión. Si la incompatibilidad continúa, usa Abrir carpeta de la extensión en Chat On Steroids y carga esa carpeta. Recarga las pestañas de ChatGPT cuando termine su trabajo activo."
+    "message": "Aplicación v$1 (protocolo $2); extensión v$3 (protocolo $4). Abre la página Extensiones del navegador, activa el modo de desarrollador y después actualiza o recarga esta extensión. Si la incompatibilidad continúa, usa Abrir carpeta de la extensión en Chat Marks y carga esa carpeta. Recarga las pestañas de ChatGPT cuando termine su trabajo activo."
   },
   "popup_yes": {
     "message": "sí"
@@ -1149,7 +1077,7 @@
     "message": "El endpoint de continuación personalizado no es válido. Revisa su URL en Ajustes; usa HTTPS o un endpoint HTTP local."
   },
   "content_history_rate_limited": {
-    "message": "ChatGPT ha limitado temporalmente el acceso al historial de este chat. Chat On Steroids pausa la recuperación automática hasta que termine la espera."
+    "message": "ChatGPT ha limitado temporalmente el acceso al historial de este chat. Chat Marks pausa la recuperación automática hasta que termine la espera."
   },
   "content_goal_error_rate_limited": {
     "message": "El proveedor de continuación está limitando la frecuencia de las solicitudes. Espera al reintento indicado o elige otro modelo de continuación."
@@ -1242,7 +1170,79 @@
     "message": "Falló. Vuelve a iniciar sesión desde CoS."
   },
   "popup_app_not_running_help": {
-    "message": "Asegúrate de que Chat On Steroids esté abierto en este ordenador. La extensión se conecta sola."
+    "message": "Asegúrate de que Chat Marks esté abierto en este ordenador. La extensión se conecta sola."
+  },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT no mostró un editor utilizable para el arranque"
+  },
+  "content_delivery_signed_out": {
+    "message": "ChatGPT no tiene una sesión iniciada en este navegador. Inicia sesión en ChatGPT allí y vuelve a enviar."
+  },
+  "content_goal_retrying__one": {
+    "message": "Reintentando Objetivo en $1 segundo"
+  },
+  "content_goal_retrying__many": {
+    "message": "Reintentando Objetivo en $1 de segundos"
+  },
+  "content_tokens_from__one": {
+    "message": "desde $1 token"
+  },
+  "content_tokens_from__many": {
+    "message": "desde $1 de tokens"
+  },
+  "content_tool_calls_count__one": {
+    "message": "$1 llamada a herramienta"
+  },
+  "content_tool_calls_count__many": {
+    "message": "$1 de llamadas a herramientas"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "$1 archivo modificado más"
+  },
+  "content_tool_more_changed_files__many": {
+    "message": "$1 de archivos modificados más"
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "Vista previa truncada desde $1 carácter."
+  },
+  "content_tool_preview_truncated__many": {
+    "message": "Vista previa truncada desde $1 de caracteres."
+  },
+  "content_waiting_local_tools__one": {
+    "message": "Esperando a que termine $1 herramienta local"
+  },
+  "content_waiting_local_tools__many": {
+    "message": "Esperando a que terminen $1 de herramientas locales"
+  },
+  "content_workers_still_running__one": {
+    "message": "$1 subagente aún en ejecución"
+  },
+  "content_workers_still_running__many": {
+    "message": "$1 de subagentes aún en ejecución"
+  },
+  "popup_count_held__one": {
+    "message": "$1 retenido"
+  },
+  "popup_count_held__many": {
+    "message": "$1 retenidos"
+  },
+  "popup_count_held_in_page__one": {
+    "message": "$1 retenido en la página"
+  },
+  "popup_count_held_in_page__many": {
+    "message": "$1 retenidos en la página"
+  },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud: $2"
+  },
+  "popup_pipeline_call_fallback_many__many": {
+    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud: $2"
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "$1 ID de solicitud coincidió con actividad de herramientas registrada."
+  },
+  "popup_pipeline_request_id_matched_many__many": {
+    "message": "$1 de ID de solicitud coincidieron con actividad de herramientas registrada."
   },
   "content_workers_finished": {
     "message": "$1 finalizados"
@@ -1317,6 +1317,15 @@
     "message": "esperando a la aplicación"
   },
   "content_task_waiting_app": {
-    "message": "Esperando la respuesta de Chat On Steroids."
+    "message": "Esperando la respuesta de Chat Marks."
+  },
+  "content_goal_wait_slots": {
+    "message": "Esperando un hueco libre (Chats trabajando a la vez)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT pidió ir más despacio · espera hasta la hora indicada"
+  },
+  "content_revival_draft_appeared": {
+    "message": "Se escribió algo en el chat mientras se preparaba el aviso del worker, así que el aviso no lo reemplazó."
   }
 }

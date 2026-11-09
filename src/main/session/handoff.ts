@@ -12,9 +12,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import type { Handoff } from '../../shared/session.js';
 import { continuationMarkerOf, unescapeMarkdown } from '../../shared/session.js';
 import { logInfo } from '../logger.js';
-import { getSession, readSessionPlan, saveHandoff } from './store.js';
+import { getSession, readEvents, readSessionPlan, readSessionUserRequests, saveHandoff } from './store.js';
+import type { UserRequest } from '../../shared/user-requests.js';
 import { destinationContinuationMarker } from './handoff-prompt.js';
-import { MAX_CHATGPT_MESSAGE_CHARS, userPromptText } from '../../shared/user-prompt.js';
+import { currentMarksSystemPrompt } from '../marks-system-prompt.js';
+import { remoteModeInstructions } from '../remote/mode.js';
+import { MAX_CHATGPT_MESSAGE_CHARS, prependUserPrompt, userPromptText } from '../../shared/user-prompt.js';
 import type { AgentPlan } from '../../shared/agent-plan.js';
 
 export interface PrepareHandoffInput {
@@ -30,6 +33,75 @@ export interface PrepareHandoffInput {
   /** Exact frontend/turn that authored this continuation brief. */
   sourceConversationId?: string | null;
   sourceTurnId?: string | null;
+  /** Only the app's own recovery text assembled from durable session records may bypass the model-brief floor. */
+  durableFallback?: boolean;
+}
+
+/**
+ * Last resort when ChatGPT repeatedly finishes a handoff with an incomplete brief. This
+ * is evidence, not a model-authored synthesis: preserve the original user's instructions,
+ * verified tool outcomes, unresolved work, and provenance without inventing a completion.
+ * Bounded output keeps the same replacement-message budget as an ordinary handoff.
+ */
+export async function durableRecoveryBrief(sessionId: string): Promise<string> {
+  const session = await getSession(sessionId);
+  if (!session) throw new Error('The recorded session is unavailable for recovery');
+  const events = await readEvents(sessionId);
+  const users: string[] = [];
+  const reports: string[] = [];
+  const results: string[] = [];
+  const excerpts = (s: string, limit: number) => s.length <= limit ? s :
+    `${s.slice(0, Math.floor(limit * 0.7))}\n[Excerpt cut; full record remains in the local session.]\n${s.slice(-(limit - Math.floor(limit * 0.7)))}`;
+  for (const event of events) {
+    if (event.kind === 'user_message') {
+      const text = event.authoredText ?? event.message.text;
+      if (!/^\s*\[\[CLF-(?:HANDOFF|RESUME):/.test(text) && !event.automatic) {
+        users.push(`[seq ${event.seq}] ${excerpts(text, 5000)}`);
+      }
+    } else if (event.kind === 'agent_message') {
+      reports.push(`[seq ${event.seq}] ${event.from} → ${event.to} (${event.delivery}): ${excerpts(event.message.text, 2400)}`);
+    } else if (event.kind === 'tool_call') {
+      const c = event.call;
+      results.push(`[seq ${event.seq}] ${c.tool} (${c.outcome}, ${c.summary.title}): arguments ${excerpts(c.args.text, 900)}; result ${excerpts(c.result.text, 1100)}`);
+    } else if (event.kind === 'assistant_message' && event.final && event.message.text.trim()) {
+      reports.push(`[seq ${event.seq}] Assistant final (claim; verify against tool results): ${excerpts(event.message.text, 1700)}`);
+    } else if (event.kind === 'chat_error') {
+      reports.push(`[seq ${event.seq}] Chat error: ${excerpts(event.message.text, 1300)}`);
+    }
+  }
+  // Keep the earliest original specification and the latest corrections; split a section's
+  // space between its beginning and end instead of silently dropping all late messages.
+  const section = (title: string, items: string[], budget: number) => {
+    const before = Math.ceil(budget * 0.35);
+    let head = '', tail = '';
+    for (const item of items) {
+      if (head.length + item.length + 2 > before) break;
+      head += `${item}\n\n`;
+    }
+    for (const item of [...items].reverse()) {
+      if (tail.length + item.length + 2 > budget - head.length) break;
+      tail = `${item}\n\n${tail}`;
+    }
+    const omitted = items.length && (head + tail).length < items.join('\n\n').length
+      ? '[Some middle records omitted from this bounded brief; the full session journal remains available.]\n\n'
+      : '';
+    return `\n\n## ${title}\n${head}${omitted}${tail}`;
+  };
+  return `DURABLE RECOVERY BRIEF — assembled by Chat Marks after three incomplete model handoffs.\n` +
+    `The original session and its complete recorded history remain available in Chat Marks. ` +
+    `This is a bounded extraction of durable evidence, not a claim that all work succeeded. ` +
+    `Continue the latest unfinished user request; inspect the repository and logs for anything omitted.\n\n` +
+    `## CURRENT STATE / ENVIRONMENT\nSession ${session.id}, current source chat ${session.conversationId ?? 'unknown'}, ` +
+    `title ${JSON.stringify(session.title)}, project ${session.projectId ?? 'unrecorded'}, ` +
+    `${session.events} recorded events, ~${session.estimatedTokens} estimated tokens, ` +
+    `${session.userMessages} user messages, ${session.toolCalls} tool calls. ` +
+    `Latest local tool: ${session.lastToolActivity?.title ?? 'unrecorded'}.\n\n` +
+    `## NEXT / DO NOT\nUse the newest user corrections as the specification. Verify Git status, active work and pending ` +
+    `agents/queues before changing anything. Preserve unrelated worktrees, uncommitted files and user approvals. ` +
+    `Recorded assistant claims are not proof of completion.\n` +
+    section('USER SPECIFICATION (original and latest corrections)', users, 43_000) +
+    section('EXECUTION EVIDENCE (tool calls, inputs and results)', results, 23_000) +
+    section('ASSISTANT, WORKERS, ERRORS AND PENDING WORK', reports, 18_000);
 }
 
 /** A public, non-authority id for provenance. The raw continuation token is never persisted here. */
@@ -66,6 +138,17 @@ function handoffPlanNotice(plan: AgentPlan | null): string {
     '\nContinue the unfinished work using this plan and the brief. Report progress with update_plan.';
 }
 
+/** Steps still waiting for the person (#1695): the next chat must not assume their results. */
+export function handoffUserRequestsNotice(requests: readonly UserRequest[]): string {
+  const open = requests.filter(request => request.state === 'open');
+  if (!open.length) return '';
+  return '\n\nSteps still waiting for the person (handed over with ask_user_to_run; they run them, not you):\n' +
+    // Bounded, so many open steps cannot crowd out the brief itself; status names every one.
+    open.slice(0, 10).map(request => `- ${request.id}: ${request.purpose}\n  Command: ${request.command.length > 300 ? `${request.command.slice(0, 300)}…` : request.command}\n  Folder: ${request.folder}`).join('\n') +
+    (open.length > 10 ? `\n- and ${open.length - 10} more` : '') +
+    '\nDo not assume their results. Check them with user_request_status before relying on them.';
+}
+
 /**
  * The exact ordinary user message typed into the replacement ChatGPT conversation.
  *
@@ -78,7 +161,7 @@ export function resumeBootstrapText(summary: string, token = ''): string {
   const identity = destinationContinuationMarker(token);
   return (
     (identity ? `${identity}\n\n` : '') +
-    'Continuing a Chat On Steroids session that was compacted. This is the brief the previous chat wrote about ' +
+    'Continuing a Chat Marks session that was compacted. This is the brief the previous chat wrote about ' +
     'its own work; carry on from it rather than starting again.\n\n' +
     summary
   );
@@ -185,16 +268,24 @@ export async function prepareHandoff(input: PrepareHandoffInput): Promise<Handof
   if (!text) throw new Error('A handoff cannot be empty');
   const summary = await getSession(input.sessionId);
   if (!summary) throw new Error('That session no longer exists');
+  // Compact & Resume starts a new native conversation. Reassert the durable
+  // remote target before the handoff so a local cache cannot become its workspace.
+  const remote = await remoteModeInstructions(input.sessionId);
+  if (remote && remote.startsWith('[CHAT REMOTE MODE]')) text = prependUserPrompt(text, remote);
   // Freeze the actual saved plan with the brief. A pointer to the removed session
   // tool cannot supply it to the replacement model. Budget this same snapshot once.
-  const planNotice = handoffPlanNotice(await readSessionPlan(input.sessionId));
-  const overhead = resumeBootstrapText('', input.continuationToken).length + planNotice.length;
+  const planNotice = handoffPlanNotice(await readSessionPlan(input.sessionId)) +
+    handoffUserRequestsNotice(await readSessionUserRequests(input.sessionId));
+  // Reserve exactly the frame that the bridge adds to the destination's first message.
+  const marks = currentMarksSystemPrompt('chatgpt');
+  const overhead = (marks ? prependUserPrompt(resumeBootstrapText('', input.continuationToken), marks)
+    : resumeBootstrapText('', input.continuationToken)).length + planNotice.length;
   text = boundBrief(text, MAX_CHATGPT_MESSAGE_CHARS - overhead);
   // Checked again here, and not only at the bridge route that can word the refusal well,
   // because this is the one function that writes a handoff to disk. A stub that reaches the
   // store is indistinguishable from a real brief for the rest of its life.
   const shortfall = briefShortfall(text, input.sourceTokens ?? summary.estimatedTokens);
-  if (shortfall) throw new Error(shortfall);
+  if (shortfall && !input.durableFallback) throw new Error(shortfall);
   const sourceConversationId = input.sourceConversationId === undefined
     ? summary.conversationId
     : input.sourceConversationId;

@@ -109,7 +109,7 @@ const CORE: SurfaceDefinition = {
     'enabled it — spawns and coordinates worker agents, subagents or a parallel swarm across several ChatGPT conversations.',
   cardSummary: 'Files, patches and terminal.',
   required: true,
-  tools: ['read', 'view_image', 'find', 'apply_patch', 'save_image', 'exec_command', 'write_stdin', 'update_plan', 'agents', 'session_finish', 'usage', 'exec']
+  tools: ['read', 'view_image', 'find', 'apply_patch', 'save_image', 'exec_command', 'write_stdin', 'ask_user_to_run', 'user_request_status', 'update_plan', 'agents', 'session_finish', 'usage', 'vault_use', 'memory_search', 'memory_save', 'remote_exec', 'exec']
 };
 
 /**
@@ -134,13 +134,13 @@ const DESKTOP: SurfaceDefinition = {
     'and reading the clipboard or copying and pasting text between programs.',
   cardSummary: 'Browser and desktop apps.',
   required: false,
-  tools: [...BROWSER_TOOLS, ...WINDOWS_COMPUTER_METHODS, 'read_clipboard', 'write_clipboard', 'observe', 'computer', 'exec']
+  tools: [...BROWSER_TOOLS, ...WINDOWS_COMPUTER_METHODS, 'read_clipboard', 'write_clipboard', 'observe', 'computer', 'linux_observe', 'linux_act', 'exec']
 };
 
 const PLUGINS: SurfaceDefinition = {
   id: 'plugins', serverName: 'chat-on-steroids-plugins',
   connectorName: `${CONNECTOR_BRAND} Plugins`,
-  description: 'Tools from external MCP integrations installed and enabled in Chat On Steroids Settings, including Blender and other connected applications and services.',
+  description: 'Tools from external MCP integrations installed and enabled in Chat Marks Settings, including Blender and other connected applications and services.',
   cardSummary: 'One shared connector for your enabled external MCP plugins.',
   required: false,
   // Dynamic declarations are owned and bounded by the plugin manager.
@@ -178,6 +178,10 @@ export function liveConnectorName(id: SurfaceId): string {
 /** Platform/capability projection used by setup; each registrar enforces the same split. */
 export function desktopToolNames(caps: Capabilities, platform: NodeJS.Platform = process.platform): string[] {
   const browser = [...(caps.screen ? BROWSER_READ_TOOLS : []), ...(caps.control ? BROWSER_WRITE_TOOLS : [])];
+  if (platform === 'linux') return [...browser,
+    ...(caps.clipboardRead ? ['read_clipboard'] : []), ...(caps.clipboardWrite ? ['write_clipboard'] : []),
+    ...(getConfig().ui.linuxDesktopEnabled === true
+      ? [...(caps.screen ? ['linux_observe'] : []), ...(caps.control ? ['linux_act'] : [])] : [])];
   if (!desktopAutomationSupported(platform)) return browser;
   if (platform !== 'win32') return [...browser, ...(caps.screen ? ['observe'] : []), ...(caps.control || caps.clipboardRead || caps.clipboardWrite ? ['computer'] : [])];
   return [
@@ -210,7 +214,7 @@ export function surfaceIsUseful(
   // still gives this surface something real to advertise.
   if (id === 'desktop') {
     return (
-      caps.screen || caps.control || (desktopAutomationSupported(platform, release) && (caps.clipboardRead || caps.clipboardWrite))
+      caps.screen || caps.control || ((platform === 'linux' || desktopAutomationSupported(platform, release)) && (caps.clipboardRead || caps.clipboardWrite))
     );
   }
   return true;

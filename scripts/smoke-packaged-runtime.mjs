@@ -4,6 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { RIPGREP, TUNNEL_CLIENT } from './packaging-versions.mjs';
 import { normalizeArch, normalizePlatform, PLATFORM_INFO } from './packaging-targets.mjs';
+import { productVersion } from './release-version.mjs';
 
 const repository = path.resolve(import.meta.dirname, '..');
 const releaseDir = path.join(repository, 'release');
@@ -37,7 +38,7 @@ const packageRoot = explicitRoot ? path.resolve(explicitRoot) : packageRootCandi
 if (!packageRoot) throw new Error(`Could not find unpacked ${targetPlatform}-${targetArch} package under ${releaseDir}`);
 
 const sourcePackage = JSON.parse(readFileSync(path.join(repository, 'package.json'), 'utf8'));
-const expectedVersion = sourcePackage.version;
+const expectedVersion = productVersion(sourcePackage.version);
 const expectedElectronVersion = sourcePackage.devDependencies?.electron;
 if (!/^\d+\.\d+\.\d+$/.test(expectedElectronVersion ?? '')) {
   throw new Error(`Electron must be pinned to an exact release version, got ${JSON.stringify(expectedElectronVersion)}`);
@@ -51,12 +52,12 @@ const nativeDir = `${targetPlatform}-${targetArch}`;
 let resourcesDir;
 let appExecutable;
 if (targetPlatform === 'darwin') {
-  const appBundle = path.join(packageRoot, 'Chat On Steroids.app');
+  const appBundle = path.join(packageRoot, 'ChatMarks.app');
   resourcesDir = path.join(appBundle, 'Contents', 'Resources');
-  appExecutable = path.join(appBundle, 'Contents', 'MacOS', 'Chat On Steroids');
+  appExecutable = path.join(appBundle, 'Contents', 'MacOS', 'ChatMarks');
 } else {
   resourcesDir = path.join(packageRoot, 'resources');
-  appExecutable = path.join(packageRoot, targetPlatform === 'win32' ? 'Chat On Steroids.exe' : 'chat-on-steroids');
+  appExecutable = path.join(packageRoot, targetPlatform === 'win32' ? 'ChatMarks.exe' : 'chat-marks');
 }
 
 function required(relative) {

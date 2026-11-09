@@ -3,6 +3,7 @@ import { STRICT_REFUSAL_PROGRESS_PREFIX, UNPROVEN_WORKER_NOTICE, UNTRUSTED_NOTIC
 import { noteConnectorUse } from '../connector-proof.js';
 import { beginPluginToolCall } from '../plugin-refresh.js';
 import { pluginManager } from '../plugins/manager.js';
+import { markspanelAccessBlocked } from '../markspanel-auth.js';
 import { WINDOWS_COMPUTER_STATE_INPUT_METHODS } from '../../shared/windows-computer.js';
 /**
  * The machinery every model-facing tool sits on, independent of which surface it lives on.
@@ -52,6 +53,7 @@ import { isUserSkillVirtualPath, resolveUserSkillPath } from '../user-skills.js'
 import { ExecError } from '../exec.js';
 import { ComputerError } from '../computer/index.js';
 import { getConfig } from '../config.js';
+import { redactVaultValues } from '../marks-vault-redaction.js';
 import { noteToolCall, toolOutcome } from '../diagnostics-facts.js';
 import {
   AgentError,
@@ -110,6 +112,8 @@ import {
   awaitFreshCallOrigin,
   evidenceWindow,
   freshCallOrigin,
+  captureRecordingContext,
+  recordingContextCurrent,
   recordAgentMessage,
   recordProgress,
   recordToolCall
@@ -143,7 +147,7 @@ import type { ToolOutcome } from '../../shared/session.js';
 const requestOwner = (requestId: string): string | null => requestCorrelation(requestId)?.conversationId ?? null;
 
 const WORKER_CONNECTION_PROFILE_REFUSAL =
-  'WORKER_CONNECTION_PROFILE_MISMATCH: this worker belongs to a different Chat On Steroids Setup profile. ' +
+  'WORKER_CONNECTION_PROFILE_MISMATCH: this worker belongs to a different Chat Marks Setup profile. ' +
   'No local tool was run. Return to the owning prime and switch back to the connection that created this worker family; ' +
   'cross-profile worker routing is not automatic.';
 
@@ -238,6 +242,11 @@ export interface ToolContext {
   exposedSessionTools?: boolean;
   exposedAgentTools?: boolean;
   /**
+   * Whether the steps-for-the-person tools (#1695) stay registered, for the same reason. They
+   * follow Run programs, and also Read-only over it, which switches the command tools off.
+   */
+  exposedUserRequests?: boolean;
+  /**
    * Whether `find` must stay registered for the lifetime of the endpoint.
    *
    * `find` and the exec pair are mutually exclusive, and that choice cannot be derived
@@ -248,6 +257,8 @@ export interface ToolContext {
    * ever added to. Defaults to the live answer when the caller does not track it.
    */
   exposedFind?: boolean;
+  /** Monotone native Linux tool exposure for one MCP endpoint; execution uses the live opt-in. */
+  exposedLinuxDesktop?: boolean;
 }
 
 export type ToolContent =
@@ -373,7 +384,7 @@ export async function guard(name: string, fn: () => Promise<ToolResult>): Promis
   // the question this answers is whether the model may call us at all.
   toolCallSeenAt = started;
   try {
-    const result = await fn();
+    const result = redactVaultValues(await fn());
     const elapsed = Date.now() - started;
     if (result.isError) {
       const summary = result.content
@@ -450,6 +461,7 @@ function setCallerConversation(context: CallContext, conversationId: string | nu
   context.caller.conversationId = conversationId;
   const exact = conversationId ? requestCorrelation(context.caller.requestId) : null;
   context.caller.sessionId = exact?.conversationId === conversationId ? exact.sessionId : null;
+  context.caller.providerSessionAnchor = exact?.conversationId === conversationId ? exact.providerSessionAnchor : undefined;
 }
 
 /** The only SDK handler context field this layer consumes; request identity comes from ingress ALS. */
@@ -565,9 +577,19 @@ function withUnattributedNotice(
   conversationId: string | null | undefined,
   result: ToolResult,
   requestId: string | null,
-  allowUnattributed: boolean
+  allowUnattributed: boolean,
+  provisional = false
 ): ToolResult {
   if (conversationId) return result;
+  const requestOwnershipNotice =
+    'This request id owns its workspace, update_plan, terminals and agents/subagents. Use the process and run ids returned to this request; later exact proof attaches that state to its chat. ';
+  if (provisional) return { ...result, content: [...result.content, { type: 'text', text:
+    '\n--- Recording context ---\n' +
+    'Exact caller identity is not available. The recorder may provisionally place this operation in the only observed running chat, ' +
+    'pending exact request evidence. This does not grant access to that chat’s workspace, messages, workers or terminals. ' +
+    'Continue using enabled self-contained tools with their existing permissions. Do not repeat a completed operation to repair attribution. ' +
+    requestOwnershipNotice
+  }] };
   const eta = unattributedRepairEta(Date.now(), requestId);
   const recovery = eta === null ? '' : `The next attribution recovery check is in about ${eta}s. `;
   return {
@@ -582,7 +604,7 @@ function withUnattributedNotice(
             'Unattributed does not switch on Read-only mode or disable tools. Continue using every enabled tool, ' +
             'including apply_patch, exec_command, Desktop and Plugins; their existing permissions still apply. ' +
             (requestId
-              ? 'This request id owns its workspace, update_plan, terminals and agents/subagents. Use the process and run ids returned to this request; later exact proof attaches that state to its chat. '
+              ? requestOwnershipNotice
               : 'This call has no request id, so request-owned plans and worker families cannot be created until a request id or exact chat proof is available. ') +
             'A refusal about a particular process, worker or chat target applies only to that operation, not to file edits or other tools. ' +
             'Report the actual tool result; do not claim mutation or terminal tools are unavailable because of this notice, and never replay successful work. ' +
@@ -663,8 +685,17 @@ export async function dispatch(
   surface: SurfaceId,
   run: () => Promise<ToolResult>,
   parent?: CallContext,
-  setupProfileId: string | null = null
+  setupProfileId: string | null = null,
+  /**
+   * Chat Marks: `local` is an in-process caller (an API chat, `api-chat/tools.ts`) with its own
+   * exact correlation. It skips only the bookkeeping that means "ChatGPT used this connector".
+   */
+  options: { local?: boolean } = {}
 ): Promise<ToolResult> {
+  if (markspanelAccessBlocked()) return {
+    isError: true,
+    content: [{ type: 'text', text: 'MARKSPANEL_SIGNING_OUT: Local tools are unavailable while the app closes.' }]
+  };
   // The context is built here, one layer out from where the work happens, because the
   // compaction barrier asks about the whole request and not just the handler. A call is
   // still unsettled while it waits for its request-id evidence, while its outcome is being
@@ -672,6 +703,7 @@ export async function dispatch(
   // those gaps describes a machine that has not finished changing. The counter therefore
   // opens with the request and closes with it.
   const context: CallContext = {
+    recordingContext: parent?.recordingContext ?? (inboundProviderRequest() && requestId ? captureRecordingContext(Date.now()) : null),
     publication: parent?.publication ?? inboundPublication() ?? { completedAt: null, failed: false },
     startedAt: Date.now(),
     activity: summarizeRunningCall(name, args, emptyEvidence()),
@@ -689,7 +721,7 @@ export async function dispatch(
   const confirmUse = !parent && inboundProviderRequest() ? beginPluginToolCall(surface) : null;
   try {
     const result = await trackMcpRequest(() =>
-      trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run, !!parent))
+      trackInFlight(context, () => dispatchTracked(context, name, args, transportKey, requestId, surface, run, !!parent, options.local === true))
     );
     // In-process callers have no socket; resolving their outer invocation publishes it.
     if (!parent && !inboundPublication()) context.publication!.completedAt = Date.now();
@@ -728,18 +760,23 @@ async function dispatchTracked(
   requestId: string | null,
   surface: SurfaceId,
   run: () => Promise<ToolResult>,
-  nested: boolean
+  nested: boolean,
+  local = false
 ): Promise<ToolResult> {
-  noteTransportIdentity(transportKey);
+  // Chat Marks: a local (API chat) call never reached a connector, so it proves no transport,
+  // connector use or served request; every guard below still applies to it.
+  if (!local) noteTransportIdentity(transportKey);
   const markTiming = beginToolTiming();
   const callStartedAt = Date.now();
   // Recorded here rather than in `guard` because only this layer knows which server
   // answered, and "was this connector ever actually used from ChatGPT" is a per-connector
   // question the setup screen has to answer honestly.
-  surfaceToolCallAt.set(surface, Date.now());
-  noteConnectorUse(surface, 'tool');
-  // Proof for connector identity: this exact request reached this surface's own endpoint.
-  if (!nested) noteServedRequest(requestId, surface);
+  if (!local) {
+    surfaceToolCallAt.set(surface, Date.now());
+    noteConnectorUse(surface, 'tool');
+    // Proof for connector identity: this exact request reached this surface's own endpoint.
+    if (!nested) noteServedRequest(requestId, surface);
+  }
   const isFinish = isFinishCall(name, args);
   const startedAt = context.startedAt;
   const allowUnattributed = context.allowUnattributed === true;
@@ -769,16 +806,24 @@ async function dispatchTracked(
   // Identity and the finish hold share one ingress deadline; late proof must not
   // add another complete hold interval to an already waiting provider request.
   const finishDeadline = name === 'session_finish' ? sessionFinishDeadline(startedAt) : null;
-  const identityWindow = (requested: number): number => finishDeadline === null
-    ? requested : Math.min(requested, Math.max(0, finishDeadline - Date.now()));
+  // A step for the person (#1695) waits for its chat at most the ordinary identity window in total,
+  // across every later identity check too (CodeRabbit on #2088).
+  const stepDeadline = name === 'ask_user_to_run' || name === 'user_request_status' ? startedAt + IDENTITY_EVIDENCE_MS : null;
+  const deadline = finishDeadline ?? stepDeadline;
+  const identityWindow = (requested: number): number => deadline === null
+    ? requested : Math.min(requested, Math.max(0, deadline - Date.now()));
   // Windows observation/input gets one short grace even under the opt-in. Exact proof can then
   // alias the observation directly to the durable session, while a genuinely headless caller
   // falls back to its request principal instead of waiting the old full identity window.
-  const needsExactIdentity = name === 'session_finish' || desktopContext || (!allowUnattributed && (
+  // A step for the person (#1695) is shown in its own chat and refused without it, so it waits for
+  // the page's proof like session_finish: ChatGPT can hand one before that proof arrives (VM, 2026-11-07).
+  const stepForPerson = name === 'ask_user_to_run' || name === 'user_request_status';
+  const needsExactIdentity = name === 'session_finish' || stepForPerson || desktopContext || (!allowUnattributed && (
     name === 'exec' || name === 'update_plan' || (identitySensitive && swarmRunning())
   ));
   if (!context.caller.conversationId && needsExactIdentity && requestId) {
-    const wait = name === 'session_finish' || (workerStarting() && !desktopContext)
+    // A step for the person keeps the ordinary identity window, also while a worker starts (CodeRabbit on #2088).
+    const wait = name === 'session_finish' || (workerStarting() && !desktopContext && !stepForPerson)
       ? SPAWN_EVIDENCE_MS
       : desktopContext && allowUnattributed
       ? UNATTRIBUTED_DESKTOP_EVIDENCE_MS
@@ -1029,10 +1074,13 @@ async function dispatchTracked(
   let handlerRan = false;
   markTiming('identity');
   const invokeHandler = (): Promise<ToolResult> => {
+    // Identity admission and strict allowlist checks may have awaited storage.
+    // A concurrent MarksPanel logout must not let the earlier request run now.
+    if (markspanelAccessBlocked()) return Promise.resolve(fail('MARKSPANEL_SIGNING_OUT: Local tools are unavailable while the app closes.'));
     handlerRan = true;
     return run();
   };
-  const result = await runInCallContext(context, () =>
+  let result = await runInCallContext(context, () =>
       admissionRefusal
         ? Promise.resolve(fail(admissionRefusal))
         : compacting
@@ -1042,7 +1090,7 @@ async function dispatchTracked(
             fail(
               'CONVERSATION_SUPERSEDED: Compact & Resume replaced this ChatGPT conversation. Its transcript remains readable, but it can no longer execute local tools. ' +
                 (replacement
-                  ? `The work continues in https://chatgpt.com/c/${replacement.conversationId}${replacement.title.trim() ? `, shown in Chat On Steroids as ${JSON.stringify(replacement.title.trim())}` : ''}. Tell the user to continue there; no local tool was run.`
+                  ? `The work continues in https://chatgpt.com/c/${replacement.conversationId}${replacement.title.trim() ? `, shown in Chat Marks as ${JSON.stringify(replacement.title.trim())}` : ''}. Tell the user to continue there; no local tool was run.`
                   : 'Continue only in the replacement chat; no local tool was run.')
             )
           )
@@ -1085,8 +1133,6 @@ async function dispatchTracked(
         : invokeHandler()
   );
   markTiming('handler');
-  // Nested exec children are counted under their own names, like direct calls.
-  noteToolCall(name, toolOutcome(result), Date.now() - callStartedAt);
   if (identityRefusals.has(result)) rememberIdentityRefusal(requestId, name);
   // Identity, once, from this call's own evidence — see callerConversation. `agents` has
   // already established its own inside the call and adopted it, and re-reading here would
@@ -1102,7 +1148,22 @@ async function dispatchTracked(
     ? await conversationAccessRefusal(context.caller.conversationId)
     : isChatBlocked(context.caller.conversationId) ? BLOCKED_CHAT_REFUSAL : null) ??
     workerConnectionProfileRefusal(context.caller);
-  const deliveryFenced = Boolean(conversationPolicyRefusal) || compacting || supersededConversation || Boolean(silentCeilingWorker) ||
+  const currentProviderProof = context.caller.providerSessionAnchor ? requestCorrelation(requestId) : null;
+  const providerIdentityChanged = !!context.caller.providerSessionAnchor &&
+    (!currentProviderProof || currentProviderProof.conversationId !== context.caller.conversationId || currentProviderProof.sessionId !== context.caller.sessionId);
+  if (providerIdentityChanged) {
+    logWarn(`provider session delivery refused for request ${requestId}; caller proof changed while the operation ran`);
+    result = failIdentity('CALLER_IDENTITY_CHANGED: caller proof changed while this operation ran. Its result was withheld. ' +
+      'The operation may already have completed; do not repeat it to repair attribution.');
+    context.outcome = 'tool_internal_error';
+    context.evidence = emptyEvidence();
+    context.caller = { ...context.caller, conversationId: null, sessionId: null, runId: undefined };
+    context.agent = null;
+    rememberIdentityRefusal(requestId, name);
+  }
+  // Nested exec children are counted under their own names, like direct calls.
+  noteToolCall(name, toolOutcome(result), Date.now() - callStartedAt);
+  const deliveryFenced = providerIdentityChanged || Boolean(conversationPolicyRefusal) || compacting || supersededConversation || Boolean(silentCeilingWorker) ||
     Boolean(deliveryPolicyRefusal) ||
     compactingConversation(context.caller.conversationId) !== null || Boolean(context.caller.conversationId &&
       (await conversationAttachment(context.caller.conversationId, context.caller.sessionId ?? null)) === 'superseded');
@@ -1158,7 +1219,8 @@ async function dispatchTracked(
     context.caller.conversationId,
     deliveryFenced ? baseResult : withInbox(context.caller, context.agent, baseResult, isFinish),
     context.caller.requestId,
-    context.allowUnattributed === true
+    context.allowUnattributed === true,
+    recordingContextCurrent(context.recordingContext)
   );
   if (!nested && recoveredWorkerRole && !deliveryFenced) delivered = {
     ...delivered,
@@ -1213,6 +1275,7 @@ async function dispatchTracked(
   // while ChatGPT still sees the call running; the answer waits for it below, bounded.
   const closeHold = !nested && context.caller.conversationId ? openCallHold(context.caller.conversationId) : null;
   const recording = recordToolCall({
+    recordingContext: context.recordingContext,
     nested,
     tool: name,
     args: surface === 'plugins' ? pluginManager.redact(args) : args,
@@ -1228,6 +1291,7 @@ async function dispatchTracked(
     requestId: context.caller.requestId,
     conversationId: context.caller.conversationId,
     sessionId: context.caller.sessionId ?? null,
+    ...(context.caller.providerSessionAnchor ? { providerSessionAnchor: context.caller.providerSessionAnchor } : {}),
     endsActivity: isFinish && !result.isError
   });
   // Exact request-id identity needs no browser wait, so make its durable session append part
@@ -1604,7 +1668,7 @@ export function createRegistrar(server: McpServer | null, ctx: ToolContext, surf
     },
     featureDisabled(feature, setting) {
       return fail(
-        `FEATURE_DISABLED: ${feature} is switched off in Chat On Steroids. ` +
+        `FEATURE_DISABLED: ${feature} is switched off in Chat Marks. ` +
           `Ask the user to enable "${setting}" in the app, then try again.`
       );
     }

@@ -17,6 +17,7 @@ import { randomUUID } from 'node:crypto';
 import type { AgentInfo, AgentMessage, AgentState, ReasoningEffort, SwarmState } from '../shared/session.js';
 import { REASONING_EFFORTS, isReasoningEffort } from '../shared/session.js';
 import { getConfig } from './config.js';
+import { setWorkerSlotSource, workerSlotsRefusal } from './chats-at-once.js';
 import { liveConnectorName } from './mcp/surfaces.js';
 import { workerBrief, workerOwnTask } from '../shared/worker-brief.js';
 import { getChatModels, refreshForUnoffered } from './chat-models.js';
@@ -192,7 +193,7 @@ function busyFor(caller: Caller): AgentsBusyError {
 export class IdentityLostError extends AgentError {
   constructor(message?: string) {
     super(
-      message ?? ('WORKER_IDENTITY_LOST: Chat On Steroids could not tell which conversation this call came from, so it cannot ' +
+      message ?? ('WORKER_IDENTITY_LOST: Chat Marks could not tell which conversation this call came from, so it cannot ' +
         'act on the run from here. No agent operation was performed. Wait briefly and retry this operation once. ' +
         'If it is still refused, preserve your result in the chat and report that delivery is unconfirmed; ' +
         'do not claim the message or finish report reached its recipient.')
@@ -220,6 +221,22 @@ export class IdentityLostError extends AgentError {
 export function isOver(state: AgentState): boolean {
   return state === 'finished' || state === 'failed';
 }
+
+/** A woken worker still asleep this long after its slot was reserved was not woken after all. */
+const WAKE_SLOT_GRACE_MS = 10_000;
+const workerSlotKey = (runId: string, id: string): string => `${runId}/${id}`;
+// What became of a worker a "Chats working at once" slot was reserved for (#1694, Haz on #2051).
+setWorkerSlotSource((key, reservedAt, now) => {
+  const slash = key.lastIndexOf('/');
+  const run = runs.get(key.slice(0, slash));
+  // The run is gone: its spawn was refused or it ended.
+  if (!run) return { kind: 'over' };
+  const agent = run.agents.get(key.slice(slash + 1));
+  if (!agent) return { kind: 'pending' };
+  const state = agent.info.state;
+  if (isOver(state) || state === 'detached' || (state === 'sleeping' && now - reservedAt > WAKE_SLOT_GRACE_MS)) return { kind: 'over' };
+  return agent.info.conversationId ? { kind: 'chat', conversationId: agent.info.conversationId } : { kind: 'pending' };
+});
 
 /**
  * Whether this state consumes one of the run's worker slots.
@@ -394,8 +411,10 @@ const dormantRuns = new Map<string, DormantRun>();
  * A family older than this, or beyond the newest MAX_DORMANT_RUNS, is dropped and its worker
  * chats become ordinary retired leases; its prime spawns afresh if it ever comes back.
  */
-const DORMANT_RUN_TTL_MS = 7 * 24 * 60 * 60_000;
-const MAX_DORMANT_RUNS = 16;
+// An archived worker remains revivable for the same 30-day retention window as its
+// archived ChatGPT identity. Earlier seven-day eviction stranded otherwise reusable chats.
+const DORMANT_RUN_TTL_MS = 30 * 24 * 60 * 60_000;
+const MAX_DORMANT_RUNS = 128;
 
 /**
  * The earliest instant this process can honestly claim to have been watching a conversation.
@@ -694,6 +713,7 @@ export interface RetiredChat {
 
 /** A worker whose chat still has to be opened. Carries no credential. */
 export interface WorkerSpawn {
+  temporaryChat?: boolean;
   runId: string;
   primeConversationId: string | null;
   id: string;
@@ -711,7 +731,7 @@ export function pendingWorkerSpawns(): WorkerSpawn[] {
       (agent) =>
         agent.info.role === 'worker' && agent.info.state === 'invited' && !unpublishedAgents.has(agent)
     )
-    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort })));
+    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort, ...(agent.info.temporaryChat ? { temporaryChat: true } : {}) })));
 }
 
 /**
@@ -1023,7 +1043,7 @@ export function agentFamiliesForCaller(input: Caller): Array<{ run_id: string; r
 
 function requireEnabled(): void {
   if (!getConfig().multiAgent.enabled) {
-    throw new AgentError('Multi-agent mode is switched off in Chat On Steroids. Ask the user to enable it.');
+    throw new AgentError('Multi-agent mode is switched off in Chat Marks. Ask the user to enable it.');
   }
 }
 
@@ -1454,7 +1474,7 @@ export function identify(caller: Caller): AgentInfo {
  * cannot tell them apart is one that reports back on the house rules.
  */
 const briefFor = workerBrief;
-function makeWorker(id: string, label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): Agent {
+function makeWorker(id: string, label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, temporaryChat = false): Agent {
   return {
     info: {
       id,
@@ -1464,6 +1484,7 @@ function makeWorker(id: string, label: string, task: string, model: string | nul
       jobTitle: (workerOwnTask(task).split(/[\r\n]/, 1)[0]?.trim() ?? '').slice(0, 160) || undefined,
       model,
       reasoningEffort,
+      ...(temporaryChat ? { temporaryChat: true } : {}),
       state: 'invited',
       createdAt: Date.now(),
       activatedAt: null,
@@ -1770,7 +1791,7 @@ export function hasRetiredWorkerLeases(): boolean {
 
 export interface SpawnInput {
   /** `reviewer` only from the app's Goal step reviewer (#1832); the agents tool cannot set it. */
-  workers: ReadonlyArray<{ label?: string; task: string; model?: string | null; reasoning_effort?: string | null; reviewer?: boolean }>;
+  workers: ReadonlyArray<{ label?: string; task: string; model?: string | null; reasoning_effort?: string | null; reviewer?: boolean; temporary_chat?: boolean }>;
   /**
    * What every worker in this spawn needs to know, written once.
    *
@@ -2131,7 +2152,7 @@ export function requestWorkerBootstraps(ids: readonly string[], runId?: string):
         !unpublishedAgents.has(agent) &&
         wanted.has(agent.info.id)
     )
-    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort }));
+    .map((agent) => ({ runId: run.runId, primeConversationId: run.primeConversationId, id: agent.info.id, task: agent.info.task, model: agent.info.model, reasoningEffort: agent.info.reasoningEffort, ...(agent.info.temporaryChat ? { temporaryChat: true } : {}) }));
   if (owed.length === 0) return 0;
   if (spawnRequest) spawnRequest(owed);
   else logWarn('multi-agent: no browser extension is paired, so worker chats cannot be opened automatically');
@@ -2190,7 +2211,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     // the browser types, the repeated-spawn match, the status table, the snapshot — then
     // sees the same single string a worker actually receives, with no second field to keep
     // in step and no way for the two halves to be delivered apart.
-    return { label, task: briefFor(context, task), model, reasoningEffort, reviewer: worker.reviewer === true };
+    return { label, task: briefFor(context, task), model, reasoningEffort, reviewer: worker.reviewer === true, temporaryChat: worker.temporary_chat === true };
   });
 
   const conversationId = input.caller.conversationId ?? null;
@@ -2309,11 +2330,24 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
     if (!activeRun.agents.has(id)) ids.push(id);
   }
 
+  // Chats working at once (#1694): workers are chats too. The prime's own slot passes to them, and
+  // each new worker's slot is named after it so it follows the worker (Haz on #2051).
+  const chatsAtOnce = workerSlotsRefusal(conversationId, ids.map(id => workerSlotKey(activeRun.runId, id)));
+  if (chatsAtOnce) {
+    if (resumedDormant) parkRun(run, 'a new spawn was refused by the chats-at-once limit');
+    else if (createdFreshRun) runs.delete(run.runId);
+    logInfo(`agents: spawn of ${planned.length} worker(s) refused: ${chatsAtOnce}`);
+    throw new AgentError(
+      `CHATS_AT_ONCE: ${chatsAtOnce} ("Chats working at once" in the app). No workers were created. ` +
+        'Continue the work yourself, or end this turn and spawn when another chat has finished; do not retry right away.'
+    );
+  }
+
   const created: AgentInfo[] = [];
   const createdAgents: Agent[] = [];
   for (const [index, worker] of planned.entries()) {
     const id = ids[index] as string;
-    const agent = makeWorker(id, worker.label || id, worker.task, worker.model, worker.reasoningEffort);
+    const agent = makeWorker(id, worker.label || id, worker.task, worker.model, worker.reasoningEffort, worker.temporaryChat);
     agent.info.workerAllocationRunId = activeRun.runId;
     if (worker.reviewer) { agent.info.reviewer = true; agent.info.reviewAskedAt = Date.now(); }
     activeRun.agents.set(id, agent);
@@ -2360,7 +2394,7 @@ export function spawn(input: SpawnInput, options: SpawnOptions = {}): SpawnResul
  * worker still gets one; only an exact repetition of work already under way is folded back.
  */
 function matchExistingRequest(
-  requested: ReadonlyArray<{ label: string; task: string; model: string | null; reasoningEffort: ReasoningEffort | null }>,
+  requested: ReadonlyArray<{ label: string; task: string; model: string | null; reasoningEffort: ReasoningEffort | null; temporaryChat?: boolean }>,
   live: readonly Agent[]
 ): Agent[] | null {
   if (requested.length === 0 || live.length === 0) return null;
@@ -2371,8 +2405,8 @@ function matchExistingRequest(
   // file plain text: the NUL that used to do this job was a literal byte, which made every
   // text tool treat the source as binary. Model and reasoning ride along because a retry that
   // asks for a different model or level is new intent, not the same request arriving twice.
-  const shape = (label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null): string =>
-    JSON.stringify([label.trim(), task.trim(), model, reasoningEffort]);
+  const shape = (label: string, task: string, model: string | null, reasoningEffort: ReasoningEffort | null, temporaryChat = false): string =>
+    JSON.stringify([label.trim(), task.trim(), model, reasoningEffort, temporaryChat]);
   const taken = new Set<Agent>();
   const matched: Agent[] = [];
   for (const worker of requested) {
@@ -2381,10 +2415,10 @@ function matchExistingRequest(
     const found = live.find(
       (agent) =>
         !taken.has(agent) &&
-        (shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort) ===
-          shape(worker.label || agent.info.id, worker.task, worker.model, worker.reasoningEffort) ||
-          shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort) ===
-            shape(worker.label, worker.task, worker.model, worker.reasoningEffort))
+        (shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort, agent.info.temporaryChat) ===
+          shape(worker.label || agent.info.id, worker.task, worker.model, worker.reasoningEffort, worker.temporaryChat) ||
+          shape(agent.info.label, agent.info.task, agent.info.model, agent.info.reasoningEffort, agent.info.temporaryChat) ===
+            shape(worker.label, worker.task, worker.model, worker.reasoningEffort, worker.temporaryChat))
     );
     if (!found) return null;
     taken.add(found);
@@ -2770,6 +2804,15 @@ function stageMessagesActive(
               `cannot be woken right now${where}. Nothing was sent. Wait for a worker to stop and try again.`
           );
         }
+        // Chats working at once (#1694): a woken worker is a working chat again.
+        const chatsAtOnce = workerSlotsRefusal(caller.conversationId ?? null, [workerSlotKey(run?.runId ?? to.info.workerAllocationRunId ?? '', to.info.id)]);
+        if (chatsAtOnce) {
+          logInfo(`agents: waking ${toId} refused: ${chatsAtOnce}`);
+          throw new AgentError(
+            `CHATS_AT_ONCE: ${toId} is asleep and ${chatsAtOnce} ("Chats working at once" in the app), so it cannot be ` +
+              `woken right now${where}. Nothing was sent. Continue yourself, or end this turn and try when another chat has finished.`
+          );
+        }
       }
       reserved.add(to);
     }
@@ -2778,7 +2821,12 @@ function stageMessagesActive(
     const already = perRecipient.get(to.info.id) ?? 0;
     assertRoom(to, already + 1);
     perRecipient.set(to.info.id, already + 1);
-    planned.push({ to, message: newMessage(from.info.id, to.info.id, trimmed) });
+    const message = newMessage(from.info.id, to.info.id, trimmed);
+    // This is not derived from model-authored text or a supplied sender field:
+    // requireMember() above resolved the bound caller to this worker.
+    if (from.info.role === 'worker' && to.info.role === 'prime' && caller.conversationId)
+      message.origin = 'authenticated-worker-message';
+    planned.push({ to, message });
   }
 
   for (const { to, message } of planned) {
@@ -3782,7 +3830,7 @@ function planRevivalText(agent: Agent): { text: string; messageIds: string[] } {
   const body = waiting.map((message) => message.text).join('\n\n');
   const text =
     (body || 'The prime agent has more work for you; check your inbox on the next tool result.') +
-    `\n\n(Chat On Steroids: you are still ${agent.info.id} in the same run, and this is the prime agent talking to ` +
+    `\n\n(Chat Marks: you are still ${agent.info.id} in the same run, and this is the prime agent talking to ` +
     'you again in the chat you already know. Pick up from what you did here before rather than starting over. ' +
     `Report with ${ownCoreHint() ? `the agents tool${ownCoreHint()}: ` : 'agents '}action=message to="prime" as you go and action=finish when this piece is done.)`;
   return { text, messageIds: waiting.map((message) => message.id) };
@@ -4742,6 +4790,21 @@ export function closableWorkerConversations(keep: number): string[] {
   return stopped.slice(0, surplus).map((entry) => entry.conversationId);
 }
 
+/** One-time archive migration: only a verified completed assignment, with no inbox debt. */
+export function completedIdleWorkerConversations(): string[] {
+  const conversations = new Set<string>();
+  for (const owner of [...runs.values(), ...dormantRuns.values()]) {
+    for (const agent of owner.agents.values()) {
+      const info = agent.info;
+      if (info.role !== 'worker' || !info.conversationId || unpublishedAgents.has(agent) ||
+          (info.state !== 'sleeping' && info.state !== 'finished') ||
+          !info.result?.trim() || info.silenceParked || info.pending > 0 || info.awaitingAck > 0) continue;
+      conversations.add(info.conversationId);
+    }
+  }
+  return [...conversations];
+}
+
 /** Any dormant worker conversation remains an identity fence, reusable or terminal. */
 export function hasDormantWorkerLeases(): boolean {
   for (const dormant of dormantRuns.values()) {
@@ -4816,6 +4879,55 @@ export function swarmState(runId?: string): SwarmState {
     retainedWorkers: [...dormantRuns.values()].filter(r => runId === undefined || answersTo(r, runId))
       .flatMap(r => stateForAgents(r.agents, false).agents.filter(agent => agent.role === 'worker')),
     agents: visible.flatMap(r => stateForAgents(r.agents, true).agents) };
+}
+
+/** A read-only, exact owner projection. Never infer parentage from titles or worker labels. */
+export function ownedWorkerFleet(owner: { conversationId?: string; localOwnerId?: string; setupProfileId?: string }): Array<{
+  id: string; runId: string; conversationId: string | null; state: AgentState;
+}> {
+  return allFamilies().filter(family =>
+    !('runId' in family && unpublishedRuns.has(family)) &&
+    (owner.conversationId ? family.primeConversationId === owner.conversationId && !family.localOwnerId :
+      !!owner.localOwnerId && family.localOwnerId === owner.localOwnerId &&
+      (!family.setupProfileId || family.setupProfileId === owner.setupProfileId))
+  ).flatMap(family => [...family.agents.values()]
+    .filter(agent => agent.info.role === 'worker' && !unpublishedAgents.has(agent))
+    .map(agent => ({ id: agent.info.id, runId: familyKey(family),
+      conversationId: agent.info.conversationId, state: agent.info.state })));
+}
+
+/**
+ * The explicit owner's terminal transition, including parked workers. Preserve the complete
+ * family, its prime inbox, every worker report and every managed checkout. Only execution
+ * authority and pending instructions are retired; nothing is deleted.
+ */
+export function retireOwnedWorkerFleet(owner: { conversationId?: string; localOwnerId?: string; setupProfileId?: string }): number {
+  const selected = ownedWorkerFleet(owner);
+  if (!selected.length) return 0;
+  const identities = new Set(selected.map(row => `${row.runId}:\u0000${row.id}`));
+  let changedCount = 0;
+  for (const family of allFamilies()) {
+    if ('runId' in family && unpublishedRuns.has(family)) continue;
+    const runId = familyKey(family);
+    for (const agent of family.agents.values()) {
+      if (!identities.has(`${runId}:\u0000${agent.info.id}`) || agent.info.role !== 'worker') continue;
+      retireManagedWorktreeCleanupOffers([agent], 'cleared');
+      if (agent.info.state !== 'finished' || agent.info.revivable || agent.info.result === null || agent.queue.length > 0 ||
+          agent.info.silenceParked || agent.info.detachedAt !== null) changedCount++;
+      agent.info.state = 'finished';
+      agent.info.revivable = false;
+      agent.info.finishedAt ??= Date.now();
+      agent.info.detachedAt = null;
+      agent.info.silenceParked = false;
+      agent.info.silenceRecoveryTurnId = null;
+      agent.info.silenceRecoveryRequestOriginMax = null;
+      agent.info.result ??= 'Ended by the owner; chat and historical reports were preserved.';
+      agent.queue = [];
+      recount(agent);
+    }
+  }
+  if (changedCount) changed();
+  return changedCount;
 }
 
 export function agentConversation(id: string, runId?: string): string | null {
@@ -4911,6 +5023,14 @@ export function agentInfoForOwnedConversation(conversationId: string): AgentInfo
     const active = agentForConversationId(conversationId);
     if (active) return { ...active.info };
   }
+  // A deliberately terminal worker no longer has an *active* command lease. It still owns
+  // its exact durable history and may be archived, including before its parent run parks.
+  // Refuse an ambiguous restored duplicate rather than borrowing the first worker's identity.
+  const terminal = allFamilies().filter(owner => !('runId' in owner && unpublishedRuns.has(owner)))
+    .flatMap(owner => [...owner.agents.values()].filter(agent =>
+      agent.info.role === 'worker' && agent.info.conversationId === conversationId && isOver(agent.info.state)));
+  if (terminal.length === 1) return { ...terminal[0]!.info };
+  if (terminal.length > 1) return null;
   const dormant = dormantAgentForConversation(conversationId)?.agent ?? null;
   return dormant ? { ...dormant.info } : null;
 }
@@ -5746,6 +5866,7 @@ function deserializeAgents(entries: readonly SerializedAgent[], savedAt: number)
         jobTitle: typeof entry.info.jobTitle === 'string' && entry.info.jobTitle ? entry.info.jobTitle.slice(0, 160) : undefined,
         model: isModelSlug(entry.info.model) ? entry.info.model : null,
         reasoningEffort: isReasoningEffort(entry.info.reasoningEffort) ? entry.info.reasoningEffort : null,
+        temporaryChat: entry.info.temporaryChat === true,
         sleptAt: typeof entry.info.sleptAt === 'number' ? entry.info.sleptAt : null,
         contextTokens: Number.isFinite(entry.info.contextTokens) ? entry.info.contextTokens : 0,
         lastRevivalCommandId:

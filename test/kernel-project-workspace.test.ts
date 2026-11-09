@@ -131,30 +131,28 @@ it('never uses inherited Prime project after the managed worker broker history w
   expect(project).not.toHaveBeenCalled();
 });
 
-it('blocks a worker relative write and command after its checked-out directory is replaced', async () => {
+it('blocks a worker relative write and command after its checkout lease is revoked', async () => {
   swarm.managed = true;
   project.mockResolvedValue({ virtual: '/work/a', real: path.join(base, 'a') });
   const parent = path.join(base, 'swapped-owner-test');
   const original = path.join(parent, 'owned');
-  const relocated = path.join(parent, 'old-worktree');
   await fs.mkdir(original, { recursive: true });
-  // Exact 64-bit ids, as the manager reads them (worktrees/index.ts): an NTFS file id is a 48-bit
-  // record number plus a 16-bit sequence, so as a plain number a new directory made right after
-  // the rename could round to the old one's id and pass (failed on Windows CI, 2026-10-22).
-  const identity = await fs.stat(original, { bigint: true });
   const lease = { workspace: { virtual: '/work/swapped-owner-test/owned', real: original } };
   leaseLookup.mockReturnValue(lease);
-  // Simulate the manager's checked inode lease. The real validator additionally checks the
-  // marker, Git common-dir, branch and approved root; this tests that the kernel awaits it.
-  leaseValidate.mockImplementation(async current => {
-    const now = await fs.stat(current.workspace.real, { bigint: true });
-    if (now.ino !== identity.ino || now.dev !== identity.dev) throw new Error('WORKTREE_PATH_CHANGED');
-    return current;
-  });
-  await fs.rename(original, relocated);
-  await fs.mkdir(original);
   const notes = path.join(original, 'notes.txt');
   await fs.writeFile(notes, 'USER-OWNED NOTES - KEEP');
+  // This kernel test proves that each privileged boundary awaits the authoritative
+  // lease validator. The manager's separate tests exercise actual inode replacement,
+  // marker, Git common-dir, branch and approved-root checks on the filesystem.
+  // Do not rename an open temporary directory here: on Windows this can fail with
+  // EPERM (antivirus/runner file handles) before the kernel ever runs the guard.
+  let revoked = false;
+  leaseValidate.mockImplementation(async current => {
+    if (revoked) throw new Error('WORKTREE_PATH_CHANGED');
+    return current;
+  });
+  expect((await workerRun('managed', () => resolveIn(roots(), 'notes.txt'))).real).toBe(notes);
+  revoked = true;
   await expect(workerRun('managed', async () => {
     const target = await resolveIn(roots(), 'notes.txt', { allowMissing: true });
     await fs.writeFile(target.real, 'UNAUTHORIZED');
@@ -162,6 +160,35 @@ it('blocks a worker relative write and command after its checked-out directory i
   await expect(workerRun('managed', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined)))
     .rejects.toThrow(/WORKTREE_PATH_CHANGED/);
   expect(await fs.readFile(notes, 'utf8')).toBe('USER-OWNED NOTES - KEEP');
+  expect(leaseValidate).toHaveBeenCalledTimes(3);
+});
+
+it('refuses a substituted worker directory when its exact filesystem identity changed', async () => {
+  swarm.managed = true;
+  const parent = path.join(base, 'substituted-owner-test');
+  const original = path.join(parent, 'original');
+  const substitute = path.join(parent, 'substitute');
+  await fs.mkdir(original, { recursive: true });
+  await fs.mkdir(substitute, { recursive: true });
+  // Compare the full identity, including NTFS sequence bits, using bigint stats.
+  const identity = await fs.stat(original, { bigint: true });
+  const lease = { workspace: { virtual: '/work/substituted-owner-test/original', real: original } };
+  leaseLookup.mockReturnValue(lease);
+  leaseValidate.mockImplementation(async current => {
+    const now = await fs.stat(current.workspace.real, { bigint: true });
+    if (now.ino !== identity.ino || now.dev !== identity.dev) throw new Error('WORKTREE_PATH_CHANGED');
+    return current;
+  });
+  const untouched = path.join(substitute, 'notes.txt');
+  await fs.writeFile(untouched, 'USER-OWNED NOTES - KEEP');
+  lease.workspace.real = substitute;
+  await expect(workerRun('managed', async () => {
+    const target = await resolveIn(roots(), 'notes.txt', { allowMissing: true });
+    await fs.writeFile(target.real, 'UNAUTHORIZED');
+  })).rejects.toThrow(/WORKTREE_PATH_CHANGED/);
+  await expect(workerRun('managed', () => resolveCwd({ roots: roots(), caps: defaultConfig().capabilities, readOnly: false }, undefined)))
+    .rejects.toThrow(/WORKTREE_PATH_CHANGED/);
+  expect(await fs.readFile(untouched, 'utf8')).toBe('USER-OWNED NOTES - KEEP');
   expect(leaseValidate).toHaveBeenCalledTimes(2);
 });
 

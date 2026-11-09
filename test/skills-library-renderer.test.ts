@@ -234,3 +234,174 @@ it('shows recommended skill descriptions in the interface language and finds the
     await vi.waitFor(() => expect([...w.document.querySelectorAll<HTMLElement>('[data-recommended-skill-id]')].map(item => item.dataset.recommendedSkillId)).toEqual(['code-review']));
   } finally { setLanguage('en'); }
 });
+
+it('browses Agency Agents in Skills and imports only after explicit confirmation', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <details class="plugin-menu"><summary>Import</summary><div class="plugin-menu-actions"><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  w.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new w.Event('close')); };
+  const entry = { id: 'agency-engineering-backend-architect', path: 'engineering/engineering-backend-architect.md',
+    name: 'Backend Architect', category: 'engineering', commit: 'a'.repeat(40), sha: 'b'.repeat(40), size: 100 };
+  let skills: ManagedSkill[] = [];
+  const listAgencyAgents = vi.fn(async () => ({ ok: true as const, data: {
+    repository: 'msitarzewski/agency-agents', license: 'MIT', commit: entry.commit, agents: [entry]
+  } }));
+  const importAgencyAgent = vi.fn(async () => {
+    skills = [{ id: entry.id, name: 'Agency: Backend Architect', description: 'Architecture.',
+      path: `/skills/${entry.id}/SKILL.md`, origin: null }];
+    return { ok: true as const, data: skills };
+  });
+  const api = { listAgencyAgents, importAgencyAgent, listManagedSkills: vi.fn(async () => ({ ok: true as const, data: skills })),
+    skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) };
+  const open = (await import('../src/renderer/skills-library.js')).initSkillsLibrary(api as never);
+  expect(listAgencyAgents).not.toHaveBeenCalled();
+  open();
+  await vi.waitFor(() => expect(w.document.querySelectorAll('[data-agency-agent]')).toHaveLength(1));
+  expect(listAgencyAgents).toHaveBeenCalledTimes(1);
+  (w.document.querySelector('.skill-agency-import') as HTMLButtonElement).click();
+  expect(importAgencyAgent).not.toHaveBeenCalled();
+  const dialog = w.document.getElementById('skillAgencyConfirm') as HTMLDialogElement;
+  expect(dialog.textContent).toContain('MIT License');
+  (dialog.querySelector('.pet-delete-cancel') as HTMLButtonElement).click();
+  expect(importAgencyAgent).not.toHaveBeenCalled();
+  (w.document.querySelector('.skill-agency-import') as HTMLButtonElement).click();
+  (w.document.querySelector('#skillAgencyConfirm .skill-agency-confirm') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(importAgencyAgent).toHaveBeenCalledWith(entry.path, entry.commit));
+  await vi.waitFor(() => expect((w.document.querySelector('.skill-agency-import') as HTMLButtonElement).disabled).toBe(true));
+  expect(w.document.querySelector('[data-skill-id="agency-engineering-backend-architect"]')).not.toBeNull();
+});
+
+it('refreshes Agency metadata separately from explicitly confirmed single-skill updates', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <details class="plugin-menu"><summary>Import</summary><div class="plugin-menu-actions"><button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button></div></details>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount"></span><div id="skillsInstalled"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement,
+    HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  w.HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  w.HTMLDialogElement.prototype.close = function () { this.open = false; this.dispatchEvent(new w.Event('close')); };
+  const agent = { id: 'agency-engineering-backend-architect', path: 'engineering/engineering-backend-architect.md',
+    name: 'Backend Architect', category: 'engineering', commit: 'b'.repeat(40), sha: 'c'.repeat(40), size: 120 };
+  const skill: ManagedSkill = { id: agent.id, name: 'Agency: Backend Architect', description: 'Backend systems.',
+    path: `/skills/${agent.id}/SKILL.md`, origin: { kind: 'github', url: 'https://github.com/msitarzewski/agency-agents/tree/main/engineering',
+      ref: 'main', directory: 'engineering', commit: 'a'.repeat(40), revision: 'd'.repeat(64), skillSha256: 'e'.repeat(64) } };
+  let state: 'available' | 'modified' = 'available';
+  const listAgencyAgents = vi.fn(async () => ({ ok: true as const, data: { repository: 'msitarzewski/agency-agents',
+    license: 'MIT', commit: agent.commit, agents: [agent], installed: [{ id: agent.id, path: agent.path,
+      state, installedCommit: 'a'.repeat(40), availableCommit: agent.commit,
+      installedSha: 'f'.repeat(40), availableSha: agent.sha }] } }));
+  const updateAgencyAgent = vi.fn(async () => ({ ok: true as const, data: { status: 'updated' as const, skills: [skill] } }));
+  const skillsCheckGithub = vi.fn(async () => ({ ok: true as const, data: [] }));
+  const api = { listAgencyAgents, updateAgencyAgent, listManagedSkills: vi.fn(async () => ({ ok: true as const, data: [skill] })),
+    skillsCheckGithub };
+  const open = (await import('../src/renderer/skills-library.js')).initSkillsLibrary(api as never);
+  open();
+  await vi.waitFor(() => expect(w.document.querySelector('.skill-agency-catalog-refresh')).not.toBeNull());
+  await vi.waitFor(() => expect(w.document.querySelector('.skill-agency-import')?.textContent).toContain('Revisar atualização'));
+  expect(w.document.querySelector('.skill-library-source')?.textContent).toContain('Agency Agents');
+  expect(skillsCheckGithub).not.toHaveBeenCalled();
+  (w.document.querySelector('.skill-agency-catalog-refresh') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(listAgencyAgents).toHaveBeenCalledTimes(2));
+  expect(updateAgencyAgent).not.toHaveBeenCalled();
+  (w.document.querySelector('.skill-agency-updates-filter') as HTMLButtonElement).click();
+  (w.document.querySelector('.skill-agency-import') as HTMLButtonElement).click();
+  expect(updateAgencyAgent).not.toHaveBeenCalled();
+  expect(w.document.querySelector('#skillAgencyUpdateConfirm')?.textContent).toContain('Versão instalada:');
+  (w.document.querySelector('#skillAgencyUpdateConfirm .pet-delete-cancel') as HTMLButtonElement).click();
+  expect(updateAgencyAgent).not.toHaveBeenCalled();
+  (w.document.querySelector('.skill-agency-import') as HTMLButtonElement).click();
+  (w.document.querySelector('#skillAgencyUpdateConfirm .skill-agency-update-confirm') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(updateAgencyAgent).toHaveBeenCalledWith(agent.path, agent.commit, agent.sha));
+  await vi.waitFor(() => expect(listAgencyAgents).toHaveBeenCalledTimes(3));
+  await vi.waitFor(() => expect((w.document.querySelector('.skill-agency-catalog-refresh') as HTMLButtonElement).disabled).toBe(false));
+  state = 'modified';
+  (w.document.querySelector('.skill-agency-catalog-refresh') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(listAgencyAgents).toHaveBeenCalledTimes(4));
+  await vi.waitFor(() => expect((w.document.querySelector('.skill-agency-import') as HTMLButtonElement).disabled).toBe(true));
+  expect(w.document.querySelector('#skillsAgencySection')?.textContent).toContain('Customizações locais');
+});
+
+// Design audit 2026-11-01: a failed first load kept saying "Loading…" for good.
+it('says the skills could not be loaded when the first load fails, and lists them after Refresh', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount">Loading…</span><div id="skillsInstalled"></div><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  let fail = true;
+  const listManagedSkills = vi.fn(async () => fail ? { ok: false as const, error: 'Skill library unavailable' }
+    : { ok: true as const, data: [{ id: 'review', name: 'Review', description: 'Reviews code.', path: '/skills/review/SKILL.md', origin: null }] as ManagedSkill[] });
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) } as any);
+  await vi.waitFor(() => expect(w.document.getElementById('skillsInstalled')!.textContent).toBe('Skills could not be loaded.'), { timeout: 10_000 });
+  expect(w.document.getElementById('skillsCount')!.textContent).toBe('');
+  // Typing in the search repaints the list, and the failure stays (CodeRabbit on #2002).
+  const search = w.document.getElementById('skillsSearch') as HTMLInputElement;
+  search.value = 'rev'; search.dispatchEvent(new w.Event('input'));
+  expect(w.document.getElementById('skillsInstalled')!.textContent).toBe('Skills could not be loaded.');
+  expect(w.document.getElementById('skillsCount')!.textContent).toBe('');
+  search.value = ''; search.dispatchEvent(new w.Event('input'));
+  fail = false;
+  (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1), { timeout: 10_000 });
+  expect(w.document.getElementById('skillsCount')!.textContent).toContain('1 skill');
+});
+
+// CodeRabbit on #2002: a load that Refresh replaced says nothing while the newer one is still on its way.
+it('shows no load error for a load that Refresh replaced', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount">Loading…</span><div id="skillsInstalled"></div><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const replies: Array<(reply: unknown) => void> = [];
+  const listManagedSkills = vi.fn(() => new Promise(resolve => replies.push(resolve)));
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) } as any);
+  (w.document.getElementById('skillsRefresh') as HTMLButtonElement).click();
+  expect(replies).toHaveLength(2);
+  replies[0]!({ ok: false, error: 'Skill library unavailable' });
+  for (let i = 0; i < 6; i++) await Promise.resolve();
+  expect(w.document.getElementById('skillsInstalled')!.textContent).not.toContain('could not be loaded');
+  replies[1]!({ ok: true, data: [{ id: 'review', name: 'Review', description: 'Reviews code.', path: '/skills/review/SKILL.md', origin: null }] });
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1), { timeout: 10_000 });
+});
+
+// CodeRabbit on #2002: a cancelled import (no list) that replaced a first load which then fails must not leave
+// "Loading…" for good: the page loads again.
+it('loads again when a cancelled import replaced a first load that failed', async () => {
+  dom = new JSDOM(`<!doctype html><body>
+    <input id="skillsSearch"><button id="skillsRefresh"></button>
+    <button id="skillsImportFolder"></button><button id="skillsImportFile"></button><button id="skillsImportGithub"></button>
+    <dialog id="skillGithubDialog"><h2 id="skillGithubTitle"></h2><p id="skillGithubDescription"></p><button id="skillGithubClose"></button><form id="skillGithubForm"><input id="skillGithubUrl"><p id="skillGithubError" hidden></p><button id="skillGithubCancel"></button><button id="skillGithubSubmit"></button></form></dialog>
+    <span id="skillsCount">Loading…</span><div id="skillsInstalled"></div><span id="skillsRecommendedCount"></span><div id="skillsRecommended"></div>
+  </body>`, { url: 'https://skills.test/' });
+  const w = dom.window;
+  for (const [key, value] of Object.entries({ window: w, document: w.document, HTMLElement: w.HTMLElement, HTMLButtonElement: w.HTMLButtonElement, HTMLDialogElement: w.HTMLDialogElement })) vi.stubGlobal(key, value);
+  const loads: Array<(reply: unknown) => void> = [];
+  const listManagedSkills = vi.fn(() => new Promise(resolve => loads.push(resolve)));
+  const skillsImport = vi.fn(async () => ({ ok: true as const, data: null }));
+  const { initSkillsLibrary } = await import('../src/renderer/skills-library.js');
+  initSkillsLibrary({ listManagedSkills, skillsImport, skillsCheckGithub: vi.fn(async () => ({ ok: true as const, data: [] })) } as any);
+  (w.document.getElementById('skillsImportFolder') as HTMLButtonElement).click();
+  await vi.waitFor(() => expect(loads).toHaveLength(2), { timeout: 10_000 });
+  loads[0]!({ ok: false, error: 'Skill library unavailable' });
+  loads[1]!({ ok: true, data: [{ id: 'review', name: 'Review', description: 'Reviews code.', path: '/skills/review/SKILL.md', origin: null }] });
+  await vi.waitFor(() => expect(w.document.querySelectorAll('.skill-library-card')).toHaveLength(1), { timeout: 10_000 });
+  expect(w.document.getElementById('skillsInstalled')!.textContent).not.toContain('could not be loaded');
+});

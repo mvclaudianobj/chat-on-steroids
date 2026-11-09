@@ -245,4 +245,3 @@ it('takes the review from the RESULT section of a worker report, and the whole a
   expect(review).toEqual({ text: 'No problems found.' });
   expect(reviewNote(review)).toBe('');
 });
-

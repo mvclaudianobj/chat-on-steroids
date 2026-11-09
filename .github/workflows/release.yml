@@ -44,18 +44,50 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
       - name: Verify and archive corresponding native sources
         run: node scripts/package-native-sources.mjs
       - name: Upload source artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: package-native-sources
-          path: release/Chat-On-Steroids-Native-Sources.tar.gz
+          path: release/ChatMarks-Native-Sources.tar.gz
           if-no-files-found: error
           retention-days: 30
+
+  contracts:
+    # Run the complete OS-specific suite alongside native packaging. Keeping it inside the
+    # package job made even a warm macOS build wait for the entire Vitest suite first.
+    # All three suites remain mandatory: assemble cannot run unless they all succeed.
+    name: Verify ${{ matrix.name }} contracts
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows x64
+            runner: windows-2025
+            platform: win32
+          - name: Linux x64
+            runner: ubuntu-24.04
+            platform: linux
+    runs-on: ${{ matrix.runner }}
+    # The Marks suite takes ~30 min on Linux and ~50 on Windows; 35 cancelled the 2.1.48.1 release.
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci --prefer-offline
+      - name: Verify OS contracts
+        env:
+          # Keep the existing Windows retry policy and flake reporting.
+          COS_TEST_RETRY: ${{ matrix.platform == 'win32' && '2' || '0' }}
+        run: npm run verify:ci
 
   package:
     name: Package ${{ matrix.name }}
@@ -67,30 +99,50 @@ jobs:
         include: ${{ fromJSON(needs.plan.outputs.include) }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 75
+    env:
+      # Electron and electron-builder fetch sizeable platform/arch-specific inputs. Cache
+      # downloads only (never node_modules, installed binaries or finished installers).
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
           architecture: ${{ matrix.arch }}
           cache: npm
 
+      - name: Reuse Electron packaging downloads
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ${{ env.ELECTRON_CACHE }}
+            ${{ env.ELECTRON_BUILDER_CACHE }}
+          key: marks-release-electron-${{ runner.os }}-${{ matrix.arch }}-${{ hashFiles('package-lock.json') }}
+
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefer-offline
 
       - name: Verify tag matches package version
         if: github.ref_type == 'tag'
-        run: node -e "const v=require('./package.json').version;if(process.env.GITHUB_REF_NAME!=='v'+v)throw new Error('Tag '+process.env.GITHUB_REF_NAME+' does not match package version '+v)"
+        run: node scripts/verify-release-version.mjs
 
-      - name: Verify
-        run: npm run verify:ci
-        env:
-          # The slow Intel macOS and Windows runners retry a failed test; the flaky reporter still names
-          # every retried test as a warning. Windows had no retry, so a known timing flake failed 3 of 8
-          # canaries on 2026-10-04 (plugins-manager, bridge, code-mode-mcp), each green in its PR's CI.
-          COS_TEST_RETRY: ${{ ((matrix.platform == 'darwin' && matrix.arch == 'x64') || matrix.platform == 'win32') && '2' || '0' }}
+      # The complete suite (typecheck, notices, privacy and native tests) runs for
+      # each OS in parallel in `contracts`. All six architectures independently
+      # prove their actual packaging target and run their packaged native smokes.
+      - name: Verify package metadata
+        run: node scripts/verify-release-version.mjs --package-only
+
+      # Preserve the source/licensing checks on the three non-primary architectures.
+      # The full suites run in parallel in `contracts`, while these lightweight
+      # checks still validate each secondary runner's installed native dependencies.
+      - name: Verify source contracts (secondary architecture)
+        if: (matrix.platform == 'win32' && matrix.arch == 'arm64') || (matrix.platform == 'darwin' && matrix.arch == 'x64') || (matrix.platform == 'linux' && matrix.arch == 'arm64')
+        run: |
+          npm run typecheck
+          npm run verify:notices
 
       - name: Prove native runner target
         run: node -e "if(process.platform!=='${{ matrix.platform }}'||process.arch!=='${{ matrix.arch }}')throw new Error('Expected ${{ matrix.platform }}-${{ matrix.arch }}, got '+process.platform+'-'+process.arch)"
@@ -110,8 +162,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          dmg="$PWD/release/Chat-On-Steroids-macOS-${{ matrix.arch }}.dmg"
-          zip="$PWD/release/Chat-On-Steroids-macOS-${{ matrix.arch }}.zip"
+          dmg="$PWD/release/ChatMarks-macOS-${{ matrix.arch }}.dmg"
+          zip="$PWD/release/ChatMarks-macOS-${{ matrix.arch }}.zip"
           test -f "$dmg"
           test -f "$zip"
           hdiutil verify "$dmg"
@@ -143,18 +195,18 @@ jobs:
           }
           trap cleanup EXIT
           hdiutil attach -readonly -nobrowse -mountpoint "$mount_dir" "$dmg" >/dev/null
-          test -d "$mount_dir/Chat On Steroids.app"
+          test -d "$mount_dir/ChatMarks.app"
           test -L "$mount_dir/Applications"
           test "$(readlink "$mount_dir/Applications")" = /Applications
-          test -x "$mount_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
-          test -f "$mount_dir/Chat On Steroids.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/Chat On Steroids.app"
+          test -x "$mount_dir/ChatMarks.app/Contents/MacOS/ChatMarks"
+          test -f "$mount_dir/ChatMarks.app/Contents/Info.plist"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$mount_dir/ChatMarks.app"
           # ditto is the macOS-native ZIP extractor and preserves executable modes/metadata.
           ditto -x -k "$zip" "$zip_dir"
-          test -d "$zip_dir/Chat On Steroids.app"
-          test -x "$zip_dir/Chat On Steroids.app/Contents/MacOS/Chat On Steroids"
-          test -f "$zip_dir/Chat On Steroids.app/Contents/Info.plist"
-          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/Chat On Steroids.app"
+          test -d "$zip_dir/ChatMarks.app"
+          test -x "$zip_dir/ChatMarks.app/Contents/MacOS/ChatMarks"
+          test -f "$zip_dir/ChatMarks.app/Contents/Info.plist"
+          node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' "$zip_dir/ChatMarks.app"
 
       - name: Launch packaged macOS app normally
         if: matrix.platform == 'darwin'
@@ -165,12 +217,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          deb="$PWD/release/Chat-On-Steroids-Linux-${{ matrix.arch }}.deb"
+          deb="$PWD/release/ChatMarks-Linux-${{ matrix.arch }}.deb"
           test -f "$deb"
           echo "Generated control metadata:"
           dpkg-deb --field "$deb" Package Version Architecture Depends
           test "$(dpkg-deb --field "$deb" Package)" = chat-on-steroids
-          test "$(dpkg-deb --field "$deb" Version)" = "$(node -p "require('./package.json').version")"
+          test "$(dpkg-deb --field "$deb" Version)" = "$(node scripts/release-version.mjs --deb)"
           expected_deb_arch=arm64
           if [ '${{ matrix.arch }}' = x64 ]; then expected_deb_arch=amd64; fi
           test "$(dpkg-deb --field "$deb" Architecture)" = "$expected_deb_arch"
@@ -183,15 +235,15 @@ jobs:
           dpkg-query -W -f='${Status}\n' chat-on-steroids | grep -Fxq 'install ok installed'
           desktop=/usr/share/applications/com.chatonsteroids.app.desktop
           test -f "$desktop"
-          grep -Fxq 'Name=Chat On Steroids' "$desktop"
-          grep -Fxq 'Icon=chat-on-steroids' "$desktop"
+          grep -Fxq 'Name=ChatMarks' "$desktop"
+          grep -Fxq 'Icon=chat-marks' "$desktop"
           grep -Fxq 'StartupWMClass=com.chatonsteroids.app' "$desktop"
           # electron-builder's DEB postinstall registers /usr/bin through update-alternatives.
           # Prove package integration is present, then anchor the full runtime smoke at the
           # package-owned resolved binary rather than assuming an /opt product-directory spelling.
-          test -L /usr/bin/chat-on-steroids
-          ELECTRON_RUN_AS_NODE=1 /usr/bin/chat-on-steroids -e "if(process.platform!=='linux'||process.arch!=='${{ matrix.arch }}')process.exit(9); console.log('deb-runtime-ok')" | grep -Fxq 'deb-runtime-ok'
-          installed_executable="$(readlink -f /usr/bin/chat-on-steroids)"
+          test -L /usr/bin/chat-marks
+          ELECTRON_RUN_AS_NODE=1 /usr/bin/chat-marks -e "if(process.platform!=='linux'||process.arch!=='${{ matrix.arch }}')process.exit(9); console.log('deb-runtime-ok')" | grep -Fxq 'deb-runtime-ok'
+          installed_executable="$(readlink -f /usr/bin/chat-marks)"
           test -x "$installed_executable"
           dpkg-query -S "$installed_executable" | grep -Eq '^chat-on-steroids:'
           node scripts/smoke-packaged-runtime.mjs --platform linux --arch '${{ matrix.arch }}' --root "$(dirname "$installed_executable")"
@@ -229,7 +281,7 @@ jobs:
           XDG_CACHE_HOME="$deb_smoke_root/cache" \
           XDG_DATA_HOME="$deb_smoke_root/data" \
           XDG_STATE_HOME="$deb_smoke_root/state" \
-          CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids >deb-gui.log 2>&1
+          CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-marks >deb-gui.log 2>&1
           status=$?
           set -e
           cat deb-gui.log
@@ -237,9 +289,11 @@ jobs:
             echo "Installed DEB GUI exited before the intentional timeout (status $status)" >&2
             exit 1
           fi
-          grep -Fq '[info] app started' deb-gui.log
-          grep -Fq '[info] window loaded' deb-gui.log
-          grep -Fq '[info] renderer state ready' deb-gui.log
+          if ! grep -Fq '[info] markspanel login ready' deb-gui.log; then
+            grep -Fq '[info] app started' deb-gui.log
+            grep -Fq '[info] window loaded' deb-gui.log
+            grep -Fq '[info] renderer state ready' deb-gui.log
+          fi
           if grep -Fq '[error] window failed to load' deb-gui.log || grep -Fq '[error] renderer:' deb-gui.log; then
             echo "Installed DEB GUI reported a renderer startup failure" >&2
             exit 1
@@ -250,10 +304,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          appimage="$PWD/release/Chat-On-Steroids-Linux-${{ matrix.arch }}.AppImage"
+          appimage="$PWD/release/ChatMarks-Linux-${{ matrix.arch }}.AppImage"
           test -x "$appimage"
           # Exercise the actual static-runtime artifact through Chromium/Electron startup and
-          # require renderer-state proof rather than accepting a process that merely hangs.
+          # require login-or-workspace readiness proof rather than accepting a process that merely hangs.
           # Do not use Electron's Node mode through AppRun here: when user namespaces are blocked,
           # the 1.0.3 launcher can prepend --no-sandbox, which Node mode rejects as a bad option.
           # The unpacked native-runtime probe above already validates every native dependency.
@@ -295,9 +349,11 @@ jobs:
               echo "AppImage $label GUI exited before the intentional timeout (status $status)" >&2
               exit 1
             fi
-            grep -Fq '[info] app started' "$log"
-            grep -Fq '[info] window loaded' "$log"
-            grep -Fq '[info] renderer state ready' "$log"
+            if ! grep -Fq '[info] markspanel login ready' "$log"; then
+              grep -Fq '[info] app started' "$log"
+              grep -Fq '[info] window loaded' "$log"
+              grep -Fq '[info] renderer state ready' "$log"
+            fi
             if grep -Fq '[error] window failed to load' "$log" || grep -Fq '[error] renderer:' "$log"; then
               echo "AppImage $label GUI reported a renderer startup failure" >&2
               exit 1
@@ -307,7 +363,7 @@ jobs:
           run_appimage_smoke forced-fallback "$fallback_smoke_root" "$fake_bin:$PATH" appimage-fallback-gui.log
 
       - name: Upload package artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ matrix.artifact }}
           path: ${{ matrix.files }}
@@ -316,7 +372,7 @@ jobs:
 
   assemble:
     name: Assemble release candidate
-    needs: [plan, package, sources]
+    needs: [plan, package, sources, contracts]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -324,7 +380,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Download packages
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: package-*
           path: release
@@ -335,11 +391,11 @@ jobs:
           set -euo pipefail
           # Same stamp as the packaged app, so a ZIP-loaded extension reports its build (#568).
           node scripts/write-extension-stamp.mjs
-          (cd extension && zip -qr ../release/Chat-On-Steroids-Extension.zip . -x '*.map')
-          zip -q release/Chat-On-Steroids-Extension.zip LICENSE
-          node -e "const m=require('./extension/manifest.json'),p=require('./package.json');if(m.version!==p.version)throw new Error('Extension '+m.version+' does not match app '+p.version)"
+          (cd extension && zip -qr ../release/ChatMarks-Extension.zip . -x '*.map')
+          zip -q release/ChatMarks-Extension.zip LICENSE
+          node scripts/verify-release-version.mjs --package-only
           for required in manifest.json build-stamp.txt background.js chatgpt-dom.js content.js fiber.js overlay.css popup.html popup.css popup.js icons/icon16.png icons/icon32.png icons/icon48.png icons/icon128.png LICENSE; do
-            unzip -Z1 release/Chat-On-Steroids-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
+            unzip -Z1 release/ChatMarks-Extension.zip | grep -Fxq "$required" || { echo "Extension zip missing $required" >&2; exit 1; }
           done
 
       - name: Create SHA-256 checksums
@@ -353,14 +409,56 @@ jobs:
           (cd release && sha256sum "${files[@]}" > SHA256SUMS.txt)
           cat release/SHA256SUMS.txt
 
-      - name: Upload release candidate
+      - name: Add the legacy Linux updater filename
+        run: |
+          set -euo pipefail
+          source=release/ChatMarks-Linux-x64.deb
+          target=release/Chat-Marks-Linux-x64.deb
+          test -s "$source"
+          cp -- "$source" "$target"
+          cmp -s "$source" "$target"
+          (cd release && sha256sum "$(basename "$target")" >> SHA256SUMS.txt)
+          (cd release && sha256sum -c SHA256SUMS.txt)
+
+      # Keep electron-builder's stable internal filenames for updater compatibility,
+      # but offer people a versioned download without changing those filenames.
+      - name: Prepare versioned Linux installer
+        id: linux_download
+        if: contains(needs.plan.outputs.files, 'ChatMarks-Linux-x64.deb')
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node scripts/release-version.mjs --deb)"
+          source=release/ChatMarks-Linux-x64.deb
+          target="release/ChatMarks-Linux-${version}-amd64.deb"
+          test -s "$source"
+          test "$(dpkg-deb --field "$source" Version)" = "$version"
+          test "$(dpkg-deb --field "$source" Architecture)" = amd64
+          cp -- "$source" "$target"
+          cmp -s "$source" "$target"
+          (cd release && sha256sum "$(basename "$target")" > "$(basename "$target").sha256")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Upload versioned Linux installer
+        if: steps.linux_download.outputs.version != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ChatMarks-Linux-${{ steps.linux_download.outputs.version }}-amd64
+          path: |
+            release/ChatMarks-Linux-${{ steps.linux_download.outputs.version }}-amd64.deb
+            release/ChatMarks-Linux-${{ steps.linux_download.outputs.version }}-amd64.deb.sha256
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload release candidate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Artifact names reject `/`, so direct candidate runs from feature/foo refs must not
           # fail after all six package jobs. A run id is filesystem-safe and caller-stable.
-          name: chat-on-steroids-candidate-${{ github.run_id }}
+          name: chatmarks-candidate-${{ github.run_id }}
           path: |
-            release/Chat-On-Steroids-*
+            release/ChatMarks-*
+            release/Chat-Marks-Linux-x64.deb
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30

@@ -1,7 +1,7 @@
 /**
  * English source of the texts the main process shows outside the window: the tray menu and its
  * tooltip, the Session finish desktop notice with its buttons, tunnel-loss notices, and the
- * one-time notice that the CoS browser hid to the tray, the window that says an update is installing,
+ * one-time notice that the Chat Marks browser hid to the tray, the window that says an update is installing,
  * native file dialogs, worker checkout removal and checkpoint Restore confirmation, and the question
  * before a desktop step takes the mouse or keyboard.
  *
@@ -10,16 +10,24 @@
  * text without a published translation is shown as written.
  */
 export const MAIN_TEXTS = [
+  'Cancel',
+  'Synchronize',
+  'SFTP mirror synchronization',
+  'Upload local files to the selected SSH profile?',
+  'Download remote files into the local mirror?',
+  'Existing files can be overwritten. No files are deleted. Secrets and common credential files are excluded.',
+  'Authorize',
+  'Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?',
   'Open',
   'Show browser',
   'Hide browser',
   'Connect',
   'Disconnect',
   'Quit',
-  'Updating Chat On Steroids',
+  'Updating Chat Marks',
   'Saving your work…',
   'Waiting for your permission in Windows…',
-  'Starting the installer. Chat On Steroids opens again by itself.',
+  'Starting the installer. Chat Marks opens again by itself.',
   'Connected',
   'No internet',
   'OpenAI outage',
@@ -28,12 +36,12 @@ export const MAIN_TEXTS = [
   'Core connection lost',
   'Desktop connection lost',
   'Plugins connection lost',
-  'The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.',
+  'The tunnel disconnected unexpectedly. Open Chat Marks to check the connection.',
   'Astra is wrapping up',
   'Send an automatic Goal or write your next instruction.',
   'Send Automatic Goal',
   'Write Directly',
-  'The Chat On Steroids browser is still running',
+  'The Chat Marks browser is still running',
   'Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.',
   'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.',
   'Restore files from this checkpoint?',
@@ -48,10 +56,10 @@ export const MAIN_TEXTS = [
   'Export usage as CSV',
   // Phone notifications (ntfy).
   'A chat is waiting for you.',
-  'Something failed in Chat On Steroids.',
+  'Something failed in Chat Marks.',
   'A chat finished.',
   'Finished after {0} min.',
-  'This is a test from Chat On Steroids. Phone notifications work.',
+  'This is a test from Chat Marks. Phone notifications work.',
   'Import CoS Pet folder',
   'Export settings',
   'Import settings',
@@ -83,13 +91,26 @@ export const MAIN_TEXTS = [
   'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.',
   'Keep checkout',
   'Remove checkout; preserve Git branch',
+  'Authorize Company workers',
   // The turn-completion notice when an answer has no text to show.
   'ChatGPT finished.',
+  'Export encrypted Chat Marks vault',
+  'Import encrypted Chat Marks vault',
+  'Import GPG secrets',
+  'Chat Marks vault',
+  'GPG encrypted files',
+  'Export Brain memories',
+  'JSON Lines',
+  'Export notification settings',
+  'Import notification settings',
+  'Chat Marks notification settings',
+  'Select a copy of remote-targets.json',
+  'JSON files',
   // The Goal helper stopped without evidence that the requested work is complete.
   'Goal result needs review',
   'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.',
   // The question before a desktop step takes the mouse or keyboard (#1804).
-  'Chat On Steroids wants to use your mouse and keyboard',
+  'Chat Marks wants to use your mouse and keyboard',
   'Click',
   'Double-click',
   'Type',
@@ -107,7 +128,40 @@ export const MAIN_TEXTS = [
   // A chat shared as a web page: the page's own labels ('You' is above).
   'New chat',
   'hidden',
-  'Shared from Chat On Steroids'
+  'Shared from Chat Marks',
+  // The Telegram bot's own messages (#1934): telegram.ts and telegram-status.ts.
+  "Connected to Chat Marks. Its notifications arrive here.",
+  "This code is not valid any more. Get a new one in Chat Marks: Settings → Phone notifications → Telegram.",
+  "Send /start with the code shown in Chat Marks: Settings → Phone notifications → Telegram.",
+  "Chat Marks notifications arrive here. Commands: /status, /stop, /pause, /resume. Reply to a notification to send that chat a message.",
+  "I know /status, /stop, /pause, /resume and /help. Reply to a notification to send that chat a message.",
+  "Deny",
+  "Denied from Telegram at {0}.",
+  "Already answered.",
+  "Could not deny it. Open the chat in Chat Marks.",
+  "Stopped.",
+  "Nothing is running there.",
+  "Nothing is running.",
+  "Paused. /resume starts it again.",
+  "Goal and Loop are not on there.",
+  "No chat has Goal or Loop on.",
+  "Resumed.",
+  "It was not paused from here.",
+  "No chat was paused from here.",
+  "Could not do that. Open the chat in Chat Marks.",
+  "Several chats could be meant. Reply to that chat's notification with {0}.",
+  "On its way to the chat.",
+  "Queued: it goes to the chat after its current answer.",
+  "Sending messages to chats from Telegram is off. Turn it on in Chat Marks: Settings → Phone notifications → Telegram.",
+  "That chat cannot take messages from here.",
+  "That notification is too old to answer. Send /status to see your chats.",
+  "Nothing is running and nothing waits for you.",
+  "Working: {0}",
+  "Waiting for your approval: {0}",
+  "waits for your approval",
+  "working",
+  "{0} more",
+  "This is a test from Chat Marks. Telegram notifications work."
 ] as const;
 
 export type MainText = typeof MAIN_TEXTS[number];

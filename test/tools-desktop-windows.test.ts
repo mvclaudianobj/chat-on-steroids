@@ -71,7 +71,8 @@ describe('Windows Desktop public registrar', () => {
       const caps = { screen: false, control: false, clipboardRead: false, clipboardWrite: false, [capability]: true };
       const browser = capability === 'screen' ? BROWSER_READ_TOOLS : capability === 'control' ? BROWSER_WRITE_TOOLS : [];
       expect(capabilityTools(capability, 'windows')).toEqual([...browser, ...surface(caps).tools.keys()]);
-      expect(capabilityTools(capability, 'linux')).toEqual(browser);
+      expect(capabilityTools(capability, 'linux')).toEqual(
+        capability === 'clipboardRead' ? ['read_clipboard'] : capability === 'clipboardWrite' ? ['write_clipboard'] : browser);
       expect(capabilityTools(capability)).toEqual(browser);
     }
   });

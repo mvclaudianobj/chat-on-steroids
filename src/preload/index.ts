@@ -1,3 +1,4 @@
+import type { MarksModuleAction, MarksModuleState } from '../shared/modules.js';
 import type { ChatGroup, ChatGroupsState } from '../shared/chat-groups.js';
 import type { DesktopAskPending } from '../shared/desktop-ask.js';
 import type { WorkspaceTerminalEvent, WorkspaceTerminalInfo } from '../shared/workspace-terminal.js';
@@ -12,14 +13,15 @@ import type { InputAttachment } from '../shared/input.js';
 import type { UsageOverview } from '../shared/usage.js';
 import type { ProviderUsage } from '../shared/provider-usage.js';
 import type { InputArgs, InputEntry } from '../main/session/input.js';
-import type { ChatgptProjectChoice, LocalProject, ProjectColor } from '../shared/projects.js';
+import type { ChatgptProjectChoice, LocalProject, ProjectColor, RelatedFolderView } from '../shared/projects.js';
 import type { ProjectDirectoryListing, ProjectFileMutationResult, ProjectFilePreview, ProjectFileSaveResult, ProjectFilesChanged } from '../shared/project-files.js';
 import type { CheckpointRestoreResult, ProjectGitChanged, ProjectGitDiff, ProjectGitSnapshot } from '../shared/project-git.js';
 import type { PetLibraryState, PetOverlayControlState, PetRuntimeAsset } from '../shared/pets.js';
 import type { SkillSummary, ManagedSkill, GitHubSkillUpdateCheck, SkillLibrary, SkillsDraftScope } from '../shared/skills.js';
+import type { MarksAgencyCatalog } from '../shared/marks-agency-agents.js';
 import type { RunningToolActivity, SessionChange, SessionSearchReply, SessionSearchLocation, SessionBookmark, ToolEditReview } from '../shared/session.js';
 import type { TurnTrace } from '../shared/turn-trace.js';
-import type { RunningExecProcess } from '../shared/background-exec.js';
+import type { AgentOutputEvent, RunningExecProcess } from '../shared/background-exec.js';
 import type { PluginSnapshot, PluginInstallRequest, PluginConfigPatch } from '../shared/plugins.js';
 /**
  * The entire renderer-facing API.
@@ -36,6 +38,9 @@ import type { SoundCue } from '../shared/sound-cues.js';
 import type { CommitState } from '../shared/project-git.js';
 import type { ScheduledRun } from '../main/scheduled-runs.js';
 import type { ScheduleRepeat } from '../shared/schedule.js';
+import { BRAIN_IMPORT_ACTIONS } from '../shared/brain-import-actions.js';
+import type { BrainImportProgress } from '../shared/brain-import.js';
+import type { ScheduledRunListItem } from '../shared/schedule.js';
 import type {
   Handoff,
   ImageStorageClearMode,
@@ -116,10 +121,63 @@ export interface SessionDetail {
 }
 
 const api = {
+  companyObserve: () => call<import('../main/company-observability.js').CompanyObservabilityView>('marksCompany:request', {action:'observe'}),
+  company: (request: import('../main/company-ipc.js').CompanyIpcRequest) => call<import('../shared/company.js').CompanySnapshot>('marksCompany:request', request),
+  onCompanyChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('marksCompany:changed', wrapped);
+    return () => ipcRenderer.removeListener('marksCompany:changed', wrapped);
+  },
+  companyLocalGrants: (subject?: import('../main/company-local-grants.js').CompanyLocalSubject) =>
+    call<import('../main/company-local-grants.js').CompanyLocalGrantsView>('marksCompany:request',
+      { action: 'localGrants', ...(subject ? { payload: { subject } } : {}) }),
+  revokeCompanyLocalGrant: (id: string) => call<boolean>('marksCompany:request', { action: 'localGrantRevoke', payload: { id } }),
+  requestCompanyLocalGrant: (payload: Extract<import('../main/company-ipc.js').CompanyIpcRequest, { action: 'localGrantRequest' }>['payload']) =>
+    call<{ authorized: boolean; epoch: number; id: string | null }>('marksCompany:request', { action: 'localGrantRequest', payload }),
+  notificationWhatsAppStart: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-start' }) as Promise<
+    { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |
+    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue; setupStage?: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus['stage'] | 'unknown' }
+  >,
+  notificationWhatsAppStatus: () => ipcRenderer.invoke('marksNotify:request', { action: 'wa-status' }) as Promise<
+    { ok: true; data: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus } |
+    { ok: false; error: string; setupCode?: import('../shared/notification-center.js').WhatsAppSetupIssue; setupStage?: import('../main/notification-whatsapp-web.js').WhatsAppWebStatus['stage'] | 'unknown' }
+  >,
+  notificationWhatsAppDisconnect: () => call<import('../main/notification-whatsapp-web.js').WhatsAppWebStatus>('marksNotify:request', { action: 'wa-disconnect' }),
+  notificationTelegramPairStart: () => call<{url:string;expires:number;qr:string}>('marksNotify:request', { action: 'tg-start' }),
+  notificationTelegramPairCheck: () => call<{state:'pending'|'paired'|'expired';chatId?:string}>('marksNotify:request', { action: 'tg-check' }),
+  notificationTelegramPairCancel: () => call<boolean>('marksNotify:request', { action: 'tg-cancel' }),
+  notificationCenterGet: () => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'get' }),
+  notificationCenterSave: (settings: import('../shared/notification-center.js').NotificationCenterSettings) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'save', settings }),
+  notificationCenterSetCredential: (channel: import('../shared/notification-center.js').NotificationChannel, credential: string, masterPassword: string) => call<import('../shared/notification-center.js').NotificationCenterView>('marksNotify:request', { action: 'credential', channel, credential, masterPassword }),
+  notificationCenterTest: (channel: import('../shared/notification-center.js').NotificationChannel) =>
+    ipcRenderer.invoke('marksNotify:request', { action: 'test', channel }) as Promise<{ ok: true; data: { delivered: number } } | { ok: false; error: string; failure?: import('../shared/notification-center.js').NotificationFailure }>,
+  notificationCenterExport: () => call<boolean>('marksNotify:request', { action: 'export' }),
+  notificationCenterImport: () => call<{ imported: boolean }>('marksNotify:request', { action: 'import' }),
   /** System.Speech is available only through Windows PowerShell. */
   dictationSupported: process.platform === 'win32',
+  jarvisMicrophoneConsent: (enabled?: boolean) => call<boolean>('jarvis:audio', enabled === undefined
+    ? { action: 'microphone-consent' } : { action: 'microphone-consent', enabled }),
+  jarvisAudioStatus: () => call<{ models: string[]; local: boolean; windows: boolean; error: string | null }>('jarvis:audio', { action: 'status' }),
+  jarvisTranscribe: (engine: 'cliproxy' | 'local' | 'provider', model: string, language: string, mime: 'audio/webm' | 'audio/ogg' | 'audio/mp4', bytes: Uint8Array, voice?: import('../shared/jarvis-voice.js').JarvisVoiceConfig) =>
+    call<string>('jarvis:audio', { action: 'transcribe', engine, model, language, mime, bytes, ...(voice ? { voice } : {}) }),
+  jarvisCancel: () => call<null>('jarvis:audio', { action: 'cancel' }),
+  /** Jarvis J3: the voice provider's catalog and whether its Vault K keys exist (never their values). */
+  jarvisVoiceStatus: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig) => call<import('../main/jarvis-voice.js').JarvisVoiceStatus>('jarvis:audio', { action: 'voice-status', voice }),
+  jarvisVoiceSetKey: (slot: import('../shared/jarvis-voice.js').JarvisVoiceKeySlot, baseUrl: string, value: string, password: string) => call<boolean>('jarvis:audio', { action: 'voice-key', slot, baseUrl, value, password }),
+  jarvisVoiceRouteStatus: (routing: import('../shared/jarvis-voice.js').JarvisVoiceRouting) => call<{ g4f1: boolean; g4f2: boolean; error: string | null }>('jarvis:audio', { action: 'voice-route-status', routing }),
+  jarvisSpeak: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string, routing?: import('../shared/jarvis-voice.js').JarvisVoiceRouting, groupId?: string) => call<{ mime: string; bytes: Uint8Array }>('jarvis:audio', { action: 'speak', voice, text, routing, groupId }),
+  jarvisSpeakStream: (voice: import('../shared/jarvis-voice.js').JarvisVoiceConfig, text: string, requestId: string, routing?: import('../shared/jarvis-voice.js').JarvisVoiceRouting, groupId?: string) =>
+    call<{ firstByteMs: number; totalMs: number; bytes: number }>('jarvis:audio', { action: 'speak-stream', voice, text, requestId, routing, groupId }),
+  onJarvisSpeechStream: (listener: (event: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }) => void): (() => void) => {
+    const wrapped = (_event: unknown, chunk: import('../main/jarvis-voice.js').JarvisAudioStreamEvent | { requestId: string; type: 'error'; error: string }): void => listener(chunk);
+    ipcRenderer.on('jarvis:speech-stream', wrapped);
+    return () => ipcRenderer.removeListener('jarvis:speech-stream', wrapped);
+  },
+  jarvisSpeakCancel: () => call<null>('jarvis:audio', { action: 'speak-cancel' }),
+  /** No text or secrets may cross this diagnostics boundary. */
+  jarvisTrace: (entry: import('../shared/jarvis-trace.js').JarvisTrace) => call<null>('jarvis:audio', { action: 'trace', ...entry }),
   /** Start microphone access only on explicit user action; audio stays in Windows recognizer. */
-  startDictation: () => call<{ status: 'starting' }>('dictation:start'),
+  startDictation: (language = '') => call<{ status: 'starting' }>('dictation:start', { language }),
   stopDictation: () => call<void>('dictation:stop'),
   onDictationEvent: (listener: (event: DictationEvent) => void): (() => void) => {
     const wrapped = (_event: unknown, value: DictationEvent): void => listener(value);
@@ -131,6 +189,62 @@ const api = {
   terminalResize: (id: string, cols: number, rows: number) => call<void>('workspaceTerminal:request', { action: 'resize', id, cols, rows }),
   terminalAck: (id: string, count: number) => call<void>('workspaceTerminal:request', { action: 'ack', id, count }),
   terminalClose: (id: string) => call<void>('workspaceTerminal:request', { action: 'close', id }),
+  cliStatus: () => call<import('../main/cli-modules.js').CliModuleStatus[]>('marksCli:request', { action: 'status' }),
+  cliChatOpen: (backend: 'markscode' | 'codex' | 'claude', projectId: string | null) => call<import('../main/cli-chat.js').CliChatThread>('cliChat:request', { action: 'open', backend, projectId }),
+  cliChatSend: (backend: 'markscode' | 'codex' | 'claude', projectId: string | null, prompt: string) => call<import('../main/cli-chat.js').CliChatThread>('cliChat:request', { action: 'send', backend, projectId, prompt }),
+  cliChatCancel: (backend: 'markscode' | 'codex' | 'claude', projectId: string | null) => call<import('../main/cli-chat.js').CliChatThread>('cliChat:request', { action: 'cancel', backend, projectId }),
+  onCliChatEvent: (listener: (event: import('../main/cli-chat.js').CliChatThread) => void): (() => void) => {
+    const wrapped = (_event: unknown, event: import('../main/cli-chat.js').CliChatThread): void => listener(event);
+    ipcRenderer.on('cliChat:event', wrapped);
+    return () => ipcRenderer.removeListener('cliChat:event', wrapped);
+  },
+  marksPanelLogout: () => call<boolean>('markspanel:logout'),
+  apiChatStatus: () => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'status' }),
+  /** Stores (or, empty, removes) the API chat key; the reply never contains it. */
+  apiChatSetKey: (key: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setKey', key }),
+  apiChatSetSettings: (settings: Partial<import('../shared/api-chat.js').ApiChatSettings>) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'setSettings', settings }),
+  /** A page of an engine's models (CLIProxy's catalog when `engine` is omitted). */
+  apiChatModels: (query = '', offset = 0, limit = 50, refresh = false, engine?: import('../shared/agent-engine.js').AgentEngineId, route?: import('../shared/agent-engine.js').AgentEngineRoute) => call<{ models: import('../shared/api-chat.js').ApiChatModel[]; total: number }>('marksApiChat:request', { action: 'models', query, offset, limit, refresh, ...(engine ? { engine } : {}), ...(route ? { route } : {}) }),
+  /** Every chat engine with whether a new chat can use it now. */
+  apiChatEngines: () => call<import('../shared/agent-engine.js').AgentEngineInfo[]>('marksApiChat:request', { action: 'engines' }),
+  apiChatToggleFavorite: (model: string) => call<import('../shared/api-chat.js').ApiChatStatus>('marksApiChat:request', { action: 'toggleFavorite', model }),
+  /** A minimal real request with the model (the default one when omitted); records its availability. */
+  apiChatTest: (model?: string) => call<{ model: string }>('marksApiChat:request', { action: 'test', ...(model ? { model } : {}) }),
+  /** A new API chat: a local session in the `cosapi-` namespace, optionally in a project, on an engine (CLIProxy by default). */
+  apiChatCreate: (options: { projectId?: string | null; model?: string; engine?: import('../shared/agent-engine.js').AgentEngineId; route?: import('../shared/agent-engine.js').AgentEngineRoute } = {}) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'createChat', ...options }),
+  /** Records the question and starts the answer; it streams into the session's history. */
+  apiChatSend: (sessionId: string, text: string, options: { takeBackTerminal?: true } = {}) =>
+    call<{ turnId: string }>('marksApiChat:request', { action: 'send', sessionId, text, ...(options.takeBackTerminal ? { takeBackTerminal: true } : {}) }),
+  apiChatStop: (sessionId: string) => call<{ stopped: boolean }>('marksApiChat:request', { action: 'stop', sessionId }),
+  apiChatTerminal: (sessionId: string) => call<{ cliSessionId: string }>('marksApiChat:request', { action: 'terminal', sessionId }),
+  apiChatChatSettings: (sessionId: string) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'chatSettings', sessionId }),
+  apiChatSetChatSettings: (sessionId: string, settings: { model?: string; effort?: import('../shared/api-chat.js').ApiChatEffort | null; approval?: import('../shared/api-chat.js').ApiChatApprovalMode; route?: import('../shared/agent-engine.js').AgentEngineRoute }) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'setChatSettings', sessionId, ...settings }),
+  apiChatApprove: (sessionId: string, approvalId: string, decision: import('../shared/api-chat.js').ApiChatApprovalDecision) => call<import('../shared/api-chat.js').ApiChatView>('marksApiChat:request', { action: 'approve', sessionId, approvalId, decision }),
+  cliAction: (module: import('../main/cli-modules.js').CliId, action: 'enable' | 'disable' | 'install' | 'update' | 'update-external' | 'stop', version?: string) => call<unknown>('marksCli:request', { action, module, ...(version ? { version } : {}) }),
+  cliSessions: () => call<import('../main/cli-modules.js').CliSession[]>('marksCli:request', { action: 'sessions' }),
+  /** `quickstart`: ZeroClaw's `zeroclaw quickstart` instead of its `zerocode` terminal. */
+  cliCreateSession: (module: import('../main/cli-modules.js').CliId, projectId: string | null, kind?: 'quickstart' | 'claude-login' | 'claude-logout' | 'codex-login' | 'codex-logout') => call<import('../main/cli-modules.js').CliSession>('marksCli:request', { action: 'create', module, projectId, ...(kind ? { kind } : {}) }),
+  cliDirectAccount: (module: 'claude' | 'codex') => call<import('../main/cli-modules.js').DirectAccountState>('marksCli:request', { action: 'account', module }),
+  cliOpen: (sessionId: string, attachmentId: string, cols: number, rows: number) => call<{ id: string; cwd: string; session: string }>('marksCli:request', { action: 'open', sessionId, attachmentId, cols, rows }),
+  cliWrite: (attachmentId: string, data: string) => call<void>('marksCli:request', { action: 'write', attachmentId, data }),
+  cliResize: (attachmentId: string, cols: number, rows: number) => call<void>('marksCli:request', { action: 'resize', attachmentId, cols, rows }),
+  cliAck: (attachmentId: string, count: number) => call<void>('marksCli:request', { action: 'ack', attachmentId, count }),
+  cliDetach: (attachmentId: string) => call<void>('marksCli:request', { action: 'detach', attachmentId }),
+  cliRenameSession: (sessionId: string, title: string) => call<void>('marksCli:request', { action: 'rename', sessionId, title }),
+  cliDeleteSession: (sessionId: string) => call<void>('marksCli:request', { action: 'delete', sessionId }),
+  onCliEvent: (listener: (event: { id: string; data?: string; exitCode?: number }) => void): (() => void) => {
+    const wrapped = (_event: unknown, event: { id: string; data?: string; exitCode?: number }): void => listener(event);
+    ipcRenderer.on('marksCli:event', wrapped);
+    return () => ipcRenderer.removeListener('marksCli:event', wrapped);
+  },
+  agentOutputOpen: (id: string, sessionId: string, processId: number, incarnation: number) =>
+    ipcRenderer.invoke('agentOutput:request', { action: 'open', id, sessionId, processId, incarnation }) as Promise<{ ok: true; data: true } | { ok: false; error: string }>,
+  agentOutputClose: (id: string) => ipcRenderer.invoke('agentOutput:request', { action: 'close', id }) as Promise<{ ok: true; data: true } | { ok: false; error: string }>,
+  onAgentOutput: (listener: (event: AgentOutputEvent) => void): (() => void) => {
+    const wrapped = (_event: unknown, value: AgentOutputEvent): void => listener(value);
+    ipcRenderer.on('agentOutput:event', wrapped);
+    return () => ipcRenderer.removeListener('agentOutput:event', wrapped);
+  },
   onTerminalEvent: (listener: (event: WorkspaceTerminalEvent) => void): (() => void) => {
     const wrapped = (_event: unknown, value: WorkspaceTerminalEvent): void => listener(value);
     ipcRenderer.on('workspaceTerminal:event', wrapped);
@@ -159,6 +273,8 @@ const api = {
   renameChatGroup: (id: string, name: string) => call<ChatGroupsState>('chatGroups:rename', { id, name }),
   deleteChatGroup: (id: string) => call<ChatGroupsState>('chatGroups:delete', { id }),
   assignChatGroup: (sessionId: string, groupId: string | null) => call<ChatGroupsState>('chatGroups:assign', { sessionId, groupId }),
+  moveChatProject: (sessionId: string, projectId: string | null, groupId?: string | null) =>
+    call<{ from: string | null; fromGroup: string | null; groups: ChatGroupsState; summaries: SessionSummary[] }>('sessions:moveProject', { sessionId, projectId, ...(groupId !== undefined ? { groupId } : {}) }),
   petsList: () => call<PetLibraryState>('pets:list'),
   petsOverlayState: () => call<PetOverlayControlState>('pets:overlayState'),
   petsSetOverlayVisible: (visible: boolean) => call<PetOverlayControlState>('pets:overlayVisible', { visible }),
@@ -175,12 +291,17 @@ const api = {
     // `warnings`: what went wrong after the settings were written, each a sentence of its own.
     call<{ state: AppState; changedCount: number; keyCount: number; warnings?: string[] }>('settings:importApply', { token, includeKeys, ...(passphrase !== undefined ? { passphrase } : {}) }),
   testPhonePush: () => call<void>('phonePush:test', undefined),
+  connectTelegram: (token: string) => call<AppState>('telegram:connect', { token }),
+  disconnectTelegram: () => call<AppState>('telegram:disconnect', undefined),
+  testTelegram: () => call<void>('telegram:test', undefined),
   setPhonePushToken: (token: string) => call<AppState>('phonePush:token', { token }),
   markWhatsNewSeen: () => call<void>('ui:whatsNewSeen'),
   /** #1833: the first-run tour was taken, skipped or declined. */
   markTourDone: () => call<void>('ui:tourDone'),
   /** #1864: the desktop question waiting now, its answer from the app's window, and when it changes. */
   desktopAskPending: () => call<DesktopAskPending | null>('desktopAsk:pending'),
+  /** Explicit one-time GNOME screenshot consent check, never returns the screenshot itself. */
+  linuxScreenshotConsent: () => call<{ pngBytes: number }>('desktop:linuxScreenshotConsent'),
   answerDesktopAsk: (id: string, choice: 'go' | 'not-now') => call<boolean>('desktopAsk:answer', { id, choice }),
   onDesktopAskPending: (listener: (pending: DesktopAskPending | null) => void): (() => void) => {
     const wrapped = (_event: unknown, pending: DesktopAskPending | null): void => listener(pending);
@@ -214,6 +335,9 @@ const api = {
   listSkills: () => call<SkillSummary[]>('skills:list'),
   listManagedSkills: () => call<ManagedSkill[]>('skills:managed'),
   listRecommendedSkills: () => call<Array<{ id: string; name: string; description: string; installed: boolean }>>('skills:recommended'),
+  listAgencyAgents: () => call<MarksAgencyCatalog>('skills:agencyCatalog'),
+  importAgencyAgent: (path: string, commit: string) => call<ManagedSkill[]>('skills:agencyImport', { path, commit }),
+  updateAgencyAgent: (path: string, commit: string, sha: string) => call<{ status: 'current' | 'updated'; skills: ManagedSkill[]; warning?: string }>('skills:agencyUpdate', { path, commit, sha }),
   installRecommendedSkill: (id: string) => call<ManagedSkill[]>('skills:installRecommended', { id }),
   skillsImport: (kind: 'folder' | 'file') => call<ManagedSkill[] | null>('skills:import', { kind }),
   skillsImportGithub: (url: string) => call<ManagedSkill[]>('skills:githubImport', { url }),
@@ -258,9 +382,57 @@ const api = {
   getUsage: () => call<UsageOverview>('usage:get'),
   /** Codex's and Claude Code's usage from their logs here; `fresh` skips the 30-second cache. */
   getProviderUsage: (fresh = false) => call<ProviderUsage>('usage:providers', { fresh }),
+  vault: (action: string, payload?: unknown) => {
+    const allowed = ['status', 'list', 'create', 'recover', 'put', 'remove', 'reveal', 'changePassword', 'export', 'import', 'importGpg', 'pending', 'decide'];
+    if (!allowed.includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown vault action' });
+    return call<unknown>(`vault:${action}`, payload);
+  },
+  brain: (action: string, payload?: unknown) => {
+    // Chat Marks: model memory administration is a fixed local-only IPC action list.
+    const allowed: string[] = ['status','doctor','sources','settings.get','settings.set','recall','memories.list','memories.search','memories.get','memories.save','chat.tools','chat.save','chat.saveLatestAnswer','memories.update','memories.delete','memories.export','pending.list','pending.decide','providers.test','providers.setKey','providers.importMarksCode', ...BRAIN_IMPORT_ACTIONS];
+    if (!allowed.includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown Brain action' });
+    return call<unknown>('marksBrain:request', { action, payload });
+  },
+  /** Chat Marks H2: copy, index and import progress of old history. */
+  onBrainProgress: (listener: (event: BrainImportProgress) => void): (() => void) => {
+    const handler = (_event: unknown, value: BrainImportProgress): void => listener(value);
+    ipcRenderer.on('marksBrain:progress', handler);
+    return () => ipcRenderer.removeListener('marksBrain:progress', handler);
+  },
+  onBrainApprovalsChanged: (listener: () => void): (() => void) => {
+    const handler = (): void => listener();
+    ipcRenderer.on('marksBrain:approvalsChanged', handler);
+    return () => ipcRenderer.removeListener('marksBrain:approvalsChanged', handler);
+  },
+  /** The vault's pending chat requests changed; read them again with `vault('pending')`. */
+  onVaultPendingChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('vault:pending-changed', wrapped);
+    return () => ipcRenderer.removeListener('vault:pending-changed', wrapped);
+  },
+  remoteHosts: (action: string, payload?: unknown) => {
+    if (!['list', 'save', 'delete', 'test', 'install', 'unlock', 'prepareKey', 'credentialAnswer', 'masterKeyAnswer', 'fingerprint', 'trust', 'project', 'preview', 'import', 'pending', 'decide', 'mode', 'modeView'].includes(action)) return Promise.resolve({ ok: false as const, error: 'Unknown remote action' });
+    return call<unknown>(`remoteHosts:${action}`, payload);
+  },
+  onRemoteApprovalsChanged: (listener: () => void): (() => void) => {
+    const wrapped = (): void => listener();
+    ipcRenderer.on('remoteHosts:pending-changed', wrapped);
+    return () => ipcRenderer.removeListener('remoteHosts:pending-changed', wrapped);
+  },
+  onRemoteCredentialNeeded: (listener: (request: { id: string; profileId: string; profileName: string }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: { id: string; profileId: string; profileName: string }) => listener(request);
+    ipcRenderer.on('remoteHosts:credential-needed', handler);
+    return () => ipcRenderer.removeListener('remoteHosts:credential-needed', handler);
+  },
+  onRemoteMasterKeyNeeded: (listener: (request: { id: string; profileName: string }) => void): (() => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: { id: string; profileName: string }) => listener(request);
+    ipcRenderer.on('remoteHosts:master-key-needed', handler);
+    return () => ipcRenderer.removeListener('remoteHosts:master-key-needed', handler);
+  },
   /** Saves the Usage page as CSV through a save dialog; `divisor` is the page's token divisor. */
   exportUsage: (divisor: number) => call<{ saved: false } | { saved: true; name: string }>('usage:export', { divisor }),
   getState: () => call<AppState>('state:get'),
+  marksPromptPreview: () => call<string>('marks:promptPreview'),
   resetPluginRefresh: () => call<AppState>('plugin-refresh:reset'),
   /** Sets an unreadable credentials file aside (kept as a backup) so keys can be saved again. */
   startFreshCredentials: () => call<{ state: AppState; setAside: boolean }>('credentials:start-fresh'),
@@ -292,14 +464,15 @@ const api = {
     call<{ url: string; via: 'gh' | 'existing' | 'browser' }>('projectCommit:pullRequest', { projectId, title, body }),
   setCommitFlow: (flow: CommitFlow) => call<boolean>('projectCommit:flow', { flow }),
   saveDiagnosticsReport: () => call<{ saved: false } | { saved: true; name: string }>('diagnostics:saveReport'),
-  openFeedbackIssue: (report: { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }
-    | { kind: 'idea'; problem: string; proposal: string }) => call<{ trimmed: boolean }>('feedback:openIssue', report),
+  openFeedbackIssue: (report: { kind: 'bug'; what: string; steps?: string; frequency?: 'Every time' | 'Sometimes' | 'It happened once' }) =>
+    call<{ trimmed: boolean }>('feedback:openIssue', report),
   requestDesktopAccessibility: () => call<AppState>('desktop:requestAccessibility'),
   repairDesktopAccess: () => call<AppState>('desktop:repairPermissions'),
   getLog: () => call<LogEntry[]>('log:get'),
   getLogText: () => call<string>('log:text'),
   getLogJson: () => call<string>('log:json'),
   writeClipboard: (text: string) => call<boolean>('clipboard:write', { text }),
+  readClipboard: (primary = false) => call<string>('clipboard:read', { primary }),
   // A code block's Save: main asks where, in a native dialog, and `name` is only its suggestion.
   saveCode: (request: { text: string; name: string }) => call<{ done: 'saved'; name: string } | { done: 'cancelled' }>('code:save', request),
   exportMarkdown: (request: { id: string; scope: 'answer' | 'latest' | 'session'; turnId?: string; messageId?: string; target: 'clipboard' | 'file' }) =>
@@ -315,6 +488,59 @@ const api = {
   // Applies the update this app has already downloaded and verified: the app quits, the
   // installer runs, and the app comes back as the new version. It takes no argument because
   // there is nothing here to choose - the main process knows what is staged.
+  modulesStatus: () => call<MarksModuleState[]>('modules:status'),
+  moduleAction: (id: MarksModuleState['id'], action: MarksModuleAction, managementUrl?: string) => call<MarksModuleState[]>('modules:action', { id, action, managementUrl }),
+  // Chat Marks: CLIProxyAPI management. The password only travels in; API keys come back masked.
+  cliProxyStatus: (refresh = false) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'status', refresh }),
+  cliProxySetManagementKey: (key: string) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'setManagementKey', key }),
+  cliProxyCreateKey: () => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'createKey' }),
+  cliProxyRevokeKey: (id: string) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'revokeKey', id }),
+  /** Lets an existing service save its config (systemd drop-in + ownership), after confirmation. */
+  cliProxyRepairConfig: () => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'repairConfig' }),
+  /** Installs or updates to `version`, the release the user confirmed. */
+  cliProxyInstall: (mode: 'install' | 'update', version: string) => call<import('../shared/cliproxy.js').CliProxyManageStatus>('marksCliProxy:request', { action: 'install', mode, version }),
+  onCliProxyProgress: (listener: (progress: import('../shared/cliproxy.js').CliProxyInstallProgress) => void): (() => void) => {
+    const wrapped = (_event: unknown, progress: import('../shared/cliproxy.js').CliProxyInstallProgress): void => listener(progress);
+    ipcRenderer.on('marksCliProxy:progress', wrapped);
+    return () => ipcRenderer.removeListener('marksCliProxy:progress', wrapped);
+  },
+  // Chat Marks: upstream OpenCode and ZeroClaw modules (official releases into the module folder).
+  upstreamStatus: (module: import('../shared/upstream-module.js').UpstreamModuleId, refresh = false) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'status', module, refresh }),
+  /** Installs or updates to `version`, the release the user confirmed. */
+  upstreamInstall: (module: import('../shared/upstream-module.js').UpstreamModuleId, mode: 'install' | 'update', version: string) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'install', module, mode, version }),
+  /** OpenCode's background service: Start / Stop / Restart (with the binary this app uses). */
+  upstreamService: (op: import('../shared/upstream-module.js').OpenCodeServiceAction) => call<import('../shared/upstream-module.js').UpstreamModuleStatus>('marksUpstream:request', { action: 'service', module: 'opencode', op }),
+  /** ZeroClaw's read-only key facts for its Settings page (no secrets). */
+  upstreamZeroClawFacts: () => call<import('../shared/upstream-module.js').ZeroClawFacts>('marksUpstream:request', { action: 'facts', module: 'zeroclaw' }),
+  upstreamMarksClawPreview: () => call<import('../shared/upstream-module.js').MarksClawMigrationPreview>('marksUpstream:request', { action: 'marksclaw-preview', module: 'zeroclaw' }),
+  upstreamMarksClawImport: (ticket: string) => call<import('../shared/upstream-module.js').MarksClawMigrationResult>('marksUpstream:request', { action: 'marksclaw-import', module: 'zeroclaw', ticket }),
+  onUpstreamProgress: (listener: (progress: import('../shared/upstream-module.js').UpstreamInstallProgress) => void): (() => void) => {
+    const wrapped = (_event: unknown, progress: import('../shared/upstream-module.js').UpstreamInstallProgress): void => listener(progress);
+    ipcRenderer.on('marksUpstream:progress', wrapped);
+    return () => ipcRenderer.removeListener('marksUpstream:progress', wrapped);
+  },
+  // Chat Marks: Claude Code Router module (npm release into the module folder, its daemon, its web UI).
+  ccrStatus: (refresh = false) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'status', refresh }),
+  vmsView: () => call<import('../shared/vms.js').VmView>('marksVms:request', { action: 'view' }),
+  vmsInit: (name: string, box: string, memory: number, cpus: number) => call<import('../shared/vms.js').VmView>('marksVms:request', { action: 'init', name, box, memory, cpus }),
+  vmsRun: (name: string, op: import('../shared/vms.js').VmAction, confirmation?: string, dryRun = false) => call<import('../shared/vms.js').VmJob>('marksVms:request', { action: 'run', name, op, confirmation, dryRun }),
+  vmsCancel: (name: string) => call<boolean>('marksVms:request', { action: 'cancel', name }),
+  onVmsEvent: (listener: (job: import('../shared/vms.js').VmJob) => void): (() => void) => {
+    const wrapped = (_event: unknown, job: import('../shared/vms.js').VmJob): void => listener(job);
+    ipcRenderer.on('marksVms:event', wrapped);
+    return () => ipcRenderer.removeListener('marksVms:event', wrapped);
+  },
+  /** Installs or updates to `version`, the release the user confirmed; `update-external` updates the user's own copy in place. */
+  ccrInstall: (mode: import('../shared/ccr-module.js').CcrInstallMode, version: string) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'install', mode, version }),
+  ccrService: (op: import('../shared/ccr-module.js').CcrServiceAction) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'service', op }),
+  ccrAutoStart: (enabled: boolean) => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'autoStart', enabled }),
+  /** Opens CCR's web UI in the browser (main reads its address; it never reaches the renderer). */
+  ccrOpenUi: () => call<import('../shared/ccr-module.js').CcrStatus>('marksCcr:request', { action: 'openUi' }),
+  onCcrProgress: (listener: (progress: import('../shared/ccr-module.js').CcrInstallProgress) => void): (() => void) => {
+    const wrapped = (_event: unknown, progress: import('../shared/ccr-module.js').CcrInstallProgress): void => listener(progress);
+    ipcRenderer.on('marksCcr:progress', wrapped);
+    return () => ipcRenderer.removeListener('marksCcr:progress', wrapped);
+  },
   installUpdate: () => call<boolean>('update:install'),
   /** Check/stage/apply supported updates and request one connector refresh round. May restart. */
   updateAll: (restartVersion?: string) => call<import('../shared/types.js').UpdateAllResult>('update:all', restartVersion),
@@ -324,12 +550,14 @@ const api = {
 
   // Sessions, compaction and the browser bridge. Everything here is read-only or a
   // named action; there is still no channel that takes a path or a command.
-  listSessions: (options?: { cursor?: SessionListCursor; limit?: number; projectId?: string }) =>
+  listSessions: (options?: { cursor?: SessionListCursor; limit?: number; projectId?: string; archived?: boolean; search?: string }) =>
     call<SessionList>('sessions:list', options ?? {}),
   listProjects: () => call<LocalProject[]>('projects:list'),
   // `chatgpt: 'later'`: the person picks a new or an existing ChatGPT Project next (#1756).
   addProject: (options?: { chatgpt?: 'later' }) => call<LocalProject | null>('projects:add', options ?? {}),
   addRemoteProject: (address: string, folder: string, options?: { chatgpt?: 'later' }) => call<LocalProject>('projects:addRemote', { address, folder, ...(options ?? {}) }),
+  addRemoteProfileProject: (profileId: string, folder: string) => call<LocalProject | null>('projects:addRemoteProfile', { profileId, folder }),
+  syncRemoteProfileProject: (projectId: string, direction: 'pull' | 'push') => call<{ files: number; bytes: number; skipped: number } | null>('projects:syncRemoteProfile', { projectId, direction }),
   retryChatgptProject: (id: string) => call<LocalProject | null>('projects:chatgpt-retry', { id }),
   chatgptProjectChoices: () => call<ChatgptProjectChoice[]>('projects:chatgpt-choices'),
   linkChatgptProject: (id: string, chatgptId: string) => call<LocalProject>('projects:chatgpt-link', { id, chatgptId }),
@@ -338,11 +566,16 @@ const api = {
   removeProject: (id: string) => call<LocalProject>('projects:remove', { id }),
   setProjectColor: (id: string, color: ProjectColor | null) => call<LocalProject>('projects:color', { id, color }),
   setProjectSecretsShieldOff: (id: string, off: boolean) => call<LocalProject>('projects:secrets-shield', { id, off }),
+  /** #1689: a project's related folders, each available or not. */
+  relatedFolders: (id: string) => call<RelatedFolderView[]>('projects:related', { id }),
+  setRelatedFolders: (id: string, folders: string[]) => call<RelatedFolderView[]>('projects:related-set', { id, folders }),
   /** #1826: a chat's schedule (one per chat), or null. */
   getSchedule: (sessionId: string) => call<ScheduledRun | null>('schedules:get', { sessionId }),
+  listSchedules: () => call<ScheduledRunListItem[]>('schedules:list'),
   saveSchedule: (request: { sessionId: string; text: string; repeat: ScheduleRepeat; until: number | null; catchUp?: boolean }) => call<ScheduledRun>('schedules:save', request),
   pauseSchedule: (sessionId: string, paused: boolean) => call<ScheduledRun | null>('schedules:pause', { sessionId, paused }),
   deleteSchedule: (sessionId: string) => call<boolean>('schedules:delete', { sessionId }),
+  runScheduleNow: (sessionId: string) => call<boolean>('schedules:runNow', { sessionId }),
   listProjectFiles: (projectId: string, directory = '') => call<ProjectDirectoryListing>('projectFiles:list', { projectId, directory }),
   watchProjectFiles: (projectId: string | null, directories: string[]) => call<boolean>('projectFiles:watch', { projectId, directories }),
   onProjectFilesChanged: (listener: (event: ProjectFilesChanged) => void): (() => void) => {
@@ -380,7 +613,8 @@ const api = {
   clearImageStorage: (mode: ImageStorageClearMode) => call<ImageStorageClearResult>('sessions:clearImageStorage', { mode }),
     getSession: (id: string, options?: { from?: number; before?: number; after?: number; limit?: number; actions?: boolean }) =>
     call<SessionDetail>('sessions:events', { id, ...options }),
-  stopSessionTurn: (id: string, expectedTurnId: string) => call<SessionControlsView>('sessions:stopTurn', { id, expectedTurnId }),
+  stopSessionTurn: (id: string, expectedTurnId: string, expectedConversationId?: string | null) =>
+    call<SessionControlsView>('sessions:stopTurn', { id, expectedTurnId, ...(expectedConversationId ? { expectedConversationId } : {}) }),
   releaseSessionFinish: (id: string, expectedTurnId: string) => call<SessionControlsView>('sessions:releaseFinish', { id, expectedTurnId }),
   generateFinishGoal: (id: string, expectedTurnId: string) => call<string>('sessions:generateFinishGoal', { id, expectedTurnId }),
   getChatModels: () => call<ChatModelCatalog>('chatModels:get'),
@@ -398,12 +632,18 @@ const api = {
     return () => ipcRenderer.removeListener('chatModels:changed', wrapped);
   },
   getSessionControls: (id: string) => call<SessionControlsView>('sessions:controls', { id }),
+  resumeAutomaticSends: () => call<boolean>('automation:resumeNow'),
+  answerUserRequest: (id: string, requestId: string, answer: 'done' | 'skipped') =>
+    call<NonNullable<SessionControlsView['userRequests']>>('sessions:answerUserRequest', { id, requestId, answer }),
   cancelRecovery: (id: string) => call<boolean>('sessions:cancelRecovery', { id }),
+  pickupNow: (id: string, shown: { next: 'queue' | 'goal' | 'loop' | 'continue'; stoppedAt: number }) =>
+    call<{ ok: true; did: 'queued' | 'retrying' } | { ok: false; code: 'no-chat' | 'history-limit' | 'nothing-waiting' | 'changed' | 'not-sent' | 'not-started' }>('sessions:pickupNow', { id, ...shown }),
   setSessionAutomation: (id: string, automation: SessionControlsView['automation'], afterTurn?: boolean) => call<SessionControlsView>('sessions:automation', { id, automation, afterTurn }),
   setSessionObjective: (id: string, text: string, mode: 'goal' | 'loop') => call<SessionControlsView>('sessions:objective', { id, text, mode }),
   compactSession: (id: string) => call<SessionControlsView>('sessions:compact', { id }),
   resumeFromHandoff: (id: string, handoffId: string) => call<SessionControlsView>('sessions:resumeFromHandoff', { id, handoffId }),
   cancelSessionCompaction: (id: string) => call<SessionControlsView>('sessions:cancelCompaction', { id }),
+  retrySessionResume: (id: string) => call<SessionControlsView>('sessions:retryResume', { id }),
   draftTaskPlan: (text: string, backend: 'api' | 'chatgpt', requestId?: string) => call<string[]>('sessions:plan', { text, backend, requestId }),
   sendInput: (input: InputArgs) => call<InputEntry>('sessions:send', input),
   retryInputBrowser: (id: string) => call<InputEntry | null>('sessions:retryBrowser', { id }),
@@ -422,6 +662,7 @@ const api = {
   retryHelper: (id: string, sourceSessionId: string) => call<boolean>('sessions:retryHelper', { id, sourceSessionId }),
   editQueuedInput: (id: string, text: string, afterTurn?: boolean) => call<boolean>('sessions:editInput', { id, text, afterTurn }),
   sendQueuedInputNow: (id: string) => call<boolean>('sessions:sendQueuedNow', { id }),
+  retryQueuedPickup: (id: string) => call<boolean>('sessions:retryPickup', { id }),
   reorderQueuedInputs: (sessionId: string, ids: string[]) => call<boolean>('sessions:reorderInputs', { sessionId, ids }),
   cancelInput: (id: string) => call<boolean>('sessions:cancelInput', { id }),
   setInputAutomation: (id: string, mode: 'off' | 'goal' | 'loop', loopAfterTurn?: boolean) => call<boolean>('sessions:inputAutomation', { id, mode, loopAfterTurn }),
@@ -433,7 +674,7 @@ const api = {
   /** The person's answer to that exact card; the page presses it only if the card still stands. */
   answerApproval: (id: string, cardId: string, choice: 'allow' | 'deny') =>
     call<{ ok: true } | { ok: false; error: string }>('sessions:answerApproval', { id, cardId, choice }),
-  followSessionTab: (id: string) => call<boolean>('sessions:followTab', { id }),
+  followSessionTab: (id: string | null) => call<boolean>('sessions:followTab', { id }),
   // Stops a chat this app cannot stop in the page: every tool call it has already been proved
   // to own is refused until it is released. Returns the whole blocked set, so one press
   // repaints without a second read.
@@ -441,6 +682,8 @@ const api = {
   setSessionTrusted: (id: string, expectedConversationId: string, trusted: boolean) =>
     call<string[]>('sessions:trust', { id, expectedConversationId, trusted }),
   deleteSession: (id: string) => call<boolean>('sessions:delete', { id }),
+  archiveSession: (id: string, archived: boolean) => call<SessionSummary>('sessions:archive', { id, archived }),
+  setSessionPins: (ids: string[]) => call<boolean>('sessions:setPins', { ids }),
   /** Chats matching every word of `query`, by title first, then by what was said in them. */
   searchSessions: (query: string) => call<SessionSearchReply>('sessions:search', { query }),
   locateSearchMatch: (id: string, query: string) => call<SessionSearchLocation | null>('sessions:locate-match', { id, query }),
@@ -462,6 +705,7 @@ const api = {
   openExtensionFolder: () => call<string>('bridge:openExtensionFolder'),
 
   getSwarm: () => call<SwarmState>('swarm:get'),
+  archiveAllWorkers: (sessionId: string) => call<import('../main/worker-cleanup.js').WorkerCleanupReport>('swarm:archiveAll', { sessionId }),
   resetSwarm: () => call<SwarmState>('swarm:reset'),
   // Clearing the prime ends the run; clearing a worker frees that slot. Which of the two
   // happened comes back in the result — the renderer does not decide it.

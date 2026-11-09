@@ -6,6 +6,7 @@
  * agree on exactly.
  */
 import { workerOwnTask } from './worker-brief.js';
+import type { AgentEngineId } from './agent-engine.js';
 
 /** Where an event came from. The extension is untrusted UI observation; mcp is ours. */
 export type EventSource = 'extension' | 'mcp' | 'app';
@@ -187,7 +188,9 @@ export type CallAttribution =
   | 'turn'
   | 'agent'
   | 'generation'
-  | 'inferred';
+  | 'inferred'
+  /** Chat Marks: written by the chat's own agent engine session (a coding CLI), not by a connector call. */
+  | 'engine';
 
 /**
  * What each grade of attribution actually rests on, in the words shown to the user.
@@ -215,7 +218,8 @@ export const ATTRIBUTION_LABELS: Record<CallAttribution, string> = {
   agent: 'agent key',
   turn: 'tool block on the page',
   generation: 'the only chat generating',
-  inferred: 'not placed in a chat'
+  inferred: 'not placed in a chat',
+  engine: "the chat's own engine session"
 };
 
 export interface ToolCallRecord {
@@ -231,10 +235,14 @@ export interface ToolCallRecord {
   attribution: CallAttribution;
   /** Normalized inbound HTTP x-request-id, retained for forensic correlation. */
   requestId: string | null;
-  /** Conversation proven by that request id, or null when ownership was unresolved. */
+  /** Recorded conversation; generation placement is provisional and never caller proof. */
   conversationId: string | null;
-  /** Deterministic placement outcome for current, unresolved, or deliberately retired callers. */
-  attributionMethod: 'request_id' | 'unattributed' | 'superseded';
+  /** Deterministic placement outcome for request, generation, engine, unresolved or retired callers. */
+  attributionMethod: 'request_id' | 'unattributed' | 'superseded' | 'engine' | 'generation';
+  /** Chat Marks: the agent engine whose own tool this row records (never a kernel call). */
+  engine?: AgentEngineId;
+  /** Native request that anchored a verified host conversation-metadata correlation. */
+  providerSessionAnchor?: string;
   /** Exact arguments as JSON. Cut inline past the cap, with the whole text in an asset. */
   args: StoredText;
   result: StoredText;
@@ -381,6 +389,8 @@ export type SessionEvent =
       inputId?: string;
       /** #1826: the message was a run of the chat's schedule, due then, and sent late when `late`. */
       scheduled?: { dueAt: number; late: boolean };
+      /** Sent by the person from elsewhere: a reply to a Telegram notification (Haz on #1990). */
+      via?: 'telegram';
       /** Tool handout remains unconfirmed until a later exact invocation proves receipt. */
       inputDelivery?: 'offered' | 'confirmed';
       /** Original app-authored text, excluding transport-only control instructions. */
@@ -482,7 +492,9 @@ export type SessionEvent =
    * event written before this model existed, or by a page whose commentary had no readable
    * identity, is still a plain standalone caption.
    */
-  | (BaseEvent & { kind: 'progress'; message: StoredText; progressId?: string; origin?: number; reason?: 'helper_stop_unverified'; finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number } })
+  | (BaseEvent & { kind: 'progress'; message: StoredText; progressId?: string; origin?: number;
+      /** Set by foldProgress: when its newest update came; `time` stays when it began. */
+      updatedAt?: number; reason?: 'helper_stop_unverified'; finishControl?: { state: 'released' | 'notified' | 'decision'; conversationId: string; revision?: string; inputRevision?: string; workSeq?: number } })
   /**
    * Visible ChatGPT-native tool activity that never passed through this MCP server.
    *
@@ -600,6 +612,8 @@ export type NewSessionEvent = SessionEvent extends infer Event
  */
 export interface SessionOrigin {
   kind: 'resume' | 'worker' | 'helper' | 'desktop';
+  /** This worker was explicitly opened using ChatGPT's Temporary mode. */
+  temporaryChat?: boolean;
   /** The session this chat continues. Null when the source session no longer exists. */
   fromSessionId: string | null;
   /** Agent id for a worker chat ("worker-1"). Null for a resume. */
@@ -655,6 +669,10 @@ export function originTitle(origin: SessionOrigin, source: string | null): strin
 }
 
 export interface SessionSummary {
+  /** ChatGPT owns this conversation as temporary; the user's local history is still recorded. */
+  temporaryChat?: boolean;
+  /** Explicit local Chat Marks archive; absent means visible. It never changes ChatGPT's archive. */
+  archivedAt?: number;
   /** Rebuildable transcript boundaries; no message bodies or execution authority. */
   timelineTurns?: import('./chronology.js').TimelineTurns;
   /** Rebuildable request-to-turn proof from recorded MCP calls, never a caller permission. */
@@ -672,6 +690,20 @@ export interface SessionSummary {
   selectedModel?: { conversationId: string; model: string; observedAt: number; reasoningEffort?: ReasoningEffort };
   /** Explicit local project; durable across frontend conversation replacement. */
   projectId?: string;
+  /** Explicit remote profile selection for this local chat; null means mode disabled. */
+  remoteMode?: { profileId: string } | null;
+  /**
+   * Chat Marks: the agent engine of an API chat, projected from its ledger record when the
+   * renderer reads the list (`agent-engine/ledger.ts` `withChatEngines`). Never stored here.
+   */
+  engine?: AgentEngineId;
+  /**
+   * The person moved this chat to its project, or out of one (#1919). The app then never binds it
+   * to a project by itself again, as it does for a chat started in a linked ChatGPT Project.
+   */
+  projectChosen?: true;
+  /** Moved into its project since the person's last message: the next one names the folder once. */
+  projectNotePending?: true;
   id: string;
   title: string;
   /**
@@ -702,6 +734,10 @@ export interface SessionSummary {
   events: number;
   userMessages: number;
   toolCalls: number;
+  /** Calls provisionally placed by the only observed running turn; never caller proof. */
+  provisionalToolCalls?: number;
+  /** Provider-proven calls whose provenance can be upgraded by native request evidence. */
+  providerSessionToolCalls?: number;
   /** Start time of the newest exact attributed tool call, independent of later page noise. */
   lastToolCallAt: number | null;
   /**
@@ -925,6 +961,8 @@ export function isReasoningEffort(value: unknown): value is ReasoningEffort {
 }
 
 export interface AgentInfo {
+  /** Worker creation option; temporary ChatGPT chats cannot be restored through history. */
+  temporaryChat?: boolean;
   /** Broker owner projection. IDs such as worker-1 are local to this incarnation. */
   runId?: string;
   /** Immutable broker allocation identity; survives a sleeping family's new incarnation. */
@@ -1078,6 +1116,9 @@ export interface AgentMessage {
   id: string;
   from: string;
   to: string;
+  /** Broker-owned sender provenance. Only a worker-scoped authenticated agents
+   * message to its prime can carry this flag. Old records must fail closed. */
+  origin?: 'authenticated-worker-message';
   /**
    * Prime-family address of the sender when a message crosses between existing prime families.
    *
@@ -1268,7 +1309,7 @@ export function foldProgress(events: readonly SessionEvent[]): SessionEvent[] {
     }
     const held = out[at];
     if (held && held.kind === 'progress' && event.kind === 'progress') {
-      out[at] = { ...held, message: event.message };
+      out[at] = { ...held, message: event.message, updatedAt: event.time };
     } else if (held && held.kind === 'page_tool' && event.kind === 'page_tool') {
       out[at] = { ...held, label: event.label };
     } else if (held && held.kind === 'tool_call' && event.kind === 'tool_call') {
@@ -1356,3 +1397,6 @@ export const UNATTRIBUTED_SESSION_TITLE = 'Unattributed activity';
 export function isUnattributedSession(summary: { conversationId: string | null; title: string; origin?: SessionOrigin | null }): boolean {
   return summary.conversationId === null && !summary.origin && summary.title === UNATTRIBUTED_SESSION_TITLE;
 }
+
+/** How long a Compact & Resume may wait for ChatGPT's summary before the last saved one is offered (2026-11-01). */
+export const STUCK_SUMMARY_MS = 15 * 60_000;

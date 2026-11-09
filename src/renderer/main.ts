@@ -13,6 +13,7 @@ import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connec
 import { displayLocalServer } from './local-url.js';
 import { paintPluginRefreshReminder } from './plugin-refresh-reminder.js';
 import { initRecordingStorageSetting, paintRecordingStorageNotice, paintRecordingStorageUsage } from './image-storage.js';
+import { paintAutomaticPause } from './automatic-pause.js';
 import { paintCredentialsNotice } from './credentials-notice.js';
 import { paintPluginRefreshOffer } from './plugin-refresh-offer.js';
 import { initUpdateReadiness, paintUpdateReadiness } from './update-readiness.js';
@@ -31,12 +32,15 @@ import { initDesktopAskNotice } from './desktop-ask-notice.js';
 import { initPet } from './pet.js';
 import { initPets } from './pets.js';
 import { initSkillsLibrary } from './skills-library.js';
+import { initScheduled } from './scheduled.js';
 import { initWhatsNew } from './whats-new.js';
 import { initTour } from './tour.js';
 import { playSoundCue } from './sound-cues.js';
 import { inQuietHours } from '../shared/phone-push.js';
 import { collectSettings, initSettingsSearch, searchSettings } from './settings-search.js';
 import { matchesWords } from './palette.js';
+import { installNotificationCenter } from './notification-center.js';
+import { initJarvis } from './jarvis.js';
 import type { AppearanceSettings, ThemeChoice } from '../shared/appearance.js';
 import type { BrowserBridgePort } from '../shared/browser-bridge.js';
 import { parseCommandAllowlistText } from '../shared/command-allowlist.js';
@@ -69,11 +73,17 @@ import {
   WRITE_CAPABILITIES
 } from '../shared/types.js';
 import type { SwarmState } from '../shared/session.js';
-import { $, ago, disclosureChevron, el, elapsedDurationText, icon, run, shortAgo, toast } from './dom.js';
-import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, openFeedback } from './chat.js';
+import { $, ago, disclosureChevron, el, elapsedDurationText, icon, paintWhenShown, run, shortAgo, toast } from './dom.js';
+import { chatApply, chatSettingsPatch, chatVisible, initChat, openChatSearch, openChatView, openFeedback, openScheduledChat, selectedChatWorkspaceId, selectChatSession, selectedChatSession } from './chat.js';
 import { publishStopNoticeTexts } from './stop-notices.js';
 import { publishMainTexts } from './main-texts.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
+import { initMarksModulesUi } from './marks-modules-ui.js';
+import { initMarksVaultUi } from './marks-vault.js';
+import { initBrainUi } from './brain-ui.js';
+import { initCompanyUi } from './company-ui.js';
+import { mountBrainImport } from './brain-import-ui.js';
+import { initRemoteHostsUi } from './remote-hosts.js';
 
 declare global {
   interface Window {
@@ -82,11 +92,36 @@ declare global {
 }
 
 const api = window.api;
+installNotificationCenter(api);
+
+document.getElementById('marksPanelLogout')?.addEventListener('click', async () => {
+  const button = document.getElementById('marksPanelLogout') as HTMLButtonElement;
+  button.disabled = true;
+  const reply = await api.marksPanelLogout();
+  if (!reply.ok) { toast(reply.error); button.disabled = false; }
+});
+const scheduled = initScheduled({
+  list: () => api.listSchedules(),
+  pause: (sessionId, paused) => api.pauseSchedule(sessionId, paused),
+  runNow: sessionId => api.runScheduleNow(sessionId),
+  delete: sessionId => api.deleteSchedule(sessionId),
+  openChat: sessionId => { showTab('chat'); void openScheduledChat(sessionId); }
+});
+api.onSessionChanged(() => {
+  if (document.querySelector('.panel[data-panel="scheduled"]')?.classList.contains('is-active')) void scheduled.refresh();
+});
 // First: main announces a Keychain read before it starts and may not get through again until it ends.
 initKeychainNotice(api);
 initDesktopAskNotice(api);
 initLanguage();
 initLayoutPreviews();
+initMarksVaultUi(api);
+// Chat Marks: the local Brain page shares the Settings navigation and app IPC.
+const brainUi = initBrainUi(api);
+const companyUi = initCompanyUi(api, sessionId => { showTab('chat'); void selectChatSession(sessionId); });
+// Chat Marks H2: old-history search and confirmed imports on the Brain page.
+const brainImportUi = mountBrainImport(api, { showTab: name => showTab(name), selectChat: selectChatSession });
+initRemoteHostsUi(api);
 // Composer key hints name this computer's keys only: a Windows user never reads ⌘ first.
 ui($('followUpHint'), 'textContent', () => t('What a message you send while ChatGPT works does by default. {0} sends it the other way.', [primaryShiftShortcut(t('Enter'))]));
 ui($('enterSendsHint'), 'textContent', () => t('Which key sends what you type. With {0}, Enter starts a new line.', [primaryShortcut(t('Enter'))]));
@@ -124,6 +159,8 @@ const publishUiLanguage = (): void => { void Promise.resolve(api.setUiLanguage?.
 publishUiLanguage();
 onLanguageChange(publishUiLanguage);
 const pet = initPet(api, () => showTab('pets'));
+// Chat Marks: API chats select their session and follow the selected one.
+const marksModulesUi = initMarksModulesUi(api, { showTab: name => showTab(name), openChatView, workspace: selectedChatWorkspaceId, selectedChat: selectedChatSession, selectChat: selectChatSession });
 initSettingsBackup(api, {
   imported: next => {
     apply(next);
@@ -134,6 +171,8 @@ initSettingsBackup(api, {
   toast
 });
 initPhonePushSettings(api, { save: () => save(), applied: next => apply(next), toast });
+initJarvis(api, selectedChatSession, { createCliProxyChat: () => marksModulesUi.createJarvisChat(), selectChat: selectChatSession,
+  openSettings: () => showTab('jarvis'), openChat: () => showTab('chat') });
 const settingsSearch = initSettingsSearch({
   open: tab => showTab(tab),
   shown: () => document.querySelector<HTMLElement>('.app')!.dataset.screen === 'settings'
@@ -253,6 +292,7 @@ const externalSetupLinks = [...document.querySelectorAll<HTMLButtonElement>('#wi
 const permissionSurface = document.querySelector<HTMLElement>('.workspace-permissions > .settings-surface')!;
 const permissionHome = permissionSurface.parentElement!;
 
+
 function placePermissions(tab: string): void {
   const target = tab === 'setup' ? $('accessFineSlot') : permissionHome;
   if (permissionSurface.parentElement !== target) target.append(permissionSurface);
@@ -261,10 +301,14 @@ function placePermissions(tab: string): void {
 /** Set once the tour exists (below); leaving the chat screen ends a running tour quietly. */
 let stopTour: () => void = () => undefined;
 function showTab(name: string): void {
+  name = marksModulesUi.normalizeTab(name);
+  if (name === 'company') void companyUi.refresh();
+  if (name === 'brain') { void brainUi.refresh(); void brainImportUi.refresh(); }
   if (name !== 'chat') stopTour();
   if (name === 'skills') openSkillsLibrary();
   placePermissions(name);
-  const library = name === 'plugins' || name === 'skills' || name === 'pets';
+  // Chat Marks: ZeroClaw's page is a main view beside them, opened from the sidebar.
+  const library = name === 'plugins' || name === 'skills' || name === 'pets' || name === 'scheduled' || name === 'zeroclaw' || name === 'company';
   const settings = name !== 'chat' && !library;
   // Opening Settings asks whether "Up to date" is still true (the check itself waits ten minutes).
   if (settings && document.querySelector<HTMLElement>('.app')!.dataset.screen !== 'settings') void api.refreshUpdate();
@@ -274,7 +318,9 @@ function showTab(name: string): void {
   $('workspaceSettings').hidden = false;
   $('workspaceSettings').classList.toggle('is-sel', settings);
   if (name === 'usage') void refreshUsage();
+  if (name === 'scheduled') void scheduled.refresh();
   if (name === 'settings') void paintRecordingStorageUsage();
+  marksModulesUi.onTabOpening(name);
   $('tabs').hidden = !settings;
   $('settingsFindBox').hidden = !settings;
   // A page opened any way leaves the search; the page list comes back.
@@ -286,10 +332,12 @@ function showTab(name: string): void {
   for (const tab of document.querySelectorAll<HTMLElement>('nav button')) {
     tab.classList.toggle('is-sel', tab.dataset.tab === name);
   }
+  marksModulesUi.paintNavigation(name);
   for (const item of document.querySelectorAll<HTMLElement>('[data-sidebar-page]')) item.classList.toggle('is-sel', item.dataset.sidebarPage === name);
   for (const panel of document.querySelectorAll<HTMLElement>('.panel')) {
     panel.classList.toggle('is-active', panel.dataset.panel === (name === 'settings' ? 'chat' : name));
   }
+  marksModulesUi.onTabShown(name);
   // After the panel shows: the chat and Agents & automation share its scroll pane, and a hidden
   // pane cannot be scrolled to where each view starts.
   if (name === 'settings') openChatView('settings');
@@ -375,7 +423,9 @@ $('sessionList').addEventListener('click', event => {
 $('newChat').addEventListener('click', () => showTab('chat'));
 $('sidebarPlugins').addEventListener('click', () => showTab('plugins'));
 $('sidebarPets').addEventListener('click', () => showTab('pets'));
+$('sidebarCompany').addEventListener('click', () => showTab('company'));
 $('sidebarSkills').addEventListener('click', () => showTab('skills'));
+$('sidebarScheduled').addEventListener('click', () => showTab('scheduled'));
 api.onPetOverlayOpenOwner(screen => showTab(screen));
 $('addProject').addEventListener('click', () => showTab('chat'));
 let zoomFactor = 1;
@@ -395,8 +445,12 @@ document.addEventListener('keydown', (event) => {
   event.preventDefault(); void zoom(event.key === '0' ? 1 : zoomFactor + (event.key === '-' ? -.1 : .1));
 });
 $('tabs').addEventListener('click', (event) => {
-  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab]');
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>('[data-tab], [data-module-page]');
   if (button?.dataset.tab) showTab(button.dataset.tab);
+  else {
+    const page = marksModulesUi.modulePage(button);
+    if (page) showTab(page);
+  }
 });
 
 // ------------------------------------------------------------ permissions
@@ -583,6 +637,87 @@ function desktopUnattributedRow(): HTMLElement {
   return row;
 }
 
+function linuxDesktopRow(): HTMLElement {
+  const row = el('label', 'tool linux-desktop-row');
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.id = 'linuxDesktopEnabled';
+  input.addEventListener('change', () => void save());
+  const body = el('span');
+  body.append(el('strong', '', () => t('Allow native Linux Desktop access')),
+    el('em', '', () => t('Off by default. GNOME display screenshots require Screen permission and OS consent. Semantic accessibility actions require Control permission, a proven chat, and explicit approval when configured. No physical-input fallback.')));
+  row.append(input, body);
+  return row;
+}
+
+let linuxScreenshotConsentBusy = false;
+/** Only translate known, fixed main-process errors; never display arbitrary backend text. */
+function linuxScreenshotConsentErrorText(error: unknown): string {
+  switch (error) {
+    case 'Activate the Chat Marks window before requesting screenshot permission.':
+    case 'The Chat Marks window lost focus; no screenshot was requested.':
+      return t('Activate the Chat Marks window, then try again.');
+    case 'Enable native Linux Desktop and Screen access first.':
+    case 'Screen access was disabled before the screenshot request.':
+    case 'Native Linux Desktop or Screen access was disabled during the screenshot request.':
+      return t('Enable native Linux Desktop access and Screen permission, then try again.');
+    case 'Screenshot permission can be requested only from the Chat Marks main window.':
+      return t('Screenshot permission can be requested only from the Chat Marks main window.');
+    case 'A screenshot permission request is already running.':
+      return t('A screenshot permission request is already running.');
+    default:
+      return t('GNOME screenshot permission could not be confirmed.');
+  }
+}
+function linuxScreenshotConsentRow(): HTMLElement {
+  const row = el('div', 'tool is-static linux-consent-row');
+  const body = el('span');
+  body.append(
+    el('strong', '', () => t('Test GNOME screenshot permission')),
+    el('em', '', () => t('Click while the Chat Marks window is active. If GNOME asks, choose Allow. The screenshot is discarded.'))
+  );
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.id = 'linuxScreenshotConsent';
+  ui(button, 'textContent', () => t('Request screenshot permission'));
+  button.disabled = true;
+  const status = el('em', 'linux-consent-result');
+  status.id = 'linuxScreenshotConsentResult';
+  status.setAttribute('role', 'status');
+  status.setAttribute('aria-live', 'polite');
+  button.addEventListener('click', async () => {
+    if (linuxScreenshotConsentBusy || button.disabled) return;
+    const hadFocus = document.activeElement === button;
+    linuxScreenshotConsentBusy = true;
+    button.disabled = true;
+    status.textContent = t('Waiting for GNOME screenshot permission…');
+    try {
+      const reply = await api.linuxScreenshotConsent();
+      status.textContent = reply.ok
+        ? t('Screenshot permission confirmed. No image was saved.')
+        : t('Screenshot permission request failed: {0}', [
+          linuxScreenshotConsentErrorText(reply.error)
+        ]);
+    } catch {
+      status.textContent = t('Screenshot permission request failed: {0}', [
+        t('GNOME screenshot permission could not be confirmed.')
+      ]);
+    } finally {
+      linuxScreenshotConsentBusy = false;
+      const config = state?.config;
+      button.disabled = !config || config.ui.linuxDesktopEnabled !== true || config.capabilities.screen !== true;
+      // A disabled button can drop keyboard focus. Restore it only when the
+      // person originally focused this button and has not moved elsewhere.
+      const active = document.activeElement;
+      if (hadFocus && !button.disabled && (!active || active === button ||
+          active === document.body || active === document.documentElement)) button.focus();
+    }
+  });
+  body.append(button, status);
+  row.append(body);
+  return row;
+}
+
 function buildGroups(): void {
   const permissionGroups = GROUPS.map((group) => {
     const box = document.createElement('input');
@@ -610,6 +745,7 @@ function buildGroups(): void {
       label.append(input, body);
       tools.append(label);
       if (cap === 'control') tools.append(desktopAskRow(), desktopUnattributedRow());
+      if (cap === 'screen') tools.append(linuxDesktopRow(), linuxScreenshotConsentRow());
     }
     tools.append(toolNames([]));
     if (group.id === 'run') tools.append(buildCommandAllowlist());
@@ -656,6 +792,7 @@ function paintGroups(): void {
   if (!state) return;
   const { readOnly } = state.config;
   const desktopSupported = state.platform?.desktopAutomation ?? true;
+  const clipboardSupported = desktopSupported || state.platform?.family === 'linux';
 
   for (const group of GROUPS) {
     const root = document.querySelector<HTMLElement>(`[data-group="${group.id}"]`)!;
@@ -670,7 +807,7 @@ function paintGroups(): void {
     }
 
     const usable = group.caps.filter((cap) => !(readOnly && WRITE_CAPABILITIES.includes(cap)) &&
-      (desktopSupported || cap !== 'clipboardRead' && cap !== 'clipboardWrite'));
+      (clipboardSupported || cap !== 'clipboardRead' && cap !== 'clipboardWrite'));
     const on = group.caps.filter((cap) => capInput(cap).checked);
 
     const box = root.querySelector<HTMLInputElement>('.group-box')!;
@@ -692,7 +829,7 @@ function paintGroups(): void {
 
   for (const cap of WRITE_CAPABILITIES) capInput(cap).disabled = readOnly;
   for (const cap of ['clipboardRead', 'clipboardWrite'] as const) {
-    capInput(cap).disabled = !desktopSupported || (readOnly && WRITE_CAPABILITIES.includes(cap));
+    capInput(cap).disabled = !clipboardSupported || (readOnly && WRITE_CAPABILITIES.includes(cap));
   }
 
   // The feature group. apply() already passed its switch through the
@@ -733,9 +870,9 @@ function paintDesktopAccess(next: AppState): void {
   // earlier grant is remembered; the first version that remembers grants knows of none.
   const repairable = problem?.missing === true;
   ui($('desktopAccessTitle'), 'textContent', () => t("Desktop access needs attention"));
-  ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat On Steroids. ", [missing.join(' · ')]) +
+  ui($('desktopAccessDetail'), 'textContent', () => t("{0}. These are live verdicts from the native backend executing inside Chat Marks. ", [missing.join(' · ')]) +
     (stale
-      ? t("macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.")
+      ? t("macOS still shows Chat Marks as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.")
       : repairable
         ? t("Choose Repair permissions and allow it when macOS asks, then fully quit and reopen the app. Repair also fixes a permission that System Settings shows as allowed but that no longer applies after an update.")
         : t("Grant the missing macOS permission, then fully quit and reopen the app.")));
@@ -787,7 +924,7 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
     // config. A hidden disabled checkbox is presentation,
     // not a user edit: copying its forced-false value into every unrelated settings save
     // would erase those choices merely because the config was opened on another OS.
-    if (!(state.platform?.desktopAutomation ?? true) && DESKTOP_CAPABILITIES.includes(capability) && capability !== 'screen' && capability !== 'control') continue;
+    if (!(state.platform?.desktopAutomation ?? true) && state.platform?.family !== 'linux' && DESKTOP_CAPABILITIES.includes(capability) && capability !== 'screen' && capability !== 'control') continue;
     capabilities[capability] = input.checked;
   }
   const readOnly = over.readOnly ?? previous.readOnly;
@@ -815,6 +952,7 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
       cosBrowserMinimize: $<HTMLSelectElement>('cosBrowserMinimize').value === 'tray' ? 'tray' : 'taskbar',
       desktopAsk: ($<HTMLSelectElement>('desktopAsk').value || 'off') as NonNullable<Config['ui']['desktopAsk']>,
       desktopUnattributed: $<HTMLInputElement>('desktopUnattributed').checked,
+      linuxDesktopEnabled: $<HTMLInputElement>('linuxDesktopEnabled').checked,
       finishTool: $<HTMLInputElement>('finishTool').checked,
       finishHoldOnStop: $<HTMLInputElement>('finishHoldOnStop').checked,
       planBackend: $<HTMLSelectElement>('planBackend').value as 'chatgpt' | 'api',
@@ -833,6 +971,9 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
       autoConnect: $<HTMLInputElement>('autoConnect').checked,
       startAtLogin: $<HTMLInputElement>('startAtLogin').checked,
       turnNotifications: $<HTMLInputElement>('turnNotifications').checked,
+      archiveRetentionDays: Number($<HTMLSelectElement>('archiveRetentionDays').value),
+      marksSystemPromptEnabled: $<HTMLInputElement>('marksSystemPromptEnabled').checked,
+      marksPreferredName: $<HTMLInputElement>('marksPreferredName').value.trim() || undefined,
       sounds: $<HTMLInputElement>('soundCues').checked,
       localAppUsage: $<HTMLInputElement>('localAppUsage').checked,
       keepAwake: $<HTMLSelectElement>('keepAwake').value !== 'off',
@@ -847,6 +988,7 @@ function save(over: { readOnly?: boolean; theme?: ThemeChoice; appearance?: Appe
       chatWritingStyle: chatStyleDraft('chatWritingStyle', DEFAULT_CHAT_WRITING_STYLE),
       sendCheckUrl: sendCheckDraft(previous),
       followOutput: $<HTMLInputElement>('followOutput').checked,
+      showMessageTimes: $<HTMLInputElement>('showMessageTimes').checked,
       mentionCore: $<HTMLInputElement>('mentionCore').checked,
       mentionPlugins: $<HTMLInputElement>('mentionPlugins').checked,
       privacyScreenshots: $<HTMLInputElement>('privacyScreenshots').checked,
@@ -926,10 +1068,22 @@ async function saveSnapshot(patch: SettingsPatch, previous: AppState['config']):
     if (state && (!requestedSettings || requestedSettings.controlApi?.enabled === patch.controlApi?.enabled)) {
       $<HTMLInputElement>('controlApiEnabled').checked = state.config.controlApi?.enabled === true;
     }
+    // And for replies from Telegram, which let the phone message a chat: a box shown off while the saved
+    // value is still on would misstate it (CodeRabbit on #1990).
+    if (state && (!requestedSettings || requestedSettings.ui.phonePush?.telegramSteer === patch.ui.phonePush?.telegramSteer)) {
+      $<HTMLInputElement>('telegramSteer').checked = state.config.ui.phonePush?.telegramSteer === true;
+    }
     // And for desktop control without a known chat (CodeRabbit on #1938): a box shown off while the
     // saved value is still on would misstate what the desktop tools allow.
     if (state && (!requestedSettings || requestedSettings.ui.desktopUnattributed === patch.ui.desktopUnattributed)) {
       $<HTMLInputElement>('desktopUnattributed').checked = state.config.ui.desktopUnattributed === true;
+    }
+    if (state && (!requestedSettings || requestedSettings.ui.linuxDesktopEnabled === patch.ui.linuxDesktopEnabled)) {
+      $<HTMLInputElement>('linuxDesktopEnabled').checked = state.config.ui.linuxDesktopEnabled === true;
+    }
+    // And message times: a switch left on after a failed save would show what the setting hides.
+    if (state && (!requestedSettings || requestedSettings.ui.showMessageTimes === patch.ui.showMessageTimes)) {
+      $<HTMLInputElement>('showMessageTimes').checked = state.config.ui.showMessageTimes === true;
     }
     if (state && (!requestedSettings || requestedSettings.projects?.codeCheckpoints === patch.projects?.codeCheckpoints)) {
       $<HTMLInputElement>('codeCheckpoints').checked = state.config.projects?.codeCheckpoints === true;
@@ -1028,7 +1182,8 @@ const FILES_AND_TERMINAL = CAPABILITIES.filter(cap => !DESKTOP_CAPABILITIES.incl
 /** The Desktop permissions this host can grant: browser control everywhere, the rest only with a native backend. */
 function hostDesktopCapabilities(next: AppState): Capability[] {
   const native = next.platform?.desktopAutomation ?? true;
-  return DESKTOP_CAPABILITIES.filter(cap => native || cap === 'screen' || cap === 'control');
+  return DESKTOP_CAPABILITIES.filter(cap => native || cap === 'screen' || cap === 'control' ||
+    (next.platform?.family === 'linux' && (cap === 'clipboardRead' || cap === 'clipboardWrite')));
 }
 
 /** What the saved permissions amount to, in Setup's terms. */
@@ -1343,7 +1498,7 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
   let tone: UpdateTone = 'work';
   // #1490: an installer that stopped silently left this start on the old version.
   if (update.notInstalled) {
-    lines.push(t("Chat On Steroids {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.", [update.notInstalled, update.current]));
+    lines.push(t("Chat Marks {0} did not install; this is still {1}. Choose Install to try again; Windows may ask for permission.", [update.notInstalled, update.current]));
     tone = 'bad';
   }
   if (update.latest && !(update.notInstalled === update.latest && update.stage === 'ready')) {
@@ -1354,12 +1509,12 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
       update.stage === 'checking'
         ? t("Checking for the latest update…")
         : update.stage === 'ready'
-        ? t("Chat On Steroids {0} is downloaded and ready. Install it now, or it installs the next time you quit.", [update.latest])
+        ? t("Chat Marks {0} is downloaded and ready. Install it now, or it installs the next time you quit.", [update.latest])
         : update.stage === 'downloading'
-          ? t("Chat On Steroids {0} is downloading. Keep working; you can install it when it lands.", [update.latest])
+          ? t("Chat Marks {0} is downloading. Keep working; you can install it when it lands.", [update.latest])
           : update.stage === 'failed'
-            ? t("Chat On Steroids {0} could not be downloaded: {1}.", [update.latest, update.error ? updateErrorText(update.error) : t("the download stopped")])
-            : t("Chat On Steroids {0} is out. This installation has to be updated by hand.", [update.latest])
+            ? t("Chat Marks {0} could not be downloaded: {1}.", [update.latest, update.error ? updateErrorText(update.error) : t("the download stopped")])
+            : t("Chat Marks {0} is out. This installation has to be updated by hand.", [update.latest])
     );
     if (update.stage === 'failed' || update.notInstalled) tone = 'bad';
   } else if (update.stage === 'failed') {
@@ -1369,14 +1524,21 @@ function updateSummary({ bridge, update, config, status }: AppState): { text: st
     lines.push(t("Checking for a newer version…"));
   } else if (!stale && !missing && !update.notInstalled) {
     const extension = bridge.present && bridge.extensionVersion ? t(" · extension {0}", [bridge.extensionVersion]) : '';
-    lines.push(t("Up to date! Chat On Steroids {0}{1}", [update.current, extension]));
+    lines.push(t("Up to date! Chat Marks {0}{1}", [update.current, extension]));
     tone = 'ok';
   }
   if (stale) {
     // Firefox runs the add-on Mozilla signed and updates it itself; the app's folder is not what it loads.
     const firefox = bridge.extensionEngine === 'gecko' || (bridge.externalExtension?.engine === 'gecko' && bridge.externalExtension.version === stale);
+    // bridge.extensionVersion is scoped to the ChatGPT browser selected by the app,
+    // not to the newest extension seen in any unrelated browser. Name that browser
+    // explicitly so a stale Firefox copy cannot be mistaken for the built-in one.
+    const browser = firefox ? t('Mozilla Firefox') : config.ui.chatBrowser === 'cos'
+      ? t('Chat Marks browser (built-in)') : config.ui.chatBrowser === 'edge'
+      ? t('Microsoft Edge') : config.ui.chatBrowser === 'brave'
+      ? t('Brave Browser') : t('Google Chrome / Chromium');
     lines.push(
-      t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
+      `${t('ChatGPT browser')}: ${browser}. ` + t("Update your browser extension: {0} → {1}. ", [stale, update.current]) +
         (firefox
           ? t("Firefox updates the add-on by itself. To do it now, open about:addons in Firefox and choose Check for Updates, then refresh ChatGPT.")
           : t("Reload the extension from this app’s folder, then refresh ChatGPT."))
@@ -1706,6 +1868,7 @@ function apply(next: AppState): void {
   paintPluginRefreshRecovery(next);
   paintPluginRefreshReminder(next.connectorSchemas ?? {}, next.confirmedConnectorSchemas ?? {});
   paintRecordingStorageNotice(next.recordingStorageFull === true);
+  paintAutomaticPause(next.bridge.automaticPauseUntil ?? null);
   // A new size changes the "used of" line at once, not only when Settings opens again.
   if (previousState && previousState.config.sessions.storageLimitGiB !== next.config.sessions.storageLimitGiB) void paintRecordingStorageUsage();
   paintCredentialsNotice(next, api, apply);
@@ -1713,7 +1876,7 @@ function apply(next: AppState): void {
 
   // ---- health numbers and facts
   paintClock();
-  $('facts').replaceChildren(...facts(next));
+  paintWhenShown($('facts'), () => $('facts').replaceChildren(...facts(next)));
 
   // ---- permissions
   $('readOnlyBtn').classList.toggle('is-on', config.readOnly);
@@ -1724,7 +1887,8 @@ function apply(next: AppState): void {
     : t('Switch to read-only: ChatGPT can still look at files and the screen, but can’t create, edit, move or delete files, run programs or control this computer.'));
   for (const input of document.querySelectorAll<HTMLInputElement>('[data-cap]')) {
     const cap = input.dataset.cap as Capability;
-    const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap) || cap === 'screen' || cap === 'control';
+    const supported = (next.platform?.desktopAutomation ?? true) || !DESKTOP_CAPABILITIES.includes(cap) || cap === 'screen' || cap === 'control' ||
+      (next.platform?.family === 'linux' && (cap === 'clipboardRead' || cap === 'clipboardWrite'));
     applyChecked(input, supported && config.capabilities[cap], previousState?.config.capabilities[cap]);
   }
   applyChecked(
@@ -1779,9 +1943,15 @@ function apply(next: AppState): void {
   applyValue($<HTMLSelectElement>('cosBrowserMinimize'), config.ui.cosBrowserMinimize ?? 'taskbar', previousState?.config.ui.cosBrowserMinimize ?? 'taskbar');
   applyValue($<HTMLSelectElement>('desktopAsk'), config.ui.desktopAsk ?? 'off', previousState?.config.ui.desktopAsk ?? 'off');
   applyChecked($<HTMLInputElement>('desktopUnattributed'), config.ui.desktopUnattributed === true, previousState?.config.ui.desktopUnattributed === true);
-  // The system says when it was last used only on macOS and Windows; elsewhere nothing would ask.
-  ($('desktopAsk').closest('.desktop-ask-row') as HTMLElement).hidden = !['macos', 'windows'].includes(next.platform?.family ?? 'macos');
-  ($('desktopUnattributed').closest('.desktop-unattributed-row') as HTMLElement).hidden = !['macos', 'windows'].includes(next.platform?.family ?? 'macos');
+  applyChecked($<HTMLInputElement>('linuxDesktopEnabled'), config.ui.linuxDesktopEnabled === true, previousState?.config.ui.linuxDesktopEnabled === true);
+  // The optional native approval row is available on Linux too; the gate
+  // stays disabled by default and conservatively asks when idle proof is absent.
+  ($('desktopAsk').closest('.desktop-ask-row') as HTMLElement).hidden = !['macos', 'windows', 'linux'].includes(next.platform?.family ?? 'macos');
+  ($('desktopUnattributed').closest('.desktop-unattributed-row') as HTMLElement).hidden = !['macos', 'windows', 'linux'].includes(next.platform?.family ?? 'macos');
+  ($('linuxDesktopEnabled').closest('.linux-desktop-row') as HTMLElement).hidden = next.platform?.family !== 'linux';
+  ($('linuxScreenshotConsent').closest('.linux-consent-row') as HTMLElement).hidden = next.platform?.family !== 'linux';
+  $<HTMLButtonElement>('linuxScreenshotConsent').disabled = linuxScreenshotConsentBusy ||
+    next.platform?.family !== 'linux' || config.ui.linuxDesktopEnabled !== true || config.capabilities.screen !== true;
   // Only the built-in browser has a window of the app's own to minimize.
   $('cosBrowserMinimizeRow').hidden = (config.ui.chatBrowser ?? 'chrome') !== 'cos';
   $<HTMLSelectElement>('planBackend').value = config.ui.planBackend ?? 'chatgpt';
@@ -1800,7 +1970,7 @@ function apply(next: AppState): void {
     rotate.add(option);
   }
   applyValue(rotate, rotateMinutes, previousState ? String(previousState.config.ui.rotateTurnMinutes ?? 30) : undefined);
-  applyChecked($<HTMLInputElement>('rotateStopFallback'), config.ui.rotateStopFallback === true, previousState?.config.ui.rotateStopFallback);
+  applyChecked($<HTMLInputElement>('rotateStopFallback'), config.ui.rotateStopFallback !== false, previousState?.config.ui.rotateStopFallback);
   $<HTMLInputElement>('rotateStopFallback').disabled = (config.ui.rotateTurnMinutes ?? 30) === 0;
   applyChecked($<HTMLInputElement>('backgroundChats'), config.ui.backgroundChats === true, previousState?.config.ui.backgroundChats);
   applyValue($<HTMLSelectElement>('backgroundPlacement'), config.ui.backgroundPlacement ?? 'window', previousState?.config.ui.backgroundPlacement ?? 'window');
@@ -1820,6 +1990,18 @@ function apply(next: AppState): void {
   $<HTMLInputElement>('startAtLogin').disabled = next.loginStartupAvailable !== true;
   applyChecked($<HTMLInputElement>('startAtLogin'), config.ui.startAtLogin === true, previousState?.config.ui.startAtLogin);
   applyChecked($<HTMLInputElement>('turnNotifications'), config.ui.turnNotifications !== false, previousState ? previousState.config.ui.turnNotifications !== false : undefined);
+  const retention = $<HTMLSelectElement>('archiveRetentionDays');
+  const retentionDays = String(config.ui.archiveRetentionDays ?? 30);
+  if (![...retention.options].some(option => option.value === retentionDays)) {
+    retention.querySelector('option[data-configured]')?.remove();
+    const option = document.createElement('option');
+    option.value = retentionDays; option.textContent = t('{0} days', [retentionDays]); option.dataset.configured = '';
+    retention.add(option);
+  }
+  applyValue(retention, retentionDays, previousState ? String(previousState.config.ui.archiveRetentionDays ?? 30) : undefined);
+  applyChecked($<HTMLInputElement>('marksSystemPromptEnabled'), config.ui.marksSystemPromptEnabled !== false, previousState ? previousState.config.ui.marksSystemPromptEnabled !== false : undefined);
+  applyValue($<HTMLInputElement>('marksPreferredName'), config.ui.marksPreferredName ?? '', previousState?.config.ui.marksPreferredName ?? '');
+  $('marksPromptPreview').hidden = true;
   applyChecked($<HTMLInputElement>('soundCues'), config.ui.sounds === true, previousState?.config.ui.sounds);
   applyChecked($<HTMLInputElement>('localAppUsage'), config.ui.localAppUsage !== false, previousState ? previousState.config.ui.localAppUsage !== false : undefined);
   // The saved switch, not the click, decides what the main process reads.
@@ -1847,6 +2029,9 @@ function apply(next: AppState): void {
     applyValue(sendCheckField, config.ui.sendCheckUrl ?? '', previousState ? previousState.config.ui.sendCheckUrl ?? '' : undefined);
   sendCheckValid();
   applyChecked($<HTMLInputElement>('followOutput'), config.ui.followOutput !== false, previousState?.config.ui.followOutput);
+  applyChecked($<HTMLInputElement>('showMessageTimes'), config.ui.showMessageTimes === true, previousState?.config.ui.showMessageTimes === true);
+  // Every chat row carries its time; the stylesheet shows it above each message only while this is on.
+  document.documentElement.classList.toggle('show-message-times', config.ui.showMessageTimes === true);
   applyChecked($<HTMLInputElement>('mentionCore'), config.ui.mentionCore !== false, previousState?.config.ui.mentionCore);
   applyChecked($<HTMLInputElement>('mentionPlugins'), config.ui.mentionPlugins === true, previousState?.config.ui.mentionPlugins);
   applyChecked($<HTMLInputElement>('controlApiEnabled'), config.controlApi?.enabled === true, previousState?.config.controlApi?.enabled);
@@ -1911,7 +2096,7 @@ function apply(next: AppState): void {
   // The add button is the call to action until a folder is shared, then it quiets to done.
   $('wizAddFolder').dataset.tone = config.roots.length > 0 ? 'ok' : 'off';
   // One folder per line: they are paths, and a row of them wraps mid-name.
-  $('wizFolders').replaceChildren(...(config.roots.length === 0
+  paintWhenShown($('wizFolders'), () => $('wizFolders').replaceChildren(...(config.roots.length === 0
     ? [(() => {
       // Empty is an invitation, not a hole: the whole area chooses a folder, like the button.
       const row = el('li', 'is-empty');
@@ -1922,7 +2107,7 @@ function apply(next: AppState): void {
       row.append(pick);
       return row;
     })()]
-    : config.roots.map((root) => { const row = el('li'); row.append(icon('i-folder'), el('span', '', `/${root.name}`)); return row; })));
+    : config.roots.map((root) => { const row = el('li'); row.append(icon('i-folder'), el('span', '', `/${root.name}`)); return row; }))));
   const secureStorageAvailable = next.secureStorage?.available ?? true;
   const apiKey = $<HTMLInputElement>('apiKey');
   ui(apiKey, 'placeholder', () => next.hasApiKey ? t("•••••••• stored") : 'sk-…');
@@ -1994,7 +2179,7 @@ function apply(next: AppState): void {
           : t("ChatGPT ran a tool {0} — the whole chain works.", [ago(ranAt)]));
 
   const cards = $('connectorCards');
-  cards.replaceChildren(...connectorCards(next));
+  paintWhenShown(cards, () => cards.replaceChildren(...connectorCards(next)));
 
   // Step marks: everything before the first unfinished step counts as done.
   const order = ['browser', 'folder', 'access', 'tunnel', 'key', 'connect', 'chatgpt'];
@@ -2344,7 +2529,7 @@ function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, all
   $('readyStart').hidden = !allSet;
   step('ready').classList.toggle('is-all-set', allSet);
   const list = $('readyChecks');
-  const rows = shown.map(name => {
+  paintWhenShown(list, () => list.replaceChildren(...shown.map(name => {
     const check = READY_CHECKS[name]!;
     const passed = done.has(name);
     const narrowed = name === 'access' && limited;
@@ -2363,8 +2548,7 @@ function paintReady(shown: string[], done: Set<string>, cosBrowser: boolean, all
       row.append(go);
     }
     return row;
-  });
-  list.replaceChildren(...rows);
+  })));
 }
 
 /** A connector's newest evidence that ChatGPT uses it: this run's, else what earlier runs proved. */
@@ -2782,7 +2966,7 @@ function confirmUpdateRestart(version: string): Promise<boolean> {
     const title = document.createElement('h2'); title.id = 'updateRestartTitle';
     ui(title, 'textContent', () => t('Restart to install the update?'));
     const lead = document.createElement('p'); lead.className = 'whats-new-lead'; lead.id = 'updateRestartLead';
-    ui(lead, 'textContent', () => t('Chat On Steroids will close and restart. Running chats, agents and commands may be interrupted.'));
+    ui(lead, 'textContent', () => t('Chat Marks will close and restart. Running chats, agents and commands may be interrupted.'));
     dialog.setAttribute('aria-labelledby', title.id); dialog.setAttribute('aria-describedby', lead.id);
     head.append(hero, named, title, lead);
     const actions = document.createElement('footer'); actions.className = 'whats-new-actions';
@@ -2818,7 +3002,7 @@ updateAllButton.addEventListener('click', async () => {
     if (!reply.ok) { updateAllError = reply.error; toast(updateErrorText(reply.error)); return; }
     const result = reply.data;
     if (result === 'manual') toast(t('Download link opened. Install the app to continue; your settings are kept.'));
-    else if (result === 'restarting') toast(t('Installing the update. Chat On Steroids closes and starts again as the new version.'));
+    else if (result === 'restarting') toast(t('Installing the update. Chat Marks closes and starts again as the new version.'));
     else if (result === 'checking-connectors') toast(document.getElementById('updateReadinessCard') ? t('Plugin checks requested. Any remaining steps are shown in Update status.') : t('Checking…'));
     else if (result === 'confirm') toast(t('Update postponed. You can keep working.'));
   } catch (error) {
@@ -2839,7 +3023,7 @@ updateAllButton.addEventListener('click', async () => {
  * click looking like a crash. Both buttons are the same action; either can be the one pressed.
  */
 function installUpdate(): void {
-  toast(t("Installing the update. Chat On Steroids closes and starts again as the new version."));
+  toast(t("Installing the update. Chat Marks closes and starts again as the new version."));
   void run(api.installUpdate());
 }
 
@@ -2978,9 +3162,13 @@ for (const id of [
   'playfulContinue',
   'announceTurns',
   'followOutput',
+  'showMessageTimes',
   'followUp',
   'enterSends',
   'turnNotifications',
+  'archiveRetentionDays',
+  'marksSystemPromptEnabled',
+  'marksPreferredName',
   'soundCues',
   'mentionCore',
   'mentionPlugins',
@@ -2998,6 +3186,7 @@ for (const id of [
   'phonePushAway',
   'phonePushQuiet',
   'phonePushDetails',
+  'telegramSteer',
   'secretsShield',
   'tunnelKind',
   'tunnelId',
@@ -3007,6 +3196,14 @@ for (const id of [
 ]) {
   $(id).addEventListener('change', () => void save());
 }
+$('marksPromptPreviewButton').addEventListener('click', async () => {
+  await settingsSaveQueue;
+  const prompt = await run(api.marksPromptPreview());
+  if (prompt === null) return;
+  const preview = $('marksPromptPreview');
+  preview.textContent = prompt || t('Prompt do Chat Marks desativado.');
+  preview.hidden = false;
+});
 $('sendCheckUrl').addEventListener('input', () => { sendCheckValid(); });
 $('connectorSuffix').addEventListener('input', () => { connectorSuffixValid(); });
 // #1802: turning sounds on plays one, so the person hears what they chose.
@@ -3016,6 +3213,17 @@ $('soundCues').addEventListener('change', event => {
 });
 api.onSoundCue?.(playSoundCue);
 
+/**
+ * A plain web link outside the chat (the Usage price links, Send feedback's guide link): the window
+ * denies new windows, so without this it did nothing (design audit 2026-11-01). Chat links route
+ * themselves and mark the click handled; the main process validates the address again.
+ */
+function openPlainWebLink(event: MouseEvent): void {
+  const anchor = (event.target as Element | null)?.closest?.<HTMLAnchorElement>('a[href]');
+  if (!anchor || event.defaultPrevented || !/^https?:\/\//i.test(anchor.href)) return;
+  event.preventDefault();
+  void run(api.openLink(anchor.href, { external: true }));
+}
 document.addEventListener('click', (event) => {
   const target = event.target as HTMLElement;
   if (!target.closest('.connection-anchor') && !$('connectionPopover').contains(target) && !$('connectionPopover').hidden) setConnectionPopover(false);
@@ -3023,7 +3231,11 @@ document.addEventListener('click', (event) => {
   if (external?.dataset.linkExternal) void run(api.openLink(external.dataset.linkExternal, { external: true }));
   const link = target.closest<HTMLElement>('[data-link]');
   if (link?.dataset.link) void run(api.openLink(link.dataset.link));
+  openPlainWebLink(event);
 });
+// A middle-click on the same links (auxclick), so it opens in the browser instead of being denied
+// (CodeRabbit on #2011). Chat links handle their own middle-click and mark it handled.
+document.addEventListener('auxclick', event => { if (event.button === 1) openPlainWebLink(event); });
 document.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape' || $('connectionPopover').hidden) return;
   setConnectionPopover(false);
@@ -3069,7 +3281,15 @@ initPlugins(apply);
 initPets(api, pet);
 openSkillsLibrary = initSkillsLibrary(api);
 initBrowserPreferences();
-initChat({ save: () => save(), state: () => state, palette: {
+
+initChat({ save: () => save(), state: () => state ,
+  cliModules: marksModulesUi.cliModules,
+  createCliSession: marksModulesUi.createSession,
+  projectChatItems: marksModulesUi.projectChatItems,
+  repaintCliSessions: () => marksModulesUi.repaintSessions(),
+  showChat: () => showTab('chat')
+, palette: {
+
   showChat: () => showTab('chat'),
   actions: () => [
     { label: () => t('Keyboard shortcuts'), keys: () => paletteKeys('Keyboard shortcuts'), run: () => shortcutsDialog.open() },
@@ -3081,6 +3301,7 @@ initChat({ save: () => save(), state: () => state, palette: {
     .filter(entry => !/[.!?…]$/.test(entry.title) && matchesWords(entry.title, query))
     .map(entry => ({ title: entry.title, place: [entry.page, entry.section].filter(Boolean).join(' › '), open: () => settingsSearch.reveal(entry) }))
 } });
+
 /** The keys the shortcuts dialog prints for one of its rows, by its English name. */
 function paletteKeys(name: string): string[] {
   return shortcutGroups(() => state?.config.ui.enterSends !== false).flatMap(group => group.rows).find(row => row.label() === t(name))?.keys() ?? [];

@@ -28,6 +28,21 @@ import type { Config } from '../src/shared/types.js';
 const recoveryBrowserWake = vi.hoisted(() => vi.fn(async (_url: string, _retry?: boolean, _background?: boolean,
   _authority?: { current(): boolean | Promise<boolean> }) => {}));
 vi.mock('../src/main/browser-startup.js', () => ({ wakeBrowserUrl: recoveryBrowserWake }));
+// Makes the app withhold one queued input from the page, with a reason (2026-10-31).
+const withheldInput = vi.hoisted(() => ({ id: null as string | null, reason: '' }));
+vi.mock('../src/main/session/input.js', async original => {
+  const real = await original<typeof import('../src/main/session/input.js')>();
+  return { ...real, queuedInputOfferBlocker: async (id: string) => id === withheldInput.id ? withheldInput.reason : real.queuedInputOfferBlocker(id) };
+});
+// Holds one chat's observation write open, as a busy multi-agent run does (#1922).
+const heldRecording = vi.hoisted(() => ({ conversationId: null as string | null, release: null as (() => void) | null }));
+vi.mock('../src/main/session/recorder.js', async original => {
+  const real = await original<typeof import('../src/main/session/recorder.js')>();
+  return { ...real, recordChatObservations: async (...args: Parameters<typeof real.recordChatObservations>) => {
+    if (args[0] === heldRecording.conversationId) await new Promise<void>(resolve => { heldRecording.release = resolve; });
+    return real.recordChatObservations(...args);
+  } };
+});
 
 async function recordFinalForTest(conversationId: string, turnId: string): Promise<void> {
   await request('POST', '/events', { body: { conversationId, events: [{ kind: 'assistant_message', time: Date.now(),
@@ -62,6 +77,9 @@ const {
   cancelAssistantRecovery,
   onBridgeChange,
   compactSession,
+  resumeFromSavedSummary,
+  setSessionAutomation,
+  STUCK_SUMMARY_MS,
   setSessionObjective,
   unattributedRepairEta,
   cancelResume,
@@ -72,6 +90,7 @@ const {
   unattributedIncidentsSettledForTests,
   restoreCommands,
   resumeJobFor,
+  retrySessionResume,
   setBrowserOpener,
   shutdownBridge,
   STALE_SWARM_MS,
@@ -95,10 +114,10 @@ const {
   startBridge,
   stopBridge,
   sweepStaleSwarm,
+  pickupNow,
   noteRecoverySweepTick,
   unpair,
-  workerBriefForTests
-} = await import('../src/main/bridge.js');
+  workerBriefForTests, forgetPickupWatchesForTests } = await import('../src/main/bridge.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { setStuckNotifier } = await import('../src/main/stuck-notice.js');
 const {
@@ -340,11 +359,12 @@ async function waitForOpened(count = 1, timeout?: number): Promise<void> {
 
 async function waitForRevival(): Promise<{ id: string; conversationId: string }> {
   let revival: { id: string; conversationId: string } | null = null;
+  // The release runners (Intel macOS, Linux arm64) are slow: not vi.waitFor's one-second default.
   await vi.waitFor(async () => {
     const status = await request('GET', '/status');
     revival = status.body.revival ?? null;
     expect(revival).toMatchObject({ id: expect.any(String), conversationId: expect.any(String) });
-  });
+  }, { timeout: 10_000, interval: 50 });
   return revival!;
 }
 
@@ -357,7 +377,7 @@ async function waitForRevival(): Promise<{ id: string; conversationId: string }>
 async function redeem(id?: string, client = 'tab-1'): Promise<any> {
   if (!id) {
     const index = anonymousRedeemIndex++;
-    await vi.waitFor(() => expect(opened.length).toBeGreaterThan(index));
+    await vi.waitFor(() => expect(opened.length).toBeGreaterThan(index), { timeout: 10_000, interval: 20 });
     id = new URL(opened[index]!).searchParams.get('clf')!;
   }
   const reply = await request('POST', '/commands/redeem', { body: { id, client } });
@@ -426,6 +446,62 @@ beforeEach(async () => {
   await flushDurable();
   await setSecret('bridgeToken', '');
   token = null;
+});
+
+describe('lost first-message opening', () => {
+  const browser = 'openingownerbrowser1234', other = 'otheropeningbrowser1234';
+  let input: typeof import('../src/main/session/input.js');
+  beforeEach(async () => {
+    input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+  });
+  afterEach(async () => {
+    input.resetInputForTests();
+    await writeDurableNow('session-input', []);
+  });
+  it.each(['unclaimed', 'other-browser', 'missing-browser', 'no-handout', 'claimed', 'authorized'])(
+    'accepts a missing-tab report only from its holder before any claim (%s)', async phase => {
+      await pair();
+      const row = await input.enqueueInput({ id: randomUUID(), sessionId: null, text: 'Opening task',
+        mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+      if (phase !== 'no-handout') {
+        const status = await request('POST', '/status', { browser, body: { openConversations: [] } });
+        expect(status.body.inputs).toContainEqual({ id: row.id, conversationId: null });
+      }
+      if (phase === 'claimed' || phase === 'authorized')
+        expect(await input.claimBrowserInput(row.id, '7:document:0', null, true)).not.toBeNull();
+      if (phase === 'authorized') expect(await input.authorizeBrowserInput(row.id, '7:document:0', null)).toBe(true);
+      const before = await input.listInputs();
+      const reply = await request('POST', '/input/opening-unavailable', {
+        ...(phase === 'missing-browser' ? {} : { browser: phase === 'other-browser' ? other : browser }),
+        body: { id: row.id, tab: 7, stage: 'ready' }
+      });
+      if (phase === 'unclaimed') {
+        // Nothing reached the lost tab: twice a fresh one (the extension forgets the old), then Not sent.
+        expect(reply.body).toEqual({ ok: true, reopen: true });
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', openingReopens: 1 });
+        // The same lost tab again (its answer never reached the extension): the same grant, nothing spent.
+        expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 7, stage: 'ready' } })).body).toEqual({ ok: true, reopen: true });
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued', openingReopens: 1, openingReopenedTab: `${browser}:7` });
+        expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 8, stage: 'ready' } })).body).toEqual({ ok: true, reopen: true });
+        expect((await request('POST', '/input/opening-unavailable', { browser, body: { id: row.id, tab: 9, stage: 'ready' } })).body).toEqual({ ok: true });
+        expect((await input.listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed' });
+        expect(await input.pendingBrowserInputs()).toEqual([]);
+        expect(await input.claimBrowserInput(row.id, '7:late-document:0', null, true)).toBeNull();
+      } else {
+        expect(reply.status).toBe(['claimed', 'authorized'].includes(phase) ? 200 : 409);
+        expect(reply.body.ok).not.toBe(true);
+        expect(await input.listInputs()).toEqual(before);
+      }
+    });
+  it.each([{ tab: null, stage: 'opening' }, { tab: 7.5, stage: 'ready' }, { tab: 7, stage: 'sent' }])(
+    'refuses an invalid opening report %j', async report => {
+      await pair();
+      expect((await request('POST', '/input/opening-unavailable', {
+        browser, body: { id: randomUUID(), ...report }
+      })).status).toBe(400);
+    });
 });
 
 // ------------------------------------------------------------------ origin
@@ -541,6 +617,63 @@ describe('direct browser control over the paired bridge', () => {
 });
 
 describe('who is allowed to talk to it', () => {
+  it('logs only bounded close-outbox decision codes and only once per extension report', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const report = (action: string, reason: string, at: number) => request('POST', '/diagnostics', {
+      browser: 'aaaaaaaaaaaaaaaa',
+      body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+        preferences: { overwrite: true, durations: false },
+        closeOutboxDecision: { at, action, reason } }
+    });
+    const lines = () => info.mock.calls.map(([line]) => String(line)).filter(line => line.startsWith('browser: deferred /closed:') ||
+      line.startsWith('browser: discarded stale /closed:'));
+    await report('deferred', 'chrome_tab_open', 10_000);
+    await report('deferred', 'chrome_tab_open', 10_000);
+    await report('deferred', 'chrome_inventory_unavailable', 10_001);
+    await report('discarded', 'conversation_binding_open', 10_002);
+    await report('deferred', 'user chat title; forged status', 10_003);
+    await report('constructor', 'chrome_tab_open', 10_004);
+    expect(lines()).toEqual([
+      'browser: deferred /closed: Chrome still has the conversation tab',
+      'browser: deferred /closed: Chrome tab inventory was unavailable',
+      'browser: discarded stale /closed: the conversation was rebound'
+    ]);
+    info.mockRestore();
+  });
+
+  // 2026-10-30: an extension that kept Chrome's language for weeks said nothing anywhere.
+  it('logs once when the extension\'s stored language is not the app\'s, with its last error', async () => {
+    await pair();
+    const logger = await import('../src/main/logger.js');
+    const warn = vi.spyOn(logger, 'logWarn');
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'en' } });
+    const report = (language: unknown) => request('POST', '/diagnostics', { body: { capturedAt: Date.now(), status: { connected: true, paired: true },
+      preferences: { overwrite: true, durations: false }, language } });
+    const lines = () => warn.mock.calls.map(([line]) => String(line)).filter(line => line.includes("the extension's stored language"));
+    await report({ applied: 'en', stored: 'en', error: null });
+    expect(lines()).toEqual([]);
+    await report({ applied: null, stored: null, error: 'storage read did not answer within 5 s' });
+    await report({ applied: null, stored: null, error: 'storage read did not answer within 5 s' });
+    await report({ applied: 'en', stored: 'de', error: null });
+    expect(lines()).toEqual([
+      "browser: the extension's stored language is none (it uses the browser's), the app's is en; last attempt: storage read did not answer within 5 s",
+      "browser: the extension's stored language is de, the app's is en"]);
+    // An older extension reports no language: nothing to say.
+    await report(undefined);
+    expect(lines()).toHaveLength(2);
+    // The app's language changing is a new mismatch (CodeRabbit on #1940) ...
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, language: 'fr' } });
+    await report({ applied: 'en', stored: 'de', error: null });
+    expect(lines().at(-1)).toBe("browser: the extension's stored language is de, the app's is fr");
+    // ... and once they match, the same mismatch coming back is said again.
+    await report({ applied: 'fr', stored: 'fr', error: null });
+    await report({ applied: 'en', stored: 'de', error: null });
+    expect(lines()).toHaveLength(4);
+    warn.mockRestore();
+  });
+
   // A chat tab the extension reloaded off Chrome's error page says so in the app's log, once (2.1.47 round).
   it('logs the extension\'s error-page reloads once each', async () => {
     await pair();
@@ -638,6 +771,16 @@ describe('who is allowed to talk to it', () => {
     expect(status.body).toMatchObject({ language: 'en', browserPreferences: { overwrite: false, durations: true } });
   });
 
+  // 2026-11-01: the popup looks like the app: its colors for both themes and the theme it shows.
+  it('hands the app\'s theme and colors to the extension in /status', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, theme: 'light' } });
+    const status = await request('POST', '/status', { body: { openConversations: [] } });
+    expect(status.body.appearance.theme).toBe('light');
+    expect(status.body.appearance.light['--page']).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(status.body.appearance.dark['--accent-fill']).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+
   it('accepts only an exact plugin id or an exact missing report on /core-plugin', async () => {
     await pair();
     expect((await request('POST', '/core-plugin', { body: { appId: 'asdk_app_6aa5b6651c3c81919f03cb5dc38bf019' } })).status).toBe(200);
@@ -729,6 +872,7 @@ describe('who is allowed to talk to it', () => {
   // Its moz-extension:// origin says it is Firefox too.
   it('tells an older Firefox add-on apart by its origin', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
     const firefox = 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b';
     await request('GET', '/status', { host: 'browser', origin: firefox, extensionVersion: '2.1.37.1002' });
     expect((await bridgeStatus()).externalExtension).toMatchObject({ present: true, engine: 'gecko' });
@@ -740,6 +884,7 @@ describe('who is allowed to talk to it', () => {
   // record. Its user agent is on every one.
   it('keeps an older Firefox add-on apart on requests that carry no origin', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
     const firefox = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:152.0) Gecko/20100101 Firefox/152.0';
     await request('GET', '/status', { host: 'browser', origin: 'moz-extension://3f0e5b1a-0c1d-4e2f-8a9b-0c1d2e3f4a5b', extensionVersion: '2.1.37.1002', userAgent: firefox });
     await request('GET', '/status', { host: 'browser', origin: null, extensionVersion: '2.1.37.1002', userAgent: firefox });
@@ -778,10 +923,10 @@ describe('who is allowed to talk to it', () => {
     } finally { unsubscribe(); }
   });
 
-  // 2.1.41 bug hunt: with Chrome current and Firefox still on the add-on it had not updated yet, the one
-  // reported version followed whichever browser asked last, and the update notice came and went.
-  it('reports the oldest extension among connected browsers, with its engine, until that browser goes quiet', async () => {
+  // An older Firefox add-on must be reported when Firefox is selected, even as Chrome keeps polling.
+  it('reports the oldest selected-browser extension until it goes quiet', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
     const chrome = 'a'.repeat(32), firefox = 'b'.repeat(32);
@@ -789,7 +934,7 @@ describe('who is allowed to talk to it', () => {
       request('POST', '/status', { host: 'browser', browser, extensionVersion, engine, body: { openConversations: [] } });
     try {
       await ask(chrome, APP_VERSION);
-      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: null });
       expect((await bridgeStatus()).extensionEngine).toBeUndefined();
       await ask(firefox, '0.0.1', 'gecko');
       for (let i = 0; i < 3; i++) {
@@ -804,8 +949,9 @@ describe('who is allowed to talk to it', () => {
       changed.mockClear();
       await vi.advanceTimersByTimeAsync(20_002);
       expect(changed).toHaveBeenCalled();
-      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
-      expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+      // With no live Firefox sighting, keep its last reported version until another Firefox
+      // comes back; Chrome's version must not masquerade as Firefox's.
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
       // The same browser updated in place replaces its own entry.
       await ask(firefox, '0.0.1', 'gecko');
       expect(await bridgeStatus()).toMatchObject({ extensionVersion: '0.0.1', extensionEngine: 'gecko' });
@@ -814,8 +960,83 @@ describe('who is allowed to talk to it', () => {
     } finally { unsubscribe(); vi.useRealTimers(); }
   });
 
+  it('keeps old external extensions out of the native-browser update notice', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+    const native = 'c'.repeat(32), external = 'e'.repeat(32);
+    const status = (host: string, browser: string, extensionVersion: string) =>
+      request('POST', '/status', { host, browser, extensionVersion, body: { openConversations: [] } });
+    await status('browser', external, '2.1.42.1');
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: null, externalExtension: { version: '2.1.42.1' } });
+    await status('cos', native, APP_VERSION);
+    for (let i = 0; i < 2; i++) {
+      await status('browser', external, i === 0 ? '2.1.42.1' : '2.1.43.1');
+      expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION, cosExtension: { present: true } });
+    }
+    // A genuinely outdated native extension still needs its warning, despite external Chrome
+    // being up to date. Once native reloads, only that updated version should be reported.
+    await status('cos', native, '2.1.43.1');
+    await status('browser', external, APP_VERSION);
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.43.1' });
+    await status('cos', native, APP_VERSION);
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: APP_VERSION });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    await status('browser', external, '2.1.42.1');
+    expect(await bridgeStatus()).toMatchObject({ extensionVersion: '2.1.42.1' });
+  });
+
+  it('does not report the selected built-in browser connected only because external Chrome is paired', async () => {
+    await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+    const native = 'c'.repeat(32), external = 'e'.repeat(32);
+    const poll = (host: string, browser: string) => request('POST', '/status', {
+      host, browser, body: { openConversations: [] }
+    });
+    await poll('browser', external);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: false, extensionVersion: null,
+      externalExtension: { present: true }, cosExtension: { present: false } });
+    await poll('cos', native);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    // Chrome continues polling after the native browser closes. The external profile's
+    // valid shared credential must not make the selected native browser look connected.
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
+    try {
+      await vi.advanceTimersByTimeAsync(40_000);
+      await poll('browser', external);
+      await vi.advanceTimersByTimeAsync(20_002);
+      expect(await bridgeStatus()).toMatchObject({ paired: true, present: false,
+        externalExtension: { present: true }, cosExtension: { present: false } });
+      await poll('cos', native);
+      expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('projects Firefox and Chromium presence independently while sharing one valid pairing', async () => {
+    const credential = await pair();
+    const chrome = 'c'.repeat(32), firefox = 'f'.repeat(32);
+    const poll = (browser: string, engine?: string) => request('POST', '/status', {
+      host: 'browser', browser, engine, auth: credential, body: { openConversations: [] }
+    });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'firefox' } });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: false, extensionVersion: null });
+    await poll(firefox, 'gecko');
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true,
+      extensionVersion: APP_VERSION, extensionEngine: 'gecko' });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true,
+      extensionVersion: APP_VERSION, extensionEngine: 'gecko' });
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'chrome' } });
+    await poll(chrome);
+    expect(await bridgeStatus()).toMatchObject({ paired: true, present: true, extensionVersion: APP_VERSION });
+    expect((await bridgeStatus()).extensionEngine).toBeUndefined();
+    // Switching browsers changes the UI projection, not the pairing credential itself.
+    expect((await request('GET', '/status', { host: 'browser', browser: firefox, engine: 'gecko', auth: credential })).status).toBe(200);
+  });
+
   it('publishes external expiry while the CoS companion continues polling', async () => {
     await pair();
+    await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
     const changed = vi.fn(); const unsubscribe = onBridgeChange(changed);
     try {
@@ -929,9 +1150,34 @@ describe('who is allowed to talk to it', () => {
     expect(reply.body.bridge).toBe(BRIDGE_PROTOCOL);
     expect(reply.body.paired).toBe(false);
     // Identification must not double as a status leak.
-    expect(Object.keys(reply.body)).toEqual(['app', 'version', 'bridge', 'compatible', 'paired', 'disconnected']);
+    expect(Object.keys(reply.body)).toEqual(['app', 'version', 'bridge', 'compatible', 'paired', 'disconnected', 'instance']);
     expect(reply.body.disconnected).toBe(false);
     expect(reply.body.compatible).toBe(true);
+  });
+
+  it('names its app profile with one stable instance id, so an extension can tell two running apps apart', async () => {
+    const first = (await request('GET', '/hello', { auth: null })).body.instance as string;
+    expect(first).toMatch(/^[0-9a-f]{32}$/);
+    // Persisted in the profile, not the process: a restarted bridge answers the same id.
+    expect(JSON.parse(readFileSync(`${dir}/state/bridge-instance.json`, 'utf8'))).toEqual({ instance: first });
+    await stopBridge();
+    base = `http://127.0.0.1:${await startBridge()}`;
+    expect((await request('GET', '/hello', { auth: null })).body.instance).toBe(first);
+    // `/pair` names the instance that minted the token.
+    expect((await request('POST', '/pair', { auth: null, body: { reuse: true } })).body.instance).toBe(first);
+    // Another profile (the `npm run dev` one beside an installed app) is another instance.
+    const other = await makeTempDir('clf-bridge-other-');
+    try {
+      initDurableStore(other);
+      const second = (await request('GET', '/hello', { auth: null })).body.instance as string;
+      expect(second).toMatch(/^[0-9a-f]{32}$/);
+      expect(second).not.toBe(first);
+      expect((await request('GET', '/hello', { auth: null })).body.instance).toBe(second);
+    } finally {
+      initDurableStore(dir);
+      await removeTempDir(other);
+    }
+    expect((await request('GET', '/hello', { auth: null })).body.instance).toBe(first);
   });
 
   it('refuses every web page origin, chatgpt.com included', async () => {
@@ -1118,6 +1364,7 @@ describe('provisioning', () => {
 
   it('does not treat a persisted pairing token as proof the browser is present after restart', async () => {
     await pair();
+    await request('GET', '/status', { host: 'browser' });
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
 
     // Pairing is durable authorization; browser presence belongs to this app process. A
@@ -1129,6 +1376,7 @@ describe('provisioning', () => {
 
   it('requires a fresh browser sighting after the local bridge itself restarts', async () => {
     await pair();
+    await request('GET', '/status', { host: 'browser' });
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
 
     await stopBridge();
@@ -1139,7 +1387,7 @@ describe('provisioning', () => {
     expect(await bridgeStatus()).toMatchObject({ running: true, paired: true, present: false, lastSeenAt: null });
 
     // Authorization survived, so the first normal extension poll proves presence again.
-    expect((await request('GET', '/status')).status).toBe(200);
+    expect((await request('GET', '/status', { host: 'browser' })).status).toBe(200);
     expect(await bridgeStatus()).toMatchObject({ paired: true, present: true });
   });
 });
@@ -1818,6 +2066,66 @@ describe('activity feed', () => {
       clock.mockRestore();
       input.resetInputForTests();
       await writeDurableNow('session-input', []);
+    }
+  });
+
+  // #1960 (scuan2, reproduced on v2.1.49): with the built-in browser chosen, a repair for a chat that
+  // ordinary Chrome still holds went only to Chrome, whose claim is refused; the chosen browser never
+  // got it, and the chat sat. The chosen built-in browser takes a repair over, as it does inputs (#1516).
+  it('hands a repair for a chat an unchosen browser holds to the chosen built-in browser', async () => {
+    await pair();
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    const before = getConfig().ui.chatBrowser;
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+      const conversationId = randomUUID();
+      const session = await createSession({ conversationId });
+      const status = (browser: string, host: string, open: string[]) =>
+        request('POST', '/status', { body: { openConversations: open }, browser, host });
+      // The built-in browser is present; Chrome has the chat open.
+      await status(builtIn, 'cos', []);
+      await status(chrome, 'browser', [conversationId]);
+      await compactSession(session.id);
+      const fromChrome = ((await status(chrome, 'browser', [conversationId])).body.repairs ?? [])
+        .find((row: { conversationId: string }) => row.conversationId === conversationId);
+      // Chrome, not chosen, is handed no token it could not claim (CodeRabbit on #1963).
+      expect(fromChrome).toBeUndefined();
+      const fromBuiltIn = ((await status(builtIn, 'cos', [])).body.repairs ?? [])
+        .find((row: { conversationId: string }) => row.conversationId === conversationId);
+      expect(fromBuiltIn).toMatchObject({ reason: 'compaction' });
+      expect((await request('POST', '/repairs/claim', { body: { token: fromBuiltIn.token }, browser: builtIn, host: 'cos' })).body.allowed).toBe(true);
+    } finally {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
+    }
+  });
+
+  // CodeRabbit on #1963: with "browser only", the chosen built-in browser may not open the chat Chrome
+  // holds. It is not handed the repair (which it would skip unclaimed, spending the no-page budget on an
+  // open chat); the repair waits, said once, and Chrome's refused claim is logged.
+  it('keeps a repair waiting rather than spending it when browser only keeps the chosen browser from opening the chat', async () => {
+    await pair();
+    const chrome = 'c'.repeat(32), builtIn = 'd'.repeat(32);
+    const before = getConfig().ui;
+    try {
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos', browserOnly: true } });
+      const conversationId = randomUUID();
+      const session = await createSession({ conversationId });
+      const status = (browser: string, host: string, open: string[]) =>
+        request('POST', '/status', { body: { openConversations: open }, browser, host });
+      await status(builtIn, 'cos', []);
+      await status(chrome, 'browser', [conversationId]);
+      await compactSession(session.id);
+      for (let pass = 0; pass < 15; pass++) {
+        expect(((await status(builtIn, 'cos', [])).body.repairs ?? []).some((row: { conversationId: string }) => row.conversationId === conversationId)).toBe(false);
+        await status(chrome, 'browser', [conversationId]);
+      }
+      const waits = getLog().filter(entry => entry.message.includes(`repair for ${conversationId} waits: another browser holds this chat, and "browser only"`));
+      expect(waits).toHaveLength(1);
+      // Never declared pageless: the chat is open in Chrome. Once browser only is off, the chosen browser takes it.
+      await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, browserOnly: false } });
+      expect(((await status(builtIn, 'cos', [])).body.repairs ?? []).find((row: { conversationId: string }) => row.conversationId === conversationId)).toMatchObject({ reason: 'compaction' });
+    } finally {
+      await saveConfig({ ...getConfig(), ui: before });
     }
   });
 
@@ -2714,6 +3022,115 @@ describe('automatic compaction', () => {
     info.mockRestore();
   });
 
+  // 2026-11-01, the maintainer's Mac: a Loop chat stopped twice this way, and showing its tab by hand brought it
+  // back at once. A Goal or Loop chat is shown once per stuck repair, by a browser that can show chats, before
+  // the app gives up (user, 2026-11-02). Without such a browser nothing could be shown: it stops as before.
+  it.each([true, false])('shows a Loop chat once before it stops offering a repair nobody claims (browser can show chats: %s)', async canShow => {
+    const { setSessionAutomation } = await import('../src/main/bridge.js');
+    await pair();
+    const browser = 'cccccccccccccccc3333';
+    let socket: WebSocket | null = null;
+    if (canShow) {
+      socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+      await once(socket, 'open');
+      const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+    }
+    try {
+      const conversationId = randomUUID();
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'Continue this task', messageId: 'loop-never-claimed' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'loop-never-claimed-turn' }
+      ] } });
+      const session = (await findSessionByConversation(conversationId))!;
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'chat_error', time: Date.now(), turnId: 'loop-never-claimed-turn', recoverable: true,
+          text: 'Connection interrupted. Waiting for the complete answer' }
+      ] } });
+      await settled();
+      const reveals: string[] = [];
+      const offered = async (): Promise<boolean> => {
+        const body = (await request('POST', '/status', { browser, body: { openConversations: [], canReveal: true } })).body;
+        reveals.push(...(body.reveals ?? []));
+        return (body.repairs as Array<{ conversationId: string }>).some(row => row.conversationId === conversationId);
+      };
+      const notes = async () => (await readEvents(session.id, { kinds: ['note'] }))
+        .map(event => (event as { message: { text: string } }).message.text);
+
+      // The reply that hands over the chat to show skips the repair once; it stops for good only after that.
+      let seen = 0, absent = 0;
+      for (let pass = 0; pass < 60 && absent < 3; pass++) {
+        if (await offered()) { seen += 1; absent = 0; } else absent += 1;
+      }
+      expect(absent, 'the repair was still being offered after sixty reads').toBe(3);
+      expect((await sessionControlsFor(session.id)).pageless).toBe(true);
+      expect((await notes()).some(text => text.includes('has no page to reload'))).toBe(true);
+      if (canShow) {
+        // Shown once (the next status after the ten offers carries it), then nine more offers, then the stop.
+        await vi.waitFor(() => expect(reveals).toEqual([conversationId]), { timeout: 5_000 });
+        expect(seen).toBeGreaterThanOrEqual(19);
+        await vi.waitFor(async () => expect((await notes()).some(text => text.includes('showing its tab'))).toBe(true), { timeout: 5_000 });
+      } else {
+        expect(reveals).toEqual([]);
+        expect(seen).toBeLessThan(19);
+        expect((await notes()).some(text => text.includes('showing its tab'))).toBe(false);
+      }
+      expect(recoveryBrowserWake).not.toHaveBeenCalled();
+    } finally {
+      if (socket) { const closed = once(socket, 'close'); socket.close(); await closed; }
+    }
+  });
+
+  // CodeRabbit on #2027: a show the browser reports it could not carry out is not used up.
+  it.each(['soon', 'late'] as const)('shows a Loop chat again when the browser reports, %s, that it could not show it', async report => {
+    const { setSessionAutomation, unclaimedChatShowFailed } = await import('../src/main/bridge.js');
+    await pair();
+    const browser = 'dddddddddddddddd4444';
+    const socket = new WebSocket(base.replace('http:', 'ws:') + '/wake', { origin: EXTENSION_ORIGIN });
+    await once(socket, 'open');
+    const authenticated = once(socket, 'message'); socket.send(token!); await authenticated;
+    try {
+      const conversationId = randomUUID();
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'user_message', time: Date.now(), text: 'Continue this task', messageId: 'show-again' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'show-again-turn' }
+      ] } });
+      const session = (await findSessionByConversation(conversationId))!;
+      await setSessionAutomation(session.id, 'loop');
+      await request('POST', '/events', { body: { conversationId, events: [
+        { kind: 'chat_error', time: Date.now(), turnId: 'show-again-turn', recoverable: true,
+          text: 'Connection interrupted. Waiting for the complete answer' }
+      ] } });
+      await settled();
+      const reveals: string[] = [];
+      const poll = async (): Promise<boolean> => {
+        const body = (await request('POST', '/status', { browser, body: { openConversations: [], canReveal: true } })).body;
+        reveals.push(...(body.reveals ?? []));
+        return (body.repairs as Array<{ conversationId: string }>).some(row => row.conversationId === conversationId);
+      };
+      for (let pass = 0; pass < 30 && !reveals.length; pass++) await poll();
+      expect(reveals).toEqual([conversationId]);
+      if (report === 'late') {
+        // A report long after the show is not about it: the show stays used, and the chat ends page-less.
+        unclaimedChatShowFailed(conversationId, Date.now() + 61_000);
+        let still = true;
+        for (let pass = 0; pass < 40 && still; pass++) still = await poll() || (await poll());
+        expect(reveals).toEqual([conversationId]);
+        expect((await sessionControlsFor(session.id)).pageless).toBe(true);
+        return;
+      }
+      expect((await request('POST', '/reveal/failed', { body: { conversationId } })).body).toEqual({ ok: true });
+      for (let pass = 0; pass < 30 && reveals.length < 2; pass++) await poll();
+      expect(reveals).toEqual([conversationId, conversationId]);
+      // Failed again: no third show, and the chat ends page-less as before (CodeRabbit on #2027).
+      expect((await request('POST', '/reveal/failed', { body: { conversationId } })).body).toEqual({ ok: true });
+      let offered = true;
+      for (let pass = 0; pass < 40 && offered; pass++) offered = await poll() || (await poll());
+      expect(reveals).toHaveLength(2);
+      expect((await sessionControlsFor(session.id)).pageless).toBe(true);
+    } finally { const closed = once(socket, 'close'); socket.close(); await closed; }
+  });
+
   it('stops offering a repair the browser never claims, and says the chat has no page', async () => {
     await pair();
     const conversationId = randomUUID();
@@ -2836,6 +3253,92 @@ describe('automatic compaction', () => {
     expect((await request('POST', '/repairs/claim', { body: { token: errorRepair.token } })).body.allowed).toBe(false);
   });
 
+  // 2026-11-01: ChatGPT stopped serving a resumed chat ("temporarily limited access to this conversation
+  // history"), so its Compact & Resume never got a summary and the chat sat stuck for hours. After a
+  // while the last saved summary (written in the earlier chat) is offered, and using it ends that wait.
+  it('offers the last saved summary when a Compact & Resume waits too long, and continuing from it cancels the wait', async () => {
+    await pair();
+    const chatA = randomUUID(), chatB = randomUUID();
+    const session = await createSession({ conversationId: chatA });
+    const first = await openContinuationNow(session.id, chatA);
+    await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+    expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+    expect(await commitContinuation(first.token, chatB)).toBe(true);
+    const saved = (await findSessionByConversation(chatB))!.lastHandoffId!;
+    await compactSession(session.id);
+    const stuck = continuationForSession(session.id)!;
+    expect((await sessionControlsFor(session.id)).lastSummary).toBeNull();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      vi.setSystemTime(Date.now() + STUCK_SUMMARY_MS + 1_000);
+      expect((await sessionControlsFor(session.id)).lastSummary).toMatchObject({ handoffId: saved, earlierChat: true });
+      // A summary that cannot be used ends nothing: the waiting Compact & Resume stays (CodeRabbit on #2019).
+      await expect(resumeFromSavedSummary(session.id, 'not-a-saved-summary')).rejects.toThrow('This summary can no longer be used');
+      expect(continuationForSession(session.id)?.token).toBe(stuck.token);
+      await resumeFromSavedSummary(session.id, saved);
+      const now = continuationForSession(session.id)!;
+      expect(now.token).not.toBe(stuck.token);
+      expect(now.state).toBe('awaiting-chat');
+      expect(getLog().some(entry => entry.message.includes(`continues from saved summary ${saved}; the Compact & Resume still waiting for ChatGPT's summary is cancelled`))).toBe(true);
+      // The new run has its summary already: nothing is offered any more.
+      expect((await sessionControlsFor(session.id)).lastSummary).toBeNull();
+    } finally { vi.useRealTimers(); }
+  });
+
+  // The unattended case (2026-11-01): a Loop chat ran on with nobody watching, and its automatic
+  // compaction could never ask ChatGPT for a summary. After a slowed burst too failed, it continues from
+  // the last saved summary in a new chat of the same session, by itself.
+  it.each(['loop', 'off', 'blocked'] as const)('continues a Loop chat from its last saved summary when its automatic compaction never reaches ChatGPT (automation %s)', async automation => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const chatA = randomUUID(), chatB = randomUUID();
+      const session = await createSession({ conversationId: chatA });
+      const first = await openContinuationNow(session.id, chatA);
+      await attachSummary(first.token, 'TASK\n\nKeep auditing the fleet manager and fix what the audit finds.\n'.repeat(4));
+      expect(await claimContinuationNow(first.token, 'page-b')).not.toBeNull();
+      expect(await commitContinuation(first.token, chatB)).toBe(true);
+      const saved = (await findSessionByConversation(chatB))!.lastHandoffId!;
+      if (automation !== 'off') await setSessionAutomation(session.id, 'loop');
+      const filed = await request('POST', '/compact', { body: { conversationId: chatB, ticket: true, automatic: true } });
+      const ticket = filed.body.token as string;
+      // A refused filing would make every case below pass for the wrong reason.
+      expect(ticket, JSON.stringify(filed.body)).toEqual(expect.any(String));
+      // A block keeps the switch's state, but a blocked chat is never moved. Blocked after filing, so the
+      // ticket reaches the saved-summary gate itself (CodeRabbit on #2019).
+      if (automation === 'blocked') setChatBlocked(chatB, true);
+      let continued = false;
+      for (let pass = 0; pass < 30 && !continued; pass++) {
+        await vi.advanceTimersByTimeAsync(2 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = ((await request('GET', '/status')).body.repairs as Array<{ conversationId: string; reason: string; token: string }> | undefined)
+          ?.find(row => row.conversationId === chatB && row.reason === 'compaction');
+        if (repair) {
+          await request('POST', '/repairs/claim', { body: { token: repair.token } });
+          await request('GET', `/status?repaired=${encodeURIComponent(repair.token)}&repairAction=reloaded`);
+        }
+        const now = continuationForSession(session.id);
+        continued = !!now && now.token !== ticket && now.state === 'awaiting-chat';
+      }
+      if (automation === 'blocked') setChatBlocked(chatB, false);
+      if (automation !== 'loop') {
+        // Somebody is meant to be watching a chat without Goal or Loop: it is never moved by itself,
+        // and the controls offer the saved summary instead.
+        expect(continued).toBe(false);
+        expect(getLog().some(entry => entry.message.includes(`continues in a new chat from saved summary ${saved}`))).toBe(false);
+        // Without Goal or Loop the gate says why it did not move the chat. A blocked chat is held before it:
+        // no compaction repair is offered for it at all, so its ticket only waits.
+        if (automation === 'off') expect(getLog().some(entry =>
+          entry.message.includes(`${ticket.slice(0, 8)} does not continue from the saved summary: Goal and Loop are off for this chat`))).toBe(true);
+        else expect(continuationForSession(session.id)?.token).toBe(ticket);
+        return;
+      }
+      expect(continued).toBe(true);
+      expect(continuationForSession(session.id)).toMatchObject({ state: 'awaiting-chat' });
+      expect(getLog().some(entry => entry.message.includes(`the loop chat continues in a new chat from saved summary ${saved}`))).toBe(true);
+    } finally { vi.useRealTimers(); }
+  });
+
   it.each(['cancelled', 'replaced', 'dispatched'] as const)('opens a manual source immediately and revokes a %s ticket before browser action', async scenario => {
     await pair();
     const conversationId = randomUUID();
@@ -2879,6 +3382,28 @@ describe('automatic compaction', () => {
     expect((await request('GET', '/status')).body.repairs.some((row: { token: string }) => row.token === handout.token)).toBe(true);
   });
 
+  // #2074: a page that kept answering "held" (the app's own Continue was back in its message box) used
+  // up the no-page budget, and recovery ended with "no page; not offering again" while that page was there.
+  it('never ends recovery as "no page" while the page keeps answering that it holds the repair, and logs a cleared leftover', async () => {
+    await pair();
+    const conversationId = randomUUID();
+    const session = await createSession({ conversationId });
+    await compactSession(session.id);
+    for (let pass = 0; pass < 15; pass++) {
+      const offered = (await request('GET', '/status')).body.repairs
+        .find((row: { conversationId: string }) => row.conversationId === conversationId);
+      expect(offered).toBeTruthy();
+      await request('GET', `/status?repairHeld=${encodeURIComponent(offered.token)}&why=draft`);
+    }
+    expect(getLog().some(entry => entry.message.includes(`${conversationId} never claimed`))).toBe(false);
+    const handout = (await request('GET', '/status')).body.repairs
+      .find((row: { conversationId: string }) => row.conversationId === conversationId);
+    // The report itself hands out no work, as for a held repair (CodeRabbit on #2079).
+    expect((await request('GET', `/status?repairCleared=${encodeURIComponent(handout.token)}`)).body.repairs).toEqual([]);
+    expect(getLog().some(entry => entry.message ===
+      `bridge: the page removed this app's own already-sent message, restored into ${conversationId}'s message box, before the compaction repair`)).toBe(true);
+  });
+
   it('says an app-started Compact & resume reloaded its chat to send the request, in a row naming that chat', async () => {
     await pair();
     const conversationId = randomUUID();
@@ -2897,6 +3422,56 @@ describe('automatic compaction', () => {
       [conversationId, 'Reloaded chat to send the handoff request for Compact & resume.']
     ]);
   });
+
+  // #1922 (scuan2): a page that tries to claim a repair and is refused for the moment is a page. Its
+  // refusals must not use up the "never claimed … no page" budget, and each refusal says why. Nor do
+  // the polls of a browser that may not claim it (CodeRabbit on #1953): with the built-in browser
+  // chosen, Chrome still sees the chat but its polls are not offers anyone could take.
+  it.each(['one browser', 'a second, unchosen browser polling too', 'a second eligible browser polling without claiming'] as const)(
+    'keeps offering a repair whose page keeps trying to claim it, and logs why each claim was refused (%s)', async variant => {
+      await pair();
+      const builtIn = 'd'.repeat(32), chrome = 'c'.repeat(32);
+      const before = getConfig().ui.chatBrowser;
+      const conversationId = randomUUID();
+      // Another chat keeps saving its events meanwhile, so each claim is refused for the moment.
+      const other = randomUUID();
+      heldRecording.conversationId = other;
+      let busy: Promise<unknown> | null = null;
+      try {
+        const unchosen = variant === 'a second, unchosen browser polling too';
+        if (unchosen) await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: 'cos' } });
+        const asker: Record<string, string> = unchosen ? { browser: builtIn, host: 'cos' } : variant === 'one browser' ? {} : { browser: 'a'.repeat(32), host: 'browser' };
+        const bystander: Record<string, string> = unchosen ? { browser: chrome, host: 'browser' } : { browser: 'b'.repeat(32), host: 'browser' };
+        const session = await createSession({ conversationId });
+        await compactSession(session.id);
+        const offered = async (who: Record<string, string> = asker) => ((await request('POST', '/status', { body: { openConversations: [conversationId] }, ...who })).body.repairs ?? [])
+          .find((row: { conversationId: string }) => row.conversationId === conversationId);
+        expect(await offered()).toMatchObject({ reason: 'compaction' });
+        busy = request('POST', '/events', { body: { conversationId: other, events: [{ kind: 'progress', time: Date.now(), turnId: 'other-turn', text: 'Working' }] } });
+        await vi.waitFor(() => expect(heldRecording.release).not.toBeNull(), { timeout: 10_000 });
+        let tries = 0;
+        for (let pass = 0; pass < 14; pass++) {
+          if (variant !== 'one browser') await offered(bystander);
+          const handout = await offered();
+          if (!handout) break;
+          tries += 1;
+          expect((await request('POST', '/repairs/claim', { body: { token: handout.token }, ...asker })).body.allowed).toBe(false);
+        }
+        expect(tries).toBe(14);
+        expect(getLog().some(entry => entry.message.includes(`${conversationId} never claimed`))).toBe(false);
+        // Said once a minute per chat and reason, not once per refusal.
+        expect(getLog().filter(entry => entry.message.includes(`refused the compaction repair claim for ${conversationId}: a chat was still saving its events`))).toHaveLength(1);
+        heldRecording.release!(); heldRecording.conversationId = null; heldRecording.release = null;
+        await busy; busy = null;
+        // Once the write is done, the same repair is claimed.
+        expect((await request('POST', '/repairs/claim', { body: { token: (await offered()).token }, ...asker })).body.allowed).toBe(true);
+      } finally {
+        // Never leave the write open: later claims in this file would all be refused.
+        heldRecording.release?.(); heldRecording.conversationId = null; heldRecording.release = null;
+        await busy?.catch(() => undefined);
+        await saveConfig({ ...getConfig(), ui: { ...getConfig().ui, chatBrowser: before } });
+      }
+    });
 
   it('hands out an explicitly requested Compact & resume for a chat whose tab the user closed', async () => {
     // 2026-09-30, live on 2.1.22: the test chat's tab had been closed, so its automatic recovery
@@ -3917,6 +4492,47 @@ describe('automatic compaction', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  // 2026-11-03 (Mac, 2 days): ChatGPT limited the chat's history, so its page never showed the latest
+  // tool results answered; every automatic attempt ended at that receipt, or a recovery reload cut the
+  // wait short, while the chat grew past its limit. The app now lets a later attempt ask without it.
+  it.each([
+    ['one attempt that waited the receipt out', ['results-unconfirmed'], true],
+    ['two attempts cut short', ['results-wait-changed', 'results-wait-changed'], false],
+    ['three attempts cut short', ['results-wait-changed', 'results-wait-changed', 'results-wait-changed'], true],
+    ['deferrals for other reasons', [null, null, null, null], false],
+    // This machine's own call kept the receipt from being checked: not a receipt miss (CodeRabbit on #2056).
+    ['attempts whose local call kept running', ['local-tools-running', 'local-tools-running', 'local-tools-running'], false]
+  ] as const)('asks for the handoff without the tool-result receipt after %s', async (_case, codes, waived) => {
+    await pair();
+    const conversationId = `a1a1a1a1-0000-4000-8000-0000000${String(codes.length)}${waived ? 'b' : 'c'}${codes[0] === null ? 'd' : codes[0] === 'local-tools-running' ? 'f' : 'e'}00`;
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a long chat whose results ChatGPT never confirms', messageId: `m-${conversationId}` }] }
+    });
+    const first = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    expect(first.body.waiveReceipt).toBeUndefined();
+    const token = first.body.token as string;
+    for (const code of codes) {
+      expect((await request('POST', '/compact', { body: { conversationId, token, sourceDeferred: true,
+        sourceError: 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.', ...(code ? { sourceErrorCode: code } : {}) } })).status).toBe(200);
+    }
+    const again = await request('POST', '/compact', { body: { conversationId, ticket: true, automatic: true } });
+    expect(again.body.token).toBe(token);
+    expect(again.body.waiveReceipt === true).toBe(waived);
+    const lines = getLog().map(entry => entry.message).filter(line => line.includes(`compaction ticket ${token.slice(0, 8)}`) && line.includes('without ChatGPT\'s receipt'));
+    expect(lines).toHaveLength(waived ? 1 : 0);
+  });
+
+  it('never waives the receipt for a manual Compact & Resume', async () => {
+    await pair();
+    const conversationId = 'a1a1a1a1-0000-4000-8000-00000000ac1f';
+    await request('POST', '/events', {
+      body: { conversationId, events: [{ kind: 'user_message', time: Date.now(), text: 'a manual press', messageId: 'm-manual-waive' }] }
+    });
+    const filed = await request('POST', '/compact', { body: { conversationId, ticket: true } });
+    await request('POST', '/compact', { body: { conversationId, token: filed.body.token, sourceDeferred: true, sourceError: 'x', sourceErrorCode: 'results-unconfirmed' } });
+    expect((await request('POST', '/compact', { body: { conversationId, ticket: true } })).body.waiveReceipt).toBeUndefined();
   });
 
   it('takes no deferral reason for a manual Compact & Resume', async () => {
@@ -4964,7 +5580,7 @@ describe('delivering a bootstrap', () => {
           {
             kind: 'user_message',
             time: Date.now(),
-            text: 'Continue the previous Chat On Steroids session. Read the handoff below.',
+            text: 'Continue the previous Chat Marks session. Read the handoff below.',
             messageId: 'boot-resume'
           }
         ]
@@ -5230,7 +5846,10 @@ describe('delivering a bootstrap', () => {
       expect(userPromptText(command.text)).toContain('PROJECT_TASK_PRESERVED');
       expect(userPromptText(command.text)).not.toMatch(/SCOPED_AGENTS|Cut off/);
     } else {
-      expect(command.text).not.toContain('[[COS_CONTEXT:');
+      // Compact & Resume starts a new ChatGPT document, so the short Marks persona
+      // now belongs in that opening; the full AGENTS/setup instructions still do not.
+      expect(command.text).toContain('[[COS_CONTEXT:');
+      expect(command.text).toContain('Você é Marks');
       expect(command.text).not.toContain('SCOPED_AGENTS_HEAD');
       expect(command.text).toContain('PROJECT_TASK_PRESERVED');
     }
@@ -5778,6 +6397,29 @@ describe('delivering a bootstrap', () => {
    * names the same id back, and the browser has to say which conversation it typed into
    * before the broker will believe the worker is awake.
    */
+  // #1952: a worker opened on GPT-5.6 high went on in GPT-6 medium, because its wake was typed
+  // without choosing a model. The wake carries the worker's own model and effort.
+  it('asks the page to choose the worker\'s own model and effort before typing its wake', async () => {
+    await pair();
+    spawn({ workers: [{ task: 'write the audit', model: 'gpt-5-6', reasoning_effort: 'high' }], caller: { conversationId: PRIME_CHAT } });
+    const bootstrap = await redeem();
+    expect(bootstrap).toMatchObject({ model: 'gpt-5-6', reasoningEffort: 'high' });
+    const conversationId = 'cafecafe-7654-3210-fedc-ba98765432a1';
+    await request('POST', '/commands/ack', { body: { id: bootstrap.id, status: 'sent', conversationId, agent: 'worker-1' } });
+    finishAgent({ conversationId }, 'the first half is done');
+    wake([{ to: 'worker-1', text: 'now do the second half' }]);
+    const revival = await waitForRevival();
+    const claimed = await request('POST', '/commands/redeem', { body: { id: revival.id, client: 'tab-wake-model', conversationId } });
+    expect(claimed.body.command).toMatchObject({ type: 'revive', model: 'gpt-5-6', reasoningEffort: 'high' });
+    // Another page cannot report it: only the page that redeemed the wake speaks for it.
+    const foreign = await request('POST', '/commands/step', { body: { id: revival.id, client: 'tab-someone-else', step: 'model-unconfirmed' } });
+    expect(foreign.body.ok).not.toBe(true);
+    expect(getLog().some(entry => entry.message.includes(`worker-1's wake in ${conversationId} goes out on ChatGPT's current model`))).toBe(false);
+    // The picker could not confirm it: the wake goes out anyway, and the app says on what.
+    expect((await request('POST', '/commands/step', { body: { id: revival.id, client: 'tab-wake-model', step: 'model-unconfirmed' } })).body).toEqual({ ok: true });
+    expect(getLog().some(entry => entry.message.includes(`worker-1's wake in ${conversationId} goes out on ChatGPT's current model: gpt-5-6 high could not be confirmed`))).toBe(true);
+  });
+
   it("routes revival to the worker's own chat without opening a duplicate, and treats the typed message as an offer", async () => {
     await pair();
     spawn({ workers: [{ task: 'write the audit' }], caller: { conversationId: PRIME_CHAT } });
@@ -7995,6 +8637,21 @@ ${SAMPLE_BRIEF}` }
       expect((await poll(other, [])).placement).toBeNull();
       expect((await poll(holder, [home])).placement).toMatchObject({ id: command.id, homeConversationId: home, active: true });
     });
+
+    // CodeRabbit on #2079: a repair report's reply is not read, so it must not spend a placement.
+    it('keeps a placement for the next poll when the browser only reports a repair', async () => {
+      await pair();
+      const home = 'c0c0c0c0-1111-4222-8333-000000000b04';
+      const { sessionId, token } = await compactedSession(home, 'carry on');
+      await poll(holder, [home]);
+      const command = queueResume(sessionId, token)!;
+      await vi.waitFor(async () => expect((await readDurable<any>('bridge-commands'))?.commands?.some((row: any) => row.id === command.id && row.phase === 'leased')).toBe(true), { timeout: 10_000 });
+      for (const report of ['repairCleared=some-token', 'repairHeld=some-token&why=draft', 'repairFailed=some-token&why=changed']) {
+        const reply = await request('POST', `/status?${report}`, { body: { openConversations: [home] }, browser: holder });
+        expect(reply.body.placement ?? null).toBeNull();
+      }
+      expect((await poll(holder, [home])).placement).toMatchObject({ id: command.id, homeConversationId: home, active: true });
+    });
   });
 
   it('never issues a second open while the handed-out browser tab is still hydrating', async () => {
@@ -8270,6 +8927,20 @@ describe('targeted open', () => {
     }
   });
 
+  // 2026-11-01 (Mac): a resume whose model the picker could not confirm was abandoned. It now goes on
+  // on ChatGPT's current model, and the app says which model it could not confirm.
+  it('logs a Compact & Resume that goes on without its model', async () => {
+    setBrowserOpener(async (url) => { opened.push(url); });
+    await pair();
+    const { sessionId, token } = await automaticCompactedSession('66666666-7777-8888-9999-aaaaaaaaaaaf', 'the brief');
+    const first = queueResume(sessionId, token)!;
+    await waitForOpened(1, 10_000);
+    await redeem(first.id, 'tab-1');
+    expect((await request('POST', '/commands/step', { body: { id: first.id, client: 'tab-1', step: 'model-unconfirmed' } })).body).toEqual({ ok: true });
+    expect(getLog().some(entry => entry.level === 'warn' && entry.message.includes(`the Compact & Resume of session ${sessionId} starts its new chat on ChatGPT's current model`))).toBe(true);
+    expect(continuationByToken(token)?.state).not.toBe('aborted');
+  });
+
   /**
    * #882 (2026-10-04): the replacement chat of an automatic handoff stopped at "choosing the model
    * and reasoning" and the app waited out its whole 15-minute window. Meanwhile the prime was
@@ -8302,6 +8973,119 @@ describe('targeted open', () => {
       // The ticket survives, and the next pickup can carry the brief.
       const second = queueResume(sessionId, token)!;
       expect((await redeem(second.id, 'tab-2')).text).toContain('the stalled brief');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('retries three model-stalled resume openings with backoff then offers an explicit retry', async () => {
+    vi.useFakeTimers();
+    try {
+      setBrowserOpener(async url => { opened.push(url); });
+      await pair();
+      const { sessionId, token } = await automaticCompactedSession(
+        '62626262-7777-8888-9999-aaaaaaaaaaaa', 'durable fallback brief');
+      const first = queueResume(sessionId, token)!;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        const active = pendingCommands().find(row => row.what === `resume:${sessionId}`);
+        expect(active).toBeDefined();
+        expect((await redeem(active!.id, `model-tab-${attempt}`)).text).toContain('durable fallback brief');
+        if (attempt > 1) {
+          const chosen = await request('POST', '/commands/redeem', { body: { id: active!.id, client: `model-tab-${attempt}` } });
+          expect(chosen.body.command.model).toBeNull();
+        }
+        expect((await request('POST', '/commands/step', { body: { id: active!.id, client: `model-tab-${attempt}`, step: 'model' } })).body).toEqual({ ok: true });
+        await vi.advanceTimersByTimeAsync(3 * 60_000 + 1_000);
+        await vi.waitFor(() => expect(pendingCommands().some(row => row.id === active!.id)).toBe(false));
+        expect(continuationByToken(token)?.openingFailures).toBe(attempt);
+        if (attempt < 3) {
+          await vi.advanceTimersByTimeAsync(attempt === 1 ? 20_001 : 60_001);
+          await sweepStaleSwarm(Date.now());
+          expect(pendingCommands().filter(row => row.what === `resume:${sessionId}`)).toHaveLength(1);
+        }
+      }
+      expect(resumeJobFor(sessionId)).toMatchObject({ stage: 'failed', canRetry: true, openingAttempts: 3 });
+      expect(continuationByToken(token)?.state).not.toBe('aborted');
+      await vi.advanceTimersByTimeAsync(20 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect(pendingCommands().filter(row => row.what === `resume:${sessionId}`)).toHaveLength(0);
+      await retrySessionResume(sessionId);
+      expect(resumeJobFor(sessionId)).toMatchObject({ canRetry: false, openingAttempts: 0 });
+      expect(pendingCommands().filter(row => row.what === `resume:${sessionId}`)).toHaveLength(1);
+      expect(first.id).not.toBe(pendingCommands().at(-1)?.id);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // #1882 (2026-11-02, a user's Windows log): ChatGPT did not open the source Project within a minute
+  // while it was limiting that chat's history. The app abandoned the finished brief, and the next
+  // automatic try had to write a new one. Nothing was sent, so the brief is kept and opened again.
+  it.each([
+    ['source-ready-timeout:last=source-not-ready', true, true],
+    ['transition-timeout:last=source-route', true, true],
+    ['user-interrupted', true, false],
+    ['source-ready-timeout:last=source-not-ready', false, false]
+  ] as const)('keeps the brief of a Compact & Resume whose new chat ChatGPT did not open in time (%s, automatic: %s)', async (detail, automatic, kept) => {
+    setBrowserOpener(async (url) => { opened.push(url); });
+    await pair();
+    const source = `68888888-7777-8888-9999-${automatic ? 'a' : 'b'}${kept ? 'c' : 'd'}${detail.slice(0, 1) === 's' ? 'e' : detail.slice(0, 1) === 't' ? 'f' : '0'}aaaaaaaa1`;
+    const { sessionId, token } = automatic ? await automaticCompactedSession(source, 'the kept brief') : await compactedSession(source, 'the kept brief');
+    const first = queueResume(sessionId, token)!;
+    await waitForOpened(1, 10_000);
+    expect((await redeem(first.id, 'tab-1')).text).toContain('the kept brief');
+    const prior = new Set(getLog());
+    const ack = await request('POST', '/commands/ack', { body: { id: first.id, client: 'tab-1', status: 'failed',
+      error: 'ChatGPT could not open the source Project through its native link; nothing was sent', detail: `project-entry:${detail}` } });
+    expect(ack.status).toBe(200);
+    expect(pendingCommands().some(entry => entry.id === first.id)).toBe(false);
+    expect(continuationByToken(token)?.state === 'aborted').toBe(!kept);
+    expect(getLog().some(entry => !prior.has(entry) && entry.message.includes('the brief is kept and the new chat is opened again at the next pickup'))).toBe(kept);
+    if (!kept) return;
+    expect(continuationByToken(token)).toMatchObject({ destinationSend: { state: 'not-attempted' } });
+    // The same brief, not a new one, goes to the next attempt.
+    const second = queueResume(sessionId, token)!;
+    expect(second.id).not.toBe(first.id);
+    expect((await redeem(second.id, 'tab-2')).text).toContain('the kept brief');
+  });
+
+  // #1882: after its three quick tries, an automatic ticket with a written brief stopped trying to
+  // open its new chat at all, and while open it owns the chat's recovery: the chat stopped for good.
+  it('keeps opening the new chat of an automatic Compact & Resume once an hour after its quick tries', async () => {
+    vi.useFakeTimers();
+    try {
+      setBrowserOpener(async (url) => { opened.push(url); });
+      await pair();
+      const { sessionId, token } = await automaticCompactedSession('69999999-7777-8888-9999-aaaaaaaaaaa1', 'the hourly brief');
+      const resumes = () => pendingCommands().filter(entry => entry.what.startsWith('resume:'));
+      const fail = async () => {
+        const [command] = resumes();
+        expect(command, 'a resume is offered').toBeTruthy();
+        expect((await redeem(command!.id, `tab-${command!.id}`)).text).toContain('the hourly brief');
+        await request('POST', '/commands/ack', { body: { id: command!.id, client: `tab-${command!.id}`, status: 'failed',
+          error: 'nothing was sent', detail: 'project-entry:source-ready-timeout:last=source-not-ready' } });
+        expect(resumes()).toHaveLength(0);
+      };
+      // Whatever offered the first one, three quick pickups follow, each 15 minutes apart.
+      if (resumes().length) await fail();
+      await sweepStaleSwarm(Date.now()); // the opening phase's clock starts here
+      for (let quick = 0; quick < 3; quick++) {
+        await vi.advanceTimersByTimeAsync(15 * 60_000 + 1_000);
+        await sweepStaleSwarm(Date.now());
+        await fail();
+      }
+      // Then not every 15 minutes, but once an hour, said once: three hours swept every 5 minutes.
+      const offeredAt: number[] = [];
+      for (let step = 0; step < 36; step++) {
+        await vi.advanceTimersByTimeAsync(5 * 60_000);
+        await sweepStaleSwarm(Date.now());
+        if (resumes().length) { offeredAt.push(Date.now()); await fail(); }
+      }
+      expect(offeredAt.length).toBeGreaterThanOrEqual(2);
+      expect(offeredAt.length).toBeLessThanOrEqual(3);
+      for (let at = 1; at < offeredAt.length; at++) expect(offeredAt[at]! - offeredAt[at - 1]!).toBe(60 * 60_000);
+      expect(getLog().filter(entry => entry.message.includes('could not open its new chat after 3 pickups — trying once an hour'))).toHaveLength(1);
+      expect(continuationByToken(token)?.state).not.toBe('aborted');
+      expect(getLog().filter(entry => entry.message.includes('trying once an hour'))).toHaveLength(1);
+      void sessionId;
     } finally {
       vi.useRealTimers();
     }
@@ -9305,6 +10089,10 @@ describe('unattributed activity recovery', () => {
             '&repairAction=reloaded&why=changed&detail=navigating');
         };
         await failWhileNavigating(first!);
+        // A still-loading tab is no failure: said once as information, never as a warning (2026-11-01).
+        const said = getLog().filter(entry => entry.message.includes(conversationId));
+        expect(said.some(entry => entry.message.includes('was still loading; the ' + reason + ' repair tries again'))).toBe(true);
+        expect(said.some(entry => entry.level === 'warn' && entry.message.includes('reported failed'))).toBe(false);
 
         expect(await maintenance()).toBeNull();
         await vi.advanceTimersByTimeAsync(NAVIGATION_RECOVERY_COOLDOWN_MS - 1);
@@ -9350,6 +10138,27 @@ describe('unattributed activity recovery', () => {
     await maintenance(retry!.token, 'reloaded');
     await events(OTHER, [{ kind: 'chat_error', time: Date.now(), turnId: 'h2-turn', text: 'another notice', recoverable: true, reason: 'stream_gone' }]);
     expect(await maintenance()).toBeNull();
+  });
+
+  // CodeRabbit on #2080: a finished repair that keeps no activity grant is no work for history Retry.
+  it('stops counting a finished repair as work once its chat keeps no activity grant', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      await events(OTHER, [{ kind: 'user_message', time: Date.now(), messageId: 'retry-done-question', text: 'Work on this task.' }, openTurn('retry-done-turn')]);
+      await events(OTHER, [{ kind: 'chat_error', time: Date.now(), turnId: 'retry-done-turn', text: 'The response stream is unavailable.',
+        recoverable: true, reason: 'stream_gone' }]);
+      const repair = await maintenance();
+      expect(repair).toMatchObject({ conversationId: OTHER, reason: 'assistant-error' });
+      expect((await request('POST', '/repairs/claim', { body: { token: repair!.token } })).body.allowed).toBe(true);
+      await maintenance(repair!.token, 'reloaded');
+      await events(OTHER, [{ kind: 'turn_end', time: Date.now(), turnId: 'retry-done-turn', outcome: 'completed' }]);
+      const view = async () => (await request('GET', `/activity?conversationId=${OTHER}`)).body.historyRetry;
+      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      expect(await view()).toEqual({ wanted: false });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('lets the user cancel an interrupted-response reload for this answer only (#1032)', async () => {
@@ -9776,7 +10585,7 @@ describe('unattributed activity recovery', () => {
       {
         kind: 'user_message',
         time: Date.now(),
-        text: '[[CLF-RESUME:O8THi8gMTC6LvH9GLclDIQ]]\n\nContinuing a Chat On Steroids session that was compacted.',
+        text: '[[CLF-RESUME:O8THi8gMTC6LvH9GLclDIQ]]\n\nContinuing a Chat Marks session that was compacted.',
         messageId: 'm-b-bootstrap'
       }
     ]);
@@ -9880,6 +10689,11 @@ describe('unattributed activity recovery', () => {
           await vi.advanceTimersByTimeAsync(APPROVAL_FRESH_MS);
         } else {
           // The page reports approval=0 both after an answer and when the card disappears.
+          await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
+          // A one-poll disappearance is not an answer: React can redraw the same
+          // permission card. The disappearance becomes authoritative after its grace.
+          const { APPROVAL_GONE_MS } = await import('../src/main/approval-wait.js');
+          await vi.advanceTimersByTimeAsync(APPROVAL_GONE_MS);
           await request('GET', `/activity?conversationId=${PRIME}&approval=0`);
         }
         const repair = await maintenance();
@@ -11580,6 +12394,79 @@ describe('unattributed activity recovery', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  it('logs a ChatGPT announcement a page closed, once a minute per chat and heading, and refuses any other note (2026-10-30)', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const lines = () => getLog().filter(entry => entry.message.includes("closed ChatGPT's announcement")).map(entry => entry.message);
+      const before = lines().length;
+      const note = (body: unknown) => request('POST', '/page-note', { body });
+      expect((await note({ note: 'announcement-closed', heading: 'Premium seats just got better', conversationId: PRIME })).body).toEqual({ ok: true });
+      expect((await note({ note: 'announcement-closed', heading: 'Premium seats just got better', conversationId: PRIME })).body).toEqual({ ok: true });
+      expect(lines().slice(before)).toEqual([`bridge: the page of ${PRIME} closed ChatGPT's announcement "Premium seats just got better" that covered it, by Escape`]);
+      await vi.advanceTimersByTimeAsync(60_000);
+      await note({ note: 'announcement-closed', heading: 'Premium seats just got better', conversationId: PRIME });
+      // No quotes or control characters from the page reach the log line.
+      await note({ note: 'announcement-closed', heading: 'A "new"\nfeature', conversationId: null });
+      expect(lines().slice(before)).toHaveLength(3);
+      expect(lines().at(-1)).toBe('bridge: a ChatGPT page closed ChatGPT\'s announcement "A new feature" that covered it, by Escape');
+      expect((await note({ note: 'something-else' })).status).toBe(400);
+      // Why a page held a queued message back, once a minute per chat and reason (2026-10-30).
+      const held = () => getLog().filter(entry => entry.message.includes('held queued message')).map(entry => entry.message);
+      const heldBefore = held().length;
+      await note({ note: 'input-held', reason: 'still-answering', inputId: 'abcdef01-2345-4678-9abc-def012345678', conversationId: PRIME });
+      await note({ note: 'input-held', reason: 'still-answering', inputId: 'abcdef01-2345-4678-9abc-def012345678', conversationId: PRIME });
+      expect(held().slice(heldBefore)).toEqual([`bridge: the page of ${PRIME} held queued message abcdef01-2345-4678-9abc-def012345678 back: ChatGPT still shows an answer running`]);
+      expect((await note({ note: 'input-held', reason: 'made-up', inputId: 'abcdef01-2345-4678-9abc-def012345678' })).status).toBe(400);
+      // CodeRabbit on #1947: only a message id (a UUID) is taken.
+      expect((await note({ note: 'input-held', reason: 'still-answering', inputId: '--------', conversationId: PRIME })).status).toBe(400);
+      // Two new chats (no id yet) held for the same reason are each said.
+      const fresh = ['11111111-2222-4333-8444-555555555555', '66666666-7777-4888-8999-aaaaaaaaaaaa'];
+      for (const inputId of fresh) await note({ note: 'input-held', reason: 'no-composer', inputId, conversationId: null });
+      expect(held().slice(heldBefore + 1)).toEqual(fresh.map(id => `bridge: a ChatGPT page held queued message ${id} back: the page shows no message box`));
+    } finally { vi.useRealTimers(); }
+  });
+
+  // CodeRabbit on #1947: a key logged again moves to the newest end, so a full map evicts the oldest log.
+  it('keeps a page note just logged again when the full log map evicts its oldest key', async () => {
+    vi.useFakeTimers();
+    try {
+      await pair();
+      const note = (body: unknown) => request('POST', '/page-note', { body });
+      const id = (index: number) => `${String(index).padStart(8, '0')}-0000-4000-8000-000000000000`;
+      const lines = (inputId: string) => getLog().filter(entry => entry.message.includes(`held queued message ${inputId} `)).length;
+      await note({ note: 'input-held', reason: 'tool-running', inputId: id(0), conversationId: id(0) });
+      for (let index = 1; index < 200; index++) await note({ note: 'input-held', reason: 'tool-running', inputId: id(index), conversationId: id(index) });
+      await vi.advanceTimersByTimeAsync(60_000);
+      await note({ note: 'input-held', reason: 'tool-running', inputId: id(0), conversationId: id(0) });
+      expect(lines(id(0))).toBe(2);
+      // One more key fills the map past its limit: the oldest (id 1) goes, not the one just logged.
+      await note({ note: 'input-held', reason: 'tool-running', inputId: id(200), conversationId: id(200) });
+      await note({ note: 'input-held', reason: 'tool-running', inputId: id(0), conversationId: id(0) });
+      expect(lines(id(0))).toBe(2);
+    } finally { vi.useRealTimers(); }
+  });
+
+  // #2076: each Retry press is another history request; an idle chat leaves it to the person.
+  it('tells the page to press history Retry only while work waits, and not inside the app hold', async () => {
+    await pair();
+    await events(PRIME, [{ kind: 'model_selection', time: Date.now(), model: 'GPT-5.6 Sol', reasoningEffort: 'high' }]);
+    const view = async () => (await request('GET', `/activity?conversationId=${PRIME}`)).body.historyRetry;
+    expect(await view()).toEqual({ wanted: false });
+    // A running call no chat is proven to own is not this chat's work (CodeRabbit on #2080).
+    const { trackInFlight, emptyEvidence } = await import('../src/main/mcp/call-context.js');
+    await trackInFlight({ startedAt: Date.now(), transportKey: null, agent: null, outcome: null, evidence: emptyEvidence(),
+      caller: { conversationId: null, requestId: 'no-chat-call', transportKey: null } }, async () => {
+      expect(await view()).toEqual({ wanted: false });
+    });
+    await events(PRIME, [openTurn('retry-work')]);
+    expect(await view()).toMatchObject({ wanted: true });
+    const retryAt = Date.now() + 10 * 60_000;
+    await events(PRIME, [{ kind: 'chat_error', time: Date.now(), turnId: 'retry-work', recoverable: false, blocking: true, retryAt,
+      text: 'ChatGPT temporarily rate-limited loading this conversation history.' }]);
+    expect((await view()).until).toBeGreaterThanOrEqual(retryAt);
+  });
+
   it('records a repeating history limit once, while its deadline keeps following the newest (2026-10-11)', async () => {
     // A throttled history answered every retry with the same limit: eight identical blocking notices
     // stacked up in eight minutes. One notice says it; the hold still follows each new Retry-After.
@@ -11692,21 +12579,23 @@ describe('unattributed activity recovery', () => {
       // A second limit while the first still holds is the same episode, not a failed retry.
       await vi.advanceTimersByTimeAsync(30_000);
       expect(await limited(60_000)).toBe(60_000);
-      // Each retry that is limited again waits longer: 2, 4, 8, then 15 minutes, and stays there.
-      for (const expected of [120_000, 240_000, 480_000, 900_000, 900_000]) {
+      // Each retry that is limited again waits longer: 2, 4, 8, 15, 30, then 60 minutes, and stays
+      // there. A limit that outlasted a quarter-hour cadence for 8.5 hours (#1882, 2026-11-05) gets
+      // fewer tries the longer it lasts, not one every 25 minutes forever.
+      for (const expected of [120_000, 240_000, 480_000, 900_000, 1_800_000, 3_600_000, 3_600_000]) {
         const [hold] = (await sessionControlsFor(session.id)).recovery ?? [];
         await vi.advanceTimersByTimeAsync(hold!.deadline - Date.now() + 1_000);
         expect(await limited(60_000)).toBe(expected);
       }
       // Each longer hold says why in the log, once per failed retry.
       expect(getLog().filter(entry => entry.message.includes(`${PRIME} history was limited again after its wait`))
-        .map(entry => /holding automatic recovery (\d+) minutes/.exec(entry.message)?.[1])).toEqual(['2', '4', '8', '15', '15']);
+        .map(entry => /holding automatic recovery (\d+) minutes/.exec(entry.message)?.[1])).toEqual(['2', '4', '8', '15', '30', '60', '60']);
       // A longer Retry-After from ChatGPT still wins.
       const [held] = (await sessionControlsFor(session.id)).recovery ?? [];
       await vi.advanceTimersByTimeAsync(held!.deadline - Date.now() + 1_000);
-      expect(await limited(20 * 60_000)).toBe(20 * 60_000);
+      expect(await limited(90 * 60_000)).toBe(90 * 60_000);
       // A limit that comes back after a quiet quarter of an hour starts over.
-      await vi.advanceTimersByTimeAsync(20 * 60_000 + 15 * 60_000 + 1_000);
+      await vi.advanceTimersByTimeAsync(90 * 60_000 + 15 * 60_000 + 1_000);
       expect(await limited(60_000)).toBe(60_000);
     } finally { vi.useRealTimers(); }
   });
@@ -16331,8 +17220,119 @@ describe('the goal loop over the bridge', () => {
     } finally { vi.useRealTimers(); }
   });
 
+  // 2026-11-03 (Mac): the person's Continue reached the chat's page, which held it while ChatGPT still
+  // answered; a minute later the app failed it as "the browser did not pick up this message".
+  it('keeps a queued message the chat\'s page holds until ChatGPT\'s answer ends, and fails it only once no page holds it', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    const { resetInputForTests, enqueueInput, listInputs } = input;
+    resetInputForTests();
+    const id = 'abca1103-0000-4000-8000-000000001103';
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe1103-0000-4000-8000-000000001103';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'held-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'held-turn' },
+        { kind: 'turn_end', time: Date.now(), turnId: 'held-turn', outcome: 'completed' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      await enqueueInput({ id, sessionId: session.id, text: 'Continue', mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+      const row = async () => (await listInputs()).find(entry => entry.id === id);
+      expect((await row())?.transportIntent).toBe('browser');
+      for (let step = 0; step < 4; step++) {
+        await vi.advanceTimersByTimeAsync(40_000);
+        expect((await request('POST', '/page-note', { body: { note: 'input-held', reason: 'still-answering', inputId: id, conversationId: chat } })).body).toEqual({ ok: true });
+        expect(await row()).toMatchObject({ state: 'queued', pageHold: { reason: 'still-answering' } });
+      }
+      await vi.advanceTimersByTimeAsync(60_001);
+      expect(await row()).toMatchObject({ state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+    } finally { resetInputForTests(); vi.useRealTimers(); }
+  });
+
+  // 2026-10-31: an automatic Continue the app itself withheld was "uncollected"; the pickup reloaded the
+  // chat three times for it, stopped, and nothing said which gate held it. A page cannot claim what is
+  // not offered, so no reload is spent, and the log names the gate.
+  it('spends no reload on a queued message the app does not offer, and says which gate holds it', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    const { resetInputForTests, enqueueInput } = input;
+    resetInputForTests();
+    const id = 'abca0176-0000-4000-8000-000000000176';
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0176-0000-4000-8000-000000000176';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'withheld-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'withheld-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      await enqueueInput({ id, sessionId: session.id, text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'withheld-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'withheld-turn');
+      withheldInput.id = id; withheldInput.reason = 'an earlier queued message of this chat (x) goes first';
+      for (const minutes of [2, 5, 10]) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        expect((await request('GET', '/status')).body.repairs?.some((repair: { conversationId: string }) => repair.conversationId === chat) ?? false).toBe(false);
+      }
+      expect(getLog().filter(entry => entry.message.includes(`next automation/input step in ${chat} is not offered to the page`)).map(entry => entry.message)).toEqual([
+        `bridge: next automation/input step in ${chat} is not offered to the page — an earlier queued message of this chat (x) goes first; no reload is spent on it`
+      ]);
+      expect((await input.listInputs()).find(entry => entry.id === id)?.pickupRecovery).toBeUndefined();
+      // Once the gate opens, the ordinary pickup schedule takes over again.
+      withheldInput.id = null;
+      await vi.advanceTimersByTimeAsync(2 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs?.[0]).toMatchObject({ conversationId: chat, reason: 'goal' });
+    } finally {
+      withheldInput.id = null;
+      await writeDurableNow('session-input', []);
+      resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  it('names the gate that holds a queued message from the page, and none for one it offers', async () => {
+    const input = await import('../src/main/session/input.js');
+    const { resetInputForTests, enqueueInput, claimBrowserInput, queuedInputOfferBlocker } = input;
+    resetInputForTests();
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0177-0000-4000-8000-000000000177';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'gate-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'gate-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      const first = 'abca0177-0000-4000-8000-000000000001', second = 'abca0177-0000-4000-8000-000000000002', later = 'abca0177-0000-4000-8000-000000000003';
+      for (const id of [first, second]) await enqueueInput({ id, sessionId: session.id, text: id, mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await enqueueInput({ id: later, sessionId: session.id, text: 'later', mode: 'after-turn', dueAt: Date.now() + 60 * 60_000, model: null, reasoningEffort: null });
+      expect(await queuedInputOfferBlocker(first)).toBe("its chat's turn is still running");
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'gate-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'gate-turn');
+      expect(await queuedInputOfferBlocker(first)).toBeNull();
+      expect(await queuedInputOfferBlocker(second)).toBe(`an earlier queued message of this chat (${first}) goes first`);
+      expect(await queuedInputOfferBlocker(later)).toBe('it is not due yet');
+      expect(await claimBrowserInput(first, 'page-owner', chat)).toBeTruthy();
+      expect(await queuedInputOfferBlocker(second)).toBe(`another message of this chat (${first}) is still being sent`);
+      expect(await queuedInputOfferBlocker(first)).toBe('it is no longer queued');
+    } finally {
+      await writeDurableNow('session-input', []);
+      resetInputForTests();
+    }
+  });
+
   /** A missing page pickup gets a durable, visible stop instead of an endless reload loop. */
-  it('stops queued pickup after three persisted reload attempts and preserves the original input', async () => {
+  it('shows queued pickup as stopped after three reloads, keeps retrying every 15 to 60 minutes, and preserves the original input', async () => {
     vi.useFakeTimers();
     const input = await import('../src/main/session/input.js');
     const { resetInputForTests, enqueueInput } = input;
@@ -16369,7 +17369,8 @@ describe('the goal loop over the bridge', () => {
       await request('GET', `/status?repaired=${third.token}&repairAction=reloaded`);
 
       const row = (await input.listInputs()).find(entry => entry.id === 'abca0175-0000-4000-8000-000000000175');
-      expect(row).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 3, stoppedAt: Date.now() } });
+      // Shown as stopped (the person can Continue it in one click), with the first slow retry in 15 minutes.
+      expect(row).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 3, stoppedAt: Date.now(), nextAt: Date.now() + 15 * 60_000 } });
       expect((await sessionControlsFor(session.id)).recovery).toContainEqual({
         kind: 'pickup-stopped', deadline: Date.now(), attempts: 3, next: 'queue'
       });
@@ -16390,20 +17391,30 @@ describe('the goal loop over the bridge', () => {
       });
 
       // Dropping in-memory bridge/input state models a restart. Durable ownership restores the
-      // stopped state, so another sweep cannot reset the budget or reload this page again.
+      // stopped state and its slow schedule: the budget is not reset, and the chat is not given up.
       resetBridgeForTests();
       resetInputForTests();
       await pair();
       expect((await input.listInputs()).find(entry => entry.id === row!.id)).toMatchObject({
-        text: 'next step', pickupRecovery: { attempts: 3, stoppedAt: Date.now() }
+        text: 'next step', pickupRecovery: { attempts: 3, stoppedAt: Date.now(), nextAt: Date.now() + 15 * 60_000 }
       });
-      await vi.advanceTimersByTimeAsync(15 * 60_000);
-      await sweepStaleSwarm(Date.now());
-      await vi.advanceTimersByTimeAsync(60 * 60_000);
+      // Nothing before the slow retry is due.
+      await vi.advanceTimersByTimeAsync(14 * 60_000);
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs?.some((repair: { conversationId: string }) => repair.conversationId === chat)).toBe(false);
-      expect((await sessionControlsFor(session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', attempts: 3, next: 'queue' }));
-      expect(recoveryBrowserWake).toHaveBeenCalledTimes(3);
+      // The slow retry after 15 minutes, then the next after 30 more.
+      for (const [minutes, attempts] of [[1, 4], [30, 5]] as const) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const slow = (await request('GET', '/status')).body.repairs?.find((repair: { conversationId: string }) => repair.conversationId === chat);
+        expect(slow).toMatchObject({ reason: 'goal' });
+        await request('GET', `/status?repaired=${slow.token}&repairAction=reloaded`);
+        expect((await input.listInputs()).find(entry => entry.id === row!.id)?.pickupRecovery).toMatchObject({ attempts, stoppedAt });
+        expect(getLog().some(entry => entry.message.includes(`uncollected in ${chat} — reload ${attempts} (slow retry)`))).toBe(true);
+      }
+      expect(recoveryBrowserWake).toHaveBeenCalledTimes(5);
+      expect(getLog().filter(entry => entry.message.includes(`has not collected the step in ${chat} after 3 reloads; the chat shows as stopped, and the app keeps trying`))).toHaveLength(1);
+      expect((await sessionControlsFor(session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', next: 'queue' }));
       expect((await readSessionList({ limit: 60 })).recoveryStopped).toEqual([chat]);
       // The person acting on it ends it: the countdown and the list agree it is gone.
       expect(await input.cancelInput(row!.id)).toBe(true);
@@ -16412,6 +17423,122 @@ describe('the goal loop over the bridge', () => {
     } finally {
       await writeDurableNow('session-input', []);
       resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  // CodeRabbit on #1971: the page asking pushes a stopped pickup's slow retry out, and a restart
+  // keeps the later deadline instead of reloading the chat by the earlier one.
+  it('keeps a slow retry postponed by page activity across a restart', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0176-0000-4000-8000-000000000176';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'postponed-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'postponed-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      const id = 'abca0176-0000-4000-8000-000000000176';
+      await input.enqueueInput({ id, sessionId: session.id, text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'postponed-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'postponed-turn');
+      for (const minutes of [2, 5, 10]) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = (await request('GET', '/status')).body.repairs?.find((item: { conversationId: string }) => item.conversationId === chat);
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+      }
+      const stoppedAt = Date.now();
+      expect((await input.listInputs()).find(row => row.id === id)?.pickupRecovery).toMatchObject({ attempts: 3, nextAt: stoppedAt + 15 * 60_000 });
+      // Five minutes later the page asks: the slow retry moves to 15 minutes from now, and is saved.
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await request('POST', '/goal/draft', { body: { conversationId: chat } });
+      await vi.waitFor(async () => expect((await input.listInputs()).find(row => row.id === id)?.pickupRecovery)
+        .toMatchObject({ attempts: 3, stoppedAt, nextAt: stoppedAt + 20 * 60_000 }), { timeout: 10_000, interval: 50 });
+      resetBridgeForTests();
+      input.resetInputForTests();
+      await pair();
+      // Where the old deadline was: nothing.
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(false);
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      await sweepStaleSwarm(Date.now());
+      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(true);
+    } finally {
+      await writeDurableNow('session-input', []);
+      input.resetInputForTests();
+      vi.useRealTimers();
+    }
+  });
+
+  // 2026-10-31: the alert when a chat's quick tries run out, and the person's one click to go on.
+  it('alerts once when quick tries run out, and tries a stopped queued message again at once on request', async () => {
+    vi.useFakeTimers();
+    const input = await import('../src/main/session/input.js');
+    input.resetInputForTests();
+    const told: Array<{ title: string; sessionId: string }> = [];
+    setStuckNotifier((title, _body, sessionId) => { told.push({ title, sessionId }); return true; });
+    try {
+      await writeDurableNow('session-input', []);
+      await pair();
+      const chat = 'cafe0177-0000-4000-8000-000000000177';
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'user_message', time: Date.now(), text: 'work', messageId: 'now-user' },
+        { kind: 'turn_start', time: Date.now(), turnId: 'now-turn' }
+      ] } });
+      const session = (await findSessionByConversation(chat, { requireUnique: true }))!;
+      const id = 'abca0177-0000-4000-8000-000000000177';
+      await input.enqueueInput({ id, sessionId: session.id, text: 'next step', mode: 'after-turn', dueAt: Date.now(), model: null, reasoningEffort: null });
+      await vi.advanceTimersByTimeAsync(1);
+      // The stopped step the button shows: what main now projects for this chat.
+      const shownStep = async () => {
+        const row = (await sessionControlsFor(session.id)).recovery?.find(entry => entry.kind === 'pickup-stopped');
+        return { next: row?.next ?? 'queue', stoppedAt: row?.deadline ?? 0 };
+      };
+      expect(await pickupNow(session.id, await shownStep())).toEqual({ ok: false, code: 'nothing-waiting' });
+      expect(getLog().some(entry => entry.message.includes(`the person asked to pick up session ${session.id} now; nothing was tried — nothing is owed`))).toBe(true);
+      await request('POST', '/events', { body: { conversationId: chat, events: [
+        { kind: 'turn_end', time: Date.now(), turnId: 'now-turn', outcome: 'completed' }
+      ] } });
+      await recordFinalForTest(chat, 'now-turn');
+      for (const minutes of [2, 5, 10]) {
+        await vi.advanceTimersByTimeAsync(minutes * 60_000);
+        await sweepStaleSwarm(Date.now());
+        const repair = (await request('GET', '/status')).body.repairs?.find((item: { conversationId: string }) => item.conversationId === chat);
+        await request('GET', `/status?repaired=${repair.token}&repairAction=reloaded`);
+      }
+      expect(told.filter(notice => notice.title === 'Recovery slowed')).toEqual([{ title: 'Recovery slowed', sessionId: session.id }]);
+      // Inside a history limit nothing is tried, and the person is told why.
+      await request('POST', '/events', { body: { conversationId: chat, events: [{ kind: 'chat_error', time: Date.now(), recoverable: false, blocking: true,
+        retryAt: Date.now() + 60_000, text: 'ChatGPT temporarily rate-limited loading this conversation history.' }] } });
+      expect(await pickupNow(session.id, await shownStep())).toEqual({ ok: false, code: 'history-limit' });
+      await vi.advanceTimersByTimeAsync(5 * 60_000);
+      const shown = await shownStep();
+      expect(shown).toMatchObject({ next: 'queue' });
+      // A click for a stopped step that is no longer the one waiting acts on nothing (CodeRabbit on #1979).
+      expect(await pickupNow(session.id, { ...shown, stoppedAt: shown.stoppedAt - 1 })).toEqual({ ok: false, code: 'changed' });
+      expect(await pickupNow(session.id, { ...shown, next: 'goal' })).toEqual({ ok: false, code: 'changed' });
+      // A queued message of the person's own is tried again at once, not at its next slow slot, also
+      // right after a restart, before the first sweep made its watch again (CodeRabbit on #1979).
+      forgetPickupWatchesForTests();
+      expect(await pickupNow(session.id, shown)).toEqual({ ok: true, did: 'retrying' });
+      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(true);
+      expect((await input.listInputs()).find(row => row.id === id)).toMatchObject({ text: 'next step', state: 'queued', pickupRecovery: { attempts: 4 } });
+      expect(told.filter(notice => notice.title === 'Recovery slowed')).toHaveLength(1);
+      // Its reload is still in flight: a second click starts nothing and says so, not "trying again".
+      expect(await pickupNow(session.id, await shownStep())).toEqual({ ok: false, code: 'not-started' });
+    } finally {
+      setStuckNotifier(null);
+      await writeDurableNow('session-input', []);
+      input.resetInputForTests();
       vi.useRealTimers();
     }
   });
@@ -16506,10 +17633,15 @@ describe('the goal loop over the bridge', () => {
         expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: index + 1 });
         if (index === 0) expect(await input.cancelInput(row.id)).toBe(true);
       }
-      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: Date.now() });
+      const stoppedAt = Date.now();
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 3, pickupStoppedAt: stoppedAt });
+      // Shown as stopped, but not given up: the shared budget's slow retry comes 15 minutes later.
       await vi.advanceTimersByTimeAsync(15 * 60_000);
       await sweepStaleSwarm(Date.now());
-      expect((await request('GET', '/status')).body.repairs?.some((item: { conversationId: string }) => item.conversationId === chat)).toBe(false);
+      const slow = (await request('GET', '/status')).body.repairs?.find((item: { conversationId: string }) => item.conversationId === chat);
+      expect(slow).toMatchObject({ reason: 'goal' });
+      await request('GET', `/status?repaired=${slow.token}&repairAction=reloaded`);
+      expect(goal.goalPendingReplyFor(chat)).toMatchObject({ pickupAttempts: 4, pickupStoppedAt: stoppedAt });
     } finally {
       await writeDurableNow('session-input', []);
       input.resetInputForTests();
@@ -16610,12 +17742,17 @@ describe('the goal loop over the bridge', () => {
       }
       const stopped = (await listInputs()).find(item => item.id === id);
       expect(stopped).toMatchObject({ text: 'next step', pickupRecovery: { attempts: 3, stoppedAt: Date.now() } });
+      // Shown as stopped; the slow retry still comes, 15 minutes later.
       await vi.advanceTimersByTimeAsync(15 * 60_000);
       await sweepStaleSwarm(Date.now());
-      expect((await request('GET', '/status')).body.repairs).toEqual([]);
+      expect((await request('GET', '/status')).body.repairs).toEqual([expect.objectContaining({ conversationId: chat, reason: 'goal' })]);
+      // Still retrying: the chat says so, not that it stopped.
+      expect((await sessionControlsFor(session!.id)).recovery?.find(entry => entry.kind === 'pickup-stopped')).not.toHaveProperty('exhausted');
+      // The pickup's 12-hour window still bounds it, and then the chat says it has stopped (#1971).
       await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
       await sweepStaleSwarm(Date.now());
       expect((await request('GET', '/status')).body.repairs).toEqual([]);
+      expect((await sessionControlsFor(session!.id)).recovery?.find(entry => entry.kind === 'pickup-stopped')).toMatchObject({ exhausted: true });
       expect(await cancelInput(id)).toBe(true);
     } finally {
       await writeDurableNow('session-input', []);
@@ -16744,8 +17881,9 @@ describe('the goal loop over the bridge', () => {
       goal.restoreGoalReplies(stoppedSnapshot);
       goal.restoreGoalSwitches(switchSnapshot);
       await pair();
+      // Restored as stopped, and still retried on the slow cadence.
       await vi.advanceTimersByTimeAsync(60 * 60_000);
-      expect(await takeRepair()).toBeNull();
+      expect(await takeRepair()).toMatchObject({ reason: 'goal' });
 
       // The existing durable expiry still bounds unattended browser recovery.
       await vi.advanceTimersByTimeAsync(12 * 60 * 60_000);
@@ -17317,6 +18455,26 @@ describe('app requests to stop one exact active turn', () => {
     const activity = await request('GET', `/activity?conversationId=${conversationId}`);
     expect(activity.body.stopTurn).toEqual({ turnId: 'unanchored-turn', userMessageId: null });
   });
+  // #1882: a Stop that turned Loop off could not be told apart from the app's button or the control API.
+  it('names who sent a Stop, in its log line and in the Loop it turned off', async () => {
+    const { stopSessionTurn, setSessionAutomation } = await import('../src/main/bridge.js');
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    const conversationId = 'e9999999-aaaa-4bbb-8ccc-111111111111';
+    const sessionId = await active(conversationId, 'sent-turn');
+    await setSessionAutomation(sessionId, 'loop', undefined, 'the app');
+    await stopSessionTurn(sessionId, 'sent-turn', { from: 'the control API' });
+    const lines = info.mock.calls.map(([line]) => String(line));
+    expect(lines).toContain(`goal: ${conversationId} switched to loop by the app`);
+    expect(lines).toContain(`goal: ${conversationId} switched to Normal by a Stop sent by the control API`);
+    expect(lines.some(line => line.startsWith(`bridge: desktop (sent by the control API) Stop requested for session ${sessionId}`))).toBe(true);
+    // A second Stop of the same answer joins the queued one, and still says who sent it.
+    info.mockClear();
+    await stopSessionTurn(sessionId, 'sent-turn');
+    expect(info.mock.calls.map(([line]) => String(line))
+      .some(line => line.startsWith(`bridge: desktop (sent by the app) Stop for session ${sessionId}`) && line.includes('joins the Stop already requested'))).toBe(true);
+    info.mockRestore();
+  });
   it('hands a new Stop to the shared absent-browser startup owner once and revokes it for a newer turn', async () => {
     const { stopSessionTurn } = await import('../src/main/bridge.js');
     const conversationId = 'e8888888-aaaa-4bbb-8ccc-111111111111';
@@ -17404,6 +18562,41 @@ describe('app requests to stop one exact active turn', () => {
     expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
     expect((await getSession(sessionId))?.activeTurnId).toBe('stop-turn-two');
     expect((await getSession(sessionId))?.finishTurn?.released).toBe(false);
+  });
+  it('ends the app\'s own Loop when Stop names a turn no longer running, and asks ChatGPT to stop nothing (Haz on #1883)', async () => {
+    const { stopSessionTurn, endOwnWorkAfterStop, sessionControlsFor } = await import('../src/main/bridge.js');
+    const sessionId = await active(randomUUID());
+    await setSessionAutomation(sessionId, 'loop');
+    await expect(stopSessionTurn(sessionId, 'gone-turn')).rejects.toThrow('active_turn_changed');
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toEqual({ ended: true, resumeGoesOn: false });
+    expect((await sessionControlsFor(sessionId)).automation).toBe('off');
+    expect((await request('GET', '/status')).body.stopTurns).toEqual([]);
+    // Nothing of the app's own left: it says so.
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toEqual({ ended: false, resumeGoesOn: false });
+  });
+  it('changes nothing in a chat the session moved to, and counts a Loop the Stop path already turned off (CodeRabbit on #2066)', async () => {
+    const { endOwnWorkAfterStop, sessionControlsFor } = await import('../src/main/bridge.js');
+    const conversationId = randomUUID();
+    const sessionId = await active(conversationId);
+    await setSessionAutomation(sessionId, 'loop');
+    // Stop was pressed for another chat than the session's current one: nothing here changes.
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn', { conversationId: randomUUID(), automation: 'loop' })).toEqual({ ended: false, resumeGoesOn: true });
+    expect((await sessionControlsFor(sessionId)).automation).toBe('loop');
+    // Stop found Loop on, and its own path turned it off before finding the turn gone: that still counts.
+    await setSessionAutomation(sessionId, 'off');
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn', { conversationId, automation: 'loop' })).toEqual({ ended: true, resumeGoesOn: false });
+  });
+  it('turns off a Goal armed only by its objective when Stop names a turn no longer running (CodeRabbit on #2066)', async () => {
+    const { endOwnWorkAfterStop, sessionControlsFor } = await import('../src/main/bridge.js');
+    const { setGoalObjectiveNow, goalSwitchFor } = await import('../src/main/goal.js');
+    const conversationId = randomUUID();
+    const sessionId = await active(conversationId);
+    // An objective with no switch of its own arms Goal; the switch itself was never turned on.
+    await setGoalObjectiveNow(conversationId, 'Finish the quarterly report');
+    expect(goalSwitchFor(conversationId).enabled).toBe(false);
+    expect((await sessionControlsFor(sessionId)).automation).not.toBe('off');
+    expect(await endOwnWorkAfterStop(sessionId, 'gone-turn')).toEqual({ ended: true, resumeGoesOn: false });
+    expect((await sessionControlsFor(sessionId)).automation).toBe('off');
   });
   it('offers Stop for a turn the page still holds after the app stopped counting it as work (2.1.47 round)', async () => {
     // Seen 2026-10-28: ChatGPT stopped loading a chat's history, the page kept its turn open, so it
@@ -17703,15 +18896,51 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
     } finally { await close(socket); }
   });
 
+  it('withdraws a queued tab follow when the selected chat becomes New Chat', async () => {
+    await pair();
+    await background(true);
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      followChatInBackground(CHAT);
+      followChatInBackground(null);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
+      followChatInBackground(CHAT);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBe(CHAT);
+    } finally { await close(socket); }
+  });
+
   it('asks for nothing with Background chats off', async () => {
     await pair();
     await background(false);
     const socket = await connect();
     try {
       await poll(BROWSER_B, [CHAT]);
-      followChatInBackground(CHAT);
+      const logger = await import('../src/main/logger.js');
+      const info = vi.spyOn(logger, 'logInfo');
+      try {
+        followChatInBackground(CHAT);
+        expect(info).toHaveBeenCalledWith('browser follow: skipped, background chats are disabled');
+      } finally { info.mockRestore(); }
       expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
     } finally { await close(socket); await background(true); }
+  });
+
+  it('reports a disconnected browser so the renderer can retain and retry its pending selection', async () => {
+    await pair();
+    await background(true);
+    const logger = await import('../src/main/logger.js');
+    const info = vi.spyOn(logger, 'logInfo');
+    try {
+      expect(followChatInBackground(CHAT)).toBe(false);
+      expect(info).toHaveBeenCalledWith('browser follow: deferred, no connected browser can reveal tabs; renderer may retry while pending');
+    } finally { info.mockRestore(); }
+    const socket = await connect();
+    try {
+      await poll(BROWSER_B, [CHAT]);
+      expect(followChatInBackground(CHAT)).toBe(true);
+      expect((await poll(BROWSER_B, [CHAT])).follow).toBe(CHAT);
+    } finally { await close(socket); }
   });
 
   it('lets an old selection lapse instead of acting on it later', async () => {
@@ -17742,7 +18971,12 @@ describe('selecting a chat in the app selects its background tab (#1249)', () =>
     const socket = await connect();
     try {
       await poll(BROWSER_B, [CHAT]);
-      followChatInBackground(CHAT);
+      const logger = await import('../src/main/logger.js');
+      const info = vi.spyOn(logger, 'logInfo');
+      try {
+        followChatInBackground(CHAT);
+        expect(info).toHaveBeenCalledWith('browser follow: skipped, background tabs are grouped');
+      } finally { info.mockRestore(); }
       expect((await poll(BROWSER_B, [CHAT])).follow).toBeUndefined();
     } finally { await close(socket); await placement('window'); }
   });
@@ -17778,7 +19012,7 @@ describe('worker brief on a computer with its own connector names', () => {
     await saveConfig({ ...previous, connectorSuffix: 'Windows VM' });
     try {
       expect(workerBriefForTests('worker-1', 'Check the tests'))
-        .toContain('Report to prime through the agents tool of Chat On Steroids Core (Windows VM) — ');
+        .toContain('Report to prime through the agents tool of Chat Marks Core (Windows VM) — ');
     } finally { await saveConfig(previous); }
   });
 });
@@ -17796,7 +19030,7 @@ describe('connector identity through the bridge', () => {
     const conversationId = 'a1a1a1a1-0000-4000-8000-00000000c1d1';
     await request('POST', '/events', { body: { conversationId, events: [{ kind: 'app_sightings', time: Date.now(), apps: [
       { requestId: 'req-renamed', appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f', appName: 'My tools' },
-      { requestId: 'not-ours', appId: 'asdk_app_foreign', linkId: null, appName: 'Chat On Steroids Core' }
+      { requestId: 'not-ours', appId: 'asdk_app_foreign', linkId: null, appName: 'Chat Marks Core' }
     ] }] } });
     const status = (await request('GET', '/status')).body;
     expect(status.connectorApps.core).toEqual([{ appId: 'asdk_app_6ac261da79588191af4e6096fadeeee2', linkId: 'link_6ac262533e048191933934eaee5cd69f', name: 'My tools' }]);
@@ -17958,6 +19192,47 @@ describe('a chat deleted in ChatGPT', () => {
       input.resetInputForTests();
       await writeDurableNow('session-input', []);
     }
+  });
+});
+
+// #1990: whoever switches a chat's Goal or Loop is told to the listeners, so Telegram's pause marker can end
+// when the person's own control changes the switch.
+describe('a chat that holds a turn', () => {
+  it('holds one only while the live recorder still has that turn, never because of a stored open turn alone (#1990)', async () => {
+    await pair();
+    const { sessionHoldsTurn } = await import('../src/main/bridge.js');
+    const conversationId = randomUUID();
+    await request('POST', '/events', { body: { conversationId, events: [
+      { kind: 'user_message', time: Date.now(), text: 'Work on it', messageId: 'hold-question' },
+      { kind: 'turn_start', time: Date.now(), turnId: 'hold-turn' }
+    ] } });
+    const session = (await findSessionByConversation(conversationId))!;
+    expect(session.activeTurnId).toBe('hold-turn');
+    expect(sessionHoldsTurn(session)).toBe(true);
+    expect(sessionHoldsTurn({ ...session, browserRecoveryDismissedAt: Date.now() })).toBe(false);
+    expect(sessionHoldsTurn({ ...session, activeTurnId: 'another-turn' })).toBe(false);
+    expect(sessionHoldsTurn({ ...session, conversationId: null as never })).toBe(false);
+    // The recorder forgot the turn (an app restart): the stored record still names it, and that is history.
+    resetRecorderForTests();
+    expect(sessionHoldsTurn((await getSession(session.id))!)).toBe(false);
+  });
+});
+
+describe('a chat\'s Goal or Loop switch', () => {
+  it('tells its listeners who switched it on or off, and a failing listener never fails the switch', async () => {
+    const { onSessionAutomationChange, setSessionAutomation } = await import('../src/main/bridge.js');
+    const session = await createSession({ conversationId: randomUUID() });
+    const heard: Array<[string, boolean, string | undefined]> = [];
+    const stop = onSessionAutomationChange((id, on, from) => { heard.push([id, on, from]); });
+    const stopFailing = onSessionAutomationChange(() => { throw new Error('listener bug'); });
+    try {
+      await setSessionAutomation(session.id, 'loop', undefined, 'the app');
+      await setSessionAutomation(session.id, 'off', undefined, 'Telegram');
+      expect(heard).toEqual([[session.id, true, 'the app'], [session.id, false, 'Telegram']]);
+    } finally { stop(); stopFailing(); await setSessionAutomation(session.id, 'off').catch(() => undefined); }
+    await setSessionAutomation(session.id, 'loop');
+    expect(heard).toHaveLength(2);
+    await setSessionAutomation(session.id, 'off');
   });
 });
 

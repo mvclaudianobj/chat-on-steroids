@@ -1,6 +1,11 @@
 appId: com.chatonsteroids.app
-productName: Chat On Steroids
+productName: ChatMarks
 copyright: MIT licensed
+# Product revision 2.1.51.4; npm uses SemVer build metadata +4.
+buildVersion: 2.1.51.4
+buildNumber: '4'
+extraMetadata:
+  version: 2.1.51.4
 
 directories:
   output: release
@@ -73,6 +78,7 @@ toolsets:
 
 win:
   target: nsis
+  # Native executable and Explorer shortcut icon, regenerated from icon_marks.png.
   icon: build/icon.ico
   requestedExecutionLevel: asInvoker
   files:
@@ -80,6 +86,8 @@ win:
       to: node_modules
       filter: ['**/*']
   extraResources:
+    - from: build/runtime-icon.png
+      to: runtime-icon.png
     - from: resources/packaging/native/win32/${arch}/node_modules/@img/sharp-win32-${arch}/README.md
       to: THIRD-PARTY-NOTICES-sharp-win32-${arch}.md
     - from: resources/packaging/tunnel/win32/${arch}
@@ -91,7 +99,9 @@ win:
 
 nsis:
   include: scripts/windows-installer-acl.nsh
-  # Drawn by scripts/make-icon.mjs from the app icon: the installer an update shows is CoS's own.
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  # Drawn by scripts/make-icon.mjs from the app icon and shown in the installer header.
   installerHeader: build/installerHeader.bmp
   installerSidebar: build/installerSidebar.bmp
   oneClick: false
@@ -100,9 +110,9 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Chat On Steroids
-  artifactName: Chat-On-Steroids-Setup-${arch}.${ext}
-  uninstallDisplayName: Chat On Steroids
+  shortcutName: ChatMarks
+  artifactName: ChatMarks-Setup-${arch}.${ext}
+  uninstallDisplayName: ChatMarks
   deleteAppDataOnUninstall: false
 
 mac:
@@ -114,8 +124,8 @@ mac:
   minimumSystemVersion: "13.0"
   extendInfo:
     NSUserNotificationAlertStyle: alert
-    NSScreenCaptureUsageDescription: Chat On Steroids captures a display or window only when the enabled Desktop connector asks to observe it.
-    NSLocalNetworkUsageDescription: Chat On Steroids connects to devices and services on your local network when you run approved tools or commands.
+    NSScreenCaptureUsageDescription: ChatMarks captures a display or window only when the enabled Desktop connector asks to observe it.
+    NSLocalNetworkUsageDescription: ChatMarks connects to devices and services on your local network when you run approved tools or commands.
   # v2.0.2 intentionally ships unsigned/unnotarized macOS artifacts. Make that policy
   # deterministic instead of depending on whatever identities or Apple env vars happen to be
   # present on a hosted runner. Remove these two lines when real signing credentials are wired.
@@ -127,7 +137,7 @@ mac:
   # nothing Gatekeeper will vouch for — and verifies the result.
   identity: null
   notarize: false
-  artifactName: Chat-On-Steroids-macOS-${arch}.${ext}
+  artifactName: ChatMarks-macOS-${arch}.${ext}
   files:
     - from: resources/packaging/native/darwin/${arch}/node_modules
       to: node_modules
@@ -149,14 +159,16 @@ linux:
   target:
     - AppImage
     - deb
-  icon: build/icon.png
+  # A size set, not one 1024px file: hicolor themes have no 1024 folder, so menus, launchers
+  # and the taskbar (which finds the icon through the desktop entry) showed a blank icon.
+  icon: build/icons
   category: Development
-  executableName: chat-on-steroids
-  maintainer: Chat On Steroids <227782719+totec448-spec@users.noreply.github.com>
+  executableName: chat-marks
+  maintainer: ChatMarks <mvclaudianobj@users.noreply.github.com>
   syncDesktopName: true
   # electron-builder rewrites x64 to x86_64 for AppImage and amd64 for DEB when ${arch}
   # is used. Keep one stable public architecture label across formats/releases instead.
-  artifactName: Chat-On-Steroids-Linux-${env.COS_PACKAGE_ARCH}.${ext}
+  artifactName: ChatMarks-Linux-${env.COS_PACKAGE_ARCH}.${ext}
   files:
     - from: resources/packaging/native/linux/${arch}/node_modules
       to: node_modules
@@ -174,6 +186,8 @@ linux:
       filter: ['**/*']
 
 deb:
+  # Keep the binary package identity so apt upgrades existing installs while files use ChatMarks.
+  packageName: chat-on-steroids
   depends:
     # Ubuntu 24.04 renamed GTK 3's runtime package for the time64 transition. Keep the old
     # package as an alternative so the same .deb remains installable on Ubuntu 22.04/Debian.

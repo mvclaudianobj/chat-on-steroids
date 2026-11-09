@@ -1,5 +1,6 @@
 import { GOAL_MARKER_INSTRUCTION } from '../src/shared/goal-templates.js';
 import { currentCoreInstructions } from '../src/main/mcp/instructions.js';
+import { currentMarksSystemPrompt } from '../src/main/marks-system-prompt.js';
 import { prependUserPrompt, userPromptText } from '../src/shared/user-prompt.js';
 import { finishInstruction } from '../src/shared/finish.js';
 import { initSkillsPath } from '../src/main/skills.js';
@@ -56,7 +57,7 @@ beforeAll(async () => {
   directory = await makeTempDir('clf-input-integration-');
   initConfigPath(directory); initSecretsPath(directory); initDurableStore(directory); initSessionStore(directory);
   await saveConfig(defaultConfig());
-  registerIpc(() => ({ isDestroyed: () => false, webContents: { send: pushed } }) as never, () => undefined);
+  registerIpc(() => ({ isDestroyed: () => false, webContents: { isDestroyed: () => false, send: pushed } }) as never, () => undefined);
   await startBridge();
   // These tests move a mocked Date.now by minutes and call the sweep themselves. The bridge's own
   // 30-second timer would read such a jump as the computer waking and push every deadline 90 s
@@ -237,6 +238,40 @@ it('lists a queued message as open but not as being sent until a browser claims 
 
 // CodeRabbit on #1901: the extension's update decision and its delivery ran side by side, so a claim
 // could start while the folder was being replaced. The app, which holds every claim, closes that gap.
+it('says when the extension updates past answering pages after its long wait (2026-10-31)', async () => {
+  const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
+  extensionPath.prepare = prepare;
+  const logged = vi.spyOn(logger, 'logInfo');
+  // An hour back, so the 20 s pause a ready update starts has ended for the tests after this one.
+  const back = Date.now() - 60 * 60_000; const clock = vi.spyOn(Date, 'now').mockImplementation(() => back);
+  try {
+    expect((await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 })).body).toMatchObject({ ready: true, build: 'bbbbbbbbbbbb' });
+    expect(logged.mock.calls.map(([line]) => String(line)).filter(line => line.includes('updates although a ChatGPT tab is still answering'))).toEqual([
+      'bridge: the extension updates although a ChatGPT tab is still answering: it waited 31 minutes for every page to be idle, and no tool call runs and nothing is being sent now'
+    ]);
+    // An ordinary update says nothing of the kind; a malformed value is ignored.
+    logged.mockClear();
+    await post('/extension/update', {});
+    await post('/extension/update', { pastBusyChatsMs: 'long' });
+    expect(logged.mock.calls.some(([line]) => String(line).includes('still answering'))).toBe(false);
+    // Said only when the update really goes ahead (CodeRabbit on #1961).
+    extensionPath.prepare = () => ({ build: 'bbbbbbbbbbbb', ready: false });
+    await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 });
+    expect(logged.mock.calls.some(([line]) => String(line).includes('still answering'))).toBe(false);
+    // A tool call that started after the extension's last status holds it at the last moment.
+    extensionPath.prepare = prepare;
+    const callContext = await import('../src/main/mcp/call-context.js');
+    let finish!: () => void;
+    const call = callContext.trackInFlight({ tool: 'exec_command', caller: { transportKey: null, requestId: null, conversationId: null },
+      evidence: callContext.emptyEvidence() } as never, () => new Promise<void>(resolve => { finish = resolve; }));
+    expect((await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 })).body).toEqual({ ready: false, hold: 'app-busy' });
+    // Said once, not on every pass the extension asks again (CodeRabbit on #1961).
+    await post('/extension/update', { pastBusyChatsMs: 31 * 60_000 });
+    expect(logged.mock.calls.filter(([line]) => String(line).includes('the extension update waits: a tool call is running in this app'))).toHaveLength(1);
+    finish(); await call;
+  } finally { clock.mockRestore(); logged.mockRestore(); extensionPath.prepare = () => null; }
+});
+
 it('refuses the extension update while a message is being sent, and new claims while the extension reloads', async () => {
   let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
   const prepare = vi.fn(() => ({ build: 'bbbbbbbbbbbb', ready: true }));
@@ -507,6 +542,40 @@ it('releases a held automatic send at once when the send check address is cleare
     expect((await input.pendingBrowserInputs()).some(item => item.id === row.id)).toBe(true);
     expect((await post('/input/claim', { id: row.id, owner: 'a-document', conversationId, requiresAuthorization: true })).body.input).toMatchObject({ id: row.id });
   } finally { clock.mockRestore(); }
+});
+
+// 2026-11-02, the maintainer's Mac: an automatic Continue for a chat whose page shows another last question
+// stayed queued for eleven hours, refused on every offer (and each offer re-read a 16 MB history). After half
+// an hour of uninterrupted refusals for that reason it is retired with the reason on the message; a break in
+// the refusals starts the count over, and no other reason retires it.
+it('retires an automatic Continue that pages refuse for half an hour because the question changed', async () => {
+  // The same rule on a scale of seconds (5 s gap, 30 s run), so this test's clock stays close to the others'.
+  const { setQuestionChangedTimingForTests } = await import('../src/main/bridge.js');
+  setQuestionChangedTimingForTests(5_000, 30_000);
+  let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+    const { conversationId, row } = await silentTurnContinue('Question changed under the Continue', ms => now += ms);
+    const state = async () => (await input.listInputs()).find(item => item.id === row.id);
+    const hold = (reason = 'recovery-question-changed') => post('/page-note', { note: 'input-held', reason, inputId: row.id, conversationId });
+    // Another reason never retires it.
+    for (let step = 0; step < 40; step++) { await hold('still-answering'); now += 1_000; }
+    expect((await state())?.state).toBe('queued');
+    // Twenty seconds of refusals, a seven-second break, then twenty-nine more: still queued.
+    for (let step = 0; step < 20; step++) { await hold(); now += 1_000; }
+    now += 7_000;
+    for (let step = 0; step < 29; step++) { await hold(); now += 1_000; }
+    expect((await state())?.state).toBe('queued');
+    // Another reason in between starts the run over: thirty more seconds with one other hold in them is not a run.
+    now += 7_000;
+    for (let step = 0; step < 15; step++) { await hold(); now += 1_000; }
+    await hold('still-answering'); now += 1_000;
+    for (let step = 0; step < 16; step++) { await hold(); now += 1_000; }
+    expect((await state())?.state).toBe('queued');
+    // A full run without a break: retired, with the reason on the message.
+    for (let step = 0; step < 15; step++) { await hold(); now += 1_000; }
+    expect(await state()).toMatchObject({ state: 'cancelled', error: expect.stringContaining('no longer the one it answers') });
+  } finally { clock.mockRestore(); setQuestionChangedTimingForTests(); }
 });
 
 it('ends a Continue the page refuses before claiming because its answer is finished', async () => {
@@ -929,6 +998,30 @@ async function attributedMcp(conversationId: string): Promise<void> {
   await recordToolCall({ tool: 'read', args: {}, content: [{ type: 'text', text: 'Fixture result' }],
     outcome: 'ok', durationMs: 1, startedAt: Date.now(), requestId });
 }
+
+it('continues an MCP-backed turn that ends by promising the next step, once', async () => {
+  await saveConfig({ ...defaultConfig(), ui: { ...defaultConfig().ui, autoContinue: true } });
+  const conversationId = randomUUID(), turnId = randomUUID();
+  const session = await createSession({ title: 'Long task step', conversationId });
+  await post('/events', { conversationId, events: [
+    { kind: 'user_message', messageId: randomUUID(), text: 'Reproduce the bug and fix it', authoredNow: true, time: Date.now() },
+    { kind: 'turn_start', turnId, time: Date.now() }
+  ] });
+  await attributedMcp(conversationId);
+  const messageId = randomUUID();
+  await post('/events', { conversationId, events: [
+    { kind: 'assistant_message', turnId, messageId, text: 'Vou reproduzir o erro e executar os testes.', state: 'final', final: true, time: Date.now() },
+    { kind: 'turn_end', turnId, outcome: 'completed', time: Date.now() }
+  ] });
+  const rows = (await input.listInputs()).filter(row => row.sessionId === session.id && row.promisedStep);
+  expect(rows).toHaveLength(1);
+  expect(rows[0]).toMatchObject({ state: 'queued', promisedStep: { sourceTurnId: turnId, finalMessageId: messageId } });
+  expect((await input.pendingBrowserInputs()).some(row => row.id === rows[0]!.id)).toBe(true);
+  await post('/events', { conversationId, events: [
+    { kind: 'assistant_message', turnId, messageId, text: 'Vou reproduzir o erro e executar os testes.', state: 'final', final: true, time: Date.now() }
+  ] });
+  expect((await input.listInputs()).filter(row => row.promisedStep?.sourceTurnId === turnId)).toHaveLength(1);
+});
 
 it.each(['interim', 'native-tool', 'mcp', 'final', 'replay'] as const)('releases failed input immediately and reconciles later %s', async activity => {
   const bridge = await import('../src/main/bridge.js');
@@ -1961,7 +2054,7 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   const standing = 'ä 🐱 Complete standing guidance\n'.repeat(100) + 'FINAL_STANDING_MARKER';
   await saveConfig({ ...config, mcp: { ...config.mcp, instructions: standing } });
   const first = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'First request' });
-  const canonical = await currentCoreInstructions();
+  const canonical = [currentMarksSystemPrompt('chatgpt'), await currentCoreInstructions()].filter(Boolean).join('\n\n');
   const claim = await input.claimBrowserInput(first.id, 'exact-document', null, true);
   expect(claim?.text).toBe(prependUserPrompt('First request', canonical));
   expect(claim?.text).toContain(standing);
@@ -1971,7 +2064,8 @@ it('freezes the complete current prompt for each new chat and leaves the authore
   await input.cancelInput(first.id);
   const second = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', text: 'Second request' });
   const next = await input.claimBrowserInput(second.id, 'next-document', null, true);
-  expect(next?.text).toBe(prependUserPrompt('Second request', await currentCoreInstructions()));
+  const updated = [currentMarksSystemPrompt('chatgpt'), await currentCoreInstructions()].filter(Boolean).join('\n\n');
+  expect(next?.text).toBe(prependUserPrompt('Second request', updated));
   expect(userPromptText(next!.text)).toBe('Second request');
 });
 
@@ -2072,13 +2166,13 @@ describe('IPC input delivery and Goal control integration', () => {
     const { publishPluginSurface, resetPluginRefreshForTests, setPluginRefreshTunnelGraceForTests } = await import('../src/main/plugin-refresh.js');
     resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0);
     const tools = [{ name: 'read', description: 'Read a file', inputSchema: { type: 'object', properties: {} } }];
-    publishPluginSurface('core', 'Chat On Steroids Core', 'test', 'Synthetic instructions', tools);
+    publishPluginSurface('core', 'Chat Marks Core', 'test', 'Synthetic instructions', tools);
     const requests = (await post('/plugin-refresh', { action: 'pending' })).body.requests;
     expect(requests).toHaveLength(1);
     const identity = { id: requests[0].id, appId: 'asdk_app_synthetic' };
     expect((await post('/plugin-refresh', { ...identity, action: 'claim', connectorName: 'Wrong', tools })).body.ok).toBe(false);
-    expect((await post('/plugin-refresh', { ...identity, action: 'claim', connectorName: 'Chat On Steroids Core', tools })).body.ok).toBe(false);
-    expect((await post('/plugin-refresh', { ...identity, action: 'claim', connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0], description: 'Old declaration' }] })).body.ok).toBe(true);
+    expect((await post('/plugin-refresh', { ...identity, action: 'claim', connectorName: 'Chat Marks Core', tools })).body.ok).toBe(false);
+    expect((await post('/plugin-refresh', { ...identity, action: 'claim', connectorName: 'Chat Marks Core', tools: [{ ...tools[0], description: 'Old declaration' }] })).body.ok).toBe(true);
     expect((await post('/plugin-refresh', { ...identity, action: 'complete', tools: [] })).body.ok).toBe(false);
     expect((await post('/plugin-refresh', { ...identity, action: 'complete', tools, versionId: 'asdk_app_v_synthetic' })).body.ok).toBe(true);
     resetPluginRefreshForTests();
@@ -2120,9 +2214,9 @@ describe('IPC input delivery and Goal control integration', () => {
     resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0);
     await writeDurableNow('plugin-refresh', []);
     const tools = [{ name: 'computer', description: 'Current', inputSchema: { type: 'object', properties: {} } }];
-    publishPluginSurface('desktop', 'Chat On Steroids Desktop', 'test', '', tools);
+    publishPluginSurface('desktop', 'Chat Marks Desktop', 'test', '', tools);
     const [request] = (await post('/plugin-refresh', { action: 'pending' })).body.requests;
-    const claim = (tunnelId?: string) => post('/plugin-refresh', { id: request.id, appId: 'asdk_app_desktop', action: 'claim', connectorName: 'Chat On Steroids Desktop', tools: [{ name: 'observe', description: 'Old', inputSchema: { type: 'object' } }], tunnelId });
+    const claim = (tunnelId?: string) => post('/plugin-refresh', { id: request.id, appId: 'asdk_app_desktop', action: 'claim', connectorName: 'Chat Marks Desktop', tools: [{ name: 'observe', description: 'Old', inputSchema: { type: 'object' } }], tunnelId });
     expect((await claim()).body.ok).toBe(false);
     expect((await claim('tunnel_core00001')).body.ok).toBe(false); // Core's tunnel is not Desktop's
     expect((await claim('tunnel_desk00001')).body.ok).toBe(true);
@@ -2136,7 +2230,7 @@ describe('IPC input delivery and Goal control integration', () => {
     plugin.resetPluginRefreshForTests(); plugin.setPluginRefreshTunnelGraceForTests(0);
     await writeDurableNow('plugin-refresh', []);
     const tools = [{ name: 'read', description: 'Current declaration', inputSchema: { type: 'object', properties: {} } }];
-    plugin.publishPluginSurface('core', 'Chat On Steroids Core', 'test', '', tools);
+    plugin.publishPluginSurface('core', 'Chat Marks Core', 'test', '', tools);
     const saved = (await plugin.pendingPluginRefreshes())[0]!;
     expect(saved).toBeDefined();
     expect((await post('/plugin-refresh', { action: 'pending' })).body.requests).toEqual([]);
@@ -2144,7 +2238,7 @@ describe('IPC input delivery and Goal control integration', () => {
     await configure(true);
     expect((await post('/plugin-refresh', { action: 'pending' })).body.requests[0].id).toBe(saved.id);
     expect((await post('/status', { openConversations: [] })).body.pluginRefreshRequests).toHaveLength(1);
-    const claim = { action: 'claim', id: saved.id, appId: 'asdk_app_off_on_test', connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0], description: 'Older declaration' }] };
+    const claim = { action: 'claim', id: saved.id, appId: 'asdk_app_off_on_test', connectorName: 'Chat Marks Core', tools: [{ ...tools[0], description: 'Older declaration' }] };
     await configure(false);
     expect((await post('/plugin-refresh', claim)).body).toMatchObject({ ok: false, error: 'automatic_refresh_disabled' });
     await configure(true);
@@ -2181,9 +2275,9 @@ describe('IPC input delivery and Goal control integration', () => {
     resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0);
     const tools = [{ name: 'read', description: 'Read current', inputSchema: { type: 'object', properties: {} } }];
     const installed = [{ ...tools[0], description: 'Read old' }];
-    publishPluginSurface('core', 'Chat On Steroids Core', 'test', 'Synthetic instructions', tools);
+    publishPluginSurface('core', 'Chat Marks Core', 'test', 'Synthetic instructions', tools);
     const request = (await post('/plugin-refresh', { action: 'pending' })).body.requests[0];
-    const manual = await post('/plugin-refresh', { ...request, appId: 'asdk_app_synthetic', action: 'manual', connectorName: 'Chat On Steroids Core', tools: installed, error: 'Recreate or republish this custom app.' });
+    const manual = await post('/plugin-refresh', { ...request, appId: 'asdk_app_synthetic', action: 'manual', connectorName: 'Chat Marks Core', tools: installed, error: 'Recreate or republish this custom app.' });
     expect(manual.body.ok).toBe(true);
     expect((await post('/plugin-refresh', { action: 'pending' })).body.requests).toEqual([]);
     resetPluginRefreshForTests();
@@ -2564,6 +2658,182 @@ describe('native progress silence authority', () => {
     expect(live[0]!.id).not.toBe(first.id);
   });
 
+  // 2026-10-31: an automatic Continue no page took after a stalled turn; a plain Continue in the same
+  // chat was taken at once. The fallback turns it into that ordinary message, once, and only while
+  // nothing newer happened in the chat.
+  it('turns an automatic Continue no page took into an ordinary message, only while nothing newer happened', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+    // The turn is still open in the record: an ordinary message could not go out, so nothing changes.
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toEqual({ refused: 'its turn is still open in the record' });
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() }
+    ] });
+    // Not before it has waited long enough itself.
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test', 60 * 60_000)).toEqual({ refused: 'it is not old enough yet' });
+    const outcome = await input.continueAsOrdinaryMessage(ticket.id, 'not claimed after its reloads');
+    const ordinary = 'row' in outcome ? outcome.row : null;
+    expect(ordinary).toMatchObject({ id: ticket.id, text: ticket.text, mode: 'auto', state: 'queued', continuedFrom: 'recovery' });
+    // Still the app's own send: the send check asks before it goes (CodeRabbit on #1960).
+    expect(input.automaticSendKind(ordinary!)).toBe('continue');
+    expect(ordinary).not.toHaveProperty('recovery');
+    expect(ordinary).not.toHaveProperty('silenceBoundary');
+    expect(logger.getLog().some(entry => entry.message.includes(`input ${ticket.id}: no page took the automatic Continue (not claimed after its reloads); sending it as an ordinary message`))).toBe(true);
+    // Offered like a typed message, and only once converted.
+    expect((await input.pendingBrowserInputs()).find(row => row.id === ticket.id)).toEqual(expect.not.objectContaining({ recovery: expect.anything() }));
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'again')).toEqual({ refused: 'it is no longer a queued automatic Continue' });
+    expect(ordinary).toMatchObject({ continuesQuestionId: ticket.recovery!.questionId });
+  });
+
+  // CodeRabbit on #1960: the converted Continue keeps its question and is still checked until Send.
+  it('withdraws a Continue sent on as an ordinary message once the person asks something newer', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() }
+    ] });
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toHaveProperty('row');
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'user_message', messageId: randomUUID(), text: 'Do this instead', time: Date.now(), authoredNow: true }
+    ] });
+    expect(await input.claimBrowserInput(ticket.id, 'page-owner', source.conversationId, true)).toBeNull();
+    expect((await input.listInputs()).find(row => row.id === ticket.id)).toMatchObject({
+      state: 'cancelled', error: 'Automatic Continue cancelled: another user message arrived.'
+    });
+  });
+
+  it('sends an automatic Continue no page claims as an ordinary message after a reload and ten minutes, instead of stopping', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      await post('/events', { conversationId: source.conversationId, events: [
+        { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: now }
+      ] });
+      // The page reloads on the pickup schedule and never claims the ticket.
+      let reloads = 0;
+      for (let minute = 1; minute <= 16; minute++) {
+        now += 60_000;
+        await (await bridge()).sweepStaleSwarm(now);
+        const repairs = (await post('/status', { openConversations: [source.conversationId] })).body.repairs ?? [];
+        for (const repair of repairs.filter((row: any) => row.conversationId === source.conversationId)) {
+          if (repair.requiresClaim) await post('/repairs/claim', { conversationId: source.conversationId, token: repair.token });
+          await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [source.conversationId] });
+          reloads += 1;
+        }
+        if (!(await input.listInputs()).find(row => row.id === ticket.id)?.recovery) break;
+      }
+      const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
+      expect(row).toMatchObject({ state: 'queued', mode: 'auto', text: ticket.text });
+      expect(row.recovery).toBeUndefined();
+      expect(row.pickupRecovery?.stoppedAt).toBeUndefined();
+      // The silence reload and at most two pickup reloads: no third reload and no stop.
+      expect(reloads).toBeGreaterThanOrEqual(2);
+      expect(reloads).toBeLessThanOrEqual(3);
+      expect(logger.getLog().some(entry => entry.message.includes(`input ${ticket.id}: no page took the automatic Continue (not claimed after`))).toBe(true);
+      expect((await input.pendingBrowserInputs()).some(entry => entry.id === ticket.id)).toBe(true);
+    } finally { clock.mockRestore(); }
+  });
+
+  // CodeRabbit on #2030: while its pages refuse it because the chat shows another last question, the
+  // Continue is not turned into an ordinary message, which would lose that check.
+  it('does not send a Continue on as an ordinary message while its pages say the question changed', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      await post('/events', { conversationId: source.conversationId, events: [
+        { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: now }
+      ] });
+      for (let minute = 1; minute <= 16; minute++) {
+        now += 60_000;
+        await post('/page-note', { note: 'input-held', reason: 'recovery-question-changed', inputId: ticket.id, conversationId: source.conversationId });
+        await (await bridge()).sweepStaleSwarm(now);
+        const repairs = (await post('/status', { openConversations: [source.conversationId] })).body.repairs ?? [];
+        for (const repair of repairs.filter((row: any) => row.conversationId === source.conversationId)) {
+          if (repair.requiresClaim) await post('/repairs/claim', { conversationId: source.conversationId, token: repair.token });
+          await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [source.conversationId] });
+        }
+      }
+      const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
+      expect(row.recovery, 'it was sent on as an ordinary message while the question no longer matched').toBeDefined();
+      expect(row.continuedFrom).toBeUndefined();
+    } finally { clock.mockRestore(); }
+  });
+
+  // 2026-10-31: the person's one click sends a waiting automatic Continue now, as an ordinary message.
+  it('sends a waiting automatic Continue now when the person asks, without waiting ten minutes', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      await post('/events', { conversationId: source.conversationId, events: [
+        { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: now }
+      ] });
+      now += 3 * 60_000;
+      // Its quick tries ran out: the chat shows the stopped Continue, with its button.
+      const stoppedAt = now;
+      await writeDurableNow('session-input', (await input.listInputs()).map(entry => entry.id === ticket.id
+        ? { ...entry, pickupRecovery: { attempts: 3, stoppedAt } } : entry));
+      input.resetInputForTests();
+      const bridgeModule = await bridge();
+      expect((await bridgeModule.sessionControlsFor(source.session.id)).recovery).toContainEqual(expect.objectContaining({ kind: 'pickup-stopped', next: 'continue', deadline: stoppedAt }));
+      // The caller's last gate runs inside the conversion: refusing it leaves the automatic Continue as it was.
+      expect(await input.continueAsOrdinaryMessage(ticket.id, 'gate test', 0, () => 'ChatGPT limits its chat\'s history'))
+        .toEqual({ refused: 'ChatGPT limits its chat\'s history' });
+      expect((await input.listInputs()).find(entry => entry.id === ticket.id)).toMatchObject({ state: 'queued', recovery: expect.anything() });
+      // Queued as an ordinary message: that is no delivery yet, and the answer says so (CodeRabbit on #1979).
+      expect(await bridgeModule.pickupNow(source.session.id, { next: 'continue', stoppedAt }, now)).toEqual({ ok: true, did: 'queued' });
+      const row = (await input.listInputs()).find(entry => entry.id === ticket.id)!;
+      expect(row).toMatchObject({ state: 'queued', mode: 'auto', text: ticket.text, continuedFrom: 'recovery' });
+      expect(row.recovery).toBeUndefined();
+      expect(logger.getLog().some(entry => entry.message.includes(`the person queued the automatic Continue in ${source.conversationId} now`))).toBe(true);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('says once why an automatic Continue is not sent as an ordinary message yet (CodeRabbit on #1960)', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const source = await open('gpt-5.6-sol');
+      expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+      const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+      // The turn stays open in the record: the page reloads on schedule and never claims it.
+      for (let minute = 1; minute <= 16; minute++) {
+        now += 60_000;
+        await (await bridge()).sweepStaleSwarm(now);
+        const repairs = (await post('/status', { openConversations: [source.conversationId] })).body.repairs ?? [];
+        for (const repair of repairs.filter((row: any) => row.conversationId === source.conversationId)) {
+          if (repair.requiresClaim) await post('/repairs/claim', { conversationId: source.conversationId, token: repair.token });
+          await post(`/status?repaired=${repair.token}&repairAction=reloaded`, { openConversations: [source.conversationId] });
+        }
+      }
+      expect((await input.listInputs()).find(row => row.id === ticket.id)?.recovery).toBeDefined();
+      expect(logger.getLog().map(entry => entry.message).filter(line => line.includes(`automatic Continue in ${source.conversationId} is not sent as an ordinary message yet`))).toEqual([
+        `bridge: the automatic Continue in ${source.conversationId} is not sent as an ordinary message yet — its turn is still open in the record`
+      ]);
+    } finally { clock.mockRestore(); }
+  });
+
+  it('leaves an automatic Continue alone once the person asked something newer', async () => {
+    const source = await open('gpt-5.6-sol');
+    expect(await input.fileRecoveryInput(source.session.id, source.conversationId, source.turnId, false, () => true)).toBe(true);
+    const ticket = (await input.listInputs()).find(row => row.recovery && row.state === 'queued')!;
+    await post('/events', { conversationId: source.conversationId, events: [
+      { kind: 'turn_end', turnId: source.turnId, outcome: 'stalled', time: Date.now() },
+      { kind: 'user_message', messageId: randomUUID(), text: 'Actually, do this instead', time: Date.now(), authoredNow: true }
+    ] });
+    // The newer question already withdrew the Continue; either way it is never sent as an ordinary message.
+    expect(await input.continueAsOrdinaryMessage(ticket.id, 'test')).toHaveProperty('refused');
+    const left = (await input.listInputs()).find(row => row.id === ticket.id)!;
+    expect(left).toMatchObject({ recovery: expect.anything() });
+    expect(left.continuedFrom).toBeUndefined();
+  });
+
   it('keeps authored queued work ahead of automatic Continue after a committed handoff', async () => {
     let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     try {
@@ -2858,7 +3128,7 @@ describe('native progress silence authority', () => {
 
 describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)', mode => {
   beforeEach(async () => { await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } }); });
-  async function silent(model: string, advance: (ms: number) => void, reloadDelay = 0, sourceEnd?: 'completed' | 'interrupted' | 'unknown', mcp = true, manualClose = false) {
+  async function silent(model: string, advance: (ms: number) => void, reloadDelay = 0, sourceEnd?: 'completed' | 'interrupted' | 'unknown', mcp = true, manualClose = false, endDuringReload = false) {
     const bridge = await import('../src/main/bridge.js');
     const conversationId = randomUUID();
     const session = await createSession({ title: 'Automatic Continue fixture', conversationId });
@@ -2900,10 +3170,15 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
     expect(repair?.reason).toBe('silence');
     if (repair.requiresClaim) expect((await post('/repairs/claim', { token: repair.token })).body.allowed).toBe(true);
     advance(reloadDelay);
+    // ChatGPT can settle the *same* interrupted generation while the old document
+    // reloads, before the extension's exact repair acknowledgement reaches the app.
+    if (endDuringReload) await post('/events', { conversationId, events: [
+      { kind: 'turn_end', turnId, outcome: 'interrupted', time: Date.now() }
+    ] });
     await post(`/status?repaired=${repair.token}&repairAction=${manualClose ? 'reopened' : 'reloaded'}`, { openConversations });
     const row = (await input.listInputs()).find(row => row.sessionId === session.id && row.recovery)!;
     expect(row).toMatchObject({ state: 'queued', recovery: { questionId, phase: 'ready' } });
-    return { row, conversationId, session, turnId };
+    return { row, conversationId, session, turnId, repairToken: repair.token };
   }
 
   it.each(['gpt-5.6-sol', 'gpt-5.6-pro'])('continues an idle unfinished %s immediately after its initial reload', async model => {
@@ -2917,6 +3192,28 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
       expect(await input.authorizeBrowserInput(row.id, 'idle-doc', conversationId)).toBe(true);
       expect(await input.authorizeBrowserInput(row.id, 'idle-doc', conversationId)).toBe(false);
       expect(goal.goalPendingReplyFor(conversationId)).toBeNull();
+    } finally { clock.mockRestore(); }
+  });
+
+  it('continues one interrupted working turn whose end reaches the app before the reload receipt', async () => {
+    let now = Date.now(); const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    try {
+      const { row, conversationId, session, repairToken } = await silent('gpt-5.6-sol', ms => { now += ms; },
+        0, undefined, true, false, true);
+      expect(row.recovery).toMatchObject({ phase: 'ready' });
+      expect((await input.listInputs()).filter(entry => entry.sessionId === session.id && entry.recovery)).toHaveLength(1);
+      expect(await input.claimBrowserInput(row.id, 'reloaded-page', conversationId, true)).not.toBeNull();
+      expect(await input.authorizeBrowserInput(row.id, 'reloaded-page', conversationId)).toBe(true);
+      expect(await input.acknowledgeBrowserInput(row.id, 'reloaded-page', conversationId, 'continue-once')).toBe(true);
+      // Duplicate receipts, memory cache loss and another silence sweep must not
+      // mint a second Continue after the single native Send was acknowledged.
+      await post(`/status?repaired=${repairToken}&repairAction=reloaded`, { openConversations: [conversationId] });
+      input.resetInputForTests();
+      expect((await input.listInputs()).filter(entry => entry.sessionId === session.id && entry.recovery)).toMatchObject([
+        { id: row.id, state: 'sent', sendAuthorizedAt: expect.any(Number) }
+      ]);
+      await (await import('../src/main/bridge.js')).sweepStaleSwarm(now + 5 * 60_000);
+      expect((await input.listInputs()).filter(entry => entry.sessionId === session.id && entry.recovery)).toHaveLength(1);
     } finally { clock.mockRestore(); }
   });
 
@@ -3280,9 +3577,10 @@ describe.each(['off', 'goal', 'loop'] as const)('shared automatic Continue (%s)'
       expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ pickupRecovery: { attempts: 3, stoppedAt: now } });
       input.resetInputForTests();
       expect((await input.listInputs()).find(item => item.id === row.id)).toMatchObject({ pickupRecovery: { attempts: 3, stoppedAt: now } });
+      // Shown as stopped, and retried slowly: 15 minutes later the same ticket is reloaded for again.
       now += 15 * 60_000;
       await bridge.sweepStaleSwarm(now);
-      expect((await post('/status', { openConversations: [conversationId] })).body.repairs.some((item: any) => item.conversationId === conversationId)).toBe(false);
+      expect((await post('/status', { openConversations: [conversationId] })).body.repairs.some((item: any) => item.conversationId === conversationId)).toBe(true);
       expect((await input.listInputs()).find(item => item.id === row.id)?.text).toBe(row.text);
       expect((await input.claimBrowserInput(row.id, 'restored-doc', conversationId, true))?.text).toBe(row.text);
       expect(await input.authorizeBrowserInput(row.id, 'restored-doc', conversationId)).toBe(true);
@@ -3406,11 +3704,11 @@ describe('this install\'s connector names', () => {
   it('reach the extension with every status reply, and follow a changed suffix at once', async () => {
     await saveConfig(defaultConfig());
     expect((await post('/status', { openConversations: [] })).body.connectorNames).toEqual({
-      core: 'Chat On Steroids Core', desktop: 'Chat On Steroids Desktop', plugins: 'Chat On Steroids Plugins'
+      core: 'Chat Marks Core', desktop: 'Chat Marks Desktop', plugins: 'Chat Marks Plugins'
     });
     await saveConfig({ ...defaultConfig(), connectorSuffix: 'Windows' });
     expect((await post('/status', { openConversations: [] })).body.connectorNames).toEqual({
-      core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)'
+      core: 'Chat Marks Core (Windows)', desktop: 'Chat Marks Desktop (Windows)', plugins: 'Chat Marks Plugins (Windows)'
     });
     await saveConfig(defaultConfig());
   });
@@ -3478,6 +3776,26 @@ it('lets a branch from a chat of a linked project be claimed on its draft, not o
   const claim = async (id: string) => (await post('/input/claim', { id, owner: 'a-document', conversationId: null, requiresAuthorization: true })).body.input;
   expect(await claim(plain.id)).toBeNull();
   expect(await claim(branch.id)).toMatchObject({ id: branch.id, branch: { conversationId, messageId } });
+});
+
+it('releases a new chat to standalone delivery when its native ChatGPT Project was removed', async () => {
+  const folder = path.join(directory, 'gone-project-' + randomUUID());
+  await fs.mkdir(folder);
+  const config = defaultConfig();
+  await saveConfig({ ...config, roots: [{ name: 'project', path: folder }] });
+  const projects = await import('../src/main/projects.js');
+  const project = await addProject(folder);
+  const request = (project.chatgpt as { requestId: string }).requestId;
+  expect(await projects.claimProjectCreate(request, 'page-a')).toBe(true);
+  expect(await projects.armProjectCreate(request, 'page-a')).toBe(true);
+  const projectId = `g-p-${'b'.repeat(32)}`;
+  expect(await projects.completeProjectCreate(request, 'page-a', projectId)).toBe(true);
+  const first = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id });
+  expect((await input.pendingBrowserInputs()).some(row => row.id === first.id && row.project === projectId)).toBe(true);
+  expect(await projects.markProjectGone(project.id, projectId)).toBe(true);
+  expect((await input.pendingBrowserInputs()).find(row => row.id === first.id)).toMatchObject({ id: first.id, conversationId: null });
+  expect((await post('/input/claim', { id: first.id, owner: 'home-page', conversationId: null, requiresAuthorization: true })).body.input)
+    .toMatchObject({ id: first.id });
 });
 
 it('gives a branch the history it was branched from before its first question, without duplicates (#482)', async () => {
@@ -3651,3 +3969,449 @@ it.each(['GPT-5.6 Sol', 'gpt-6-pro'])('sends a message typed after Stop once Cha
   expect((await input.pendingBrowserInputs()).some(item => item.id === queued.id)).toBe(false);
 });
 
+
+// Haz on #1990: where a message came from is main's to say; the window cannot mark one as from Telegram.
+it('never lets the window mark a message as from Telegram', async () => {
+  const session = await createSession({ title: 'Typed here', conversationId: randomUUID() });
+  const result = await handlers.get('sessions:send')!(null, { ...message(session.id, 'off'), mode: 'auto' as const, via: 'telegram' });
+  expect(result.ok).toBe(true);
+  expect(result.data.via).toBeUndefined();
+  expect((await input.listInputs()).find(row => row.id === result.data.id)?.via).toBeUndefined();
+});
+
+// "Chats working at once" (#1694): the app's own sends wait for a slot; the person's never do.
+it("holds a scheduled run while other chats fill every slot, never the person's own message, and goes when one frees", async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>(['another-chat']);
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Scheduled run waits for a slot', conversationId });
+    const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(false);
+    expect((await input.listInputs()).find(item => item.id === scheduled.id)?.slotWait).toBe('slots');
+    expect(await input.queuedInputOfferBlocker(scheduled.id)).toMatch(/free slot: 1 chats are working \(limit 1\)/);
+    // The person's own message goes out with every slot taken, also in a chat that is not working.
+    const mine = await createSession({ title: 'My own chat', conversationId: randomUUID() });
+    const typed = await input.enqueueInput({ ...message(mine.id, 'off'), mode: 'auto', text: 'My own question' });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === typed.id)).toBe(true);
+    await input.cancelInput(typed.id);
+    // The other chat finishes: the scheduled run is offered, and its row no longer says it waits.
+    working = new Set();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(true);
+    expect((await input.listInputs()).find(item => item.id === scheduled.id)?.slotWait).toBeUndefined();
+    // Offered again on the next poll before its chat shows as working: its slot is its own.
+    working = new Set(['a-third-chat']);
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(true);
+    await input.cancelInput(scheduled.id);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+// CodeRabbit on #2051: time the app itself held a message is not the browser's minute.
+it('keeps a slot-held scheduled run queued past the pickup minute, also across a restart, and counts the minute from the release', async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>(['another-chat']);
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    const session = await createSession({ title: 'Scheduled run held past a minute', conversationId: randomUUID() });
+    const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: now, late: false } });
+    const state = async () => (await input.listInputs()).find(item => item.id === scheduled.id)?.state;
+    for (let step = 0; step < 6; step++) {
+      expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(false);
+      now += 20_000;
+    }
+    expect(await state()).toBe('queued');
+    // A restart while it is held: the saved hold still counts.
+    await flushDurable(); input.resetInputForTests();
+    now += 30_000;
+    expect(await state()).toBe('queued');
+    // The slot frees: offered, and the browser's minute starts now.
+    working = new Set();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === scheduled.id)).toBe(true);
+    now += 50_000;
+    expect(await state()).toBe('queued');
+    now += 15_000;
+    expect(await state()).toBe('failed');
+  } finally {
+    clock.mockRestore();
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it("refuses the claim and Send of an automatic message once ChatGPT's pause starts after its offer", async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 2 } });
+    const conversationId = randomUUID();
+    const session = await createSession({ title: 'Pause after the offer', conversationId });
+    const scheduled = () => input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    const first = await scheduled();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === first.id)).toBe(true);
+    // Claimed with Send still to be authorized, then the pause starts.
+    expect(await input.claimBrowserInput(first.id, 'pause-page', conversationId, true)).not.toBeNull();
+    const now = Date.now();
+    slots.noteChatLimit('limited-a', null, now, now);
+    slots.noteChatLimit('limited-b', null, now, now);
+    expect(await input.authorizeBrowserInput(first.id, 'pause-page', conversationId)).toBe(false);
+    await input.cancelInput(first.id);
+    // Offered before the pause, claimed after it: not handed out, still queued.
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+    const second = await scheduled();
+    expect((await input.pendingBrowserInputs()).some(item => item.id === second.id)).toBe(true);
+    slots.noteChatLimit('limited-a', null, Date.now(), Date.now());
+    slots.noteChatLimit('limited-b', null, Date.now(), Date.now());
+    expect(await input.claimBrowserInput(second.id, 'pause-page', conversationId, true)).toBeNull();
+    expect((await input.listInputs()).find(item => item.id === second.id)?.state).toBe('queued');
+    await input.cancelInput(second.id);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it("pauses on ChatGPT's blocking limit notice in two chats even without a retry time, and not on a replayed old one", async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+  try {
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 2 } });
+    const limited = async (at: number) => {
+      const conversationId = randomUUID();
+      await createSession({ title: 'Limited chat', conversationId });
+      await post('/events', { conversationId, events: [
+        { kind: 'chat_error', text: 'You have hit your limit. Please try again later.', recoverable: false, blocking: true, time: at }
+      ] });
+    };
+    // Two notices replayed from twenty minutes ago: no new evidence.
+    await limited(Date.now() - 20 * 60_000);
+    await limited(Date.now() - 20 * 60_000);
+    expect(slots.chatsAtOnceStatus().pauseUntil).toBeNull();
+    // Two fresh ones without a retry time: the 15-minute pause (CodeRabbit on #2051).
+    await limited(Date.now());
+    expect(slots.chatsAtOnceStatus().pauseUntil).toBeNull();
+    await limited(Date.now());
+    expect(slots.chatsAtOnceStatus().pauseUntil).toBeGreaterThan(Date.now() + 14 * 60_000);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it('takes no slot for a message that waits for its ChatGPT Project anyway', async () => {
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => new Set());
+  const folder = path.join(directory, 'slot-project-' + randomUUID());
+  await fs.mkdir(folder);
+  try {
+    const config = defaultConfig();
+    await saveConfig({ ...config, roots: [{ name: 'slot-project', path: folder }], goal: { ...config.goal, enabled: false },
+      multiAgent: { ...config.multiAgent, chatsAtOnce: 1 } });
+    // The project's ChatGPT Project is still being asked for: its new chat cannot open yet.
+    const project = await addProject(folder);
+    const waiting = await input.enqueueInput({ ...message(null, 'off'), mode: 'auto', projectId: project.id, text: 'Start the report',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === waiting.id)).toBe(false);
+    // The only slot stays free for another chat's automatic message.
+    const session = await createSession({ title: 'Gets the free slot', conversationId: randomUUID() });
+    const other = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the issues',
+      scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+    expect((await input.pendingBrowserInputs()).some(item => item.id === other.id)).toBe(true);
+    await input.cancelInput(other.id); await input.cancelInput(waiting.id);
+  } finally {
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  }
+});
+
+it("holds a Loop step at /goal/draft while other chats fill every slot, says so in the chat, and lets it ask once one frees", async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>(['another-chat']);
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Loop step waits for a slot', conversationId });
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    await saveConfig({ ...defaultConfig(), multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-6-pro', time: now },
+      { kind: 'user_message', messageId: 'request', text: 'Build all stage layers', time: now },
+      { kind: 'turn_start', turnId: 'slot-source', time: now },
+      { kind: 'turn_end', turnId: 'slot-source', outcome: 'failed', reason: 'thinking_failed', time: now + 1 }
+    ] });
+    await goal.setGoalSwitchNow(conversationId, 'loop', false, true);
+    now += 300001;
+    await bridge.setSessionAutomation(session.id, 'loop');
+    const pending = goal.goalPendingReplyFor(conversationId)!;
+    expect(pending).toBeTruthy();
+    const draft = { conversationId, turnId: pending.turnId, clientId: 'slot-page', terminalRequired: true };
+    const held = await post('/goal/draft', draft);
+    expect(held.status).toBe(409);
+    expect(held.body).toMatchObject({ error: 'chats_at_once', retryable: true });
+    expect((await bridge.sessionControlsFor(session.id)).goalWait).toEqual({ reason: 'slots' });
+    working = new Set();
+    expect((await post('/goal/draft', draft)).status).toBe(200);
+    // A request refused for another reason holds no slot (CodeRabbit on #2051): the gate is asked last.
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+    expect((await post('/goal/draft', { ...draft, clientId: 'another-page' })).body.error).toBe('goal_owned_elsewhere');
+    expect(slots.automaticSendRefusal('input:someone-else', 'someone-else')).toBeNull();
+    await bridge.setSessionAutomation(session.id, 'off');
+  } finally {
+    clock.mockRestore();
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig(defaultConfig());
+  }
+});
+
+it("asks again at Send for a ready Goal message whose slot hold ran out while it was drafted (CodeRabbit on #2051)", async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const slots = await import('../src/main/chats-at-once.js');
+  const bridgeSource = slots.workingChatsSourceForTests();
+  let working = new Set<string>();
+  slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(() => working);
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Goal message waits at Send', conversationId });
+  let now = Date.now();
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+  try {
+    // Offline templates: the draft is ready without a helper chat or an API key.
+    await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, backend: 'templates' },
+      multiAgent: { ...defaultConfig().multiAgent, chatsAtOnce: 1 } });
+    await goal.setGoalObjectiveNow(conversationId, 'Complete the current requested work');
+    await goal.setGoalSwitchNow(conversationId, 'goal', true);
+    await post('/events', { conversationId, events: [
+      { kind: 'model_selection', model: 'gpt-6-pro', time: now },
+      { kind: 'user_message', messageId: 'request', text: 'Build all stage layers', time: now },
+      { kind: 'turn_start', turnId: 'send-source', time: now },
+      { kind: 'assistant_message', turnId: 'send-source', messageId: 'send-source-answer', text: 'More remains\n[[COS_GOAL:CONTINUE]]', state: 'final', final: true, time: now + 1 },
+      { kind: 'turn_end', turnId: 'send-source', outcome: 'completed', time: now + 2 }
+    ] });
+    const store = await import('../src/main/session/store.js');
+    const [answer] = await store.readRecentEvents(session.id, 1, { kinds: ['assistant_message'] });
+    await goal.acceptGoalReplyNow({ conversationId, sessionId: session.id, replyId: 'send-source-obligation', turnId: 'send-source', eventSeq: answer!.seq, blocked: false });
+    const pending = goal.goalPendingReplyFor(conversationId)!;
+    expect(pending).toBeTruthy();
+    expect((await post('/goal/draft', { conversationId, turnId: pending.turnId, clientId: 'slot-page', terminalRequired: true })).status).toBe(200);
+    // Drafting outlasts the slot's hold and another chat takes the only slot meanwhile: the ready
+    // message is asked about again at Send and waits, untyped (CodeRabbit on #2051).
+    await vi.waitFor(() => expect(goal.goalViewFor(conversationId, 'slot-page')?.stage).toBe('ready'), { timeout: 10_000, interval: 25 });
+    const activity = () => fetch(`http://127.0.0.1:${bridgePort()}/activity?conversationId=${conversationId}&goalClient=slot-page`, { headers: {
+      authorization: `Bearer ${bearer}`, 'x-extension-version': APP_VERSION, 'x-extension-protocol': String(BRIDGE_PROTOCOL)
+    } }).then(r => r.json());
+    expect((await activity()).goal.slotWait).toBeUndefined();
+    now += 3 * 60_000;
+    working = new Set(['another-chat']);
+    expect((await activity()).goal).toMatchObject({ draft: { stage: 'ready' }, slotWait: expect.stringMatching(/1 chats are working/) });
+    // The desktop chat says why too, instead of "Message ready" (CodeRabbit on #2051).
+    expect((await bridge.sessionControlsFor(session.id)).goalWait).toEqual({ reason: 'slots' });
+    working = new Set();
+    expect((await activity()).goal.slotWait).toBeUndefined();
+    expect((await bridge.sessionControlsFor(session.id)).goalWait).toBeNull();
+    await bridge.setSessionAutomation(session.id, 'off');
+  } finally {
+    clock.mockRestore();
+    slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(bridgeSource);
+    await saveConfig(defaultConfig());
+  }
+});
+
+// #2074: the texts a page may treat as this app's own leftover in the message box.
+it("lists only the app's own automatic messages ChatGPT received, never the person's, as message-box leftovers", async () => {
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Own leftovers', conversationId });
+  const deliver = async (row: { id: string }, messageId: string) => {
+    expect(await input.claimBrowserInput(row.id, 'leftover-page', conversationId, true)).not.toBeNull();
+    expect(await input.authorizeBrowserInput(row.id, 'leftover-page', conversationId)).toBe(true);
+    expect(await input.acknowledgeBrowserInput(row.id, 'leftover-page', conversationId, messageId)).toBe(true);
+  };
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Check the open issues and report',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  await deliver(scheduled, 'scheduled-message');
+  const mine = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'My own question about the issues' });
+  await deliver(mine, 'my-message');
+  const waiting = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Not sent yet',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now() + 60 * 60_000, late: false } });
+  const sent = await input.ownSentResidue(conversationId);
+  // Each with its ChatGPT message id, which the page matches to the chat's latest message (CodeRabbit on #2079).
+  expect(sent).toEqual([expect.objectContaining({ messageId: 'scheduled-message', text: expect.stringContaining('Check the open issues and report') })]);
+  expect(sent.some(row => row.text.includes('My own question'))).toBe(false);
+  expect(sent.some(row => row.text.includes('Not sent yet'))).toBe(false);
+  expect(await input.ownSentResidue(randomUUID())).toEqual([]);
+  await input.cancelInput(waiting.id);
+  // The outbox keeps only its newest finished rows across all chats; the chat's latest automatic
+  // send is still known after they are gone, and after a restart (CodeRabbit on #2079).
+  await flushDurable();
+  await writeDurableNow('session-input', []);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([expect.objectContaining({ messageId: 'scheduled-message' })]);
+});
+
+// #2074 saved data: the own-sent store starts empty for data saved by the previous version, and a
+// damaged file or entry is dropped while the good entries stay.
+it('reads the own-sent store from an older version as empty and drops damaged entries', async () => {
+  const conversationId = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', null);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await writeDurableNow('own-sent-receipts', 'not a list');
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await writeDurableNow('own-sent-receipts', [
+    { conversationId, text: 'Continue the task', messageId: 'kept-message', at: Date.now() },
+    { conversationId, text: '', messageId: 'empty-text', at: Date.now() },
+    { conversationId: 42, text: 'Broken owner', messageId: 'bad-owner', at: Date.now() },
+    { conversationId, text: 'Private words with a broken time', messageId: 'bad-time', at: 'yesterday' },
+    'garbage'
+  ]);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'kept-message' }]);
+  // The rejected rows leave the disk too, not only memory (CodeRabbit on #2079).
+  await flushDurable();
+  const { readDurable } = await import('../src/main/durable.js');
+  expect(JSON.stringify(await readDurable('own-sent-receipts'))).not.toContain('Private words');
+  // A file whose JSON is broken still holds text on disk: it is replaced by a clean store.
+  const file = path.join(directory, 'state', 'own-sent-receipts.json');
+  await fs.writeFile(file, '[{"conversationId":"x","text":"Private words in a broken file"', 'utf8');
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(conversationId)).toEqual([]);
+  await flushDurable();
+  const raw = await fs.readFile(file, 'utf8');
+  expect(raw).not.toContain('Private words');
+  expect(JSON.parse(raw)).toEqual({ version: 1, receipts: [], forgotten: [] });
+});
+
+// CodeRabbit on #2079: a chat ChatGPT deleted loses its own-sent record, and a save keeps nothing
+// older than the window a page may use it in.
+it('forgets the own-sent record of a chat ChatGPT deleted, and drops old records when it saves', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  const gone = randomUUID(), old = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', [
+    { conversationId: gone, text: 'Continue the task', messageId: 'gone-message', at: Date.now() },
+    { conversationId: old, text: 'An old continue', messageId: 'old-message', at: Date.now() - 25 * 60 * 60_000 }
+  ]);
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(gone)).toEqual([{ text: 'Continue the task', messageId: 'gone-message' }]);
+  expect(await input.ownSentResidue(old)).toEqual([]);
+  await input.failInputsForDeletedConversation(gone);
+  expect(await input.ownSentResidue(gone)).toEqual([]);
+  // Saved at once, without the deleted chat's text and without the old record.
+  expect(await readDurable('own-sent-receipts')).toEqual({ version: 1, receipts: [], forgotten: [expect.objectContaining({ conversationId: gone })] });
+});
+
+// CodeRabbit on #2079: a send acknowledged after its chat was deleted does not record it again.
+it("does not record a deleted chat's automatic send that is acknowledged afterwards", async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Deleted while sending', conversationId });
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'The person\'s scheduled words',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'late-page', conversationId, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'late-page', conversationId)).toBe(true);
+  await input.forgetOwnSent([conversationId]);
+  expect(await input.acknowledgeBrowserInput(scheduled.id, 'late-page', conversationId, 'late-message')).toBe(true);
+  await flushDurable();
+  const saved = await readDurable<{ receipts: Array<{ conversationId: string }> }>('own-sent-receipts');
+  expect(saved?.receipts.some(row => row.conversationId === conversationId)).toBe(false);
+  // After a restart too.
+  input.resetInputForTests();
+  await input.forgetOwnSent([]);
+  expect((await readDurable<{ receipts: Array<{ conversationId: string }> }>('own-sent-receipts'))?.receipts
+    .some(row => row.conversationId === conversationId)).toBe(false);
+});
+
+// CodeRabbit on #2079: expired text leaves the disk when the store is read, and a deletion racing
+// another chat's send keeps both changes.
+it('drops expired own-sent text from disk on read, and keeps both changes when a deletion races a send', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const expired = randomUUID(), deleted = randomUUID();
+  await flushDurable();
+  await writeDurableNow('own-sent-receipts', { version: 1, receipts: [
+    { conversationId: expired, text: 'An expired continue', messageId: 'expired-message', at: Date.now() - 25 * 60 * 60_000 },
+    { conversationId: deleted, text: 'Soon deleted', messageId: 'deleted-message', at: Date.now() }
+  ], forgotten: [] });
+  input.resetInputForTests();
+  expect(await input.ownSentResidue(expired)).toEqual([]);
+  await flushDurable();
+  expect(((await readDurable<any>('own-sent-receipts'))!.receipts as Array<{ messageId: string }>).map(row => row.messageId)).toEqual(['deleted-message']);
+  // A send for another chat is acknowledged while the deletion is being saved.
+  const kept = randomUUID();
+  const session = await createSession({ title: 'Kept while another is deleted', conversationId: kept });
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Kept continue',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'race-page', kept, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'race-page', kept)).toBe(true);
+  await Promise.all([input.forgetOwnSent([deleted]), input.acknowledgeBrowserInput(scheduled.id, 'race-page', kept, 'kept-message')]);
+  await flushDurable();
+  const saved = (await readDurable<any>('own-sent-receipts'))!;
+  expect((saved.receipts as Array<{ messageId: string }>).map(row => row.messageId)).toEqual(['kept-message']);
+  expect((saved.forgotten as Array<{ conversationId: string }>).map(row => row.conversationId)).toEqual([deleted]);
+});
+
+// CodeRabbit on #2079: a store that cannot be read for the moment is not cached as empty.
+it('reads the own-sent store again after it could not be read for a moment', async () => {
+  const conversationId = randomUUID();
+  const dir = path.join(directory, 'state', 'own-sent-receipts.json');
+  await flushDurable();
+  await fs.rm(dir, { force: true });
+  // A directory where the file belongs: unreadable, but not damaged data.
+  await fs.mkdir(dir, { recursive: true });
+  input.resetInputForTests();
+  await expect(input.ownSentResidue(conversationId)).rejects.toThrow();
+  await fs.rm(dir, { recursive: true, force: true });
+  await writeDurableNow('own-sent-receipts', { version: 1, receipts: [
+    { conversationId, text: 'Continue the task', messageId: 'readable-again', at: Date.now() }], forgotten: [] });
+  // Not the empty snapshot of the failed read.
+  expect(await input.ownSentResidue(conversationId)).toEqual([{ text: 'Continue the task', messageId: 'readable-again' }]);
+});
+
+// CodeRabbit on #2079: a send acknowledged while the store could not be read is recorded once it can.
+it('records an automatic send acknowledged while the own-sent store was unreadable, once it reads again', async () => {
+  const { readDurable } = await import('../src/main/durable.js');
+  await saveConfig({ ...defaultConfig(), goal: { ...defaultConfig().goal, enabled: false } });
+  const conversationId = randomUUID();
+  const session = await createSession({ title: 'Acknowledged while unreadable', conversationId });
+  const file = path.join(directory, 'state', 'own-sent-receipts.json');
+  await flushDurable();
+  await fs.rm(file, { recursive: true, force: true });
+  await fs.mkdir(file, { recursive: true });
+  input.resetInputForTests();
+  const scheduled = await input.enqueueInput({ ...message(session.id, 'off'), mode: 'auto', text: 'Continue while unreadable',
+    scheduled: { scheduleId: randomUUID(), dueAt: Date.now(), late: false } });
+  expect(await input.claimBrowserInput(scheduled.id, 'unreadable-page', conversationId, true)).not.toBeNull();
+  expect(await input.authorizeBrowserInput(scheduled.id, 'unreadable-page', conversationId)).toBe(true);
+  // The acknowledgement itself never fails on the store.
+  expect(await input.acknowledgeBrowserInput(scheduled.id, 'unreadable-page', conversationId, 'unreadable-message')).toBe(true);
+  await fs.rm(file, { recursive: true, force: true });
+  await writeDurableNow('session-input', []);
+  // Readable again, and the outbox history no longer has the row: the receipt is still recorded.
+  expect(await input.ownSentResidue(conversationId)).toEqual([expect.objectContaining({ messageId: 'unreadable-message' })]);
+  await flushDurable();
+  expect(JSON.stringify(await readDurable('own-sent-receipts'))).toContain('unreadable-message');
+});

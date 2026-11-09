@@ -31,13 +31,15 @@ describe('Firefox companion packaging groundwork', () => {
     }
   });
 
-  it('adds a Firefox-only build number when one is given, and only digits', async () => {
-    // Mozilla never signs a version twice (2.1.43, 2026-10-20): the publish run can ask for 2.1.43.1.
+  it('adds a Firefox-only build number only to a three-part version, and only digits', async () => {
+    // Mozilla never signs a version twice (2.1.43, 2026-10-20): the community's publish run can ask
+    // for 2.1.43.1. A Chat Marks version already has four parts, so it publishes a new revision.
     const source = JSON.parse(await fs.readFile(path.join(extensionRoot, 'manifest.json'), 'utf8'));
-    expect(firefoxManifest(source, '1').version).toBe(`${APP_VERSION}.1`);
+    expect(firefoxManifest({ ...source, version: '2.1.43' }, '1').version).toBe('2.1.43.1');
+    expect(() => firefoxManifest({ ...source, version: '2.1.43.1' }, '1')).toThrow('publish the next Marks revision');
     expect(firefoxManifest(source, '').version).toBe(APP_VERSION);
     expect(firefoxManifest(source).version).toBe(APP_VERSION);
-    for (const bad of ['0', '01', 'a', '1.2', '1000']) expect(() => firefoxManifest(source, bad), bad).toThrow();
+    for (const bad of ['0', '01', 'a', '1.2', '1000']) expect(() => firefoxManifest({ ...source, version: '2.1.43' }, bad), bad).toThrow();
   });
 
   it('derives only the Gecko manifest delta from the canonical companion manifest', async () => {
@@ -51,9 +53,9 @@ describe('Firefox companion packaging groundwork', () => {
     expect(manifest.browser_specific_settings).toEqual({
       // The id is permanent once Mozilla signs it; updates come from the latest release.
       gecko: {
-        id: 'companion@chatonsteroids.app',
+        id: 'companion@chatmarks.app',
         strict_min_version: '140.0',
-        update_url: 'https://github.com/totec448-spec/chat-on-steroids/releases/latest/download/firefox-updates.json',
+        update_url: 'https://github.com/mvclaudianobj/chat-on-steroids/releases/latest/download/firefox-updates.json',
         data_collection_permissions: { required: ['personalCommunications', 'websiteContent'] }
       },
       // Mozilla's validator (2026-10-15): data_collection_permissions arrived in Firefox for

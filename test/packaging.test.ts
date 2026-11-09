@@ -185,10 +185,10 @@ describe('cross-platform packaging targets', () => {
   });
 
   it('builds canaries only for the targets most installs use, and releases for all of them', () => {
-    expect(releaseTargets('common').include.map((target: { name: string }) => target.name)).toEqual(['Windows x64', 'macOS arm64', 'Linux x64']);
-    expect(releaseTargets('common').files).toEqual(['Chat-On-Steroids-Setup-x64.exe', 'Chat-On-Steroids-macOS-arm64.dmg',
-      'Chat-On-Steroids-macOS-arm64.zip', 'Chat-On-Steroids-Linux-x64.AppImage', 'Chat-On-Steroids-Linux-x64.deb',
-      'Chat-On-Steroids-Extension.zip', 'Chat-On-Steroids-Native-Sources.tar.gz']);
+    // Chat Marks ships no macOS build for now: its targets stay declared but disabled.
+    expect(releaseTargets('common').include.map((target: { name: string }) => target.name)).toEqual(['Windows x64', 'Linux x64']);
+    expect(releaseTargets('common').files).toEqual(['ChatMarks-Setup-x64.exe', 'ChatMarks-Linux-x64.AppImage', 'ChatMarks-Linux-x64.deb',
+      'ChatMarks-Extension.zip', 'ChatMarks-Native-Sources.tar.gz']);
     expect(() => releaseTargets('some')).toThrow();
     const canary = yamlFile('.github/workflows/canary.yml');
     expect(canary.jobs.candidate.with).toEqual({ platforms: 'common' });
@@ -211,7 +211,7 @@ describe('cross-platform packaging targets', () => {
 
     expect(reverify?.run).toContain('sha256sum -c SHA256SUMS.txt');
     expect(narrow?.['working-directory']).toBe('publish');
-    expect(narrow?.run).toContain('Chat-On-Steroids-Native-Sources.tar.gz');
+    expect(narrow?.run).toContain('ChatMarks-Native-Sources.tar.gz');
     expect(narrow?.run).toContain('SHA256SUMS.txt');
     expect(narrow?.run).toContain('SHA256SUMS.canary.txt');
     expect(publish?.run).toContain("! -name '*Native-Sources*'");
@@ -333,45 +333,35 @@ describe('cross-platform packaging targets', () => {
     expect(parsed.jobs.package.strategy.matrix.include).toBe('${{ fromJSON(needs.plan.outputs.include) }}');
     expect(parsed.jobs.plan.steps.at(-1).run).toBe('node scripts/release-targets.mjs "$PLATFORMS"');
     const matrix = releaseTargets('all').include;
-    expect(matrix).toHaveLength(6);
+    expect(matrix).toHaveLength(4);
     expect(matrix).toEqual([
       {
         name: 'Windows x64', platform: 'win32', arch: 'x64', runner: 'windows-2025',
-        script: 'dist:x64', artifact: 'package-windows-x64', files: 'release/Chat-On-Steroids-Setup-x64.exe'
+        script: 'dist:x64', artifact: 'package-windows-x64', files: 'release/ChatMarks-Setup-x64.exe'
       },
       {
         name: 'Windows arm64', platform: 'win32', arch: 'arm64', runner: 'windows-11-arm',
-        script: 'dist:arm64', artifact: 'package-windows-arm64', files: 'release/Chat-On-Steroids-Setup-arm64.exe'
-      },
-      {
-        name: 'macOS x64', platform: 'darwin', arch: 'x64', runner: 'macos-15-intel',
-        script: 'dist:mac:x64', artifact: 'package-macos-x64',
-        files: 'release/Chat-On-Steroids-macOS-x64.dmg\nrelease/Chat-On-Steroids-macOS-x64.zip'
-      },
-      {
-        name: 'macOS arm64', platform: 'darwin', arch: 'arm64', runner: 'macos-15',
-        script: 'dist:mac:arm64', artifact: 'package-macos-arm64',
-        files: 'release/Chat-On-Steroids-macOS-arm64.dmg\nrelease/Chat-On-Steroids-macOS-arm64.zip'
+        script: 'dist:arm64', artifact: 'package-windows-arm64', files: 'release/ChatMarks-Setup-arm64.exe'
       },
       {
         name: 'Linux x64', platform: 'linux', arch: 'x64', runner: 'ubuntu-24.04',
         script: 'dist:linux:x64', artifact: 'package-linux-x64',
-        files: 'release/Chat-On-Steroids-Linux-x64.AppImage\nrelease/Chat-On-Steroids-Linux-x64.deb'
+        files: 'release/ChatMarks-Linux-x64.AppImage\nrelease/ChatMarks-Linux-x64.deb'
       },
       {
         name: 'Linux arm64', platform: 'linux', arch: 'arm64', runner: 'ubuntu-24.04-arm',
         script: 'dist:linux:arm64', artifact: 'package-linux-arm64',
-        files: 'release/Chat-On-Steroids-Linux-arm64.AppImage\nrelease/Chat-On-Steroids-Linux-arm64.deb'
+        files: 'release/ChatMarks-Linux-arm64.AppImage\nrelease/ChatMarks-Linux-arm64.deb'
       }
     ]);
     expect(parsed.jobs.package['runs-on']).toBe('${{ matrix.runner }}');
-    expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
+    expect(workflow).toContain('name: chatmarks-candidate-${{ github.run_id }}');
     expect(workflow).not.toContain('Package Firefox extension groundwork');
     expect(workflow).not.toContain('npm run extension:firefox:stage');
-    expect(workflow).not.toContain('Chat-On-Steroids-Firefox.zip');
+    expect(workflow).not.toContain('ChatMarks-Firefox.zip');
     expect(workflow).toContain('Install generated DEB on target distro');
     expect(workflow).toContain('Launch installed DEB normally under Xvfb');
-    expect(workflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids');
+    expect(workflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-marks');
     expect(workflow).toContain('Execute generated static-runtime AppImage');
     expect(workflow).toContain('Verify generated macOS archives');
     expect(workflow).toContain('hdiutil verify "$dmg"');
@@ -381,8 +371,8 @@ describe('cross-platform packaging targets', () => {
     expect(workflow).toContain('test -L "$mount_dir/Applications"');
     expect(workflow).toContain('test "$(readlink "$mount_dir/Applications")" = /Applications');
     expect(workflow).toContain('ditto -x -k "$zip" "$zip_dir"');
-    expect(workflow).toContain("node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' \"$mount_dir/Chat On Steroids.app\"");
-    expect(workflow).toContain("node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' \"$zip_dir/Chat On Steroids.app\"");
+    expect(workflow).toContain("node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' \"$mount_dir/ChatMarks.app\"");
+    expect(workflow).toContain("node scripts/smoke-macos-bundle.mjs '${{ matrix.arch }}' \"$zip_dir/ChatMarks.app\"");
     expect(workflow).toContain('Audit packaged macOS bundle metadata and Mach-O payloads');
     expect(workflow).toContain('node scripts/smoke-macos-bundle.mjs ${{ matrix.arch }}');
     expect(workflow).toContain('Launch packaged macOS app normally');
@@ -401,6 +391,8 @@ describe('cross-platform packaging targets', () => {
     expect(macGuiScript).toContain("output.includes('[info] app started')");
     expect(macGuiScript).toContain("output.includes('[info] window loaded')");
     expect(macGuiScript).toContain("output.includes('[info] renderer state ready')");
+    expect(macGuiScript).toContain("output.includes('[info] markspanel login ready')");
+    expect(macGuiScript).toContain('loginReady || workspaceReady');
     expect(macGuiScript).toContain("output.includes('[error] window failed to load')");
     expect(macGuiScript).toContain("output.includes('[error] renderer:')");
     expect(macGuiScript).toContain('minimumSurvivalMs = 10_000');
@@ -414,8 +406,8 @@ describe('cross-platform packaging targets', () => {
       workflow.indexOf('      - name: Execute generated static-runtime AppImage')
     );
     expect(workflow).toContain('sudo apt-get install -y --no-install-recommends xvfb xauth');
-    expect(workflow).toContain("grep -Fxq 'Name=Chat On Steroids' \"$desktop\"");
-    expect(workflow).toContain("grep -Fxq 'Icon=chat-on-steroids' \"$desktop\"");
+    expect(workflow).toContain("grep -Fxq 'Name=ChatMarks' \"$desktop\"");
+    expect(workflow).toContain("grep -Fxq 'Icon=chat-marks' \"$desktop\"");
     expect(debGui).toContain('deb_smoke_root="$(mktemp -d)"');
     // Same shape the AppImage smoke below is held to: the teardown may retry, and may fail,
     // but it may never decide the step. Only the assertions under it do that.
@@ -427,11 +419,12 @@ describe('cross-platform packaging targets', () => {
     expect(debGui).toContain('XDG_CACHE_HOME="$deb_smoke_root/cache"');
     expect(debGui).toContain('XDG_DATA_HOME="$deb_smoke_root/data"');
     expect(debGui).toContain('XDG_STATE_HOME="$deb_smoke_root/state"');
-    expect(debGui).toContain('xvfb-run -a /usr/bin/chat-on-steroids');
+    expect(debGui).toContain('xvfb-run -a /usr/bin/chat-marks');
     expect(debGui).toContain('--kill-after=5s 12s');
     expect(debGui).toContain("grep -Fq '[info] app started' deb-gui.log");
     expect(debGui).toContain("grep -Fq '[info] window loaded' deb-gui.log");
     expect(debGui).toContain("grep -Fq '[info] renderer state ready' deb-gui.log");
+    expect(debGui).toContain("if ! grep -Fq '[info] markspanel login ready' deb-gui.log; then");
     expect(debGui).toContain("grep -Fq '[error] window failed to load' deb-gui.log");
     expect(debGui).toContain("grep -Fq '[error] renderer:' deb-gui.log");
     expect(debGui).not.toContain('ELECTRON_RUN_AS_NODE');
@@ -455,6 +448,7 @@ describe('cross-platform packaging targets', () => {
     expect(appImageGui).toContain("grep -Fq '[info] app started' \"$log\"");
     expect(appImageGui).toContain("grep -Fq '[info] window loaded' \"$log\"");
     expect(appImageGui).toContain("grep -Fq '[info] renderer state ready' \"$log\"");
+    expect(appImageGui).toContain("if ! grep -Fq '[info] markspanel login ready' \"$log\"; then");
     expect(appImageGui).toContain("grep -Fq '[error] window failed to load' \"$log\"");
     expect(appImageGui).toContain("grep -Fq '[error] renderer:' \"$log\"");
     expect(appImageGui).toContain('run_appimage_smoke normal "$normal_smoke_root" "$PATH" appimage-normal-gui.log');
@@ -538,13 +532,14 @@ describe('cross-platform packaging targets', () => {
     const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
     const iconScript = readFileSync(path.join(root, 'scripts', 'make-icon.mjs'), 'utf8');
     expect(builder.toolsets.appimage).toBe('1.0.3');
-    expect(builder.linux.artifactName).toBe('Chat-On-Steroids-Linux-${env.COS_PACKAGE_ARCH}.${ext}');
+    expect(builder.linux.artifactName).toBe('ChatMarks-Linux-${env.COS_PACKAGE_ARCH}.${ext}');
+    expect(builder.deb.packageName).toBe('chat-on-steroids');
     expect(builder.deb.depends).toContain('libgtk-3-0 | libgtk-3-0t64');
     expect(builder.deb.depends).toContain('libatspi2.0-0 | libatspi2.0-0t64');
     expect(builder.linux.syncDesktopName).toBe(true);
-    expect(builder.linux.maintainer).toMatch(/^Chat On Steroids <[^>]+@users\.noreply\.github\.com>$/);
+    expect(builder.linux.maintainer).toMatch(/^ChatMarks <[^>]+@users\.noreply\.github\.com>$/);
     expect(pkg.desktopName).toBe('com.chatonsteroids.app.desktop');
-    expect(pkg.homepage).toBe('https://github.com/totec448-spec/chat-on-steroids');
+    expect(pkg.homepage).toBe('https://github.com/mvclaudianobj/chat-on-steroids');
     expect(iconScript).toContain("build', 'icon.png'), pngFor(1024)");
 
     const packageScript = readFileSync(path.join(root, 'scripts', 'package.mjs'), 'utf8');
@@ -558,14 +553,14 @@ describe('cross-platform packaging targets', () => {
     expect(releaseWorkflow).toContain('run_appimage_smoke normal "$normal_smoke_root" "$PATH" appimage-normal-gui.log');
     expect(releaseWorkflow).toContain('run_appimage_smoke forced-fallback "$fallback_smoke_root" "$fake_bin:$PATH" appimage-fallback-gui.log');
     expect(releaseWorkflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a "$appimage" >"$log"');
-    expect(releaseWorkflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-on-steroids');
+    expect(releaseWorkflow).toContain('CLF_DEBUG=1 timeout --signal=TERM --kill-after=5s 12s xvfb-run -a /usr/bin/chat-marks');
     expect(releaseWorkflow).toContain("grep -Fq '[info] app started' \"$log\"");
     expect(releaseWorkflow).toContain("grep -Fq '[info] window loaded' \"$log\"");
     expect(releaseWorkflow).toContain("test \"$(dpkg-deb --field \"$deb\" Package)\" = chat-on-steroids");
-    expect(releaseWorkflow).toContain("test \"$(dpkg-deb --field \"$deb\" Version)\" = \"$(node -p \"require('./package.json').version\")\"");
+    expect(releaseWorkflow).toContain('test "$(dpkg-deb --field "$deb" Version)" = "$(node scripts/release-version.mjs --deb)"');
     expect(releaseWorkflow).toContain('expected_deb_arch=amd64');
-    expect(releaseWorkflow).toContain('test -L /usr/bin/chat-on-steroids');
-    expect(releaseWorkflow).toContain('installed_executable="$(readlink -f /usr/bin/chat-on-steroids)"');
+    expect(releaseWorkflow).toContain('test -L /usr/bin/chat-marks');
+    expect(releaseWorkflow).toContain('installed_executable="$(readlink -f /usr/bin/chat-marks)"');
     expect(releaseWorkflow).toContain('test -x "$installed_executable"');
     expect(releaseWorkflow).toContain('dpkg-query -S "$installed_executable"');
     expect(releaseWorkflow).toContain("node scripts/smoke-packaged-runtime.mjs --platform linux --arch '${{ matrix.arch }}' --root \"$(dirname \"$installed_executable\")\"");
@@ -609,15 +604,15 @@ describe('cross-platform packaging targets', () => {
     expect(builder.mac.notarize).toBe(false);
     expect(builder.mac.category).toBe('public.app-category.developer-tools');
     expect(builder.mac.minimumSystemVersion).toBe('13.0');
-    expect(builder.mac.artifactName).toBe('Chat-On-Steroids-macOS-${arch}.${ext}');
+    expect(builder.mac.artifactName).toBe('ChatMarks-macOS-${arch}.${ext}');
     expect(builder.mac.extendInfo.NSUserNotificationAlertStyle).toBe('alert');
     const nativePrep = readFileSync(path.join(root, 'scripts', 'prepare-packaging-native.mjs'), 'utf8');
     expect(nativePrep).toContain("await chmod(path.join(payloadRoot, 'node-pty', 'prebuilds', prebuildDir, 'spawn-helper'), 0o755)");
     for (const marker of [
       "CFBundleIdentifier: 'com.chatonsteroids.app'",
-      "CFBundleExecutable: 'Chat On Steroids'",
-      "CFBundleName: 'Chat On Steroids'",
-      "CFBundleDisplayName: 'Chat On Steroids'",
+      "CFBundleExecutable: 'ChatMarks'",
+      "CFBundleName: 'ChatMarks'",
+      "CFBundleDisplayName: 'ChatMarks'",
       "CFBundleIconFile: 'icon.icns'",
       'CFBundleShortVersionString: packageVersion',
       'CFBundleVersion: packageVersion',
@@ -661,7 +656,7 @@ describe('cross-platform packaging targets', () => {
   });
 
   it('hides Electron helper parentheses from otool-classic without changing the inspected file', () => {
-    const file = '/Applications/Chat On Steroids.app/Contents/Frameworks/Chat On Steroids Helper (GPU).app/Contents/MacOS/Chat On Steroids Helper (GPU)';
+    const file = '/Applications/ChatMarks.app/Contents/Frameworks/Chat Marks Helper (GPU).app/Contents/MacOS/Chat Marks Helper (GPU)';
     const calls: Array<{ kind: string; args: unknown[] }> = [];
     const result = withOtoolSafePath(
       file,
@@ -809,13 +804,14 @@ Load command 11
     expect(publish).toBeGreaterThan(candidate);
     expect(workflow.slice(preflight, candidate)).toContain('node scripts/check-release-absent.mjs');
     expect(workflow.slice(preflight, candidate)).toContain('npm run verify:tunnel-current');
-    expect(workflow.slice(preflight, candidate)).toContain('Verify release metadata agrees');
-    expect(workflow.slice(preflight, candidate)).toContain("APP_VERSION = '([^']+)'");
-    expect(workflow.slice(preflight, candidate)).toContain('has no release title');
+    expect(workflow.slice(preflight, candidate)).toContain('Verify tag and release metadata agree');
+    expect(workflow.slice(preflight, candidate)).toContain('node scripts/verify-release-version.mjs');
+    expect(readFileSync(path.join(root, 'scripts/verify-release-version.mjs'), 'utf8')).toContain("APP_VERSION = '([^']+)'");
+    expect(readFileSync(path.join(root, 'scripts/verify-release-version.mjs'), 'utf8')).toContain('Missing reviewed release notes');
     expect(workflow.slice(candidate, publish)).toContain('needs: preflight');
     expect(workflow.slice(publish)).toContain('node scripts/check-release-absent.mjs');
     expect(workflow.slice(publish).match(/npm run verify:tunnel-current/g)).toHaveLength(1);
-    expect(workflow).toContain('name: chat-on-steroids-candidate-${{ github.run_id }}');
+    expect(workflow).toContain('name: chatmarks-candidate-${{ github.run_id }}');
   });
 
   // The Firefox add-on is signed by Mozilla only when a tag is published: AMO signs each version
@@ -833,22 +829,29 @@ Load command 11
     expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ lint --source-dir \S+ --self-hosted/);
     expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ sign --channel=unlisted/);
     expect(script).toContain('node scripts/firefox-update-manifest.mjs');
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs --verify-signed');
     expect(env).toContain('${{ secrets.AMO_JWT_ISSUER }}');
     expect(env).toContain('${{ secrets.AMO_JWT_SECRET }}');
     // Secrets reach web-ext through the environment, never the command line.
     expect(script).not.toMatch(/--api-(key|secret)/);
     expect(publish.jobs.publish.needs).toEqual(['candidate', 'firefox-addon']);
     const publishSteps = publish.jobs.publish.steps as Array<Record<string, any>>;
+    for (const job of [publish.jobs.preflight, publish.jobs.publish]) {
+      const node = (job.steps as Array<Record<string, any>>).find(step => String(step.uses ?? '').startsWith('actions/setup-node@'));
+      expect(node?.with?.['node-version']).toBe(22);
+    }
     const names = publishSteps.map(step => step.name);
     expect(names.indexOf('Add the signed Firefox add-on')).toBeGreaterThan(names.indexOf('Re-verify the checksums'));
     expect(names.indexOf('Add the signed Firefox add-on')).toBeLessThan(names.indexOf('Publish the release'));
+    expect(String(publishSteps.find(step => step.name === 'Add the signed Firefox add-on')?.run))
+      .toContain('node ../scripts/firefox-update-manifest.mjs --verify-signed');
     const release = String(publishSteps.find(step => step.name === 'Publish the release')?.run);
-    expect(release).toContain('publish/Chat-On-Steroids-Firefox.xpi');
+    expect(release).toContain('publish/ChatMarks-Firefox.xpi');
     expect(release).toContain('publish/firefox-updates.json');
   });
 
   // Proves the AMO credentials and Mozilla's validation before a release depends on them, without
-  // spending a release version: it signs <app version>.<run number + 1000>, never the release number.
+  // spending a release version: it uses the same X.Y.Z and a separate fourth revision >= 1001.
   it('can check Firefox signing on demand without using up a release version', () => {
     const check = yamlFile('.github/workflows/firefox-sign-check.yml');
     expect(Object.keys(check.on)).toEqual(['workflow_dispatch']);
@@ -856,7 +859,12 @@ Load command 11
     const script = steps.map(step => String(step.run ?? '')).join('\n');
     expect(script).toContain('node scripts/stage-firefox-extension.mjs');
     expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ lint --source-dir \S+ --self-hosted/);
-    expect(script).toMatch(/\$\{pkg\}\.\$\(\(\s*GITHUB_RUN_NUMBER \+ 1000\s*\)\)/);
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs --test-version "$GITHUB_RUN_NUMBER"');
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs --test-id');
+    expect(script).toContain('m.browser_specific_settings.gecko.id=process.argv[2]');
+    expect(script).toContain('delete m.browser_specific_settings.gecko.update_url');
+    expect(script).toContain('node scripts/firefox-update-manifest.mjs --verify-signed');
+    expect(script).toContain('--test-addon');
     expect(script).toMatch(/npx --yes web-ext@\d+\.\d+\.\d+ sign --channel=unlisted/);
     expect(script).not.toMatch(/--api-(key|secret)/);
     expect(JSON.stringify(steps.map(step => step.env ?? {}))).toContain('${{ secrets.AMO_JWT_SECRET }}');
@@ -868,7 +876,13 @@ Load command 11
     const lock = JSON.parse(readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
     const manifest = JSON.parse(readFileSync(path.join(root, 'extension', 'manifest.json'), 'utf8'));
     const versionSource = readFileSync(path.join(root, 'src', 'main', 'version.ts'), 'utf8');
-    const tag = `v${pkg.version}`;
+    const releaseVersion = pkg.version.replace('+', '.');
+    const builder = yamlFile('electron-builder.yml');
+    expect(builder.extraMetadata.version).toBe(releaseVersion);
+    expect(builder.buildVersion).toBe(releaseVersion);
+    const revision = pkg.version.split('+')[1];
+    expect(builder.buildNumber).toBe(revision);
+    const tag = `v${releaseVersion}`;
     const changelog = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
     const notes = readFileSync(path.join(root, 'docs', 'release-notes', `${tag}.md`), 'utf8');
     const publish = readFileSync(path.join(root, '.github', 'workflows', 'publish.yml'), 'utf8');
@@ -876,23 +890,19 @@ Load command 11
 
     expect(lock.version).toBe(pkg.version);
     expect(lock.packages?.['']?.version).toBe(pkg.version);
-    expect(manifest.version).toBe(pkg.version);
-    expect(versionSource.match(/APP_VERSION = '([^']+)'/)?.[1]).toBe(pkg.version);
-    expect(changelog.match(/^## \[(\d+\.\d+\.\d+)\]/m)?.[1]).toBe(pkg.version);
+    expect(manifest.version).toBe(releaseVersion);
+    expect(versionSource.match(/APP_VERSION = '([^']+)'/)?.[1]).toBe(releaseVersion);
+    expect(changelog.match(/^## \[(\d+\.\d+\.\d+(?:\.\d+)?)\]/m)?.[1]).toBe(releaseVersion);
     expect(notes).toMatch(/^## .+$/m);
 
     const artifacts = [
-      'Chat-On-Steroids-Setup-x64.exe',
-      'Chat-On-Steroids-Setup-arm64.exe',
-      'Chat-On-Steroids-macOS-x64.dmg',
-      'Chat-On-Steroids-macOS-x64.zip',
-      'Chat-On-Steroids-macOS-arm64.dmg',
-      'Chat-On-Steroids-macOS-arm64.zip',
-      'Chat-On-Steroids-Linux-x64.AppImage',
-      'Chat-On-Steroids-Linux-x64.deb',
-      'Chat-On-Steroids-Linux-arm64.AppImage',
-      'Chat-On-Steroids-Linux-arm64.deb',
-      'Chat-On-Steroids-Extension.zip',
+      'ChatMarks-Setup-x64.exe',
+      'ChatMarks-Setup-arm64.exe',
+      'ChatMarks-Linux-x64.AppImage',
+      'ChatMarks-Linux-x64.deb',
+      'ChatMarks-Linux-arm64.AppImage',
+      'ChatMarks-Linux-arm64.deb',
+      'ChatMarks-Extension.zip',
       'SHA256SUMS.txt'
     ];
     const checksumStep = release.slice(
@@ -904,13 +914,13 @@ Load command 11
     // A release packages every target: the plan for `all` names each artifact, and the checksum step
     // and the candidate upload take exactly that plan.
     expect(checksumStep).toContain('FILES: ${{ needs.plan.outputs.files }}');
-    expect(candidateUpload).toContain('release/Chat-On-Steroids-*');
+    expect(candidateUpload).toContain('release/ChatMarks-*');
     expect(candidateUpload).toContain('release/SHA256SUMS.txt');
     const planned = releaseTargets('all').files;
-    expect(planned).not.toContain('Chat-On-Steroids-Firefox.zip');
-    expect(checksumStep).not.toContain('Chat-On-Steroids-Firefox.zip');
-    expect(candidateUpload).not.toContain('Chat-On-Steroids-Firefox.zip');
-    expect(publishStep).not.toContain('Chat-On-Steroids-Firefox.zip');
+    expect(planned).not.toContain('ChatMarks-Firefox.zip');
+    expect(checksumStep).not.toContain('ChatMarks-Firefox.zip');
+    expect(candidateUpload).not.toContain('ChatMarks-Firefox.zip');
+    expect(publishStep).not.toContain('ChatMarks-Firefox.zip');
     for (const artifact of artifacts) {
       expect(publishStep).toContain(artifact);
       if (artifact !== 'SHA256SUMS.txt') expect(planned).toContain(artifact);

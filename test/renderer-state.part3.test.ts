@@ -1042,14 +1042,136 @@ it('offers to ask before using the mouse and keyboard, off by default, under the
   linux.platform = { ...(linux.platform ?? {}), family: 'linux', name: 'Linux', desktopAutomation: false };
   mounted.push(linux);
   await settle();
-  expect(row.hidden).toBe(true);
+  expect(row.hidden).toBe(false); // Stage 3 permits optional, chat-scoped native approval.
+  expect(w.document.getElementById('desktopUnattributed')?.closest<HTMLElement>('.desktop-unattributed-row')?.hidden).toBe(false);
+  const native = w.document.getElementById('linuxDesktopEnabled') as HTMLInputElement;
+  expect(native.closest<HTMLElement>('.linux-desktop-row')?.hidden).toBe(false);
+  expect(native.checked).toBe(false);
+  native.checked = true;
+  native.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle();
+  expect(mounted.calls.at(-1)?.ui.linuxDesktopEnabled).toBe(true);
+  // The harness's save mock returns its original platform unless the test pushes it
+  // again; a real Linux app's platform remains Linux across a settings save.
+  const savedLinux = structuredClone(linux);
+  savedLinux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(savedLinux);
+  await settle();
+  const consent = w.document.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  expect(consent.closest<HTMLElement>('.linux-consent-row')?.hidden).toBe(false);
+  expect(consent.disabled).toBe(false);
+});
+
+it('requests Linux screenshot consent only after the user clicks, and shows a reply without image data', async () => {
+  const request = vi.fn(async () => ({ ok: true as const, data: { pngBytes: 640 } }));
+  const mounted = await mountChat({}, [], { linuxScreenshotConsent: request });
+  const w = mounted.window;
+  const button = w.document.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  expect(button.disabled).toBe(true);
+  const linux = structuredClone(mounted.state);
+  linux.platform = { family: 'linux', name: 'Linux', desktopAutomation: false };
+  linux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(linux);
+  await settle();
+  expect(button.disabled).toBe(false);
+  expect(request).not.toHaveBeenCalled();
+  button.click();
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(w.document.getElementById('linuxScreenshotConsentResult')?.textContent).toContain('No image was saved'));
+  expect(button.disabled).toBe(false);
+});
+
+it('localizes unknown GNOME backend failures without displaying private text and restores keyboard focus', async () => {
+  const request = vi.fn(async () => ({ ok: false as const, error: 'PRIVATE_APP_TITLE: payroll' }));
+  const mounted = await mountChat({}, [], { linuxScreenshotConsent: request });
+  const doc = mounted.window.document;
+  const button = doc.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  const linux = structuredClone(mounted.state);
+  linux.platform = { family: 'linux', name: 'Linux', desktopAutomation: false };
+  linux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(linux);
+  await settle();
+  button.focus();
+  expect(doc.activeElement).toBe(button);
+  button.click();
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  const status = doc.getElementById('linuxScreenshotConsentResult')!;
+  await waitFor(() => expect(status.textContent).toContain('GNOME screenshot permission could not be confirmed.'));
+  expect(status.textContent).not.toContain('PRIVATE_APP_TITLE');
+  expect(button.disabled).toBe(false);
+  expect(doc.activeElement).toBe(button);
+});
+
+it('shows actionable localized hints only for exact known GNOME consent errors', async () => {
+  const request = vi.fn();
+  const mounted = await mountChat({}, [], { linuxScreenshotConsent: request });
+  const doc = mounted.window.document;
+  const button = doc.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  const status = doc.getElementById('linuxScreenshotConsentResult')!;
+  const linux = structuredClone(mounted.state);
+  linux.platform = { family: 'linux', name: 'Linux', desktopAutomation: false };
+  linux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(linux);
+  await settle();
+  expect(button.disabled).toBe(false);
+
+  const cases = [
+    ['Activate the Chat Marks window before requesting screenshot permission.', 'Activate the Chat Marks window, then try again.'],
+    ['The Chat Marks window lost focus; no screenshot was requested.', 'Activate the Chat Marks window, then try again.'],
+    ['Enable native Linux Desktop and Screen access first.', 'Enable native Linux Desktop access and Screen permission, then try again.'],
+    ['Screen access was disabled before the screenshot request.', 'Enable native Linux Desktop access and Screen permission, then try again.'],
+    ['Native Linux Desktop or Screen access was disabled during the screenshot request.', 'Enable native Linux Desktop access and Screen permission, then try again.'],
+    ['Screenshot permission can be requested only from the Chat Marks main window.', 'Screenshot permission can be requested only from the Chat Marks main window.'],
+    ['A screenshot permission request is already running.', 'A screenshot permission request is already running.']
+  ] as const;
+  for (const [error, expected] of cases) {
+    request.mockResolvedValueOnce({ ok: false, error });
+    button.click();
+    await waitFor(() => expect(status.textContent).toContain(expected));
+    expect(button.disabled).toBe(false);
+  }
+
+  // A near-miss and an arbitrary backend detail must never reach the UI.
+  for (const error of [
+    'Activate the Chat Marks window before requesting screenshot permission. PRIVATE_TITLE',
+    'Native Linux Desktop or Screen access was disabled during the request.',
+    'SECRET_SCREEN_CONTENT'
+  ]) {
+    request.mockResolvedValueOnce({ ok: false, error });
+    button.click();
+    await waitFor(() => expect(status.textContent).toContain('GNOME screenshot permission could not be confirmed.'));
+    expect(status.textContent).not.toContain(error);
+    expect(button.disabled).toBe(false);
+  }
+  expect(request).toHaveBeenCalledTimes(cases.length + 3);
+});
+
+it('does not steal focus if the user switches controls while the GNOME request is pending', async () => {
+  let finish!: (value: { ok: true; data: { pngBytes: number } }) => void;
+  const request = vi.fn(() => new Promise<{ ok: true; data: { pngBytes: number } }>(resolve => { finish = resolve; }));
+  const mounted = await mountChat({}, [], { linuxScreenshotConsent: request });
+  const doc = mounted.window.document;
+  const button = doc.getElementById('linuxScreenshotConsent') as HTMLButtonElement;
+  const linux = structuredClone(mounted.state);
+  linux.platform = { family: 'linux', name: 'Linux', desktopAutomation: false };
+  linux.config.ui.linuxDesktopEnabled = true;
+  mounted.push(linux);
+  await settle();
+  button.focus();
+  button.click();
+  await waitFor(() => expect(request).toHaveBeenCalledTimes(1));
+  const other = doc.getElementById('chatInput') as HTMLTextAreaElement;
+  other.focus();
+  finish({ ok: true, data: { pngBytes: 10 } });
+  await waitFor(() => expect(doc.getElementById('linuxScreenshotConsentResult')?.textContent).toContain('No image was saved'));
+  expect(doc.activeElement).toBe(other);
 });
 
 // CodeRabbit on #1864 (Haz's keyboard condition): the question waits in the app's window too, reachable by keyboard.
 it('shows a waiting desktop question in the app without taking the focus, and answers it from there', async () => {
   let listener: ((pending: unknown) => void) | null = null;
   const answer = vi.fn(async () => ({ ok: true, data: true }));
-  const pending = { id: 'ask-1', title: 'Chat On Steroids wants to use your mouse and keyboard', step: 'Open notepad.exe', chat: 'Release notes' };
+  const pending = { id: 'ask-1', title: 'Chat Marks wants to use your mouse and keyboard', step: 'Open notepad.exe', chat: 'Release notes' };
   const mounted = await mountChat({}, [], {
     desktopAskPending: async () => ({ ok: true, data: pending }),
     onDesktopAskPending: (fn: (pending: unknown) => void) => { listener = fn; return () => {}; },
@@ -1059,7 +1181,7 @@ it('shows a waiting desktop question in the app without taking the focus, and an
   const notice = doc.getElementById('desktopAskNotice')!;
   // Already waiting when the window opened: shown at once.
   await waitFor(() => expect(notice.hidden).toBe(false));
-  expect(notice.textContent).toContain('Chat On Steroids wants to use your mouse and keyboard');
+  expect(notice.textContent).toContain('Chat Marks wants to use your mouse and keyboard');
   expect(notice.textContent).toContain('Open notepad.exe · Release notes');
   // It never takes the focus by itself: the message box keeps it.
   const box = doc.getElementById('chatInput') as HTMLTextAreaElement;
@@ -1340,13 +1462,13 @@ describe('settings backup dialogs', () => {
   });
 
   it('shows why a chosen file cannot be imported, and switches the language a backup brings', async () => {
-    const pick = vi.fn().mockResolvedValueOnce({ ok: false, error: 'This file is not a Chat On Steroids settings backup.' })
+    const pick = vi.fn().mockResolvedValueOnce({ ok: false, error: 'This file is not a Chat Marks settings backup.' })
       .mockResolvedValueOnce({ ok: true, data: choice({ keyCount: 0, changed: ['language'] }) });
     const mounted = await mountChat({}, [], { pickSettingsBackup: pick,
       importSettingsBackup: async () => ({ ok: true, data: { state: { ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, language: 'de' } } }, changedCount: 1, keyCount: 0 } }) });
     const doc = mounted.window.document;
     (doc.getElementById('importSettings') as HTMLButtonElement).click();
-    await waitFor(() => expect(doc.querySelector('.toast')?.textContent).toBe('This file is not a Chat On Steroids settings backup.'));
+    await waitFor(() => expect(doc.querySelector('.toast')?.textContent).toBe('This file is not a Chat Marks settings backup.'));
     expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(false);
     (doc.getElementById('importSettings') as HTMLButtonElement).click();
     await waitFor(() => expect((doc.getElementById('importSettingsDialog') as HTMLDialogElement).open).toBe(true));
@@ -1383,8 +1505,10 @@ describe('phone notifications in Settings', () => {
     await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.enabled).toBe(true));
     const saved = mounted.calls.at(-1).ui.phonePush;
     expect(saved.topic).toMatch(/^cos-[a-km-np-z2-9]{20}$/);
-    expect(saved).toEqual({ enabled: true, server: 'https://ntfy.sh', topic: saved.topic, needsYou: true, failures: true,
+    expect(saved).toEqual({ enabled: true, ntfy: true, server: 'https://ntfy.sh', topic: saved.topic, needsYou: true, failures: true,
       finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false });
+    // Replies from Telegram were never touched: no value is written, which means off.
+    expect('telegramSteer' in saved).toBe(false);
   });
 
   it('shows the essentials first and keeps server, token and a new topic behind Advanced; Copy copies the topic', async () => {
@@ -1501,6 +1625,28 @@ describe('phone notifications in Settings', () => {
     (doc.getElementById('phonePushTest') as HTMLButtonElement).click();
     await waitFor(() => expect(doc.getElementById('phonePushTestStatus')!.classList.contains('is-warn')).toBe(true));
     expect(doc.getElementById('phonePushTestStatus')!.textContent).toContain('refused the message');
+  });
+
+  // CodeRabbit on #1990: replies from Telegram are a remote permission; the form must neither invent a value for
+  // an older config nor show it off while the saved value is on.
+  it('leaves an absent Telegram reply setting absent until the switch is touched', async () => {
+    const mounted = await withPhone(phone());
+    const doc = mounted.window.document;
+    change(doc, 'phonePushFailures', false);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.failures).toBe(false));
+    expect('telegramSteer' in mounted.calls.at(-1).ui.phonePush).toBe(false);
+    change(doc, 'telegramSteer', true);
+    await waitFor(() => expect(mounted.calls.at(-1)?.ui.phonePush?.telegramSteer).toBe(true));
+  });
+
+  it('shows a Telegram reply switch that could not be turned off as on again, as the saved setting says', async () => {
+    const mounted = await withPhone(phone({ telegramSteer: true }), { saveSettings: async () => ({ ok: false, error: 'Fixture save refused' }) });
+    const doc = mounted.window.document;
+    const box = doc.getElementById('telegramSteer') as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    box.focus();
+    change(doc, 'telegramSteer', false);
+    await waitFor(() => expect(box.checked).toBe(true));
   });
 
   it('sends no test when the settings could not be saved', async () => {

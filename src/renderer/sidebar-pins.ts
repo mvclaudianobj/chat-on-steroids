@@ -32,6 +32,8 @@ export function createSidebarPins() {
 
   return {
     has: (id: string): boolean => pins.has(id),
+    /** Full list for migration to main-owned retention protection. */
+    ids: (): string[] => [...pins],
     /** Pins or unpins one chat and says whether it is pinned now. */
     toggle(id: string): boolean {
       if (pins.has(id)) pins.delete(id);

@@ -38,6 +38,7 @@
 
 
 .ph.ph-activity::before { content: '\e000'; }
+.ph.ph-archive::before { content: '\e00c'; }
 .ph.ph-arrow-clockwise::before { content: '\e036'; }
 .ph.ph-arrow-counter-clockwise::before { content: '\e038'; }
 .ph.ph-arrow-down::before { content: '\e03e'; }
@@ -46,6 +47,7 @@
 .ph.ph-arrow-square-out::before { content: '\e5de'; }
 .ph.ph-arrow-up::before { content: '\e08e'; }
 .ph.ph-arrows-clockwise::before { content: '\e094'; }
+.ph.ph-bell::before { content: '\e0ce'; }
 .ph.ph-bookmark-simple::before { content: '\e0ea'; }
 .ph.ph-caret-down::before { content: '\e136'; }
 .ph.ph-caret-left::before { content: '\e138'; }
@@ -81,6 +83,7 @@
 .ph.ph-keyboard::before { content: '\e2d8'; }
 .ph.ph-lightning::before { content: '\e2de'; }
 .ph.ph-link-break::before { content: '\e2e4'; }
+.ph.ph-link-simple::before { content: '\e2e6'; }
 .ph.ph-arrows-left-right::before { content: '\e0a0'; }
 .ph.ph-browser::before { content: '\e0f4'; }
 .ph.ph-brain::before { content: '\e74e'; }
@@ -108,6 +111,7 @@
 .ph.ph-sidebar-simple::before { content: '\ec24'; }
 .ph.ph-sliders-horizontal::before { content: '\e434'; }
 .ph.ph-sparkle::before { content: '\e6a2'; }
+.ph.ph-squares-four::before { content: '\e464'; }
 .ph.ph-star::before { content: '\e46a'; }
 .ph.ph-sign-in::before { content: '\e428'; }
 .ph.ph-sign-out::before { content: '\e42a'; }
@@ -123,3 +127,48 @@
 .ph-fill.ph-square-half-bottom::before { content: '\eb16'; }
 .ph-fill.ph-push-pin-simple::before { content: '\e65c'; }
 .ph-fill.ph-star::before { content: '\e46a'; }
+
+/*
+ * Chat Marks chat type glyphs (renderer/chat-types.ts): line drawings on Phosphor's 256 grid with
+ * its regular 16-unit round stroke, and the app's own fox from its artwork. Each is a CSS mask
+ * painted in currentColor, so it follows the text colour in light and dark themes like a glyph.
+ */
+.cm-glyph {
+  display: inline-block;
+  background-color: currentColor;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+/* A mask cannot overhang its box the way a font glyph does: the box is the glyph's optical size,
+   and the margin gives back the layout space (--ico) the neighbouring glyphs take. */
+.cm-glyph[hidden] { display: none; }
+.ico.cm-glyph {
+  width: var(--glyph);
+  height: var(--glyph);
+  margin: calc((var(--ico) - var(--glyph)) / 2);
+}
+/* The artwork fills its square where Phosphor leaves a margin: drawn a little smaller to match. */
+.cm-glyph-fox {
+  -webkit-mask-image: url('./browser-icons/cos.png');
+  mask-image: url('./browser-icons/cos.png');
+  -webkit-mask-size: 86% 86%;
+  mask-size: 86% 86%;
+}
+/* Codex: a hexagon around a >_ prompt. */
+.cm-glyph-codex { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M128 28 214.6 78v100L128 228l-86.6-50V78Z'/%3E%3Cpath d='m84 100 32 28-32 28m48 0h40'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M128 28 214.6 78v100L128 228l-86.6-50V78Z'/%3E%3Cpath d='m88 104 28 24-28 24m44 4h36'/%3E%3C/svg%3E"); }
+/* Claude Code: a line spark. */
+.cm-glyph-spark { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M128 32v192M32 128h192M76 76l104 104M180 76 76 180'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M128 32v192M32 128h192M76 76l104 104M180 76 76 180'/%3E%3C/svg%3E"); }
+/* CLIProxy: one route splitting in two. */
+/* OpenCode: the project's own mark (packages/identity/mark.svg, MIT), its inner square at 40%. */
+.cm-glyph-opencode { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='96 96 320 320'%3E%3Cpath fill-rule='evenodd' d='M384 416H128V96H384V416ZM320 160H192V352H320V160Z'/%3E%3Cpath fill-opacity='.4' d='M320 224V352H192V224H320Z'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='96 96 320 320'%3E%3Cpath fill-rule='evenodd' d='M384 416H128V96H384V416ZM320 160H192V352H320V160Z'/%3E%3Cpath fill-opacity='.4' d='M320 224V352H192V224H320Z'/%3E%3C/svg%3E"); -webkit-mask-size: 82% 82%; mask-size: 82% 82%; }
+/* Claude Code Router (module): three lines joining a router and leaving as one arrow, a line drawing after
+   its MIT app icon (a coloured raster, not usable as a mark). */
+.cm-glyph-ccr { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M32 64c48 0 56 48 104 48M32 128h104M32 192c48 0 56-48 104-48M168 128h56M200 104l24 24-24 24'/%3E%3Crect x='136' y='76' width='32' height='104' rx='16'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M32 64c48 0 56 48 104 48M32 128h104M32 192c48 0 56-48 104-48M168 128h56M200 104l24 24-24 24'/%3E%3Crect x='136' y='76' width='32' height='104' rx='16'/%3E%3C/svg%3E"); }
+/* ZeroClaw (module): three line claw marks; its repository has no simple vector mark. */
+.cm-glyph-claw { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M60 196c8-56 28-104 64-140M108 212c4-52 22-96 56-128M156 220c2-40 18-76 48-104'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M60 196c8-56 28-104 64-140M108 212c4-52 22-96 56-128M156 220c2-40 18-76 48-104'/%3E%3C/svg%3E"); }
+/* MarksCode (retired; its chats stay readable): </>. */
+.cm-glyph-code { -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M80 84 36 128l44 44M176 84l44 44-44 44M148 52l-40 152'/%3E%3C/svg%3E"); mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 256 256' fill='none' stroke='black' stroke-width='16' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M80 84 36 128l44 44M176 84l44 44-44 44M148 52l-40 152'/%3E%3C/svg%3E"); }

@@ -15,6 +15,7 @@ import type { InputArgs, InputEntry } from './session/input.js';
 import { getProject } from './projects.js';
 import { readSession } from './session/read-model.js';
 import { cancelDesktopInput, sendDesktopInput } from './session/start-input.js';
+import { archiveSessionLocally } from './session/local-archive.js';
 
 /**
  * The action routes of the local control API: send a message to an existing chat or start a new
@@ -52,6 +53,7 @@ const sendBody = z
     sessionId: z.string().regex(/^[0-9a-z-]{8,64}$/).optional(),
     // The project a new chat starts in. An existing chat keeps the one it has.
     projectId: lowerUuid.optional(),
+    temporaryChat: z.boolean().optional(),
     text: z.string().max(MAX_TEXT).refine((value) => value.trim().length > 0, 'text is empty'),
     // Consent to a send that would stop the answer ChatGPT is writing right now.
     interrupt: z.boolean().optional(),
@@ -61,6 +63,7 @@ const sendBody = z
   })
   .strict()
   .refine((body) => body.sessionId === undefined || body.projectId === undefined, { path: ['projectId'], message: 'a project belongs to a new chat' })
+  .refine((body) => body.sessionId === undefined || body.temporaryChat !== true, { path: ['temporaryChat'], message: 'a temporary chat must be new' })
   .refine((body) => (body.model === undefined) === (body.reasoningEffort === undefined), { path: ['reasoningEffort'], message: 'model and reasoningEffort go together' });
 
 const cancelBody = z.object({}).strict();
@@ -70,11 +73,12 @@ const stopBody = z.object({ turnId: z.string().min(1).max(256) }).strict();
 
 const CANCEL_ROUTE = /^\/v1\/inputs\/([0-9a-f-]{36})\/cancel$/;
 const STOP_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})\/stop$/;
+const ARCHIVE_ROUTE = /^\/v1\/sessions\/([0-9a-z-]{8,64})\/archive$/;
 
 /** Every path an action can arrive on, whatever the id, so one gate can refuse them all alike. */
 export function isActionPath(route: string): boolean {
-  return route === '/v1/inputs' || /^\/v1\/inputs\/[^/]+\/cancel$/.test(route) || /^\/v1\/workers\/[^/]+\/(spawn|message|ack)$/.test(route) ||
-    /^\/v1\/sessions\/[^/]+\/stop$/.test(route);
+  return route === '/v1/inputs' || /^\/v1\/inputs\/[^/]+\/cancel$/.test(route) || /^\/v1\/workers\/[^/]+\/(spawn|message|ack|archive-all)$/.test(route) ||
+    /^\/v1\/sessions\/[^/]+\/(stop|archive)$/.test(route);
 }
 
 export interface ActionReply {
@@ -142,7 +146,8 @@ async function send(rawBody: unknown): Promise<ActionReply> {
   if (existing) {
     // A new chat's first message is filed under its own id.
     if (existing.purpose === 'decision' || existing.sessionId !== (body.sessionId ?? body.id) || existing.text !== text ||
-        existing.model !== selection.model || existing.reasoningEffort !== selection.reasoningEffort) {
+        existing.model !== selection.model || existing.reasoningEffort !== selection.reasoningEffort ||
+        (existing.temporaryChat === true) !== (body.temporaryChat === true)) {
       throw new RequestError(409, 'id_conflict', 'this id belongs to a different message');
     }
     const replay: ControlApiSendResult = { input: projectInput(existing), replayed: true };
@@ -170,6 +175,7 @@ async function send(rawBody: unknown): Promise<ActionReply> {
     // The outbox opens a chat for a message without a session, exactly as the composer's New chat does.
     sessionId: body.sessionId ?? null,
     ...(body.projectId !== undefined ? { projectId: body.projectId } : {}),
+    ...(body.temporaryChat === true ? { temporaryChat: true as const } : {}),
     text,
     mode: 'auto',
     dueAt: Date.now(),
@@ -217,9 +223,8 @@ async function cancel(id: string, rawBody: unknown): Promise<ActionReply> {
     return { status: 200, body: already };
   }
   if (deliveryProof(row) !== 'pending') return notCancellable(row, 'Send was authorized; it may already be in ChatGPT');
-  // A new chat's first message owns a reserved local chat that cancelling deletes, and a pair of
-  // rows is cancelled together. Both are decisions for the person at the app.
-  if (row.opening) return notCancellable(row, 'a new chat is opening; cancel it in the app');
+  // The opening reservation is withdrawn by the same serialized outbox owner as an app cancel.
+  // Its empty local chat is retired only after the never-authorized tombstone is durable.
   if (row.companionInputId || (await listInputs()).some((other) => other.companionInputId === row.id)) {
     return notCancellable(row, 'it is paired with another message; cancel it in the app');
   }
@@ -248,7 +253,7 @@ async function stop(sessionId: string, rawBody: unknown): Promise<ActionReply> {
   if (!actionsAllowed()) throw new RequestError(403, 'actions_disabled');
   let controls: SessionControlsView;
   try {
-    controls = await stopSessionTurn(sessionId, body.turnId);
+    controls = await stopSessionTurn(sessionId, body.turnId, { from: 'the control API' });
   } catch (error) {
     const message = error instanceof Error ? error.message : '';
     if (message === 'active_turn_changed') throw new RequestError(409, 'turn_not_running', 'the answer this turnId names is not running');
@@ -273,5 +278,13 @@ export async function serveAction(method: string, route: string, body: unknown):
   if (match) return cancel(match[1]!, body);
   const stopMatch = STOP_ROUTE.exec(route);
   if (stopMatch) return stop(stopMatch[1]!, body);
+  const archiveMatch = ARCHIVE_ROUTE.exec(route);
+  if (archiveMatch) {
+    parse(cancelBody, body);
+    if (!actionsAllowed()) throw new RequestError(403, 'actions_disabled');
+    if (!await readSession(archiveMatch[1]!)) throw new RequestError(404, 'session_not_found');
+    const summary = await archiveSessionLocally(archiveMatch[1]!, true);
+    return { status: 200, body: { sessionId: summary.id, archived: Boolean(summary.archivedAt) } };
+  }
   return undefined;
 }

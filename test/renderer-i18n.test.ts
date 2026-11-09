@@ -9,6 +9,12 @@ const languages = Object.keys(names) as Language[];
 const catalogs = Object.fromEntries(languages.filter(locale => locale !== 'en').map(locale =>
   [locale, JSON.parse(readFileSync(`src/renderer/locales/${locale}.json`, 'utf8')) as Record<string, string>]));
 
+it.each(languages.filter(locale => locale !== 'en'))('translates the lost-opening delivery notice into %s', locale => {
+  const key = 'Not sent: the browser tab for this new chat was closed or lost. Review the message and send again.';
+  expect(catalogs[locale]?.[key]).toBeTruthy();
+  expect(catalogs[locale]?.[key]).not.toBe(key);
+});
+
 let dom: JSDOM;
 beforeEach(() => {
   vi.resetModules();
@@ -18,6 +24,30 @@ beforeEach(() => {
   }
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); dom.window.close(); });
+
+it.each(languages)('localizes the Archived section and its accessible controls in %s', async locale => {
+  window.localStorage.setItem('cos.ui.language', locale);
+  const { initLanguage, t } = await import('../src/renderer/i18n.js');
+  initLanguage();
+  const catalog = catalogs[locale];
+  const expected = (source: string) => catalog?.[source] ?? source;
+  for (const source of ['Archive', 'Restore', 'Archived', 'Chat archived', 'Chat restored', 'No archived chats',
+    'Search archived chats', 'Restore chat to the main list', 'Move chat to Archived without deleting its history']) {
+    expect(t(source)).toBe(expected(source));
+    expect(t(source).trim()).not.toBe('');
+  }
+  const section = document.getElementById('archivesSection') as HTMLDetailsElement;
+  expect(section).not.toBeNull();
+  expect(section.querySelector('.ph-archive[aria-hidden="true"]')).not.toBeNull();
+  expect(section.querySelector('summary')?.textContent).toContain(expected('Archived'));
+  const search = document.getElementById('archivesSearch') as HTMLInputElement;
+  expect(search.getAttribute('aria-label')).toBe(expected('Search archived chats'));
+  expect(search.placeholder).toBe(expected('Search archived chats'));
+  expect(search.type).toBe('search');
+  const more = document.getElementById('archivesMore') as HTMLButtonElement;
+  expect(more.textContent).toBe(expected('Show more'));
+  expect(more.type).toBe('button');
+});
 
 // Includes the Traditional Chinese selector regression from aliceric27's #243.
 it.each(languages)('restores %s and synchronizes accessible setup flags, settings and reloads', async locale => {
@@ -312,6 +342,61 @@ describe('app interface localization', () => {
     for (const [locale, messages] of Object.entries(catalogs)) {
       expect(Object.keys(catalog).filter(key => !Object.hasOwn(messages, key)), locale).toEqual([]);
     }
+  });
+
+  it('keeps every locale key unique, matches keysets and preserves community legal attribution', () => {
+    const legal = 'Catalog illustrations are original Chat On Steroids artwork, Copyright © 2026 Chat On Steroids contributors, licensed under the app’s MIT license. They illustrate independent integrations and are not official product logos or endorsements. Product names belong to their respective owners.';
+    const names = Object.keys(catalogs);
+    // The community supports language-specific plural categories (Russian needs
+    // 'few', Japanese has none). Compare common messages without insisting every
+    // language ship grammatical forms it never uses.
+    const ordinaryKeys = (messages: Record<string, string>): string[] =>
+      Object.keys(messages).filter(key => !/\|(zero|one|two|few|many)$/.test(key)).sort();
+    const first = ordinaryKeys(catalogs[names[0]!]!);
+    for (const [locale, messages] of Object.entries(catalogs)) {
+      const source = readFileSync(`src/renderer/locales/${locale}.json`, 'utf8');
+      const serializedKeys = [...source.matchAll(/^\s*("(?:\\.|[^"\\])*")\s*:/gm)]
+        .map(match => JSON.parse(match[1]!) as string);
+      expect(serializedKeys.length, locale).toBe(new Set(serializedKeys).size);
+      expect(serializedKeys.length, locale).toBe(Object.keys(messages).length);
+      expect(ordinaryKeys(messages), locale).toEqual(first);
+      expect(messages[legal], locale).toContain('Chat On Steroids');
+      expect(messages['Updating Chat Marks'], locale).not.toContain('Chat On Steroids');
+      expect(messages['Starting the installer. Chat Marks opens again by itself.'], locale).not.toContain('Chat On Steroids');
+      expect(messages['Add the Chat Marks add-on to Firefox'], locale).not.toContain('Chat On Steroids');
+      expect(messages['Chat Marks connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.'], locale).not.toContain('Chat On Steroids');
+      expect(messages['When enabled, use Chat Marks Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.'], locale).not.toContain('Chat On Steroids');
+      expect(messages['Desktop access is on, but macOS has not given Chat On Steroids the permission it needs.'], locale).not.toContain('Chat On Steroids');
+      expect(messages['macOS still shows Chat On Steroids as allowed, but that permission belongs to an earlier version: without a developer signature, every update is a new app to macOS. Choose Repair permissions, allow it when macOS asks, then fully quit and reopen the app.'], locale).not.toContain('Chat On Steroids');
+    }
+  });
+
+  it('translates Modules extensions, runtime status and Marks module and update highlights in every catalog', () => {
+    const required = [
+      'Marks extensions',
+      'Future Marks plugins, skills and modules will appear here for installation and activation.',
+      'Checking status…',
+      'Unsupported system',
+      'Not installed',
+      'Running',
+      'Stopped',
+      'Enabled at startup',
+      'Manual start',
+      'Connect to the local module service to see its status.',
+      'Installation guide opened. Follow the instructions to install CLIProxyAPI.',
+      'Linux .deb upgrade button with PolicyKit (pending validation).',
+      'Linux .deb upgrade',
+      'A button to request a .deb update with PolicyKit authorization is being prepared; installation is not yet validated.'
+    ];
+    for (const [locale, messages] of Object.entries(catalogs)) {
+      for (const key of required) {
+        expect(messages[key]?.trim(), `${locale}: ${key}`).toBeTruthy();
+        expect(messages[key], `${locale}: ${key}`).not.toBe(key);
+      }
+    }
+    expect(catalogs['pt-BR']!['Modules']).toBe('Módulos');
+    expect(catalogs['pt-BR']!['Linux .deb upgrade button with PolicyKit (pending validation).'])
+      .toContain('validação pendente');
   });
 });
 

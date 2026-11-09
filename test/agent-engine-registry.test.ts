@@ -1,0 +1,206 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const durable = new Map<string, unknown>();
+const modules = vi.hoisted(() => ({ enabled: new Set<string>() }));
+vi.mock('../src/main/durable.js', () => ({
+  readDurable: async (name: string) => structuredClone(durable.get(name) ?? null),
+  writeDurableNow: async (name: string, value: unknown) => { durable.set(name, structuredClone(value)); }
+}));
+// OpenCode, Codex and Claude are registered for real; here their modules are off, so they are listed unavailable.
+vi.mock('../src/main/cli-modules.js', () => ({
+  cliEngineRuntime: async () => ({ ok: false, detail: 'Enable the Codex module in Settings > Modules first' }),
+  cliModuleState: async () => ({ enabled: false, command: true, binary: null })
+}));
+vi.mock('../src/main/secrets.js', () => ({
+  getSecret: async () => null, hasSecret: async () => false, setSecret: async () => undefined, secretsRevision: () => 1
+}));
+
+const ledger = await import('../src/main/agent-engine/ledger.js');
+const registry = await import('../src/main/agent-engine/registry.js');
+const { chatAction, parseApiChatRequest } = await import('../src/main/api-chat/ipc.js');
+const settings = await import('../src/main/api-chat/settings.js');
+import type { AgentEngine } from '../src/main/agent-engine/types.js';
+import type { AgentEngineId } from '../src/shared/agent-engine.js';
+
+const SESSION = 'session-0001';
+
+/** An engine that records each call, as a CLI engine PR will register its own. */
+function fakeEngine(id: AgentEngineId, available = true) {
+  const view = (sessionId: string) => ({ sessionId, conversationId: 'cosapi-x', engine: id, model: `${id}-model`, effort: null, running: false, approval: 'ask' as const, pending: null });
+  const engine = {
+    id, label: id, terminalMode: null,
+    status: vi.fn(async () => ({ available, detail: available ? 'ready' : 'off' })),
+    models: vi.fn(async () => ({ models: [], total: 0 })),
+    create: vi.fn(async () => view('session-new')),
+    view: vi.fn(async (sessionId: string) => view(sessionId)),
+    send: vi.fn(async () => ({ turnId: `${id}-turn` })),
+    stop: vi.fn(async () => true),
+    approve: vi.fn(async (sessionId: string) => view(sessionId)),
+    setChatSettings: vi.fn(async (sessionId: string) => view(sessionId)),
+    recover: vi.fn(async () => undefined)
+  } satisfies AgentEngine;
+  return engine;
+}
+
+const request = (payload: Record<string, unknown>) => chatAction(parseApiChatRequest(payload));
+
+beforeEach(() => {
+  durable.clear();
+  ledger.resetChatLedgerForTests();
+  registry.resetAgentEnginesForTests();
+  settings.resetApiChatSettingsForTests();
+  modules.enabled.clear();
+  registry.setAgentEngineModulesForTests(async id => modules.enabled.has(id));
+});
+
+describe('agent engine registry', () => {
+  it('lists every engine in order; OpenCode, Codex and Claude are unavailable while their modules are off, MarksCode is retired and hidden', async () => {
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; hidden: boolean; terminal: string | null }>;
+    expect(engines.map(engine => `${engine.id}:${engine.available}:${engine.enabled}:${engine.hidden}:${engine.terminal}`)).toEqual([
+      'cliproxy:true:true:false:null', 'opencode:false:false:false:live', 'codex:false:false:false:live', 'claude:false:false:false:handover', 'markscode:false:false:true:null'
+    ]);
+  });
+
+  it('reports an engine whose module is on but which cannot run as enabled, with its reason', async () => {
+    registry.registerAgentEngine(fakeEngine('claude', false));
+    modules.enabled.add('claude');
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; detail: string }>;
+    expect(engines.find(engine => engine.id === 'claude')).toMatchObject({ available: false, enabled: true, detail: 'off' });
+    expect(engines.find(engine => engine.id === 'codex')).toMatchObject({ available: false, enabled: false });
+  });
+
+  it('hides the retired MarksCode from new chats, without probing it, and keeps routing its existing chats', async () => {
+    const markscode = fakeEngine('markscode');
+    registry.registerAgentEngine(markscode);
+    modules.enabled.add('markscode');
+    const engines = await request({ action: 'engines' }) as Array<{ id: string; available: boolean; enabled: boolean; hidden: boolean; terminal: string | null }>;
+    expect(engines.find(engine => engine.id === 'markscode')).toMatchObject({ available: false, enabled: false, hidden: true });
+    expect(markscode.status).not.toHaveBeenCalled();
+    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('MarksCode chats are read-only. New chats use OpenCode.');
+    expect(markscode.create).not.toHaveBeenCalled();
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, { [SESSION]: { engine: 'markscode', backendSessionId: 'ses_1', model: null, effort: null } });
+    expect(await request({ action: 'chatSettings', sessionId: SESSION })).toMatchObject({ engine: 'markscode' });
+    expect(await request({ action: 'send', sessionId: SESSION, text: 'hi' })).toEqual({ turnId: 'markscode-turn' });
+  });
+
+  it('routes every chat action by the chat ledger record, and a record without engine to CLIProxy', async () => {
+    const cliproxy = fakeEngine('cliproxy');
+    const codex = fakeEngine('codex');
+    registry.registerAgentEngine(cliproxy);
+    registry.registerAgentEngine(codex);
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, {
+      [SESSION]: { engine: 'codex', backendSessionId: 'thread-1', model: 'gpt-6-codex', effort: null },
+      'session-0002': { model: 'claude-opus-5-5', effort: 'medium' }
+    });
+    expect(await request({ action: 'send', sessionId: SESSION, text: 'hello' })).toEqual({ turnId: 'codex-turn' });
+    expect(codex.send).toHaveBeenCalledWith(SESSION, 'hello');
+    expect(await request({ action: 'stop', sessionId: SESSION })).toEqual({ stopped: true });
+    expect(await request({ action: 'chatSettings', sessionId: SESSION })).toMatchObject({ engine: 'codex' });
+    await request({ action: 'setChatSettings', sessionId: SESSION, effort: 'high' });
+    expect(codex.setChatSettings).toHaveBeenCalledWith(SESSION, { effort: 'high' });
+    await request({ action: 'approve', sessionId: SESSION, approvalId: '0f1e2d3c-aaaa-4bbb-8ccc-0123456789ab', decision: 'always' });
+    expect(codex.approve).toHaveBeenCalledWith(SESSION, '0f1e2d3c-aaaa-4bbb-8ccc-0123456789ab', 'always');
+    // An older chat, and a session with no record at all, are CLIProxy chats.
+    await request({ action: 'send', sessionId: 'session-0002', text: 'hi' });
+    await request({ action: 'chatSettings', sessionId: 'session-0003' });
+    expect(cliproxy.send).toHaveBeenCalledWith('session-0002', 'hi');
+    expect(cliproxy.view).toHaveBeenCalledWith('session-0003');
+    expect(codex.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('creates on the named engine (CLIProxy by default) and refuses an unavailable one', async () => {
+    const cliproxy = fakeEngine('cliproxy');
+    registry.registerAgentEngine(cliproxy);
+    registry.registerAgentEngine(fakeEngine('claude', false));
+    await request({ action: 'createChat', projectId: null });
+    expect(cliproxy.create).toHaveBeenCalledWith({ projectId: null });
+    await expect(request({ action: 'createChat', engine: 'claude' })).rejects.toThrow('off');
+    await expect(request({ action: 'createChat', engine: 'codex' })).rejects.toThrow('Enable the Codex module in Settings > Modules first');
+    await expect(request({ action: 'createChat', engine: 'opencode' })).rejects.toThrow('Enable the OpenCode module in Settings > Modules');
+    await expect(request({ action: 'createChat', engine: 'markscode' })).rejects.toThrow('MarksCode chats are read-only. New chats use OpenCode.');
+    expect(() => parseApiChatRequest({ action: 'createChat', engine: 'gemini' })).toThrow();
+  });
+
+  it("loads the named engine's models, CLIProxy's catalog when none is named", async () => {
+    const cliproxy = fakeEngine('cliproxy');
+    const opencode = fakeEngine('opencode');
+    registry.registerAgentEngine(cliproxy);
+    registry.registerAgentEngine(opencode);
+    await request({ action: 'models', query: 'opus', limit: 20 });
+    await request({ action: 'models', engine: 'opencode', refresh: true });
+    expect(cliproxy.models).toHaveBeenCalledWith({ query: 'opus', limit: 20 });
+    expect(opencode.models).toHaveBeenCalledWith({ refresh: true });
+  });
+
+  it('passes a route to Codex and Claude Code only: create, models and the chat settings', async () => {
+    const cliproxy = fakeEngine('cliproxy');
+    const codex = fakeEngine('codex');
+    const claude = fakeEngine('claude');
+    for (const engine of [cliproxy, codex, claude]) registry.registerAgentEngine(engine);
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, {
+      [SESSION]: { engine: 'codex', backendSessionId: 'thread-1', model: null, effort: null, route: 'direct' },
+      'session-0002': { model: 'm', effort: null }
+    });
+    await request({ action: 'createChat', engine: 'claude', route: 'router' });
+    expect(claude.create).toHaveBeenCalledWith({ projectId: null, route: 'router' });
+    await expect(request({ action: 'createChat', route: 'direct' })).rejects.toThrow(/chats have no route/);
+    await request({ action: 'models', engine: 'codex', route: 'router' });
+    expect(codex.models).toHaveBeenCalledWith({ route: 'router' });
+    await request({ action: 'models', route: 'router' });
+    expect(cliproxy.models).toHaveBeenCalledWith({});
+    await request({ action: 'setChatSettings', sessionId: SESSION, route: 'router' });
+    expect(codex.setChatSettings).toHaveBeenCalledWith(SESSION, { route: 'router' });
+    await expect(request({ action: 'setChatSettings', sessionId: 'session-0002', route: 'router' })).rejects.toThrow(/chats have no route/);
+    expect(() => parseApiChatRequest({ action: 'setChatSettings', sessionId: SESSION, route: 'proxy' })).toThrow();
+    // The route is a durable part of the chat's record; a record without one predates routes.
+    expect(ledger.routeOf(await ledger.storedChatRecord(SESSION))).toBe('direct');
+    expect(ledger.routeOf(await ledger.storedChatRecord('session-0002'))).toBe('router');
+  });
+
+  it('refuses a chat whose record this version cannot read, and keeps that record untouched', async () => {
+    const stored = { engine: 'gemini', model: 'g', effort: null };
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, { [SESSION]: stored, 'session-0002': { model: 'm', effort: null } });
+    await expect(request({ action: 'send', sessionId: SESSION, text: 'hi' })).rejects.toThrow('newer version');
+    await ledger.updateChatRecord('session-0002', current => current && { ...current, effort: 'low' });
+    expect(durable.get(ledger.API_CHAT_SESSIONS_STATE)).toEqual({ [SESSION]: stored, 'session-0002': { model: 'm', effort: 'low' } });
+  });
+});
+
+describe('API chat ledger migration', () => {
+  it('reads a record written before engines as a CLIProxy chat with no backend session', async () => {
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, { [SESSION]: { model: 'claude-opus-5-5', effort: 'medium', approval: 'auto' } });
+    const record = await ledger.storedChatRecord(SESSION);
+    expect(record).toEqual({ model: 'claude-opus-5-5', effort: 'medium', approval: 'auto' });
+    expect(ledger.engineOf(record)).toBe('cliproxy');
+    expect(await ledger.chatEngine(SESSION)).toBe('cliproxy');
+    // Rewriting it keeps the old shape: a CLIProxy record never gains an engine field.
+    await ledger.updateChatRecord(SESSION, current => current && { ...current, openTurn: { turnId: 'api-1', startedAt: 1 } });
+    await ledger.updateChatRecord(SESSION, ledger.withoutTurn);
+    expect(durable.get(ledger.API_CHAT_SESSIONS_STATE)).toEqual({ [SESSION]: { model: 'claude-opus-5-5', effort: 'medium', approval: 'auto' } });
+  });
+
+  it('keeps an engine and its backend session id', async () => {
+    await ledger.updateChatRecord(SESSION, () => ({ engine: 'claude', backendSessionId: '7b1d2c3e-4f50-4a61-8b72-9c83d4e5f601', model: null, effort: null }));
+    ledger.resetChatLedgerForTests();
+    expect(await ledger.chatEngine(SESSION)).toBe('claude');
+    expect((await ledger.storedChatRecord(SESSION))?.backendSessionId).toBe('7b1d2c3e-4f50-4a61-8b72-9c83d4e5f601');
+  });
+
+  it('names each listed API chat\'s engine for the sidebar, without writing anything', async () => {
+    durable.set(ledger.API_CHAT_SESSIONS_STATE, {
+      'session-codex': { engine: 'codex', model: null, effort: null },
+      'session-old': { model: 'gpt-5', effort: null },
+      'session-later': { engine: 'engine-from-a-later-version', model: null, effort: null }
+    });
+    const before = structuredClone(durable.get(ledger.API_CHAT_SESSIONS_STATE));
+    const rows = await ledger.withChatEngines([
+      { id: 'session-codex', conversationId: 'cosapi-1' },
+      { id: 'session-old', conversationId: 'cosapi-2' },
+      { id: 'session-later', conversationId: 'cosapi-3' },
+      { id: 'session-native', conversationId: '6a1f0c2e-0000-4000-8000-000000000001' },
+      { id: 'session-unattributed', conversationId: null }
+    ]);
+    expect(rows.map(row => row.engine)).toEqual(['codex', 'cliproxy', undefined, undefined, undefined]);
+    expect(durable.get(ledger.API_CHAT_SESSIONS_STATE)).toEqual(before);
+  });
+});

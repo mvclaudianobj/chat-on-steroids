@@ -16,7 +16,7 @@ describe('macOS permission diagnostic evidence', () => {
     const checks = describeMacOSDesktopAccess({ screen: 'missing', accessibility: 'unknown', checkedAt: 1, error: 'backend unavailable' }, { screen: true, control: true });
     expect(checks[0]).toMatchObject({ status: 'fail', ok: false });
     expect(checks[0]!.detail).toContain('preflight did not pass');
-    expect(checks[0]!.detail).toContain('this installed Chat On Steroids.app');
+    expect(checks[0]!.detail).toContain('this installed ChatMarks.app');
     expect(checks[1]).toMatchObject({ status: 'not-run', ok: null, detail: 'backend unavailable' });
     expect(describeMacOSDesktopAccess(null, { screen: false, control: false })).toEqual([]);
   });

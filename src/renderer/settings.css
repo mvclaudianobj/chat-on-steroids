@@ -11,6 +11,83 @@
 .appearance-page-head > div { min-width: 0; }
 .appearance-page-head > .btn { flex: 0 0 auto; min-height: 34px; padding: 7px 9px; font-size: calc(11.5px * var(--text-scale, 1)); }
 .appearance-section + .appearance-section { margin-top: 28px; }
+.app[data-screen='settings'] #tabs .modules-subnav { margin-left: 22px; padding-left: 12px; border-left: 2px solid var(--line); border-radius: 0 8px 8px 0; min-height: 32px; font-size: calc(12px * var(--text-scale, 1)); }
+.app[data-screen='settings'] #tabs .modules-subnav.is-sel { border-left-color: var(--accent); }
+.modules-toggle { min-height: 74px; border-bottom: 1px solid var(--line); }
+.modules-toggle .setting-text { min-width: 0; }
+.modules-toggle-control { display: inline-flex; gap: 10px; align-items: center; white-space: nowrap; font-size: calc(12px * var(--text-scale, 1)); color: var(--soft); }
+.modules-toggle-control input { width: 18px; height: 18px; accent-color: var(--accent-fill); cursor: pointer; }
+.modules-panel .modules-service { padding: 0 18px; }
+.modules-service-overview { display: grid; justify-items: start; gap: 8px; padding: 18px 0 12px; }
+.modules-status { display: inline-flex; align-items: center; min-height: 26px; padding: 4px 9px; border: 1px solid var(--line); border-radius: 100px; color: var(--soft); background: var(--sunk); font-size: calc(12px * var(--text-scale, 1)); font-weight: 600; }
+.modules-status[data-state='running'] { color: var(--green); border-color: var(--green-line); background: var(--green-wash); }
+.modules-status[data-state='stopped'] { color: var(--soft); }
+.modules-status[data-state='missing'], .modules-status[data-state='error'] { color: var(--red); border-color: var(--red-line); background: var(--red-wash); }
+.modules-detail { margin: 0; color: var(--soft); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; }
+.modules-service-actions { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px 0 18px; }
+.modules-service-actions .btn, .modules-console > .btn { min-height: 36px; padding: 8px 12px; }
+.modules-service .btn:disabled { opacity: .5; cursor: not-allowed; }
+.modules-console { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-width: 0; min-height: 80px; padding: 16px 0; border-top: 1px solid var(--line); }
+.modules-console .setting-text { flex: 1 1 220px; min-width: 0; }
+.modules-console-address { display: block; margin-top: 9px; color: var(--soft); font-size: calc(11px * var(--text-scale, 1)); }
+.modules-console input { display: block; width: 100%; min-height: 36px; margin-top: 4px; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--page); color: var(--ink); font: calc(12px * var(--text-scale, 1)) var(--mono); }
+.modules-error { margin: 0; padding: 12px 0 16px; border-top: 1px solid var(--line); color: var(--red); font-size: calc(12px * var(--text-scale, 1)); line-height: 1.5; overflow-wrap: anywhere; }
+.modules-panel :is(button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+@media (max-width: 520px) { .modules-service-actions .btn { flex: 1 1 80px; } .modules-console > .btn { width: 100%; } }
+/* Chat Marks CLIProxyAPI management (renderer/cliproxy-manage-ui.ts). */
+.cliproxy-versions { display: grid; justify-items: start; gap: 4px; }
+.modules-status[data-state='update'] { color: var(--accent); border-color: var(--accent); }
+.cliproxy-manage { border-top: 1px solid var(--line); }
+.cliproxy-field { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; min-height: 64px; padding: 12px 0; }
+.cliproxy-field > .setting-text { flex: 1 1 220px; min-width: 0; }
+.cliproxy-field input[type='password'] { flex: 1 1 220px; min-width: 0; max-width: 360px; min-height: 36px; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--page); color: var(--ink); font: calc(12px * var(--text-scale, 1)) var(--mono); }
+.cliproxy-field .btn, .cliproxy-keys .btn { min-height: 32px; padding: 6px 12px; }
+.cliproxy-keys { display: grid; gap: 6px; margin: 0; padding: 0 0 10px; list-style: none; }
+.cliproxy-keys li { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.cliproxy-key { font: calc(12px * var(--text-scale, 1)) var(--mono); color: var(--ink); }
+.cliproxy-keys li .btn { margin-left: auto; }
+.cliproxy-message { padding-bottom: 12px; }
+.cliproxy-message:empty { display: none; }
+.api-chat-settings { margin-top: 12px; padding: 16px 18px 4px; }
+.api-chat-settings > .setting-text { display: grid; gap: 4px; padding-bottom: 12px; }
+.api-chat-settings .api-chat-field { gap: 12px; }
+.api-chat-settings :is(input[type='url'], input[type='search'], input[type='password']) { flex: 1 1 220px; min-width: 0; max-width: 360px; min-height: 36px; padding: 8px 10px; border: 1px solid var(--edge); border-radius: 8px; background: var(--page); color: var(--ink); font: calc(12px * var(--text-scale, 1)) var(--mono); }
+.api-chat-key, .api-chat-model { display: flex; flex: 1 1 320px; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px; min-width: 0; }
+.api-chat-settings > #apiChatTest { min-height: 36px; margin: 14px 0 8px; padding: 8px 12px; }
+.api-chat-settings > #apiChatResult { padding-bottom: 14px; }
+/* Chat Marks API chats in the chat view (renderer/api-chat-ui.ts): the chat's own model and effort
+   take the ChatGPT model menu's place, and ChatGPT-only controls leave the composer. */
+.composer .api-chat-controls { grid-column: 3; grid-row: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 2px 4px; min-width: 0; }
+/* Buttons keep their words on one line; the row wraps instead of drawing controls over each other. */
+.api-chat-controls > .btn { flex: none; min-height: 32px; padding: 6px 8px; font-size: calc(12px * var(--text-scale, 1)); white-space: nowrap; }
+.api-chat-controls > .btn[hidden] { display: none; }
+.composer .api-chat-controls[hidden] { display: none; }
+.api-chat-controls .api-chat-terminal { flex: none; min-height: 32px; padding: 6px 8px; font-size: calc(12px * var(--text-scale, 1)); white-space: nowrap; }
+.api-chat-controls .api-chat-terminal[hidden] { display: none; }
+.api-chat-controls select { flex: 0 1 auto; width: auto; max-width: 190px; min-width: 0; overflow: hidden; white-space: nowrap; min-height: 32px; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; color: var(--ink); font: inherit; font-size: calc(12px * var(--text-scale, 1)); text-overflow: ellipsis; cursor: pointer; }
+.api-chat-controls select:hover { background: var(--hover); }
+.api-chat-controls select:focus-visible { outline: 2px solid var(--ink); outline-offset: 1px; }
+.api-chat-controls #apiChatComposerEffort { color: var(--soft); }
+.api-chat-controls select::picker(select) { width: max-content; min-width: anchor-size(width); max-width: min(320px, calc(100vw - 24px)); }
+.api-chat-label[hidden] { display: none; }
+.api-chat-label { display: inline-flex; align-items: center; gap: 5px; flex: 0 1 auto; min-width: 0; max-width: 48%; overflow: hidden; color: var(--soft); font-size: calc(12.5px * var(--text-scale, 1)); white-space: nowrap; }
+.api-chat-label > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* Chat type icons (renderer/chat-types.ts): beside a chat's title in the sidebar, its Terminals and
+   its header, at the size of the row's other marks and in their quiet colour. */
+.api-chat-label > .chat-type-icon { --ico: 14px; --glyph: 14px; }
+/* A module card heading leads with its project mark (OpenCode) or line icon (ZeroClaw). */
+h1 > .ico.module-mark, h2 > .ico.module-mark { width: 18px; height: 18px; margin: 0 8px 0 0; vertical-align: -2px; }
+h1 > .ico.module-mark { width: 22px; height: 22px; vertical-align: -3px; }
+.app[data-screen='settings'] #tabs .modules-subnav > .ico.module-mark { --ico: 16px; --glyph: 16px; }
+.chat-head > .chat-head-type { --ico: 15px; --glyph: 15px; flex: none; color: var(--soft); }
+.sess-top > .sess-type { --ico: 15px; --glyph: 15px; color: var(--faint); }
+.sess:is(:hover, .is-pointed, .is-sel) .sess-top > .sess-type { color: var(--soft); }
+.sess-card .sess-top > .sess-type + b { flex-basis: 0; }
+.cli-module-chat > .sess-type { --ico: 15px; --glyph: 15px; }
+.cli-module-chat > .cli-module-chat-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.is-api-chat :is(#attachmentMenu, #composerSettings, #createPlan, #modelMenu, #contextMeter, #generateFinishGoal, #sendOptions,
+  #activeGoalRow, #agentPlan, #taskPlanPreview, #finishQueue, #recoveryStatus, #branchDraft, #skillPicker, #composerSelectedSkills) { display: none !important; }
+.composer:has(.composer-selected-skills:not([hidden]), #composerImages:not([hidden])) .api-chat-controls { grid-row: 3; }
 .appearance-panel .appearance-settings-card { padding: 4px 18px; gap: 0; overflow: visible; }
 .appearance-panel .setting { min-width: 0; min-height: 64px; padding: 14px 0; flex-wrap: wrap; gap: 12px; }
 .appearance-panel .setting-text { flex: 1 1 180px; }
@@ -86,7 +163,9 @@
    floor; expanded details left it a 23 px sliver in an 882 px window. */
 .activity-content { grid-template-rows: auto auto minmax(0, 1fr); }
 @media (min-height: 760px) { .activity-content { grid-template-rows: auto minmax(0, max-content) minmax(min(260px, 40vh), 1fr); } }
-[data-panel='activity'] .update-readiness { grid-template-rows: max-content max-content minmax(0, 1fr) max-content; align-content: start; margin-bottom: 20px; padding: 20px; gap: 12px; }
+/* Long translated failures can exceed even the fixed status/actions tracks. Let the card
+   scroll in that case rather than clipping its recovery action; details keep their own scroll. */
+[data-panel='activity'] .update-readiness { grid-template-rows: max-content max-content minmax(0, 1fr) max-content; align-content: start; margin-bottom: 20px; padding: 20px; gap: 12px; overflow-y: auto; }
 .update-readiness h2 { min-height: 0; padding: 0; }
 .update-readiness ul { display: grid; gap: 14px; margin: 0; padding: 0; list-style: none; }
 .update-readiness .check > div { min-width: 0; overflow-wrap: anywhere; }
@@ -95,6 +174,10 @@
 .update-readiness-status, .update-readiness-actions { display: grid; gap: 8px; min-width: 0; }
 .update-readiness-status > p, .update-readiness-actions > p { margin: 0; overflow-wrap: anywhere; }
 .update-readiness-buttons { display: flex; flex-wrap: wrap; gap: 8px; }
+/* With no button to show, the actions row and its grid track take no space (its notice stays the
+   Update all button's description). */
+.update-readiness-actions:not(:has(.update-readiness-buttons > :not([hidden]))) { display: none; }
+[data-panel='activity'] .update-readiness:not(.is-compact):not(:has(.update-readiness-buttons > :not([hidden]))) { grid-template-rows: max-content max-content minmax(0, 1fr); }
 .update-readiness-header { display: flex; align-items: center; gap: 14px; min-width: 0; }
 .update-readiness .update-readiness-toggle { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; padding: 4px 0; border: 0; background: transparent; text-align: left; white-space: normal; overflow-wrap: anywhere; }
 .update-readiness-header > #updateAll { flex: 0 0 auto; }
@@ -477,3 +560,46 @@ details.connector[open] > summary .connector-chevron { transform: rotate(90deg);
 .is-found { animation: setting-found 1600ms ease-out; }
 @keyframes setting-found { from, 35% { background-color: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
 @media (prefers-reduced-motion: reduce) { .is-found { animation: none; background-color: var(--accent-wash); box-shadow: 0 0 0 8px var(--accent-wash); } }
+.marks-cli-terminal { min-height: 420px; height: min(60vh, 660px); padding: 12px; background: #101218; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+.cli-module-view { display: flex; flex-direction: column; gap: 12px; min-height: 100%; padding: 22px; }
+.cli-module-view h2 { margin: 0; }
+.cli-module-view p { margin: 0; color: var(--soft); overflow-wrap: anywhere; }
+.cli-module-view .marks-cli-terminal { flex: 1; min-height: 0; height: auto; }
+/* Chat Marks D4: a paused API chat tool call, a row of the composer dock. */
+.api-chat-approval[hidden] { display: none; }
+.api-chat-route-notice { margin: 0; padding: 8px 12px; border-bottom: 1px solid var(--edge); color: var(--muted); font-size: calc(13px * var(--text-scale, 1)); }
+.api-chat-route-notice[hidden] { display: none; }
+.api-chat-approval { display: grid; gap: 8px; margin: 0; padding: 10px 12px; border: 0; border-bottom: 1px solid var(--edge); color: var(--ink); font-size: calc(13px * var(--text-scale, 1)); }
+.api-chat-approval-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.api-chat-approval-head code { color: var(--soft); }
+.api-chat-approval pre { margin: 0; max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: calc(12px * var(--text-scale, 1)); }
+.api-chat-approval ul { margin: 0; padding-left: 18px; max-height: 120px; overflow: auto; font-size: calc(12px * var(--text-scale, 1)); }
+.api-chat-approval-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.api-chat-approval-actions button { min-height: 30px; padding: 4px 12px; border-radius: 8px; border: 1px solid var(--edge); background: var(--card); color: var(--ink); font: inherit; cursor: pointer; }
+.api-chat-approval-actions button.primary { background: var(--ink); color: var(--card); border-color: var(--ink); }
+.api-chat-approval-actions button:disabled { opacity: 0.6; cursor: default; }
+.api-chat-take-back-text { margin: 0; }
+/* Chat Marks: ZeroClaw's own Settings page (its setup terminal and its read-only settings). */
+.zeroclaw-setup-terminal { display: flex; flex-direction: column; margin-top: 12px; }
+.zeroclaw-setup-terminal[hidden] { display: none; }
+/* The mount must lay its terminal out too: as a block, the terminal's body had no height (0 px),
+   xterm fitted one row and nothing of ZeroClaw's quickstart could show. */
+.zeroclaw-setup-terminal > .marks-cli-terminal { display: flex; flex-direction: column; flex: 1; min-height: 0; height: auto; padding: 0; border: 0; border-radius: 0; }
+.zeroclaw-setup-terminal > .marks-cli-terminal[hidden] { display: none; }
+.zeroclaw-setup-terminal .workspace-terminal { flex: 1; min-height: 0; overflow: hidden; }
+.zeroclaw-facts { display: grid; grid-template-columns: max-content 1fr; gap: 6px 18px; margin: 0; font-size: calc(13px * var(--text-scale, 1)); }
+.zeroclaw-facts dt { color: var(--muted); }
+.zeroclaw-content > .appearance-section { margin-top: 28px; }
+.zeroclaw-panel .modules-service { padding: 14px 18px 0; }
+.zeroclaw-panel .zeroclaw-facts { padding-bottom: 4px; }
+.zeroclaw-panel .zeroclaw-setup-terminal { margin-bottom: 18px; }
+.zeroclaw-panel :is(button):focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.zeroclaw-facts dd { margin: 0; overflow-wrap: anywhere; }
+.vms-create { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; padding: 16px; }
+.vms-create label { display: flex; flex: 1 1 140px; flex-direction: column; gap: 5px; min-width: 120px; }
+.vms-create input { width: 100%; min-width: 0; }
+.vms-list { display: grid; gap: 12px; margin-top: 12px; }
+.vms-lab { padding: 16px; }
+.vms-lab h3 { margin: 0 0 8px; }
+.vms-log { max-height: 200px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+.vms-doctor { padding: 12px 16px; }

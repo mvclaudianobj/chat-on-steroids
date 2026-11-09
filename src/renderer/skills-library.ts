@@ -1,5 +1,8 @@
 import type { AppApi } from '../preload/index.js';
+import { AIHERO_SITE, isAiheroSkillOrigin } from '../shared/aihero-skills.js';
 import { parseGitHubSkillUrl, type GitHubSkillUpdateCheck, type ManagedSkill } from '../shared/skills.js';
+import { initAiheroSkills } from './aihero-skills.js';
+import { initMarksAgencySkills } from './marks-agency-skills.js';
 import { $, el, icon, initCardMenuDismissal, run, toast } from './dom.js';
 import { t, tn, ui } from './i18n.js';
 
@@ -8,6 +11,10 @@ export function initSkillsLibrary(api: AppApi): () => void {
   initCardMenuDismissal();
   let skills: ManagedSkill[] = [];
   let epoch = 0;
+  // Until a list arrives the header says Loading…; a failed first load says so instead of loading for good.
+  let loaded = false;
+  // The first load failed and no list arrived since: the list says so, also when the search repaints it.
+  let loadFailed = false;
   const checks = new Map<string, GitHubSkillUpdateCheck>();
   const checking = new Set<string>();
   let linkTarget: ManagedSkill | null = null;
@@ -19,6 +26,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
   const paintSource = (skill: ManagedSkill): void => {
     const source = document.querySelector<HTMLElement>(`[data-skill-id="${skill.id}"] .skill-library-source`);
     if (!source) return;
+    if (agency.paintSource(skill)) return;
     if (!skill.origin) {
       source.className = 'skill-library-source is-local';
       source.replaceChildren(icon('i-folder'), el('span', '', () => t('Local')));
@@ -32,25 +40,45 @@ export function initSkillsLibrary(api: AppApi): () => void {
       : state === 'available' ? 'Update available'
         : state === 'current' ? 'Up to date'
           : state === 'error' ? 'Check failed' : 'GitHub';
+    const aihero = isAiheroSkillOrigin(skill.origin);
     const marker = state === 'available' ? 'i-retry' : state === 'current' ? 'i-check'
       : state === 'error' ? 'i-warning' : 'i-globe';
     if (state === 'available') {
       const action = el('button', 'skill-library-update') as HTMLButtonElement;
       action.type = 'button';
-      action.append(icon(marker), el('span', '', () => t(label)));
+      action.append(icon(marker), el('span', '', () => aihero ? `aihero.dev · ${t(label)}` : t(label)));
       ui(action, 'aria-label', () => `${t('Update from GitHub')}: ${skill.name}`);
       action.addEventListener('click', () => confirmUpdate(skill));
       source.replaceChildren(action);
     } else {
-      source.replaceChildren(icon(marker), el('span', '', () => t(label)));
+      source.replaceChildren(icon(marker), el('span', '', () => aihero ? `aihero.dev · ${t(label)}` : t(label)));
     }
     const revision = installedRevision(skill);
-    source.title = check?.error
-      ? `${skill.origin.url}\n${revision}\n${check.error}`
-      : `${skill.origin.url}\n${revision}`;
+    source.title = [aihero ? AIHERO_SITE : null, skill.origin.url, revision, check?.error].filter(Boolean).join('\n');
   };
 
   let recommended: Array<{ id: string; name: string; description: string }> = [];
+  // Agency controls live separately, so upstream changes to the managed library remain easy to merge.
+  const agency = initMarksAgencySkills(api, {
+    getSkills: () => skills,
+    setSkills: next => setSkills(next),
+    updateSkills: request => update(request)
+  });
+  const aihero = initAiheroSkills({
+    getSkills: () => skills,
+    importSkill: async url => {
+      const own = ++epoch;
+      try {
+        const result = await api.skillsImportGithub(url);
+        if (!result.ok) return { ok: false, error: result.error };
+        if (own === epoch) setSkills(result.data);
+        else await update(api.listManagedSkills());
+        return { ok: true };
+      } catch {
+        return { ok: false, error: t('Could not reach GitHub. Try again.') };
+      }
+    }
+  });
   const renderRecommended = (): void => {
     const section = document.getElementById('skillsRecommendedSection');
     if (!section) return;
@@ -88,7 +116,14 @@ export function initSkillsLibrary(api: AppApi): () => void {
 
   const render = (): void => {
     renderRecommended();
+    agency.render();
+    aihero.render();
     const host = $('skillsInstalled');
+    if (loadFailed) {
+      ui($('skillsCount'), 'textContent', () => '');
+      host.replaceChildren(el('p', 'plugin-no-results muted', () => t('Skills could not be loaded.')));
+      return;
+    }
     const query = $<HTMLInputElement>('skillsSearch').value.trim().toLocaleLowerCase();
     const visible = skills.filter(skill => `${skill.id} ${skill.name} ${skill.description}`.toLocaleLowerCase().includes(query));
     ui($('skillsCount'), 'textContent', () => tn('{0} skill', '{0} skills', skills.length));
@@ -118,7 +153,9 @@ export function initSkillsLibrary(api: AppApi): () => void {
       const summary = el('summary'); summary.append(icon('i-more'));
       ui(summary, 'aria-label', () => t('Actions for {0}', [skill.name]));
       const actions = el('div', 'plugin-menu-actions');
-      if (skill.origin) {
+      if (agency.appendCardActions(skill, actions, menu)) {
+        // Marks-specific updates are handled by the Agency catalog.
+      } else if (skill.origin) {
         const refresh = el('button', 'btn', () => t('Update from GitHub')) as HTMLButtonElement;
         refresh.type = 'button'; refresh.addEventListener('click', () => { menu.open = false; confirmUpdate(skill); });
         actions.append(refresh);
@@ -135,7 +172,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   const setSkills = (next: ManagedSkill[]): void => {
-    skills = next;
+    skills = next; loaded = true; loadFailed = false;
     for (const [id, check] of checks) {
       if (skills.find(skill => skill.id === id)?.origin?.revision !== check.originRevision) checks.delete(id);
     }
@@ -143,16 +180,23 @@ export function initSkillsLibrary(api: AppApi): () => void {
     render();
   };
 
-  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>): Promise<boolean> => {
+  /**
+   * Applies the newest request's list. While no list has arrived yet, the newest request ending without one
+   * decides what the page shows: a failed load says so, and a change that ended without a list (a cancelled
+   * import) loads again rather than leaving "Loading…" for good. An older request says nothing (CodeRabbit on #2002).
+   */
+  const update = async (request: Promise<{ ok: true; data: ManagedSkill[] | null } | { ok: false; error: string }>, load = false): Promise<boolean> => {
     const own = ++epoch;
     const next = await run(request);
-    if (!next || own !== epoch) return false;
-    setSkills(next); return true;
+    if (own !== epoch) return false;
+    if (next) { setSkills(next); return true; }
+    if (!loaded) { if (load) { loadFailed = true; render(); } else void loadList(); }
+    return false;
   };
 
   const checkUpdates = (force: boolean): Promise<void> => {
     if (checkPass) return checkPass;
-    const due = skills.filter(skill => skill.origin && (force || !checks.has(skill.id) ||
+    const due = skills.filter(skill => skill.origin && !agency.isAgencySkill(skill) && (force || !checks.has(skill.id) ||
       Date.now() - checks.get(skill.id)!.checkedAt >= (checks.get(skill.id)!.state === 'error' ? 60_000 : checkAgeMs)));
     if (!due.length) return Promise.resolve();
     const groups = new Map<string, ManagedSkill[]>();
@@ -273,8 +317,9 @@ export function initSkillsLibrary(api: AppApi): () => void {
   };
 
   $('skillsSearch').addEventListener('input', render);
+  const loadList = (): Promise<boolean> => update(api.listManagedSkills(), true);
   const refresh = (force: boolean): void => {
-    void (async () => { if (await update(api.listManagedSkills())) await checkUpdates(force); })();
+    void (async () => { if (await loadList()) await checkUpdates(force); })();
   };
   $('skillsRefresh').addEventListener('click', () => refresh(true));
   for (const [id, kind] of [['skillsImportFolder', 'folder'], ['skillsImportFile', 'file']] as const) {
@@ -346,7 +391,7 @@ export function initSkillsLibrary(api: AppApi): () => void {
       ui(githubSubmit, 'textContent', () => t(linkTarget ? 'Link source' : 'Import skill'));
     }
   })());
-  void update(api.listManagedSkills());
+  void loadList();
   if (typeof api.listRecommendedSkills === 'function') void run(api.listRecommendedSkills()).then(list => { if (list) { recommended = list; renderRecommended(); } });
-  return () => refresh(false);
+  return () => { refresh(false); void agency.refresh(false); };
 }

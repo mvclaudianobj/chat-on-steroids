@@ -6,6 +6,9 @@ import { $, disclosureChevron, el, run, toast } from './dom.js';
 import { paintSharedTunnel } from './tunnel-warning.js';
 
 let snapshot: PluginSnapshot = { plugins: [], catalog: [], schemaRevision: 0 };
+let pluginsLoaded = false;
+/** The first snapshot failed and none arrived since: the list says so, also when the search repaints it. */
+let pluginsLoadFailed = false;
 let epoch = 0;
 let appState: AppState | null = null;
 let applyAppState: (next: AppState) => void = () => {};
@@ -47,18 +50,29 @@ function dialog(title: string | (() => string)): { box: HTMLDialogElement; body:
   const body = el('div', 'plugin-dialog-body'); box.append(head, body);
   box.addEventListener('close', () => box.remove()); document.body.append(box); box.showModal(); return { box, body };
 }
-async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notify = true): Promise<boolean> {
+/**
+ * While no snapshot has arrived yet, the newest request ending without one decides what the page shows: a
+ * failed load says so, and a change that failed loads again rather than leaving "Loading…" for good. An older
+ * request says nothing (CodeRabbit on #2002).
+ */
+async function mutate(work: ReturnType<typeof window.api.pluginsSnapshot>, notify = true, load = false): Promise<boolean> {
   const own = ++epoch; const result = await run(work);
-  if (!result) return false;
-  if (own === epoch) { snapshot = result; renderInstalled(); }
+  if (!result) {
+    if (own === epoch && !pluginsLoaded) { if (load) { pluginsLoadFailed = true; renderInstalled(); } else void refreshPlugins(); }
+    return false;
+  }
+  if (own === epoch) { snapshot = result; pluginsLoaded = true; pluginsLoadFailed = false; renderInstalled(); }
   if (notify) toast(t("Plugin settings saved. Refresh {0} in ChatGPT to update its tools.", [pluginsConnectorName()]));
   return true;
 }
 /** This computer's Plugins connector name, which carries its suffix when one is set. */
 function pluginsConnectorName(): string {
-  return appState?.status.surfaces.find(item => item.id === 'plugins')?.connectorName ?? 'Chat On Steroids Plugins';
+  return appState?.status.surfaces.find(item => item.id === 'plugins')?.connectorName ?? 'Chat Marks Plugins';
 }
-export async function refreshPlugins(): Promise<void> { await mutate(window.api.pluginsSnapshot(), false); }
+export async function refreshPlugins(): Promise<void> {
+  // A failed first load says so, not Loading… for good; Check local status tries again.
+  await mutate(window.api.pluginsSnapshot(), false, true);
+}
 export function applyPluginsState(next: AppState): void {
   appState = next;
   const surface = next.status.surfaces.find((item) => item.id === 'plugins');
@@ -66,16 +80,16 @@ export function applyPluginsState(next: AppState): void {
   const contacted = surface?.state === 'live' && !!surface.lastRequestAt;
   const configured = !!next.config.tunnel.pluginsTunnelId?.trim() || surface?.state === 'live';
   $('pluginsSetupTitle').closest('.plugin-connection')!.classList.toggle('is-configured', configured);
-  ui($('pluginsSetupTitle'), 'textContent', () => configured ? t("Chat On Steroids Plugins in ChatGPT") : t("Set up plugins before your first use"));
+  ui($('pluginsSetupTitle'), 'textContent', () => configured ? t("Chat Marks Plugins in ChatGPT") : t("Set up plugins before your first use"));
   ui($('pluginsSetupHint'), 'textContent', () => configured
-    ? t("Your enabled plugins reach ChatGPT through one plugin there: Chat On Steroids Plugins. Manage its connection here.")
+    ? t("Your enabled plugins reach ChatGPT through one plugin there: Chat Marks Plugins. Manage its connection here.")
     : t("Add {0} to ChatGPT once, so ChatGPT can use your installed plugins.", [pluginsConnectorName()]));
   ui($('pluginsSetupLink'), 'textContent', () => configured ? t("Plugin setup") : t("Set up plugins"));
   ui($('pluginsRefreshName'), 'textContent', pluginsConnectorName);
   $('pluginsSetupLink').classList.toggle('btn-solid', !configured);
   ui(status, 'textContent', () => surface?.state === 'live'
     ? contacted ? t("Connected to ChatGPT") : t("Plugin online · waiting for ChatGPT")
-    : configured ? t("Chat On Steroids Plugins offline") : t("Setup required · connect your plugins"));
+    : configured ? t("Chat Marks Plugins offline") : t("Setup required · connect your plugins"));
   status.dataset.live = String(surface?.state === 'live');
   ui(status, 'title', () => t(surface?.detail ?? ''));
   const setupStatus = document.getElementById('pluginSetupStatus');
@@ -108,8 +122,8 @@ function showConnection(): void {
     else key = field(body, () => t("Tunnel API key"), '', true, () => t("Use a restricted key with Tunnels: Read and Tunnels: Use. It is stored securely and shared with Core and Desktop."));
   }
   // Values needed for ChatGPT setup stay copyable; tool lists belong to each plugin.
-  copy(t("Name in ChatGPT"), surface?.connectorName ?? 'Chat On Steroids Plugins');
-  copy(t("Description"), surface?.description ?? 'Tools from your enabled Chat On Steroids plugins.');
+  copy(t("Name in ChatGPT"), surface?.connectorName ?? 'Chat Marks Plugins');
+  copy(t("Description"), surface?.description ?? 'Tools from your enabled Chat Marks plugins.');
   const url = surface?.publicUrl ?? (config.tunnel.kind === 'manual' ? surface?.localUrl : null);
   if (url) copy(t("MCP server URL"), url);
   body.append(el('p', 'hint', () => config.tunnel.kind === 'openai'
@@ -148,6 +162,11 @@ function showConnection(): void {
 }
 function renderInstalled(): void {
   const list = $('pluginsInstalled');
+  if (pluginsLoadFailed) {
+    ui($('pluginsCount'), 'textContent', () => '');
+    list.replaceChildren(el('p', 'plugin-no-results muted', () => t("Plugins could not be loaded.")));
+    return;
+  }
   list.replaceChildren(); ui($('pluginsCount'), 'textContent', () => tn("{0} installed", "{0} installed", snapshot.plugins.length));
   const query = $<HTMLInputElement>('pluginsSearch').value.trim().toLowerCase();
   const matches = (name: string, description = '') => `${name} ${description}`.toLowerCase().includes(query);
@@ -259,10 +278,20 @@ function showUninstall(plugin: PluginView): void {
 function showConfigure(plugin: PluginView): void {
   const { box, body } = dialog(() => t("Configure {0}", [plugin.name])); const config = new Map<string, HTMLInputElement>(); const secrets = new Map<string, HTMLInputElement>();
   const name = field(body, () => t("Display name"), plugin.name);
+  const secretField = (key: string, label: string) => {
+    const input = field(body, label, '', true, () => t("Leave empty to keep the saved credential."));
+    const present = plugin.credentialPresence?.[key] === true;
+    input.placeholder = present ? '••••••••' : '';
+    const caption = plugin.credentialPresence?.[key] === undefined ? 'Credential status unavailable' : present ? 'Credential saved' : 'No saved credential';
+    input.setAttribute('aria-description', t(caption));
+    input.parentElement?.append(el('small', 'muted', () => t(caption)));
+    secrets.set(key, input);
+  };
   for (const item of plugin.fields ?? snapshot.catalog.find((entry) => entry.id === plugin.catalogId)?.fields ?? [])
-    (item.secret ? secrets : config).set(item.key, field(body, item.label, item.secret ? '' : plugin.config[item.key] ?? '', item.secret, () => item.secret ? t("Leave empty to keep the saved credential.") : item.placeholder ?? ''));
+    if (item.secret) secretField(item.key, item.label);
+    else config.set(item.key, field(body, item.label, plugin.config[item.key] ?? '', false, item.placeholder ?? ''));
   for (const [key, value] of Object.entries(plugin.config)) if (!config.has(key)) config.set(key, field(body, key, value));
-  for (const key of plugin.credentialKeys) if (!secrets.has(key)) secrets.set(key, field(body, key, '', true, () => t("Leave empty to keep the saved credential.")));
+  for (const key of plugin.credentialKeys) if (!secrets.has(key)) secretField(key, key);
   const source = field(body, () => t("Server configuration (JSON)"), JSON.stringify(plugin.source), false, () => t("Keep credentials in the secure fields, not in command arguments or URLs."));
   const extraConfig = field(body, () => t("Additional configuration (JSON object)"), '{}', false, () => t("Non-secret settings and environment variables only."));
   const extraKey = field(body, () => t("Additional credential name (optional)"), '', false, () => t("Environment variable for local servers; header name for remote servers.")); const extraValue = field(body, () => t("Additional credential value"), '', true);

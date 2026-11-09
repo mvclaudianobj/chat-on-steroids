@@ -1,7 +1,7 @@
 // Real Electron overlay regression, with isolated data and no provider/tunnel access.
 // Run after npm run build: electron scripts/verify-pet-toggle.cjs
 // Windows --native-pointer moves the OS cursor; do not touch the mouse during this test.
-const { app, BrowserWindow, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, nativeImage, screen, safeStorage } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -28,7 +28,11 @@ app.setName('CoS Pet Toggle Probe');
 app.setPath('userData', userData);
 app.setAppPath(root);
 process.env.CLF_BRIDGE_PORTS = '0';
+const { installPetMarkspanelLogin, petFixtureDocumentKind } = require('./fixtures/pet-markspanel-login.cjs');
+const assertPetLogin = installPetMarkspanelLogin({ app, BrowserWindow, safeStorage });
 let owner, overlay, ignored = true, decodes = 0;
+let stage = 'loading the authenticated main window';
+const observedDocuments = [];
 let pointer = { x: 0, y: 0 };
 // Drive the existing native proximity sampler without moving the user's actual mouse.
 app.whenReady().then(() => { if (!nativePointer) screen.getCursorScreenPoint = () => pointer; });
@@ -38,12 +42,10 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const errors = [];
 app.on('web-contents-created', (_event, contents) => {
   contents.session.webRequest.onBeforeRequest({ urls: ['https://*/*', 'http://*/*'] }, (_details, callback) => callback({ cancel: true }));
-  contents.on('console-message', (_event, details) => { if (details.level === 'error') errors.push(details.message); });
+  contents.on('console-message', details => { if (details.level === 'error') errors.push(details.message); });
 });
-// Pet packages are loaded through a separate overlay window and asynchronous atlas IPC.
-// A busy CI VM can take longer than the normal 5s interaction deadline to create a pet.
 const PET_RENDER_TIMEOUT_MS = 15000;
-const deadline = setTimeout(() => { console.error('Pet toggle timed out', { userData, errors }); app.exit(1); }, 90000);
+const deadline = setTimeout(() => { console.error('Pet toggle timed out', { stage, observedDocuments, ownerLoaded: !!owner, overlayLoaded: !!overlay, login: assertPetLogin.status(), errors }); app.exit(1); }, 90000);
 async function until(predicate, label, timeoutMs = 5000) {
   const end = Date.now() + timeoutMs;
   while (Date.now() < end) { if (await predicate()) return; await sleep(40); }
@@ -203,30 +205,41 @@ async function drag(id) {
   await until(() => ignored, 'click-through after leaving pet');
 }
 app.on('browser-window-created', (_event, win) => {
-  // The overlay's title only arrives with its page. It is the one window created after the owner:
-  // the library starts with no pet enabled, so nothing else opens a window here.
-  if (win.getTitle() === 'Pets' || (owner && win !== owner && !overlay)) {
-    overlay = win;
-    const ignore = win.setIgnoreMouseEvents.bind(win);
-    win.setIgnoreMouseEvents = (value, options) => { ignored = value; return ignore(value, options); };
-  } else if (!owner) {
-    owner = win;
-    win.webContents.once('did-finish-load', () => {
+  // Native title/preload metadata is unreliable during window construction on macOS.
+  // Classify each window only after its actual production document has loaded.
+  win.webContents.on('did-finish-load', () => {
+    const kind = petFixtureDocumentKind(win.webContents.getURL());
+    observedDocuments.push(kind ?? 'other');
+    if (kind === 'overlay' && !overlay) {
+      overlay = win;
+      const ignore = win.setIgnoreMouseEvents.bind(win);
+      win.setIgnoreMouseEvents = (value, options) => { ignored = value; return ignore(value, options); };
+    }
+    if (kind === 'owner' && !owner) {
+      owner = win;
+      stage = 'waiting to enable the first pet';
       void (async () => {
+        try {
         await sleep(1200);
+        stage = 'enabling capy';
         await enable('capy', true);
+        stage = 'first pet drag';
         await drag('capy');
+        stage = 'disabling the first capy';
         await enable('capy', false);
         await until(() => !overlay.isVisible(), 'hide last pet');
+        stage = 'enabling and dragging hammy';
         await enable('hammy', true);
         await drag('hammy');
         if (nativePointer) await nativeMenu('hammy');
+        stage = 'disabling hammy and dragging capy again';
         await enable('hammy', false);
         await enable('capy', true);
         await drag('capy');
         owner.focus();
         // macOS only focuses the frontmost app, so the owner may not hold focus while this runs in
         // the background. Showing pets must never take focus, and must not take it from the owner.
+        stage = 'toggling overlay visibility and testing focus';
         const ownerFocused = owner.isFocused();
         await owner.webContents.executeJavaScript('window.api.petsSetOverlayVisible(false)');
         assert.equal(overlay.isVisible(), false);
@@ -234,7 +247,9 @@ app.on('browser-window-created', (_event, win) => {
         assert.equal(overlay.isVisible(), true);
         assert.equal(overlay.isFocused(), false, 'Showing pets must not focus the overlay');
         if (ownerFocused) assert.equal(owner.isFocused(), true, 'Showing pets must not steal foreground focus');
+        stage = 'dragging capy after re-showing overlay';
         await drag('capy');
+        stage = 'enabling both pets and checking idle decodes';
         await enable('hammy', true);
         await until(async () => !!await petRect('hammy') && !!await petRect('capy'), 'both pets', PET_RENDER_TIMEOUT_MS);
         await sleep(150);
@@ -244,6 +259,7 @@ app.on('browser-window-created', (_event, win) => {
         const measurements = { idleDecodes: decodes - count, elapsedMs: elapsed, mainCpuPercent: (usage.user + usage.system) / (elapsed * 10) };
         console.log(JSON.stringify(measurements));
         assert.equal(measurements.idleDecodes, 0, 'Pointer polling must not decode pet atlases');
+        stage = 'disabling both pets';
         await enable('capy', false); await enable('hammy', false);
         assert.equal(overlay.isVisible(), false);
         if (checkFocus) {
@@ -252,11 +268,18 @@ app.on('browser-window-created', (_event, win) => {
           await drag('capy');
           await enable('capy', false);
         }
+        stage = 'final login and overlay assertions';
         clearTimeout(deadline);
+        assertPetLogin();
         console.log('Pet toggle/drag/click-through and idle decode checks passed.');
         app.quit();
-      })().catch(error => { console.error(error); app.exit(1); });
-    });
-  }
+        } catch (error) {
+          console.error(`Pet GUI failure at ${stage}:`, error);
+          if (errors.length) console.error('Pet renderer console errors:', errors.slice(-5));
+          app.exit(1);
+        }
+      })();
+    }
+  });
 });
 require(path.join(root, 'out/main/index.js'));

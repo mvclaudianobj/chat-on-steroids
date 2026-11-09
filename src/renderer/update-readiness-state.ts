@@ -1,7 +1,7 @@
 import type { AppState } from '../shared/types.js';
 import { isNewer } from '../shared/types.js';
 import { t } from './i18n.js';
-import { updateErrorText } from './update-error.js';
+import { updateErrorNeedsDiagnostics, updateErrorNextStep, updateErrorText } from './update-error.js';
 
 interface ReadinessRow {
   id: string;
@@ -27,12 +27,13 @@ export function updateReadiness(next: AppState): ReadinessRow[] {
   const appOlder = !!bridge.extensionVersion && isNewer(bridge.extensionVersion, update.current);
   const connectionFailed = ['offline', 'auth-failed', 'tunnel-unavailable'].includes(status.state);
   const rows: ReadinessRow[] = [
-    { id: 'app', label: 'Chat On Steroids', status: appReady ? 'pass' : update.stage === 'failed' ? 'fail' : 'not-run',
+    { id: 'app', label: 'Chat Marks', status: appReady ? 'pass' : update.stage === 'failed' ? 'fail' : 'not-run',
       detail: t('Version {0}', [update.current]) + ' · ' + appDetail,
       reason: update.stage === 'failed' && update.error ? updateErrorText(update.error) : undefined,
-      nextStep: update.stage === 'failed' ? t('Choose Update all to retry. You can keep using the current app.')
+      nextStep: update.stage === 'failed' ? updateErrorNeedsDiagnostics(update.error)
+        ? updateErrorNextStep(update.error!) : t('Choose Update all to retry. You can keep using the current app.')
         : next.platform?.family === 'macos' && update.stage === 'idle' && update.latest
-          ? t('Finish active work and fully quit Chat On Steroids. Replace the app in /Applications, then open the updated app from there.') : undefined },
+          ? t('Finish active work and fully quit Chat Marks. Replace the app in /Applications, then open the updated app from there.') : undefined },
     { id: 'extension', label: t('Browser extension'), status: extensionReady ? 'pass' : 'not-run',
       detail: (bridge.extensionVersion ? t('Version {0}', [bridge.extensionVersion]) + ' · ' : '') +
         (extensionReady ? t('Connected') : !bridge.present || !bridge.paired ? t('Not connected') :

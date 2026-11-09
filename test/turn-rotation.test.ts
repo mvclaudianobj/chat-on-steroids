@@ -130,3 +130,20 @@ it('ignores a decline for another turn or chat', async () => {
   // Still the filed-and-not-taken wait of five minutes.
   expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(false);
 });
+
+it('starts the retry clock after the slow outbox filing has actually finished', async () => {
+  now = 31 * 60_000;
+  let release!: (row: unknown) => void;
+  const slow = { ...deps(), file: vi.fn(() => new Promise(resolve => { release = resolve; })) };
+  const first = considerTurnRotation('chat', 'session', 'turn', slow);
+  await vi.waitFor(() => expect(slow.file).toHaveBeenCalledOnce());
+  now += 6 * 60_000;
+  release({ id: 'slow-row' });
+  expect(await first).toBe(true);
+  // The first outbox transaction just finished. It is still too early to
+  // declare that ChatGPT failed to take it and file a second continue.
+  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(false);
+  expect(filed).toHaveLength(0);
+  now += 5 * 60_000 + 1;
+  expect(await considerTurnRotation('chat', 'session', 'turn', deps())).toBe(true);
+});

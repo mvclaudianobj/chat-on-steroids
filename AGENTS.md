@@ -76,6 +76,7 @@ losing the project, history, workers or queued instructions when a chat grows to
 | Goal / Loop | Mutually exclusive modes of one driver. Goal can decide no further message is needed; Loop continues within scope. |
 | Generated workflow / checkpoints | User instructions owned by the outbox; delivered at real finish/completion boundaries. |
 | `update_plan` | The agent's displayed progress plan. It does not execute or consume queue entries. |
+| `ask_user_to_run` / `user_request_status` | A step handed to the person (#1695): recorded and shown, never run by the app; only the person marks it done or skipped. |
 | `session_finish` | Astra's explicit near-finish hold/notice boundary; does not mean the whole task is already verified. |
 | Prime / worker | One owning conversation and its reusable subordinate chats. Several prime families may run independently. |
 | Decision helper / planner | A role-specific chat that produces a continuation decision or workflow; it must not execute the reference task. |
@@ -214,14 +215,18 @@ define the tool/config/wire contract. README and worklogs are secondary and can 
 | Plugin auto-refresh | On. | Configs written before the setting existed read Off (schema default); conservative recovery also turns it off. While it is off and `ui.autoRefreshPluginsAsked` is not set, the window offers it once (`pluginRefresh:offer`); either answer sets `autoRefreshPluginsAsked`, which a settings save never clears. Local status/discovery never claims ChatGPT refreshed its connector snapshot. |
 | Turn-done notifications | On (`ui.turnNotifications`, missing means on). | Codex's turn-completion notification. `turn-notifications.ts` watches session changes and notifies once per newer `lastTurnEndAt` of a top-level chat whose outcome is `completed` and has no new active turn, while the window is unfocused. Seeded from the session list at startup, so older turns never notify. Workers, helpers, chats whose Goal/Loop switch is on, and chats that got a Session-finish or stuck notice in the last 2 minutes stay quiet. The body is the answer's first paragraph as plain text (140 characters); a click opens the chat. |
 | Phone notifications | Off (`ui.phonePush`, missing means off). | ntfy (`phone-push.ts`, Settings → General → Phone notifications). Three kinds: needs you (the Session finish and stuck/approval notifiers), failures (tunnel loss), finished (the turn notifier hands every completed top-level chat over with `workedMs` from the turn's `turn_start` event, whether or not the window is focused). The phone keeps its own rules: kind switches, finished only after `finishedAfterMinutes` (null never, 0 always; an unknown length counts as long), quiet hours (local, may wrap midnight), away = `powerMonitor.getSystemIdleState(180)` is idle/locked/unknown, at most once per chat and kind in 2 min and 20 an hour; a message that did not arrive does not count. JSON publish to the server root (UTF-8 safe), optional Bearer token from secure storage (`ntfyToken`, IPC `phonePush:token`, `AppState.hasPhonePushToken`). By default a message only says what happened; `includeDetails` adds the chat's name, the answer's start and a `click` link to the ChatGPT chat. One `phone push:` log line per decision, never the message. `phonePush:test` sends now regardless of the rules. |
+| Telegram (#1934) | Off: no token, no link. | A second phone destination beside ntfy, under the same rules and limits (`ui.phonePush.ntfy`, missing means on, turns ntfy alone off; its topic and server are checked only while it is on). `telegram.ts` (bot), `telegram-status.ts` (`/status`), `telegram-app.ts` (wiring). The person's own @BotFather token is in secure storage (`telegramBotToken`, IPC `telegram:connect`), never in `AppState`, a log line or a settings backup; Telegram's address carries it, so a network error quoting the address has it replaced by `<token>`. `connect` checks it with `getMe`, skips earlier updates, and shows an 8-character code for 10 minutes; `/start <code>` from a private chat links exactly that account (durable store `telegram-link`: user id, chat id, names). Linked: long polling (`getUpdates`, 50 s, outgoing only); messages and buttons from any other account are ignored and logged once a minute; commands older than 2 min (sent while the app was closed) are not answered; `/status` (counts, or with `includeDetails` up to eight named chats) and `/help` (also `/start`); anything else gets the command list. A needs-you message for a waiting approval card carries **Deny** only (never Allow: its own security review first); pressing it calls `requestApprovalAnswer(…, 'deny')` for exactly that card, answers "Already answered." when it is gone, and marks the message. 401/404 from Telegram stops the bot (`token-refused`); 409 (another app polls the bot) shows `conflict` and retries every minute. Unlink (`telegram:disconnect`) forgets the link and the token. `AppState.telegram` carries state, bot and account names and the pairing code. No desktop-question button: that question shows only while someone is at the computer and declines itself after 60 s. **Phase 2 (2026-10-31):** each notification about a chat is remembered with Telegram's message id (500 at most), so a reply acts on that chat. `/stop` (the app's Stop on its running or held turn, `stopSessionTurn`), `/pause` (Goal/Loop off, keeping which; the chat is saved in durable `telegram-paused` first) and `/resume` (back on, only for a chat paused from Telegram and still off) act on the replied-to chat, or else on the only chat they can mean (`telegramTargets`, own chats only): none or several get a sentence and nothing happens. A worker or helper chat is never a target and never gets a reply, also when its notification is replied to (`act` and `steer` look the chat up again); a held turn (`sessionHoldsTurn`: the stored open turn and the live recorder agree) counts as running for a bare `/stop`, a stored open turn alone never does. `/pause` means the running Goal/Loop chats first; its marker is kept only if the switch really went off, and any other control that turns the switch on (`onSessionAutomationChange`, `noteAutomationChanged`) ends it. Connecting a new token forgets the old bot's remembered notices. A settings import that turns `ui.phonePush.telegramSteer` on is listed as wider access; the form leaves an absent `telegramSteer` absent until the switch is touched, and shows it as saved after a refused save. Any other reply to a notification goes through `telegram-steer.ts` as the person's message (`sendDesktopInput`, mode by `ui.followUp` while the chat works), only with `ui.phonePush.telegramSteer` on (missing: off; a message can make ChatGPT run tools here), never to a worker or helper chat; its words never reach the log. A reply to an unknown or forgotten message does nothing and says so. |
 | Sounds (#1802) | Off (`ui.sounds`, missing means off). | Settings → General → Chats → Play sounds. `main/sound-cues.ts` decides at the same three points that hand events to the phone (needs you, failed, finished): finished only while the window is not focused, nothing during phone notifications' quiet hours while those are on, at most once per chat and kind in 2 min. It sends `sound:cue` (`SoundCue` in `shared/sound-cues.ts`) to the window, which plays a short Web Audio tone (`renderer/sound-cues.ts`, no audio files); with no window (tray only) nothing plays. One `sound:` log line per decision except when off. Turning the setting on plays the finished sound once as a preview. |
 | Fresh turns for long work | Every 30 minutes (`ui.rotateTurnMinutes`: 0 off, 20/30/45/60; missing or malformed means 30). | #1402. Measured: turns up to ~35 minutes ended cleanly, 37–64 minutes almost always broke; Stop + "continue" by hand never did. `turn-rotation.ts` `considerTurnRotation` runs on each attributed tool call (`noteCallAttribution`, after its `grantActivity`) for the chat's exact running turn. Once that turn's own `turn_start` is `rotateTurnMinutes` old, `input.ts` `fileRotationInput` files one `purpose: 'rotation'` direct-turn message (`rotationMessage()`, Core mention kept) into exactly that turn. The native send makes ChatGPT end the turn as interrupted and continue in a fresh one; the call in flight keeps its result. It must go in while that call still waits for its answer (#1662, measured 2026-10-18: 6/6 clean while a call ran; sent in the gap after a result ChatGPT sometimes queued it behind the reply, and a Stop during a call made the model run it again). So the kernel opens `rotation-hold.ts` `openCallHold` around recording an attributed call, rotation is considered only while `callHoldOpen`, and the bridge's `awaitRotationDelivery` holds the call's answer until the row is sent or settled; a row still unauthorized after 15 s is withdrawn (`withdrawUnsentRotation`, cancelled without an error) and the call answers. The page never stops a turn for it: offered no Send (ChatGPT shows only Stop at that moment), it sends nothing and reports `desktop_input` `fail` with `error` = `input.ts` `ROTATION_DECLINED` word for word and `detail: 'no-send'`; `failBrowserInput` cancels the row with that error, `rotationDelivery` answers `declined`, the held call answers at once, and `noteRotationDeclined` lets a tool result a minute later try again without spending one of the turn's two filings (at most six declines per turn; measured 2026-10-20 on Loop chats, where every continue fell on a Stop moment). Never for Pro, worker or helper chats, and never at the result of a Goal/Loop hold tool (`GOAL_HOLD_TOOLS`: `session_finish`, `keep_astra_on_forever`), which is Loop's next instruction. Goal and Loop chats rotate like any other (2.1.43): the rotated turn ends without a final answer, so no Goal/Loop decision is filed for it, and its continue is recorded with empty `authoredText`, which the Goal helper's transcript leaves out; never for a blocked chat, beside another pending message, or into a different turn. One per turn: a refused filing retries after 1 minute, one the page did not take after 5. A rotation row is not `manualInput`: a page that cannot take it during the turn drops it rather than keeping it for after the turn, and the timeline raises no delivery notice for it. A message of the user's own cancels a rotation that was never handed out. |
-| Stop fallback for fresh turns | Off (`ui.rotateStopFallback`, experimental; disabled while fresh turns are off). | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts after 60 s without a stopped end. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
+| Stop fallback for fresh turns | On since 2.1.49 (`ui.rotateStopFallback`; disabled while fresh turns are off). Earlier configs are turned on once (`adoptStopFallback`, marked `ui.rotateStopFallbackAdopted`), because every earlier save wrote the old default; a later off stays off. | Where ChatGPT shows only Stop at a tool result it offers no Send for the continue (`ROTATION_DECLINED`, `no-send`). After `STOP_FALLBACK_AFTER_DECLINES` (2) such declines in one turn and the usual minute, the next held result takes the fallback instead of a third continue (`stopFallbackDue`/`noteStopFallback`, once per turn): `rotation-fence.ts` arms a fence (the kernel refuses that chat's calls with `ROTATION_FENCE_REFUSAL`, nothing runs, so a Stop landing mid-call cannot repeat a call, #1662), and 500 ms later `stopSessionTurn(…, { rotation: true })` queues the native Stop without turning Goal/Loop off or cancelling Compact & Resume. The stopped end of exactly that turn lifts the fence and files `fileRotationContinueAfterStop`: a `purpose: 'rotation'`, `afterStop: true` ordinary message (no `directTurn`), which `typedAfterStop` lets through once the turn shows stopped and nothing runs. The fence lifts at the processed stopped end (which files the continue), at once when the page reports it could not send that Stop (a terminal-failure receipt) or when the person's own Stop takes the turn over (no continue follows; the pending Stop is first saved without its `rotation` mark, `withdrawStopRotation`, so a restart restores neither it nor its fence), or after the Stop's 120 s budget plus 15 s (`FENCE_MS`) without a stopped end; fences are kept in the durable store `rotation-fences` (`[{ conversationId,
+turnId, until }]`) and `restoreCommands` brings back what is left of each (`restoreRotationFences`), so a restart
+after ChatGPT took the Stop but before its stopped end still files the continue; the fresh-turn Stop
+goes out only once its fence is on disk (`armRotationFence` resolves), and not at all when it cannot be saved; a fresh-turn Stop carries `rotation: true`, so after a restart a pending one re-arms its fence for what is left of that time. With fresh turns at 0 minutes no fallback Stop is taken, even after declines. Live 2026-10-20 (VM): Stop 1 s after a result, then "continue", repeated no step (2 runs). |
 | Follow-up behavior | Join the running turn (`ui.followUp: 'steer'`; a broken value loads as that). | Codex's "Follow-up behavior". Each running turn starts the composer's delivery choice from this default (`queue` selects After this turn); a choice made in the send menu lasts for that turn. Cmd/Ctrl+Shift+Enter sends the other way (`sendComposer('auto' \| 'after-turn')`); with no running turn it is an ordinary send. |
 | Enter key | Enter sends (`ui.enterSends`, missing means true). | Codex's "Enter key behavior". With `false`, Enter adds a line in the composer and Cmd/Ctrl+Enter sends; Shift+Enter always adds a line and Cmd/Ctrl+Shift+Enter keeps sending the other way (Follow-up behavior). |
 | Code checkpoints | Off (`projects.codeCheckpoints`; missing or malformed means Off). | Settings → Workspace, Folders: “Save a checkpoint before each turn's first edit”. `checkpointBeforePatch` reads `getConfig()` in the main process at capture time (never a renderer claim), so a flip applies to the next patch without a restart. Off stops new turn checkpoints only: existing ones stay listed in Review and Restore, including its own “Before restore” undo entry, keeps working. §10. |
 | Keep awake | The computer (`ui.keepAwake` on, missing means on; `ui.keepScreenAwake` off). | Codex's "Prevent sleep while running". One select: Off / The computer / The computer and screen. `keep-awake.ts` holds `powerSaveBlocker` (`prevent-app-suspension`: the system stays awake, the screen may sleep; with `keepScreenAwake`, `prevent-display-sleep`, because Windows Modern Standby laptops go to standby once the screen turns off whatever else is held, and the hold is swapped when the choice changes) while any session is working by `sessionWorkingAt` with the bridge's `sessionActivityExpiresAt` deadline, so a chat that died mid-turn releases it when its deadline passes. Refreshed on session changes, at the nearest deadline, every 60 s and when the setting changes. |
-| Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Auto falls back to 18765–18769, then 38765–38769 (`BROWSER_BRIDGE_AUTO_PORTS`, mirrored by the extension's `PORTS`; #1314: Windows reserved the primary range). Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
+| Browser bridge port | Auto. | `ui.browserBridgePort` accepts Auto or 8765–8769. Auto falls back to 18765–18769, then 38765–38769 (`BROWSER_BRIDGE_AUTO_PORTS`, mirrored by the extension's `PORTS`; #1314: Windows reserved the primary range). The `npm run dev` profile (`dev-profile.ts`, userData `chat-marks-dev`) starts Auto at 18765–18769, then 8765–8769, then 38765–38769 (`DEV_PROFILE_AUTO_PORTS`), so the installed app keeps 8765. Effective `CLF_BRIDGE_PORTS` overrides it and disables the Settings control. |
 | Background chats | On. | Omitted legacy settings use On; explicit saved On/Off remains exact. Cold Windows startup requests a minimized browser window. |
 | Background placement | Window. | `ui.backgroundPlacement` `'window'` / `'group'` (an unknown saved value reads as `'window'`), published in `/status` as `backgroundPlacement`. Group mode puts every background tab in one collapsed "Chat On Steroids" tab group in the last-focused normal window (never the background window, never incognito), then keeps using it; failures fall back to the minimized window. No follow and no compaction tab selection in the user's window (#128). |
 
@@ -275,8 +280,9 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | --- | --- | --- |
 | Permissions and settings | `config.ts` / `config.json` | Validate every load/save; enforce effective current capabilities at use. |
 | Credentials | `secrets.ts` / encrypted `secrets.bin`; plugin OAuth's encrypted installation store | Main process only; publish updated cache after the encrypted write. |
+| Named password vault | `marks-vault.ts` / authenticated `marks-vault.json`; random vault key protected by OS `secrets.bin` and independently wrapped with the master password | Admin requires master password; daily operation uses OS safeStorage. Fixed-origin `vault_use` needs exact chat authority and explicit approval (once or until app exits). `marks-vault-ipc.ts` is a guarded main-frame-only admin interface; `marks-vault-redaction.ts` keeps decrypted values in main memory for synchronous masking of logs and MCP/tool history. Neither renderer state nor model-facing tools return vault values. |
 | Session/current chat/project | `store.ts` / `sessions/<id>/meta.json` | Rebind is the semantic A→B commit. |
-| Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | First exact proof wins; retain local session epoch; new owners are written before browser ACK. Startup trusts a complete ledger and scans history only to migrate an older one. |
+| Exact request ownership | `correlation.ts` / `state/request-correlations.json` plus recorded proof | Native request proof establishes the session epoch and scoped provider-session bindings. Derived owners commit before publication; native request proof supersedes a derivation. Startup trusts a complete ledger and scans history only to migrate an older one. |
 | Running exec process | `UnifiedExecProcessManager` process memory plus `codex/ownership.ts` custody | The manager is the only live-process authority. A yielded child may start under temporary request custody; exact correlation promotes it to the durable session. IPC/preload/renderer only project that owner-scoped state and may request an ownership- and incarnation-checked stop. |
 | Authored message | `store.ts` / canonical message shard | Replace by stable identity, preserving origin chronology. |
 | Turn round outline | `recorder.ts` `turn_trace` → `store.ts::writeTurnTrace` / `sessions/<id>/traces/<turnId>.json` | Validated by `shared/turn-trace.ts`; the newest outline replaces the turn's; never an event or evidence. |
@@ -290,7 +296,7 @@ Paths in this section are repository-relative. Most mechanisms have `main`, `sha
 | Workers and inboxes | `agents.ts` / swarm snapshot and retired-worker fences | Stage → critical durable snapshot → publish/open/report. |
 | Compaction | `continuation.ts` / continuation WAL + session metadata | Disk ownership decides restart outcome; transport phase alone does not. |
 | Goal control | `goal.ts` / `goal-objectives`, `goal-switches`, `goal-replies`, `goal-outcomes` | Objective, mode and reply debt are separate concepts; draft memory is disposable. `goal-outcomes` keeps only a chat's "goal is met" decision for the window across a restart; a newer draft, a switch change or a new objective clears it, and it never drives anything. See §21 for remaining atomicity gaps. |
-| Stop/block/finish | Stop command; `blocked-chats.ts` durable set; finish facts in recorded progress/session projection | Each names exact chat/turn; no false terminal event. |
+| Stop/block/finish | Stop command; `blocked-chats.ts` durable set; finish facts in recorded progress/session projection | Each names exact chat/turn; no false terminal event. The window's Stop (`sessions:stopTurn`, preload `stopSessionTurn(id, expectedTurnId, expectedConversationId?)`) names the turn and the ChatGPT chat it was shown for. When that turn is no longer the page's running one (`active_turn_changed`), ChatGPT is asked to stop nothing, and `bridge.ts` `endOwnWorkAfterStop` ends the app's own work for that chat only (Goal/Loop off, a pending Compact & Resume cancelled unless already committing, the named turn's silence recovery, rotation fence and unsent automatic Continues withdrawn via `input.ts` `withdrawOwnContinuesAfterStop`). It changes nothing when the session has moved to another chat since: that guarantee needs the named chat, which the window always sends when its controls name one (also when main's own read of the controls fails); a caller that names none gets the session's current chat. The answer is a sentence for the person, not the code; the control API keeps `409 turn_not_running` and ends nothing (#2066). |
 | Browser repair | `bridge.ts` process-memory episodes | Re-earn from live evidence; never restore an old reload token as action authority. |
 | Catalog/usage | Saved successful `chat-models`; derived `usage-cache`; live usage snapshot | Catalog is observation, not a send receipt; estimates are not provider billing. |
 | Connector refresh | `plugin-refresh.ts` / `state/plugin-refresh.json` | Exact installed app id + schema fingerprint, claimed before Refresh, verified after. |
@@ -423,13 +429,14 @@ still checks live policy. Schema visibility is never the security boundary.
 
 | Surface | Advertised operations under current eligibility |
 | --- | --- |
-| Core — `chat-on-steroids-core` | `read`, `view_image`, `find` when command execution is off, `apply_patch`, `exec_command`/`write_stdin`, `update_plan`, `agents`, `session_finish`, code-mode `exec`. |
+| Core — `chat-on-steroids-core` | `read`, `view_image`, `find` when command execution is off, `apply_patch`, `exec_command`/`write_stdin`, `ask_user_to_run`/`user_request_status`, `update_plan`, `agents`, `session_finish`, code-mode `exec`. |
 | Desktop — `chat-on-steroids-desktop` | All Chromium extension hosts: `browser_tabs`, `browser_snapshot`, `browser_screenshot`, `browser_console`, `browser_network`, `browser_navigate`, `browser_action`, `browser_evaluate`. Windows additionally exposes 13 Window2 operations, clipboard and `exec` with `sky`; macOS adds `observe`/`computer`. Surface `exec` composes browser tools too. |
 | Plugins — `chat-on-steroids-plugins` | Enabled external tools with their upstream names and schemas, plus code-mode `exec` when that composition name is available. |
 
 `read` needs read/browse/metadata as appropriate; images need read; patch checks each hunk's
 create/edit/move/delete permission; command controls both terminal tools.
-Recording controls `update_plan`; multi-agent controls `agents`;
+Recording controls `update_plan`; recording plus command (or Read-only over command) controls
+`ask_user_to_run`/`user_request_status`; multi-agent controls `agents`;
 the finish setting controls `session_finish`. Windows publishes four observation methods under
 screen access, nine input/launch methods under control, and clipboard methods under their own
 permissions. Multiline `type_text` additionally requires clipboard write. macOS `computer`
@@ -464,6 +471,16 @@ is absent, empty or reading is disabled; no file content is read when read permi
 The opening outbox input / new-worker command owns this eligibility; no history scan or extra
 sent flag decides it. Existing-chat messages, Goal/Loop continuations, plan checkpoints, worker
 revivals, compaction requests and resumed-chat bootstraps receive no appended setup block.
+A worker revival (wake) command carries the model and effort its worker was opened with
+(`commandModelSelection` → `wakeModelSelection`, vetted against the account like a resume's), so the
+page chooses them before it types (#1952; before, a wake went out on whatever ChatGPT's box held).
+Unlike a new worker, a wake whose model the picker cannot confirm is still typed: the page reports
+step `model-unconfirmed` and the bridge logs which model it could not confirm. A Compact & Resume does the
+same (2026-11-01: an abandoned resume stopped its chat for good); its new chat then tries the model once more
+(`publishBootstrapSelection`).
+An effort-only request (no model) keeps ChatGPT's current model: `selectModelSettings` rounds the
+effort within that model only and never moves to another model offering the effort; with the current
+model unreadable it confirms nothing.
 Decision/planner helpers keep their separate role-specific contract. Selecting Goal/Loop for
 a normal new executor chat does not turn it into a helper. Direct user sends in Chrome are
 not intercepted.
@@ -542,6 +559,13 @@ grouped under their folder, written once, as `<entry>: /<id> — description` (d
 one closing line saying the user can pick them with `/`.
 `skill-package.ts` stages resource copies and publishes SKILL.md last; the existing serialized
 managed-library owner controls imports and removals. Scripts/assets remain inert resources.
+The Book of Skills also projects the pinned metadata-only AI Hero catalog (`shared/aihero-skills.ts`,
+from mattpocock/skills, with aihero.dev attribution). `renderer/aihero-skills.ts` filters these
+public links alongside installed Skills and asks for explicit confirmation before using the
+existing bounded `skills:githubImport` path. This catalog creates no separate file downloader,
+root, execution authority or installed-state ledger: the managed library and verified GitHub
+origin own installation and version checking. A colliding local or foreign-source id cannot
+be silently overwritten; import errors remain in the catalog for an explicit retry.
 When `CODEX_HOME` has a plugin cache (approved or as a user Skill area), that same read-only
 catalog may project Skills from the last `codex plugin list --json` installed/enabled snapshot.
 Only explicit `skills:library` inspection may create or refresh that runtime snapshot; session
@@ -695,6 +719,38 @@ reads them back before returning `confirmed[]`. `/events` may publish the same e
 For a reserved New Chat opening, the shared `/input/bind` route commits its exact claim first;
 only that claim retires, and its promoted conversation/document epoch precedes correlation or event publication.
 Ownership acknowledgement is separate from slow transcript/image writes.
+All three surfaces also read the host's documented `params._meta["openai/session"]` and
+`openai/subject` at validated `tools/call` ingress (`mcp/provider-session.ts`). Matching headers,
+when supplied, must agree. Hash the Setup profile, surface, subject and anonymized conversation
+as one scoped key; raw metadata and credentials are never recorded. This is distinct from the
+SDK transport session id and the undocumented generic `_meta.sessionId`.
+A key acquires an owner only through native request proof. Once bound, it can identify a new
+workflow request even when that request id is absent from the page. Provider-derived requests
+cannot seed other bindings. Unknown/missing metadata remains unidentified; contradictory native
+owners disable that provider key. A conflicting binding logs once and supplies no provider
+identity; it does not reject the tool call. Independent native request proof remains authoritative,
+and dispatch continues through the existing attribution and permission paths. Existing Block,
+Trust, retired-frontend and workspace guards still run. Old keys retain the old frontend/epoch
+after compaction, never the successor.
+The version-7 correlation ledger retains scoped hashes and each derived request's native anchor.
+Derived ownership becomes readable and wakes waiters only after its durable commit. A failed
+commit leaves that derivation unpublished, logs the fallback and continues ordinary tool
+dispatch with any independently proven native owner. Provider bookkeeping cannot introduce an
+HTTP failure for a call the existing paths would accept. Complete version-6 ledgers still load
+without scanning history. Damaged auxiliary keys cannot erase valid
+native ownership; malformed/orphaned derivations cannot become native proof. Native evidence for
+the derived request upgrades or replaces it and disables a contradictory key. Recorded calls
+retain `providerSessionAnchor`; these canonical call shards use the existing repair path to
+upgrade or relocate provenance and assets. The derived `providerSessionToolCalls` count bounds
+which sessions need that repair. History migration never promotes these calls to native proof.
+Known native requests reusing an already learned key skip the provider-admission queue without
+new writes. New bindings and derived owners stay serialized behind their durable commit;
+another chat's slow write cannot delay the known native path. Provider-session admission is
+accepted HTTP work, so ordinary disconnect drains its durable write before tool dispatch.
+If native proof changes the owner during a handler, the kernel
+withholds its result and scoped deliveries with `CALLER_IDENTITY_CHANGED`; it never replays
+the operation or transfers the original owner's resources to the new caller.
+Reference: https://developers.openai.com/plugins/reference#meta-fields-the-client-provides
 
 `usage.js` can also project an exact conversation/request pair from a complete live POST
 conversation SSE event before Fiber exposes it. Reads are bounded to 4 MiB / 15 minutes,
@@ -732,12 +788,38 @@ source turn still works), `asking` (the request is being sent) or `held` (the so
 and stopped before asking); the dock shows it without a clock. An automatic attempt the page stops
 before asking keeps its ticket and posts `/compact` `sourceDeferred` with `sourceError`, its reason:
 the app logs it and shows `held` until its next pickup. Only the chat's open, still unsent automatic
-ticket accepts it. From the request on, the chat's Compact & Resume timeline row reports progress
+ticket accepts it. A deferral at the tool-result receipt also carries `sourceErrorCode`
+(`results-unconfirmed` after the whole wait with nothing running here, `results-wait-changed` when
+the chat changed during it on the same route (a tab that moved to another chat reports nothing, so
+the relay never rebinds it), `local-tools-running` when this
+machine's own calls or a missing activity answer kept the receipt from being checked, never counted;
+the code lives with its attempt, never shared);
+the bridge counts them per ticket (`compactionReceiptMisses`, in memory). After one
+`results-unconfirmed`, or three such deferrals in all, the next automatic `ticket` answer carries
+`waiveReceipt: true` and logs why: the page then still waits for this machine's running calls
+(#825) but no longer for ChatGPT to show the latest results answered, and stops the turn and asks.
+2026-11-03: a chat whose history ChatGPT limited never showed them answered, so every attempt ended
+there for two days while the chat grew past its limit. A manual press never takes the waiver. From the request on, the chat's Compact & Resume timeline row reports progress
 and the projection is empty. The countdown authorizes nothing.
 Once a chat's history has been limited, the page's Retry presses after Retry-After back off to
-0 s, 2, 4, 8, then 15 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the once-a-minute
-pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute drew a new 429
-with a longer Retry-After each time. The recorder writes a repeating history-limit notice (one
+0 s, 2, 4, 8, 15, 30, then 60 minutes (`LOAD_FAILURE_LIMITED_BACKOFF_MS`), instead of the
+once-a-minute pace kept for an ordinary load failure. Measured 2026-10-11: pressing every minute
+drew a new 429 with a longer Retry-After each time. The step reached survives a reload of the same
+chat in that tab (`sessionStorage` key `clf-history-limit-v1`: conversation id, step, time of the
+last press; forgotten after 75 quiet minutes, on another chat, or once the chat's turns render), so
+the app's own reload after each hold no longer restarts the page at 0 s. The app's hold after a
+retry that is limited again uses the same steps (`PROVIDER_HISTORY_STREAK_HOLDS_MS`), and "Try now"
+is refused while it lasts. Measured 2026-11-05 (#1882): a chat limited for 8.5 hours took 23
+quarter-hour rounds, each a reload plus presses after 0, 2 and 4 minutes. The page presses Retry
+only while the app still owes the chat work and after the app's own hold (#2076): `/activity`
+returns `historyRetry: { wanted, until? }` (`historyRetryView`: a repair in flight, or a finished one
+while the chat keeps its activity grant; an owed Goal/Loop reply; a call the chat exactly owns
+(`runningToolProgress`); a working turn; a worker wake still owed delivery; a continuation; or a
+queued/claimed input. `until` is `providerHistoryBackoff`, read after the input lookup). An idle chat
+leaves Retry to the person. The word is bound to the chat it was asked for; a newly shown chat waits
+up to 60 s for its first answer (any reply, even a failure, counts); a Stop since the last word needs
+a newer one; a word older than 2 minutes, or an answer without it from an older app, keeps the page's
+own rule. The recorder writes a repeating history-limit notice (one
 that carries `retryAt`) once: an identical one within 30 minutes of the newest blocking `chat_error`
 is not appended again (a passing failure in between, such as a stream 404, does not repeat it), while the provider access dialog is still recorded again after 30 s. The bridge's
 provider-limit hold still follows every new Retry-After, because it reads the observations, not
@@ -792,13 +874,53 @@ observed request ids. `recordRequestEvidence()` writes each newly stored owner w
 marked `complete`. Startup restores a complete, fully readable ledger without reading session
 history. An older, unmarked or partly unreadable one is reconciled once from the newest recorded
 exact calls and rewritten complete before browser/MCP traffic is admitted. Late proof can repair
-Unattributed history only to the proved historical owner.
+Unattributed or provisional history only to the proved historical owner.
 
 Unresolved requests with an id get the recorder's 20-second production evidence grace. A
 headerless call has no exact proof to await and lands Unattributed immediately. Evidence waits
 open at admission; calls sharing a request serialize in admission order and each resolved
 session serializes its writes. Different chats must not wait behind one global grace timer.
 Already-proven calls await their own recording; unresolved recordings may settle after response.
+
+For a provider call whose request id never appears on the page (#1752), the recorder may
+provisionally place history in the only observed running turn. `kernel.ts` captures this
+recording context before the handler; `recorder.ts` requires fresh exact page-request proof
+within the response's original turn and rechecks the conversation/session and every observed turn incarnation at
+the session writer. A normal completion of the captured turn is allowed during the grace.
+An explicit `turn_end` with `continued: true` followed by its next committed start preserves
+the recording lineage. Capture its page-proven anchor before closing the original turn, even
+if no tool has run yet. Continued calls may carry new provider request ids: the original
+single-chat cohort and explicit response lineage, not an earlier tool invocation, govern their
+provisional placement. In-flight results retain their admission turn, while later calls use the
+continued turn. Each process-local lineage retains one anchor and never restores ownership
+from history; there is no per-request cache, eviction threshold or history scan on admission.
+Stop, an ordinary later question, an overlapping turn, rebind or changed cohort invalidates it. Local or
+headerless callers, strict chat allowlisting and blocked chats do not qualify. The existing
+Allow unattributed calls preference must remain enabled.
+
+This is presentation, labelled `attribution/attributionMethod: generation`, never an exact
+request correlation. It cannot choose filesystem workspace, terminal custody, agents, inboxes,
+Trust or turn recovery. Canonical tool-call shards preserve call UUIDs; the summary's derived
+`provisionalToolCalls` count identifies history needing reconciliation. Exact late proof upgrades
+or moves those calls with their assets through `reviseProvisionalCall`, preserving unrelated
+messages and sequence anchors. Startup never restores exact ownership from provisional rows.
+Provisional placement retains the same request-id stream diagnostics as Unattributed activity:
+its log names an observed stream path, or says no matching trace was observed. A later trace
+is also logged through `request-trace.ts`; trace paths never establish caller ownership.
+Storage failures during attribution repair use the existing repair timer for one delayed
+in-process retry (one second) per page-evidence/startup trigger. The retry rereads durable
+history and the exact correlation registry; it cannot promote calls without proof. A repeated
+failure exhausts the automatic budget until new evidence or startup, with a diagnostic line.
+Provisional background commands retain canonical process-call shards and bind their exact
+process-lifetime completion promise. Attribution repair and these completions share the
+recorder's serialized attribution queue: an exit before relocation is copied with the call;
+an exit after relocation revises its UUID in the proven destination. If source removal failed,
+completion revises both retained copies so a later repair cannot lose the exit. This changes
+history only, never process custody or output receipts.
+The model-facing Recording context notice replaces the allow-unattributed Identity notice
+for these calls, preserving its request-owned process/run-id and later-exact-proof guidance.
+It omits the recovery-check ETA because provisional placement cannot promise an identity
+recovery time. The strict/refused identity notice and its recovery instructions are unchanged.
 
 After a local identity refusal, `kernel.ts` appends one **Identity recovered** notice to an
 eligible outer tool result once exact request/conversation/session proof is available. Refusal
@@ -1230,7 +1352,9 @@ Bookmarked answers (#1719): `sessions:bookmarks { id }` → `SessionBookmark[]` 
 and `sessions:bookmark { id, messageId, excerpt, messageTime, on }` → the chat's new list, in
 `src/main/session/bookmarks.ts`, kept in `bookmarks.json` in the session's folder and written serially per
 session; at most `MAX_BOOKMARKS` (200) per chat, excerpts one line of at most 160 characters. A
-missing or damaged file reads as no bookmarks; damaged entries are dropped. Nothing is sent to
+missing or damaged file reads as no bookmarks; damaged entries are dropped alone. Null, scalars and
+arrays are rejected before property access and counted in one log line, without rewriting on read.
+Valid marks remain usable for listing and toggling, and an explicit edit saves the normalized list. Nothing is sent to
 ChatGPT. The header list jumps through `sessions:locate-message`; a reply no longer in the chat
 shows a notice instead of scrolling. Long row menus scroll inside the window (`row-menu.ts`). A file holding more than the limit keeps the ones bookmarked first. Tests: `test/session-bookmarks.test.ts` (storage, limit, damaged files), the "bookmarked answers" cases in `test/renderer-timeline.part6.test.ts` (answer action, header list, jump), and `scripts/verify-bookmark-list.cjs` (200 bookmarks in a short window, real Electron).
 
@@ -1337,7 +1461,9 @@ live-process capacity charge or automatic reoffer. Eviction/shutdown drops their
 custody entries; retained ids cannot be reallocated. Unread results keep their separate bounds.
 Tool descriptions and result markers say what a tool does, never how its output should be treated or
 that a call is harmless: ChatGPT's safety check flagged `write_stdin`'s "including automatic delivery;
-never reruns work" as a Suspicious Instruction and held a long run on an approval card (2026-10-15).
+never reruns work" as a Suspicious Instruction and held a long run on an approval card (2026-10-15), and
+then "Empty chars read the session output … Completed processes reject input" (2026-11-06): say neither
+how empty input nor how a finished process is treated.
 The connector instructions follow the same rule (#1755): they say what is enabled and what a ChatGPT
 message means, never how to treat blocks, approvals or ChatGPT's own messages (`test/mcp-user-instructions.test.ts`).
 
@@ -1421,6 +1547,25 @@ Ctrl+backtick toggle its dock; its first opening shows Terminal and starts a she
 project is selected, main chooses the OS user's home directory as the initial cwd; the renderer
 does not supply a path. Selecting a project later does not retarget that shell. The bottom
 header's X hides the dock but preserves its shells.
+**Agent command output, read-only (#1920).** Each running-command row has **Output**: the bottom
+Terminal dock opens an "Agent" tab (`openAgentOutput`) after the person's own tabs, with xterm
+`disableStdin` and a placeholder line saying typing does nothing, plus Stop and close in the tab.
+`agent-output-ipc.ts` (`agentOutput:request` open/close, `agentOutput:event` data/exit) opens only a
+process `runningExecProcesses(sessionId)` lists for that session, at most eight views, and closes
+them on window reload. `UnifiedExecProcessManager.watchOutput` gives the retained history, then each
+chunk, then the exit (after a pipe's streams close, and for a PTY after 150 ms of quiet, at most
+1 s, since its last data can trail its exit). It never consumes the agent's unread buffer.
+`AgentOutputStream` decodes UTF-8 across chunks and masks with `redactSecretText` (the secrets
+shield's setting and project switch): whole lines go out as they end; a partial line after 1 s or
+4 KB only up to a safe cut (its newest 8 words held, and only where masking the shown part alone
+equals masking all pending text); a trailing credential header (`Authorization:` with or without its
+scheme, or a bare `Bearer`) waits for its value; a private key stays hidden from BEGIN to END across
+flushes; at the gap of a long command's kept output the cut lines are dropped, and key lines kept
+after it with their BEGIN omitted are hidden through END (or until it arrives). Batches every 250 ms.
+The open request reserves its view before it waits, so a close meanwhile watches nothing; every
+refusal writes one log line without the request. Closing a tab only stops watching; agent tabs
+are not remembered across restarts. Output shows only when the preload offers `agentOutputOpen`,
+and a repaint gives a focused Output button back.
 The bottom `+` menu opens another bottom shell. On the right, each shell is one dock tab
 alongside Files, Review and Sub-agents; there is no nested Terminal tab bar. The right
 `+` menu creates a new shell tab, while the Terminal quick action/shortcut selects an
@@ -1452,6 +1597,852 @@ current page/ink tokens without recreating shells; cursor colors follow the same
 `scripts/verify-workspace-terminal.cjs` tests real Electron/PTY input, cwd/environment persistence,
 hide/reopen, tabs, Ctrl+C, exit codes, resize and closing against isolated state;
 `test/renderer-terminal-selection.test.ts` tests the Send to chat block, caps, key and draft insert. `test/renderer-terminal-chat-wiring.test.ts` runs `initChat` and checks both the bottom and the right-dock terminal fill the real composer.
+
+### Optional coding CLIs and durable tmux terminals
+
+`main/cli-modules.ts` owns the optional command-line adapters `CLI_IDS = opencode, codex, claude,
+zeroclaw, markscode, marksclaw`. It is separate from the upstream CLIProxyAPI systemd adapter
+(`modules.ts`), which retains its own management console security boundary. The adapters have
+exact fixed IDs, reviewed binary names and acquisition sources: Codex and Claude are installed
+into their own userData/npm prefixes (`cli-source-install.ts`); OpenCode installs its official
+2.x build from the npm registry and ZeroClaw its official GitHub release (see "Upstream modules"
+below). No installer requests
+administrator privileges. The Marks forks are no longer maintained: **MarksCode and MarksClaw are
+retired legacy ids** (`manifest[id].legacy`). They stay only so a saved activation and its tmux
+sessions can be stopped and disabled: their binary is never resolved, probed (`--version`),
+installed, built or run, and Settings shows their card only while one is active or running
+(Stop/Disable only). The fork source builds (`installFork`, Bun/cargo) are gone.
+
+**Data-preservation rule (standing).** The app never reads, writes, migrates or deletes another
+tool's data: MarksCode's `~/.local/share/markscode`, `~/.config/markscode`,
+`~/.local/state/markscode`, per-project `.markscode/`, MarksClaw's `~/.marksclaw`, and the user's
+own upstream folders (`~/.local/share/opencode`, `~/.config/opencode`, `~/.opencode`,
+`~/.zeroclaw`; only the upstream programs themselves use theirs). OpenCode 2.x runs with upstream's
+default folders (data `~/.local/share/opencode`): nothing sets `XDG_*`, `OPENCODE_DB` or
+`OPENCODE_CONFIG_DIR`; inherited variables pointing at MarksCode and MarksCode `PATH` entries are
+removed from the environment the app starts its service with (`opencode/service.ts`, test). The
+app only reads OpenCode's own service registration (`<XDG_STATE_HOME>/opencode/service.json`) to
+reach the service. Future import: the user's MarksCode history databases
+(`~/.local/share/markscode/*.db`) use the same 2.x schema as upstream OpenCode 2.x (MarksCode was
+OpenCode 2.0.25 plus patches); an import into OpenCode would be a copy the user starts, never an
+automatic migration, and is not built. Version
+probes run under `env -i` with a private HOME/XDG folder inside the module folder
+(`<module>/.probe`). Uninstall/disable removes only `<module>/bin`. Real-binary checks run with
+temporary `XDG_DATA_HOME`/`XDG_CONFIG_HOME`/`XDG_STATE_HOME`/`XDG_CACHE_HOME`.
+
+`state/marks-cli-modules.json` is the main-owned activation ledger. Activation only exposes
+the module; terminal creation still requires the current Command capability, a real binary,
+and a resolved project canonical cwd. Each module/project pair has a deterministic tmux
+session name under an app-specific tmux socket. On Linux/macOS the main process attaches via
+node-pty and on Windows through the user's WSL tmux installation, converting the approved
+Windows project path with `wslpath`. A session persists when the renderer detaches or the app
+closes; explicit Stop or Disable ends matching tmux sessions. This differs deliberately from
+the ordinary human workspace terminal above, whose PTYs end with the app. IPC requests use
+strict schemas, sender/frame checks, project revalidation before input and output flow control.
+`renderer/cli-modules-ui.ts` owns the four independent sidebar destinations and xterm views.
+`main/cli-chat.ts` and `cli-chat-protocol.ts` separately own headless Codex and Claude chat
+adapters (the MarksCode backend id remains for stored threads but resolves no binary and is not
+offered); `renderer/cli-chat-ui.ts` adds the Chat header's backend selector,
+workspace-scoped timeline and composer. It never calls ChatGPT's native send or changes
+the selected ChatGPT session identity. Main stores its separate local history in
+`marks-cli-chat`, records each accepted input before process spawn, tracks an exact
+backend/provider session id for verified resumes and persists assistant results on exit.
+On restart, pending CLI turns become failed rather than claiming live generation.
+Only allowlisted assistant text is projected from structured JSONL output; tool calls,
+reasoning, process output and stderr remain private to the CLI, and the renderer gets no
+shell, executable or arbitrary IPC authority. Stop/Disable also cancels headless CLI
+processes. An actual CLI account is required to prove provider-side responses.
+
+### Chat Marks API chats (CLIProxy)
+
+A native conversation provider, not a terminal module: an API chat is a local session whose
+model runs through an OpenAI-compatible endpoint (CLIProxyAPI at `http://127.0.0.1:18081/v1`
+by default) instead of a ChatGPT tab. Its conversation id is minted in the `cosapi-` namespace
+(`shared/api-chat.ts` `isApiConversationId`), which no ChatGPT id uses, so ChatGPT-only owners
+can refuse it by id. `main/api-chat/client.ts` streams completions (tool-call fragments
+assembled by index, bounded records, `[DONE]`, in-stream errors, http only on loopback).
+`main/api-chat/catalog.ts` keeps every listed model with its exact id, classified by modality
+(chat, image, audio, embedding, moderation); chat surfaces list chat models only.
+`main/api-chat/settings.ts` owns the Marks durable `marks-api-chat-settings` (endpoint,
+default model, effort, favorites, recents) and `marks-api-chat-availability` (the outcome of the
+last real request per endpoint and model: a listing never proves a model answers). The key is
+the encrypted secret `marks:cliproxyApiKey`, independent of the MarksPanel login; IPC
+`marksApiChat:request` (`main/api-chat/ipc.ts`, sender/frame checked) only writes it and
+answers `hasKey`/`keyRequired`, never the key. Detection is learned from the endpoint's own
+model list, and a 401 without a stored key asks for the key. The settings live in
+`renderer/api-chat-settings-ui.ts` inside Modules > CLIProxyAPI.
+
+`main/api-chat/executor.ts` runs the turns (tools: see D4 below). An API chat is an ordinary
+`createSession` session (no origin, optional project) with a `cosapi-<uuid>` id that never
+changes. The session store owns its history: the question is an app `user_message`
+(`api-user:<turn>`), the answer an `assistant_message` (`api-assistant:<turn>`) written
+`streaming` at most once a second and then `final`, between `turn_start`/`turn_end`
+(`completed|stopped|failed|interrupted`); a failure adds a `chat_error`, and a stopped or
+failed answer keeps its partial text as final. Context is the session's own questions and
+settled answers, newest kept (60 messages / 120k chars), after one short system line. The
+Marks durable `marks-api-chat-sessions` (owner `main/agent-engine/ledger.ts`) holds each chat's
+engine, backend session id, model, effort, approval mode and `openTurn`;
+the turn is opened there before its `turn_start`. Whether a turn runs is process memory
+(one per chat; Stop aborts that request). At IPC registration `recoverApiChats` closes every
+ledger `openTurn` as `interrupted`, settling a streaming answer; sends wait for it. Every
+completed or failed request updates the model's availability, a success its recents. IPC
+`marksApiChat:request` adds `engines`, `createChat`, `send`, `stop`, `chatSettings`, `setChatSettings`
+(preload `apiChatEngines/Create/Send/Stop/ChatSettings/SetChatSettings`), routed by the agent-engine
+registry (below); the renderer follows a
+turn through the store's `session:changed` notices. Fences by id: `bridge.ts`
+`controlledConversation` (controls, Stop, Goal/Loop, Compact) throws `api_chat_session` and
+`noteCallAttribution` ignores API ids; `session/input.ts` `enqueueInput`, `goal.ts`
+`setGoalSwitchNow`/`setGoalObjectiveNow` and `ipc.ts` `openSessionChat` refuse them.
+
+The chat view is the same for both providers: `renderer/api-chat-ui.ts` (created by
+`marks-modules-ui.ts`) owns only what differs. New chat's menu (`cli-modules-ui.ts`
+`newChatItems`) shows, after ChatGPT, one item per engine `apiChatEngines` reports enabled and not
+hidden (`offeredEngines`): an available one can be picked; an unavailable one (Codex not signed in,
+binary missing, …) is a disabled item whose second line and tooltip are its status `detail` (main's
+short, redacted reason), so the user sees why. An engine whose module is off is not listed, nor a
+hidden one (the retired MarksCode). Action ids have separate namespaces: engine items
+`new-chat-engine-<id>` (New chat and the project menu), terminal-module items `new-terminal-<id>`
+(New chat and the project menu's New terminal submenu), so the Claude terminal module and the
+Claude Code engine never share an id. For CLIProxy, without a default model or with a required key missing
+it opens Settings > Modules with a toast instead. Creating
+calls `apiChatCreate({projectId})` and selects the session through `chat.ts`
+`selectChatSession` (reloads the list first, so a stale read cannot drop the new selection). A
+document capture-phase `submit` listener takes the composer for the selected API chat: text goes
+to `apiChatSend` (composer cleared on success, errors as toasts, attachments refused), and the
+Send button showing Stop calls `apiChatStop`; ChatGPT chats keep the outbox path untouched. The
+chat's own model (chat-modality `apiChatModels`, favorites/recents first) and effort selects
+replace ChatGPT's model menu and write `apiChatSetChatSettings`; the header shows
+`<engine label> · <model>` (`CLIProxy · <model>`), and the model list is the chat's engine's
+(`apiChatModels(…, engine)`). `is-api-chat` on the chat panel hides the ChatGPT-only controls
+(attachments, Goal/Loop mode, Plan, model menu, context meter/Compact, delivery options, skill
+and mention menus) in `settings.css`. Hooks in upstream files, each marked `Chat Marks:`:
+`chat.ts` `refreshSessionControls` skips `sessions:controls` for API chats and takes the running
+turn from `apiChatChatSettings` (`running` + the summary's `activeTurnId`), which drives Stop and
+the timeline's working line; `sessionWorking` counts an API chat's open recorded turn (sidebar
+spinner); the row menu drops Open in browser, Copy link, Block and Trust for API chats;
+`selectedChatSession`/`selectChatSession` exports; `main.ts` passes them to
+`initMarksModulesUi`. `control-reads.ts` ignores `api_chat_session` like other expected misses.
+Proof: `test/api-chat-ui.test.ts`, `scripts/verify-api-chat-ui.cjs`.
+
+**Chat type icons (standing rule).** Every chat shows the icon of its type wherever chats are
+listed or opened: sidebar chat rows (projects, loose chats, Inbox cards and settled rows), the
+Terminals list, the New chat and project menus, and the chat header (inside `#apiChatLabel` before
+the engine label; a ChatGPT chat's fox before `#chatTitle`). One owner, `renderer/chat-types.ts`:
+`chatTypeIcon(type)` keyed by `chatgpt | terminal | api | <engine id>` (a `Record<AgentEngineId, …>`,
+so a new engine does not compile without its icon), `chatTypeOf(summary)` and `chatTypeMark`.
+Designs: ChatGPT = the app's fox (`browser-icons/cos.png` as a monochrome mask), terminal =
+`i-terminal`, Codex = a line hexagon around `>_`, Claude Code = a line spark, CLIProxy = Phosphor's
+`plug` (`i-plug`, the glyph its Settings item always had; the same everywhere CLIProxy appears),
+OpenCode = the project's own mark, MarksCode (retired, read-only chats) = `</>`;
+`api` (a record this version cannot read) = `i-chat`. The others are `cm:` entries in `dom.ts` ICONS
+drawn by icons.css `.cm-glyph-*`, painted in `currentColor` through a CSS mask (light and dark
+themes alike): line SVGs on Phosphor's 256 grid with its 16-unit round stroke, **or a project's
+own simple logo when its licence allows it** (OpenCode: `packages/identity/mark.svg`, MIT, the
+frame plus its inner square at 40% coverage). Never a company's brand logo or a fixed colour. The
+ZeroClaw module card uses a line claw (`cm:claw`; its repository has no simple vector mark); the
+Claude Code Router card a line router (`cm:ccr`, `i-module-ccr`: three lines joining a router and
+leaving as one arrow, drawn after its MIT app icon, which is a coloured raster and not usable as a
+mark; not `cm:route*`, the retired CLIProxy drawing the test keeps out). Every
+module's management entry (the Settings sub-nav item, for ZeroClaw its primary sidebar item, its
+Modules card heading and its page heading) shows the module's own icon (`chat-types.ts` `moduleIcon`/`moduleMark`: OpenCode mark, Codex
+hexagon, Claude spark, ZeroClaw and the retired MarksClaw claw, CLIProxyAPI plug, Claude Code Router its router; test
+`chat-types.test.ts`, `cli-chat-ui.test.ts`). Icons are decorative (`aria-hidden`); the title or engine name stays
+the text. The sidebar learns an API chat's engine from `SessionSummary.engine`, a read-time
+projection of the ledger (`agent-engine/ledger.ts` `withChatEngines`, applied by IPC
+`sessions:list` and `sessions:events`; never stored). Proof: `test/chat-types.test.ts` (every
+`AGENT_ENGINE_IDS` entry has a distinct drawn icon), `test/api-chat-ui.test.ts`,
+`test/renderer-timeline.test.ts` (sidebar rows), `test/agent-engine-registry.test.ts` (projection).
+
+**D4 — local tools.** An API chat uses the app's own Core tools as OpenAI function tools, through
+the same kernel as ChatGPT. `main/api-chat/tools.ts` builds the list for each completion from a
+live `ToolContext` (`roots`, `effectiveCapabilities`, `readOnly`, `privacyScreenshots`,
+`agentTools:false`, `withManagedSkills`). It runs `registerCoreTools` on a
+`createRegistrar(null, ctx, 'core')` wrapped so it captures each `(config, handler)`. The
+allowlist is `read`, `find`, `apply_patch`, `exec_command`, `write_stdin` and `update_plan`, under
+their registered names. Agents, `session_finish`, `save_image`, `usage`, `view_image` and code-mode
+`exec` are never offered. With no `exposedCaps`, a tool whose capability is off is not offered
+(Read-only hides the patch and terminal tools, and `find` replaces the terminal tools when
+command execution is off). Schemas come from `toolSchemaJson` with an object root and no
+`$schema`.
+
+Identity is never taken from the model. Each turn mints `requestId = cosapi:<uuid>`. Ingress
+`requestIdFromHeader` accepts only `[a-z0-9_-]`, so the colon makes this id impossible over HTTP.
+Before the first call, `correlateCaller` files the id with `observeRequestCorrelation({conversationId:
+cosapi-…, sessionId, messageId, tool:'api-chat'})` and `commitRequestCorrelations()`. First proof
+wins, and an id owned elsewhere refuses the call. Each call then runs
+`dispatch(name, args, null, requestId, 'core', handler, undefined, null, { local: true })`, so the
+blocked/strict-Trust, superseded, compaction, capability, Read-only, root, command-allowlist and
+exec-custody checks all apply. The kernel records the tool row (`recordToolCall`, exact delivered
+content, `attribution: request_id`); the executor writes none. `local` is the kernel's only Chat
+Marks edit. It skips `noteTransportIdentity`, `surfaceToolCallAt`, `noteConnectorUse` and
+`noteServedRequest`, because those mean "ChatGPT used this connector". Recorded rows carry no
+`turnId`, since the recorder's live map has no API chat. They sit in order between the turn's
+boundaries.
+
+The turn streams with `tools` (`tool_choice:'auto'`) for at most `MAX_TOOL_STEPS` (40)
+completions. Each step's text is its own assistant message: `api-assistant:<turn>` for step 0,
+`:<step>` after that, written `final` before that step's calls run. The assistant message with
+`tool_calls` and one `tool` message per call (the exact delivered text, at most 100k chars,
+images as a short note) are appended, and calls run one at a time, in order. The following are
+returned to the model as error results, with no row and no crash: an unknown name
+(`UNKNOWN_TOOL`), malformed JSON or a non-object (`INVALID_ARGUMENTS`), and a schema failure
+(`INVALID_ARGUMENTS`). When the cap is reached, the turn ends `completed` with a `note` asking the
+user to send a message to continue: nothing failed. The system message is the Chat Marks line,
+the tools' names, `currentCoreInstructions()`, and the project's virtual directory (the form the
+tools take; relative paths and an omitted `workdir` resolve there through the session binding).
+Replayed context stays user and final answer text only, with a turn's steps joined. Recovery
+settles every streaming step of an interrupted turn.
+
+Approvals: `read`, `find`, `update_plan` and a `write_stdin` poll (no `chars`) run without asking.
+`apply_patch`, `exec_command` and `write_stdin` with input follow the chat's ledger `approval`
+(`ask` when absent, or `auto`). In `ask`, the turn pauses on a process-memory pending approval:
+`{approvalId, turnId, toolCallId, tool, summary, files}` plus the sha256 of the canonical
+arguments. IPC `approve {sessionId, approvalId, decision: approve|deny|always}` (sender/frame
+checked; never a notification) answers only that exact id; a stale or answered id is refused.
+`always` also sets `auto`. Deny returns "The user declined this action. It was not run." to the
+model, which continues. `chatSettings` returns `approval` and `pending`, and `setChatSettings`
+takes `approval` (preload `apiChatApprove`, `apiChatSetChatSettings`). The renderer shows the card
+as a composer-dock row: tool, command or patch file list, Approve / Deny / Approve and don't ask
+again. Beside the model and effort selects it shows the mode select "Ask before edits and
+commands / Run edits and commands automatically".
+
+Stop aborts the stream, answers a pending approval `stop`, and ends the turn `stopped` at once,
+even while a tool runs. A running handler is not killed: it finishes under the kernel and exec
+custody (an exec child stays owned by the session and can be stopped from the background-command
+UI) and records its row after the turn ended. Strict mode: `createApiChat` trusts the new chat
+(`setChatsTrusted`) after its session and ledger record are durable, only while strict mode is
+on. This mirrors a composer opening. A chat created while strict mode was off stays untrusted, and
+its tools are refused (the row menu offers no Trust for API chats). Proof:
+`test/api-chat-tools.test.ts`.
+
+**Agent engines (E0).** `main/agent-engine/` (Marks-owned) puts an engine contract behind the
+same chat screen, so coding CLIs (upstream OpenCode, Codex, Claude Code) run an API chat's turns. E0 changes no CLIProxy behavior.
+- Contract (`types.ts` `AgentEngine`): `id`, `label`, `terminalMode`, `status()` (available +
+  one-line detail, never throws for "not set up"), `models(query)` (the catalog's row shape),
+  `create`, `view`, `send` (resolves once the question is recorded), `stop`, `approve`,
+  `setChatSettings`, `recover`, optional `terminal(chat)` → `{argv, mode: live|handover}` and
+  optional `openTerminal(sessionId)` → `{cliSessionId}` (IPC `terminal`).
+  Ids (`shared/agent-engine.ts`): `cliproxy`, `opencode`, `codex`, `claude`, `markscode` (retired;
+  kept so its ledger records still parse).
+- Registry (`registry.ts`): `cliproxy.ts` wraps the executor and catalog unchanged; `opencode.ts`,
+  `codex.ts` and `claude.ts` are the real OpenCode, Codex and Claude Code engines (below), each
+  available only while its own `status()` is; `reservedEngine` remains for an id registered before
+  its engine plugs in (`registerAgentEngine`). `retiredEngine('markscode', 'OpenCode')`: status
+  unavailable ("MarksCode chats are read-only. New chats use OpenCode."), so New chat never offers
+  it; `view` answers from the ledger (the history is in the app's store and stays readable);
+  create/send/approve/setChatSettings refuse; no terminal; it claims no recovery, so
+  `recoverApiChats` closes a turn the last MarksCode run left open as interrupted. It is also in
+  `HIDDEN_ENGINES`: listed `hidden` without probing its status, never shown in New chat or the
+  project menu, and `createChat` refuses it with the same read-only reason. IPC `createChat` takes `engine` (default `cliproxy`; refused while the
+  engine's status is unavailable); `send/stop/approve/chatSettings/setChatSettings` route by the
+  chat's ledger record; `models` takes `engine` (default `cliproxy`); `engines` lists every
+  engine with its status: `available`, `enabled` (available, or its CLI module switched on per
+  cli-modules `cliModuleState`; CLIProxy: its endpoint is set), `hidden` and `detail`. A hidden engine
+  (`HIDDEN_ENGINES`: the retired `markscode`) is listed without probing its status and refused by
+  `createChat` ("MarksCode chats are read-only. New chats use OpenCode."); its existing chats still
+  route to it and stay readable (`retiredEngine`). `ApiChatView.engine` names the chat's engine. The executor refuses a
+  chat of another engine.
+- Ledger (`ledger.ts`): a record without `engine` is a `cliproxy` chat, and `cliproxy` records
+  are still written without it (older records keep their exact shape). `backendSessionId` is the
+  engine's own session/thread id. Records are parsed one by one: one this version cannot read
+  (an engine added later) is kept verbatim, written back untouched, and its chat refused
+  ("created by a newer version") instead of reset. The `cosapi-` id and every fence are unchanged.
+  Startup recovery (`recoverApiChats`) closes every open turn `interrupted` (shared helper
+  `recovery.ts` `closeInterruptedTurn`), except records of an engine that claimed its own
+  recovery (`claimTurnRecovery`; Codex and OpenCode do).
+- Approvals (`approval.ts` `ApprovalGate`): the app mints the approval id and binds it to
+  `argsHash` (sha256 of the tool name and canonical action), process memory only, oldest pending
+  shown. The engine's own request id (Codex JSON-RPC id, Claude `request_id`, OpenCode permission
+  id) stays main-side beside it; `dismiss(engineRequestId)` removes a card the engine settled
+  elsewhere (its TUI). `codex/claude/openCodeApprovalDecision` map approve/always/deny/stop to
+  `accept|acceptForSession|decline|cancel`, `allow{updatedInput}|deny{message}`, `once|once|reject|–`
+  (OpenCode's own `always` is never sent and Stop answers nothing: see the OpenCode engine).
+  The executor uses the same gate.
+- Projector (`projector.ts` `TurnProjector`): CLI adapters translate their stream into
+  engine-neutral `EngineEvent`s (`text_delta/final`, `tool_started/output/finished` with kind
+  `command|patch|read|mcp|other`, `approval_requested/resolved`, `usage`, `error`, `turn_end`).
+  It writes the API chat's shapes: ledger `openTurn`, `user_message` `api-user:<turn>`,
+  `turn_start`, one `assistant_message` per answer step (`api-assistant:<turn>[:<step>]`,
+  `streaming` at most once a second, `final` when the step closes before a tool/approval/end),
+  `chat_error` (a fatal one fails the turn), `turn_end`, then the ledger close. Usage is kept as
+  the turn's latest totals (not stored yet). Events after the end are ignored.
+- CLI tool rows (`tool-row.ts`): these tools ran inside the CLI, so nothing goes through the MCP
+  kernel, correlation or the recorder. One `tool_call` per finished tool (or per tool still open
+  at the end, as "did not finish") is appended with `appendEvent`: `source: 'app'`, the turn's
+  `turnId`, `attribution`/`attributionMethod: 'engine'` (new `CallAttribution`; the row's facts read
+  "by <engine label> in this chat", translated, not the generic "placed by …"), `engine`, `requestId: null`, a stable `callId` (hash of engine, turn and
+  tool id), tool name by kind (`exec_command`, `apply_patch`, `read`, `mcp:<name>`, else the
+  engine's), a summary in the recorder's wording, `changes` from unified diffs
+  (`reviewUnavailable: 'not-kept'`), credentials redacted. Request-id placement only reads
+  `source: 'mcp'` rows, so the row is placed by its turnId. Written once, it needs no revision
+  and the session's tool count stays exact.
+- Codex engine (F, `codex.ts`, `codex-protocol.ts`, `jsonrpc.ts`; codex-cli 0.163, experimental
+  app-server protocol). Process model: ONE shared app-server per route (see Routes below) per app
+  instance, started lazily (direct `<hash>.sock`, router `<hash>-router.sock`; without a detected
+  router both routes use the direct one):
+  `codex app-server -c approval_policy="on-request" -c sandbox_mode="workspace-write"
+  -c approvals_reviewer="user" --listen unix://<userData>/codex/<sha256(userData)[:16]>.sock`
+  (0700 dir, owner/symlink checked; tmp fallback when the path exceeds ~100 bytes; pidfile so a
+  crashed instance's orphan is stopped; 0.163 makes the path a symlink to its own
+  `/tmp/codex-daemon-<uid>/` socket, accepted when the followed socket is the user's), and our
+  client `codex app-server proxy --sock <sock>`, which only relays bytes. 0.163 serves the socket
+  as WebSocket (HTTP 101, `x-codex-websocket-max-unfragmented-message-bytes: 16777216`), so
+  `jsonrpc.ts` runs a `ws` client over the proxy's stdio (`createConnection` returns the
+  stdout/stdin duplex; one path for Linux and `wsl.exe`): one JSON-RPC message per text frame (no
+  `jsonrpc` member, as Codex sends; 16 MiB `maxPayload`, 20 s handshake, per-request timeouts,
+  proxy exit or socket close closes the peer; stderr kept as a redacted 4 KB tail, never logged). Both die on
+  `will-quit`, on Codex module Stop/Disable, or when either exits (running turns fail). The `-c`
+  overrides keep a user `config.toml`/profile from turning approvals off; no bypass/`never`/
+  `danger-full-access` flag is ever passed (argv snapshot test). Windows: same argv through
+  `wsl.exe --exec`, socket under the WSL home, folders `wslpath -a` (untested).
+  - `status()`: cli-modules gates (`cliEngineRuntime`: command capability, module enabled, binary
+    from userData/modules, node_modules/.bin, `which`), `codex --version` gate (other major or
+    older minor refused; newer minor available with a warning), `account/read` (no account and
+    `requiresOpenaiAuth` → unavailable "Codex is not signed in…"; login stays the user's), asked of
+    the direct server; with a router detected the engine stays available without a direct account
+    and the detail says `direct: <account|not signed in> · Claude Code Router detected`. 30 s cache.
+  - `models({route})`: `model/list` of that route's server (paged, 5 min cache per route) → rows
+    with `label` (shown `GPT-6.1-Sol (gpt-6.1-sol)`), Codex's own `efforts` and `defaultEffort`;
+    the renderer disables the efforts a model lacks; an unsupported chat effort is omitted from
+    `turn/start`. `create` takes the route's default model.
+  - `create`: `thread/start {model, cwd, approvalPolicy, approvalsReviewer:"user",
+    sandbox:"workspace-write", ephemeral:false}` first (cwd = canonical local project root, else
+    home; a server project is refused), then the `cosapi-` session and the ledger record
+    (`backendSessionId` = thread id). `send`: thread resumed if this server has not loaded it
+    (a chat that never ran starts a new thread instead), then `turn/start {threadId,
+    input:[text], model, effort?, cwd, approvalPolicy (Ask `untrusted`, Auto `on-request`),
+    approvalsReviewer:"user", sandboxPolicy: workspaceWrite [cwd], network off}`.
+  - Events: `item/agentMessage/delta` → text_delta, `item/completed agentMessage` → text_final;
+    commandExecution → command row (outputDelta chunks, `aggregatedOutput`, exit code);
+    fileChange → patch row (changes, diff counts); mcpToolCall → `mcp:<server>/<tool>`;
+    webSearch/dynamicToolCall → other; `thread/tokenUsage/updated` → usage (turn delta of totals);
+    `error` → chat_error (recoverable when `willRetry`, else fatal); `turn/completed` → turn end
+    (completed/failed; interrupted, or `stopped` after Stop). Only the chat's own thread and turn
+    are projected; turns typed in the TUI are not mirrored.
+  - Approvals: `item/commandExecution|fileChange/requestApproval` bound in the ApprovalGate to
+    the JSON-RPC id, thread, turn, item, Codex approvalId and the command+cwd or the item's
+    changes (sha256 via `argsHash`); approve→`accept`, always→`acceptForSession` (+ chat to Auto),
+    deny→`decline`, Stop→`cancel`, each sent once to that exact id. `serverRequest/resolved`
+    (answered in the TUI) removes the card and sends nothing. Legacy `execCommandApproval`/
+    `applyPatchApproval` → `{decision:{denied:{rejection}}}`; any other server request →
+    JSON-RPC error -32601; an approval for a turn the app did not start is left to the TUI.
+  - Stop: gate stopped (pending → `cancel`), `turn/interrupt {threadId, turnId}`, outcome
+    `stopped` on Codex's confirmation or after 15 s.
+  - `recover()`: per open Codex turn, `thread/resume` (and `turn/interrupt` if Codex still
+    reports it `inProgress`), then closed `interrupted` with a detail saying the thread was resumed.
+  - Terminal (live, through the shared seam below): `openTerminal` starts the server if needed
+    and opens `codex resume <thread> --remote unix://<sock>` in the chat's Codex module terminal;
+    allowed while a turn runs (same server and thread, so the TUI sees the turn and its approvals).
+    Codex's open hook only makes sure the server runs before the pane attaches.
+  Proof: `test/agent-engine-codex.test.ts` (fake proxy and app-server speaking WebSocket on
+  stdio, `test/fixtures/agent-engine/codex-fake-app-server.cjs` with `websocket-stdio.cjs`;
+  params and replies validated against the checked-in schema subset `codex-app-server-schema.json`
+  from `generate-json-schema`),
+  `test/cli-modules.test.ts` (engine terminal), `test/api-chat-ui.test.ts` (terminal button).
+  The transport was run against the installed codex-cli 0.163.0 on Linux (initialize,
+  account/read, model/list, an ephemeral `thread/start`; no model turn). Needs a real run: a
+  model turn and its approvals, TUI `--remote` attach, Windows.
+- **Claude Code (`claude.ts`, G).** Registered as `claude` (label "Claude Code", terminal
+  `handover`); New chat and the project menus offer it once `status()` is available: Claude
+  module active and Command on (cli-modules `cliChatRuntime`: binary, canonical cwd, `wsl.exe
+  --cd … --exec` on Windows), `--version` answers and `claude auth status --json` does not say
+  `loggedIn:false` (cached 60 s; an auth-looking failure clears the cache). `models({route})` is the
+  CLI's own catalog of that route: the `initialize` control answer of a probe process (`-p
+  --input-format stream-json --output-format stream-json --verbose --no-session-persistence
+  --strict-mcp-config --settings <route settings>`, sent `initialize` only and killed once it
+  answers: no prompt, no session file, no MCP server; cached 5 min per route). Each entry is
+  `{value, resolvedModel, displayName, supportedEffortLevels}` (2.1.306); the row is the alias with
+  its concrete model as label (`opus (claude-opus-5-5)`), `default` is left out (a chat without a
+  model), and models a `system/init` reported are appended; the bare aliases `fable, opus, sonnet,
+  haiku` only when the probe fails. The same answer's `account` (`tokenSource`/`apiKeySource`
+  `none` = no credential) is the direct route's sign-in check. Effort is the shared
+  `low|medium|high` (`--effort`). `create` mints the Claude session uuid as
+  `backendSessionId` (no strict-mode trust: its tools never touch the MCP kernel).
+  One long-lived process per chat, spawned on send in the canonical project folder (home without
+  a project) with `CLAUDECODE`/`ELECTRON_RUN_AS_NODE` removed and
+  `CLAUDE_CODE_DISABLE_BACKGROUND_TASKS=1 CLAUDE_CODE_DISABLE_CRON=1` set: `-p --input-format stream-json
+  --output-format stream-json --verbose --include-partial-messages --permission-prompt-tool stdio
+  --permission-mode <default|manual> --settings <route settings: {"permissions":{"disableBypassPermissionsMode":"disable"}},
+  or router.ts CLAUDE_DIRECT_SETTINGS for a direct chat with a router detected> --disallowedTools ScheduleWakeup,Monitor,CronCreate,CronDelete,CronList [--model=M] [--effort L] --session-id=<uuid>|--resume=<uuid>`. `manual` only when `--help` lists
+  it without `default` (2.1.306 renamed the choice). Never a bypass flag or mode; a `system/init`
+  reporting `bypassPermissions` kills the process and fails the turn. User/project/local settings
+  still load (auth helpers, env, MCP and the user's own rules keep working, and the terminal
+  resumes with the same settings); the flag layer only forbids bypass. A user allow rule can
+  therefore skip a prompt; the tool still appears as its row. `--resume` when the store has an
+  earlier `turn_start` of the chat, else `--session-id`; a process that exits before any output
+  with "No conversation found" / "already in use" is retried once with the other flag. A
+  model/effort change restarts the idle process with `--resume` on the next send; an idle process
+  ends after 10 minutes. Module Stop/Disable ends every host (running turns `stopped`).
+  Wire (Agent SDK protocol): host sends `control_request {subtype:'initialize', hooks:null}`
+  first (an error answer is accepted), then per turn `{type:'user', message:{role:'user',
+  content:[{type:'text',text}]}, parent_tool_use_id:null}`. Mapping: `stream_event`
+  `content_block_delta/text_delta` → `text_delta`; `assistant` text block → `text_final`
+  (authoritative); `tool_use` → `tool_started` (Bash/PowerShell `command`; Edit/Write/MultiEdit/
+  NotebookEdit `patch` with files and a diff from the input or `structuredPatch`; Read/Grep/Glob/
+  LS `read`; `mcp__s__t` `mcp` named `s/t`; else `other`); `user` `tool_result` → `tool_finished`
+  (`declined` when the user denied it, `failed` on `is_error`; an `Agent`/`Task` result is shown
+  as the sub-agent's report alone: `claudeAgentReport` drops Claude Code's "[Subagent hand-back] …
+  The report follows:" preamble and the trailing `agentId: …` / `<usage>…</usage>` block and
+  de-indents the report; display only, nothing goes back to the CLI); messages with a
+  `parent_tool_use_id` (sub-agents) are skipped; `result` → `usage` (input incl. cache, output,
+  cached) then `turn_end` `completed`, or a fatal `chat_error` + `failed` when `is_error` or the
+  subtype is not `success`. A process exit mid-turn is a fatal error with the redacted
+  (`redactSecretText`) last stderr lines, then `failed`.
+  Approvals: `control_request {subtype:'can_use_tool', tool_name, input, tool_use_id,
+  permission_suggestions}` → the gate (action `{tool_use_id, input}` hashed with the tool name;
+  the CLI `request_id` stays main-side). The chat's `auto` mode answers allow with the input at
+  once (no card). Answers are `control_response {subtype:'success', request_id, response}`:
+  approve `{behavior:'allow', updatedInput:<the shown input>}`; always adds `updatedPermissions`
+  = the CLI's `addRules`(allow)/`addDirectories` suggestions with `destination:'session'` (never
+  `setMode`; the chat's mode is unchanged); deny/stop `{behavior:'deny', message}`. A
+  `control_cancel_request {request_id}` removes the card and is never answered; any other CLI
+  control request gets `{subtype:'error'}`. Stop sends `control_request {subtype:'interrupt'}`,
+  answers pending cards `stop` and ends the turn `stopped` at once; the stopped turn's own late
+  `result` is drained (a process that sends none within 5 s is ended). Recovery: no process
+  survives the app; `recover()` is the engine-neutral `recoverApiChats` (open turn →
+  `interrupted`), and the next send resumes with `--resume`.
+  Hand-over terminal: IPC `terminal {sessionId}` (preload `apiChatTerminal`, the composer's "Open
+  in terminal" button for engines with a terminal) → `openTerminal`: refused while a turn runs,
+  else the host process is stopped and cli-modules `cliEngineTerminal` creates or reuses the
+  chat's Claude module terminal (`engineChat` + `args` `--resume <uuid>`, or `--session-id <uuid>`
+  before the first turn; strictly validated) and the renderer shows it
+  (`cli-modules-ui` `openSession`). tmux starts `sh -c 'exec "$@"' marks-cli <bin> <args>`. Every
+  open of such a terminal (also from the sidebar) first runs the engine's hook, which refuses
+  while the chat answers and stops its host. Return rule: the next send asks
+  `cliEngineTerminalState` — `attached` (only the app's own terminal view; each view is one tmux
+  client) or `external` (more tmux clients than app views: a terminal outside the app) refuses the
+  send with `ENGINE_TERMINAL_OPEN_IN_APP` / `_ELSEWHERE` (`shared/agent-engine.ts`). The composer
+  recognises those exact texts and shows a row above it with "Close the terminal and continue here"
+  (the external text says that terminal is closed too) and Cancel; only that click sends again with
+  IPC `send {takeBackTerminal: true}` (preload `apiChatSend(id, text, {takeBackTerminal})`). Then, and
+  for `detached` without asking, `cliEndEngineTerminal` tells the app's views of that tmux session
+  they exited, detaches them and kills the session (Claude Code saved its session), and the host
+  restarts with `--resume` and sends the message. Nothing kills the TUI without that action or a
+  detached terminal. Opening the terminal is still refused while the chat answers. The TUI and the
+  host never run at once. Still needs a real run: auth
+  detection wording, `manual` vs `default`, `initialize`/`interrupt` answers and suggestion shapes
+  of the installed CLI.
+- **Terminals (one seam for every engine).** Contract: `terminal(chat)` describes the argv and
+  mode (`live` | `handover`); `openTerminal(sessionId) → {cliSessionId}` is the only entry point.
+  IPC `marksApiChat` `terminal {sessionId}` (preload `apiChatTerminal`) routes by the chat's
+  record to it; a chat without one answers "This chat has no terminal". One composer button
+  ("Open in terminal") shows for engines the registry lists with a terminal mode; its tooltip
+  follows the mode, and it is disabled while a turn runs only for `handover`. The renderer then
+  shows the module terminal by id (`cli-modules-ui` `openSession`: reload, show).
+  cli-modules `cliEngineTerminal(module, {sessionId, projectId, args, title})` keeps one durable
+  session per chat (`engineChat` + `args`, reused with new args); args are validated per module
+  (Claude: `[--settings <exactly CLAUDE_DIRECT_SETTINGS>] --resume|--session-id <uuid>`, the
+  settings for a direct chat with a router detected; Codex: `resume <thread> --remote unix:///<abs>.sock`;
+  OpenCode: `-s ses_<id> <abs cwd>`; anything else refused, also when a
+  stored session is loaded). tmux starts
+  `sh -c 'exec "$@"' marks-cli <bin> <args>`; every OpenCode terminal (engine or plain) runs
+  `OPENCODE_TERMINAL_SCRIPT` (`OPENCODE_DISABLE_AUTOUPDATE=1 exec "$@"`) instead; the TUI reads the
+  background service's URL and password itself, so neither tmux's argv nor its environment holds
+  them. Every open (also from the sidebar) first runs that module's hook
+  (`registerCliEngineOpenHook(module, hook)`): required for hand-over modules (Claude: refuses while
+  answering, stops its host), optional for live ones (Codex: starts the server; OpenCode: runs for
+  every OpenCode terminal, also a plain one, and starts the background service with the app's
+  binary and environment, so the TUI joins it instead of starting its own). A TUI reconnects by
+  itself after a service restart (checked live). `cliEngineTerminalState`/`cliEndEngineTerminal` serve Claude's return rule.
+- **Routes: direct CLI account or Claude Code Router (`router.ts`).** Claude Code Router (CCR, a
+  third-party proxy on `127.0.0.1:3456`) configures itself into the user's own CLI files
+  (`~/.claude/settings.json` `env` `ANTHROPIC_BASE_URL`/`ANTHROPIC_MODEL`/… plus `apiKeyHelper`;
+  `~/.codex/config.toml` `model_provider = "claude-code-router"`, its provider table and its own
+  `model_catalog_json`), so every Codex and Claude Code process talks to the router, never to the
+  account the CLI is signed in with. A Codex or Claude Code chat therefore has a route (ledger
+  `route`, `shared/agent-engine.ts` `AgentEngineRoute`): `direct` (default for new chats: the
+  CLI's own account) or `router` (the CLI exactly as configured; a record without `route` is
+  `router`, as every chat ran before routes). Detection reads only those two files (plus the
+  inherited `ANTHROPIC_BASE_URL`, `CLAUDE_CONFIG_DIR`/`CODEX_HOME` and the existence of CCR's
+  `settings.json.ccr-original`): Claude — a loopback base URL with CCR's port 3456, that backup or a
+  `CCR_` variable; Codex — the top-level provider is CCR's (id, table `name` or its managed-block
+  marker). A remote gateway or another custom provider is the user's own setup and never
+  overridden; without a detected router both routes are the same unmodified process
+  (`effectiveRoute`) and no choice is shown. Windows (CLIs inside WSL) detects nothing (untested).
+  **Router availability** (main/ccr, below): a router configured in those files but whose program is
+  not installed (`not_installed`) or whose gateway does not answer `/health` (`stopped`) is not
+  usable: the detection carries `unavailable` (registered by the CCR module through
+  `registerRouterAvailability`, cached 5 s, re-checked by `refreshRouterAvailability` before every
+  engine status, view, create, route change and send; without a registered provider nothing
+  changes). Then `effectiveRoute` is `direct` for both routes and the direct overrides apply to both
+  (the CLI never tries the dead router address); `chatRoutes(stored, detection)` offers both routes
+  only while the router is usable, none without a configured router, and `['direct']` plus
+  `routeNotice` (`not_installed` | `stopped`) for a chat stored on `router`, so it can move away.
+  Claude Code falls back: the same session runs with the direct settings (refused with both reasons
+  when the CLI has no account of its own). Codex cannot (a router thread keeps CCR's provider): the
+  send is refused before anything is recorded (`ROUTER_UNAVAILABLE_TEXT` + "Or switch this chat to
+  "CLI account (direct)"; Codex then starts a new thread."), and moving to direct always forgets the
+  thread (`homeRoute`). Choosing the router (a new router chat, a route change to it) is refused with
+  the same text while it is unavailable. Engine status says it (`· Claude Code Router is not
+  installed. Install it from Settings > Modules > Claude Code Router.`; `router: false`). The
+  renderer shows `routeNotice` as a row of the composer dock (`#apiChatRouteNotice`, translated by
+  code) and keeps the stored router choice visible in the route select. On a fresh machine without
+  CCR nothing is detected, no route select appears and every chat runs as before.
+  Direct overrides apply only to the processes the app starts; the user's files are never
+  written. Claude Code: precedence is flag `--settings` > local > project > user settings, and a
+  settings `env` beats the process environment, so the direct process gets `CLAUDE_DIRECT_SETTINGS`
+  (the hardening plus every router variable `CLAUDE_ROUTER_ENV_KEYS` set to `""` and `apiKeyHelper:
+  ""`). Checked live against 2.1.306: `""` reads as unset (`[gatewayDiscovery] skipped:
+  ANTHROPIC_BASE_URL is unset`, model `claude-opus-5-5`, `tokenSource: none` without a login of its
+  own, even with the router URL inherited), while `null` fails validation and Claude Code silently
+  drops the whole `--settings` layer. `claude auth status` reads the user's settings and has no
+  `--settings`, so it answers for the router route only; the direct account comes from the
+  probe's `initialize` answer. A direct send without one is refused before anything is recorded
+  ("Claude Code has no account of its own for direct chats. Run "claude auth login"…"). Codex: the
+  direct server adds `-c model_provider="openai"` (the built-in provider: `account/read` then
+  reports the ChatGPT login) and, when CCR replaced the catalog, `-c model_catalog_json="<CODEX_HOME>/
+  models_cache.json"` (Codex's own cached catalog of the account; an empty value is a directory
+  error, and a key cannot be unset with `-c`); `codexServerArgv` accepts only those two shapes.
+  Other user overrides (e.g. an `openai_base_url` of another local bridge) stay as configured.
+  Route change (IPC `setChatSettings {route}`, refused while a turn runs, Codex/Claude only):
+  Claude Code keeps its session (same session file; the next send resumes it with the other
+  route's settings; a direct `--resume` of a router-made session loads, checked live); Codex
+  threads keep the provider they started with (`Thread.modelProvider`) and their history holds
+  that provider's items, so the chat forgets its thread and the next send starts a new one on the
+  other route's server (the renderer says so; the chat's own history stays). A model the other
+  route does not list gives way to its default (Codex) or the CLI's default (Claude, `null`).
+  The hand-over Claude terminal of a direct chat runs `--settings <direct> --resume <uuid>`; a
+  Codex live terminal attaches to the server of the chat's route. Renderer: the composer's route
+  select (`apiChatComposerRoute`: "CLI account (direct)" / "Via Claude Code Router") shows only
+  when the view lists both `routes`; the model list is that route's, grouped under the route's
+  name; the header reads `Codex · GPT-6.1-Sol (gpt-6.1-sol) · direct` or `… · via Claude Code
+  Router`. `AgentEngineInfo.router` and the status detail say when a router is detected.
+Proof: `test/agent-engine-registry.test.ts` (routing, ledger migration),
+`test/agent-engine-projector.test.ts` (fixtures `test/fixtures/agent-engine/*.json`, real store),
+`test/agent-engine-claude.test.ts` (fake CLI `test/fixtures/agent-engine/fake-claude.mjs`: argv,
+turn rows, exact control responses, cancel, interrupt, failures, recovery/resume, hand-over; routes:
+direct settings, catalog per route with concrete models, direct sign-in refusal, route change on
+the same session), `test/agent-engine-router.test.ts` (detection with synthetic CCR files in a
+temporary HOME, negative cases, direct overrides), `test/agent-engine-codex.test.ts` (one fake
+app-server per route: overrides, models per route, new thread after a route change),
+`test/cli-modules.test.ts` (engine terminal args, open hook, attached/external state, take-back end),
+`test/api-chat-ui.test.ts` (offered engines, unavailable ones disabled with their reason, hidden ones
+absent; the terminal button; the take-back offer), `test/cli-chat-ui.test.ts` and
+`test/renderer-timeline.test.ts` (engine and terminal items of the same name both enabled).
+
+**OpenCode engine (`opencode`).** `agent-engine/opencode.ts` + `opencode-client.ts` (Marks-owned)
+drive **upstream OpenCode 2.x** (`anomalyco/opencode`, MIT; published only on npm as
+`@opencode/cli`; checked against 2.1.2) through its background service's `/api` HTTP API (the
+same model the retired MarksCode fork 2.0.25 had; its engine is the base). The TUI uses the same
+service, so the chat and an attached TUI share one session. Routes (checked against
+`GET /openapi.json` of 2.1.2 and live): `/api/info`, `/api/model[/default]` (`location[directory]`),
+`POST /api/session {title, location:{directory}, model, permissions}`, `GET|PATCH
+/api/session/:id` (PATCH replaces the ruleset), `/api/session/active`, `/api/session/:id/
+{prompt {text} → {data:{id}} | interrupt | model {model:{providerID,id,variant}} | message?order=
+desc | permission[/:req[/reply {decision, message}]]}`, SSE `/api/event` (`data: {id,type,data}`,
+`: heartbeat`). Errors answer `{_tag, message}`.
+- Service (`opencode/service.ts`): upstream's per-user background service (`opencode service
+  start|stop|restart`; it runs `<binary> serve --service`, default port 49374, registers
+  `{id, version, url, pid, password}` in `<XDG_STATE_HOME>/opencode/service.json` and keeps the
+  password in `<XDG_CONFIG_HOME>/opencode/service.json`; it inherits the caller's environment).
+  The app starts it on first use (create/send/models/terminal open; status never starts it) with
+  the resolved binary and `opencodeServiceEnvironment` (no `ELECTRON_RUN_AS_NODE`,
+  `OPENCODE_SERVER_*`/`OPENCODE_PASSWORD` or MarksCode variable/PATH entry; plus
+  `OPENCODE_DISABLE_AUTOUPDATE=1`, which 2.x's updater honors). It is the app's own only when
+  `/proc/<pid>/exe` is the resolved binary (` (deleted)` = our file before an update); without an
+  exe (macOS) the version must match. Another OpenCode's service is `foreign`: the engine is
+  unavailable ("…runs another OpenCode program…Restart it from Settings > Modules > OpenCode") and
+  only the card's Restart (`service restart` with our binary, user-confirmed) replaces it; `service
+  start` alone would leave it (checked live with 2.1.1 vs 2.1.2). Only a loopback http URL gets the
+  password; `/api/info` must answer the registered pid. The service outlives the app (quit only
+  closes event streams). Module Stop/Disable stop it when it is the app's own. After an update
+  (`requestOpenCodeRestart`) it restarts at once when nothing runs (no app turn and
+  `/api/session/active` empty, so a TUI run counts), else `restartPending`, retried when a turn
+  ends and on the next use: no running answer is cut. Windows: the same commands inside WSL
+  (untested).
+- `status()` (never throws): Command capability, module enabled, binary (cli-modules
+  `cliModuleState`: the module's own `bin/opencode` first, else PATH), its `--version` (`opencode
+  v2.1.2`) probed with a private HOME inside the gate `opencodeSupport`: 2.1.x ok, newer 2.x
+  available with "newer than tested", 1.x, 2.0 and 3.x unavailable ("OpenCode 2.1 or a newer 2.x is
+  needed"); a PATH binary is noted "not installed by Chat Marks"; a stopped service is noted "starts
+  on first use"; a foreign service is unavailable. The name `opencode` can never resolve a MarksCode
+  binary, and a binary path inside MarksCode's folders is refused.
+- `create`: approved local project only (`localProjectPath`; WSL path on Windows). The session is
+  created at that location with the default model (`/api/model/default`) or the chosen one and the
+  ruleset `shell * ask`, `edit * ask`, `question * deny` (a turn must not block on a form),
+  `edit /*` and `read /*` deny (outside the project resources are absolute), `external_directory *
+  deny`, `edit .markscode/*` and `edit */.markscode/*` deny (inside the project resources are
+  relative; the last matching rule wins, `*` matches `/`; all checked live: `/etc/hostname` →
+  external_directory, `.markscode/a.txt` and `sub/.markscode/b.txt` → denied).
+- `send`: refused while `/api/session/active` lists the session (its TUI); the projector opens
+  the turn, `/api/event` connects (`server.connected`), then `POST …/prompt {text}`; its answer's id
+  is the question. Mapping: `session.text.delta/ended` → text_delta/text_final (reasoning never
+  shown); `session.tool.input.started` (name) + `tool.called` → tool_started; `tool.success/
+  failed` → tool_finished (`shell` → command with `metadata.exit`; `write/edit/patch` → patch with
+  `metadata.files` or the diff its permission request showed (2.x `write` reports none); `read/
+  glob/grep/list` → read; `error.type permission.rejected` → declined); `session.step.ended`
+  tokens summed per assistant message → usage (`session.usage.updated` is the session total and
+  ignored); `session.execution.succeeded/failed/interrupted` end the turn (interrupted: the app's
+  Stop → stopped, else interrupted "stopped in its terminal").
+- Approvals: `permission.asked {id, sessionID, action, resources, save, metadata, source}` →
+  ApprovalGate card bound to sha256 of `{sessionID, requestID, action, resources}`. `approve` reads
+  `GET …/permission/:req` back and refuses a vanished or changed request, then `…/reply
+  {decision:'once'|'reject', message?}`. **"Always" is never sent upstream**: 2.x saves an
+  `always` as a project-wide allow rule (`/api/permission/saved`, persistent, and it beat another
+  session's `edit * ask` in a live check); the app answers `once`, replaces the chat's ruleset with
+  its Auto one and switches the chat to Auto (the client cannot even send `always`). Stop: `POST
+  …/interrupt`, which settles pending requests itself (nothing is answered); the turn ends on
+  `execution.interrupted` or after a 5 s grace. A `permission.replied` this app did not send (the
+  TUI) removes the card.
+- The stream is volatile: bounded lines (1 MiB) and records (4 MiB), 45 s silence = dead,
+  reconnect with backoff (250 ms … 8 s, then interrupted). After every reconnect: messages (newest
+  50, oldest first) → missed settled texts, finished tools and step tokens, pending permissions →
+  new/vanished cards, `/api/session/active` + the session's `outcome`/`time.idle` → the end.
+- Recovery (claimed, `claimTurnRecovery`): the service outlives the app, so a turn left open is
+  re-attached while its session still runs, else what finished is imported and the turn closes
+  with the session's outcome. Recovery never starts the service; a stopped one closes the turn
+  interrupted.
+- Terminal (live, through the shared seam): args `-s <ses_id> <folder>` (the TUI attaches to the
+  background service session; checked live in tmux, no second server); opens while a turn runs.
+Proof: `test/agent-engine-opencode.test.ts` (fake 2.1.2 service in-process plus the real
+`service.ts` with a fake host: status gate incl. foreign service, start on first use with the
+sanitized environment, ruleset, full turn mapping with diffs and per-step usage, once / always→
+once+Auto (never `always`) / stale / changed / deny, TUI reply, Stop→interrupt with nothing
+answered, TUI interrupt, failure, busy session, SSE drop + reconcile, re-attach and close after a
+restart, terminal args and hook, Basic auth never logged; service: registration trust, Start/Stop/
+Restart and foreign refusal, update restart with a turn or a TUI session running, stale service on
+next use, environment), `test/cli-modules.test.ts` (OpenCode args, the terminal script, the hook
+also for a plain terminal), `test/api-chat-ui.test.ts`. Checked live with the real 2.1.2 (temporary
+HOME/XDG, as the user): installed through `installUpstream` from npm (integrity checked,
+`opencode v2.1.2`), service started through `ensureOpenCodeService` (`/proc/<pid>/exe` = the
+module binary, `OPENCODE_DISABLE_AUTOUPDATE=1` in its environment), 11 models incl. OpenCode's free
+ones, a chat on `opencode/minimax-m3.1-flash-free` (free): shell card → "always" → `once` + Auto,
+no saved project rule upstream, `echo` row and answer, turn completed; the TUI attached in tmux
+showed the same session; restart-after-update path and Stop. Needs a real run: the chat UI end
+to end, Windows/WSL, macOS.
+
+### Upstream modules: OpenCode and ZeroClaw
+
+`main/upstream/` (Marks-owned, IPC `marksUpstream:request` `status|install|service|facts`, sender/frame
+checked; preload `upstreamStatus/Install/Service/ZeroClawFacts`, progress `marksUpstream:progress`) installs and
+updates an upstream CLI from its official release into the user's module folder, without root,
+like the CLIProxyAPI card but per user. Each module names a `ReleaseSource` (`upstream/install.ts`):
+- GitHub (`githubSource`, `github-release.ts`, shared with CLIProxyAPI; ZeroClaw): `releases/latest`
+  of the trusted repository only (`vX.Y.Z`, no draft/prerelease), each asset's API `digest`
+  (`sha256:…`), downloads only from `https://github.com/<repo>/releases/download/` through GitHub
+  release hosts (bounded, at most five redirects).
+- npm (`npmSource`, `npm-release.ts`; OpenCode 2.x): only `https://registry.npmjs.org/` (no other
+  host, no redirect, no credentials). `/<pkg>/latest` (`@opencode%2fcli/latest`: exact x.y.z, its
+  `optionalDependencies` must list the host's platform package at that same version), then the
+  platform package's version document (`@opencode%2fcli-linux-x64/2.1.2`, bounded 1 MiB), whose
+  `dist.tarball` must be exactly the canonical URL and whose `dist.integrity` (SRI `sha512-…`) must
+  match the downloaded tarball before anything is extracted.
+- `installUpstream(spec, confirmedVersion, mode)`: refuses a latest other than the one the user
+  confirmed (`version_changed`); picks the build for the host (`HOST_PROBE_SCRIPT`: `uname -m`,
+  avx2 in /proc/cpuinfo, musl); checks the tar listing first (only regular files and folders, no
+  absolute or `..` path, nothing outside the allowlist); extracts only the allowlisted members
+  (with `--strip-components` for npm's `package/bin/`) into a private 0700 `<module>/.stage-<uuid>`
+  (same filesystem); each binary must be a regular non-link ELF file and report exactly the
+  confirmed x.y.z under `env -i` with a private HOME/XDG; then promotes: `file` layout = rename over
+  the old binary (a running service keeps its inode), `directory` layout = `bin` → `bin.old`,
+  stage → `bin`. Every step is argv to a fixed program, through a Runner: direct on Linux,
+  `wsl.exe --exec` on Windows (the archive copied into WSL and re-checked with `sha256sum`;
+  untested). Destination: `<userData>/modules/<id>/bin`, or `~/.local/share/chat-marks-modules/<id>/bin` in WSL.
+- OpenCode (`opencode/release.ts`, 2.x only; 1.x GitHub releases are a different server API and are
+  not used): `@opencode/cli-linux-<x64|arm64>[-baseline][-musl]` (baseline on x64 without avx2),
+  tarball `package/package.json` + `package/bin/opencode`; only `package/bin/opencode` is
+  extracted (256 MiB bound; 2.1.2 x64 is 99 MB). The update indicator compares installed vs npm
+  latest; a latest outside the gate (3.x) is shown "not supported yet" and never offered. After an
+  update the service restarts without interrupting a running answer (`requestOpenCodeRestart`).
+  OpenCode's own `opencode upgrade` is never offered and its auto-update is off.
+- ZeroClaw (`zeroclaw/release.ts`, `zeroclaw-labs/zeroclaw`, Apache-2.0, checked against 0.8.6):
+  `zeroclaw-<x86_64|aarch64>-unknown-linux-<gnu|musl>.tar.gz` + `SHA256SUMS`; installs `zeroclaw`,
+  `zerocode` (the TUI, which needs the daemon's exact version) and the dashboard `web/dist/`
+  beside them (`<dir-of-binary>/web/dist` is one of the gateway's auto-detected locations);
+  `zerorelay` is not installed. ZeroClaw is an autonomous agent to configure, **not a chat or
+  terminal type**: it never appears in New chat, the project's New terminal submenu or the sidebar
+  Terminals (`cli-modules-ui.ts` `TERMINAL_MODULE`; test `cli-chat-ui.test.ts`). It has its own
+  page instead: the primary sidebar item **ZeroClaw** right below Pets (`#sidebarZeroClaw`,
+  `data-sidebar-page="zeroclaw"`, claw mark, shown only while the module is enabled) opens the
+  `zeroclaw` main view (`data-panel="zeroclaw"`, a `plugins-panel` beside Plugins/Skills/Pets;
+  `main.ts` `showTab` counts it as a library page; the old `module-zeroclaw` Settings sub-page is
+  gone and `normalizeTab` maps that name to it, or to Settings > Modules while disabled; disabling
+  the module while the page is open goes back to the chat). Its Modules card keeps install and
+  update and links to the page ("Open ZeroClaw"); the page links back ("Manage in Settings >
+  Modules"). Sections: Status (state, installed/latest version), Agent ("Configure agent" opens
+  `zeroclaw quickstart`, `cliCreateSession(…, 'quickstart')`, args `['quickstart']` only, in a
+  terminal inside the page, one reused session; a setup that ended is started again, one still
+  running is reattached; when it ends the page says so and the terminal keeps its last output) and
+  Settings. **This area grows with ZeroClaw settings over time**; it starts
+  with read-only key facts (`zeroclaw/settings.ts`, IPC `marksUpstream` `facts`): agent aliases
+  (`zeroclaw agents list`) with each one's model provider, memory backend and enabled flag, the
+  runtime, the gateway address and the cost limits, each through `zeroclaw config get --json` of a
+  fixed non-secret path. Checked against 0.8.6 with a temporary HOME: `status`, `config get` and
+  `agents list` write a default `~/.zeroclaw/config.toml` (and `data/`, `shared/`) when none exists,
+  so nothing runs until ZeroClaw is configured (the page says "Not configured yet"); with a
+  configuration they read without rewriting it. `zeroclaw update` is never offered (it could
+  update `zeroclaw` alone). Apart from ZeroClaw's own reads, `~/.zeroclaw` (shared with the
+  retired MarksClaw fork) is never touched (only its `config.toml` existence is checked), with one
+  exception below.
+- ZeroClaw terminals (`cli-modules.ts` `ZEROCLAW_TERMINAL_SCRIPT`, quickstart and `zerocode`):
+  `sh -c '<script>' marks-cli <bin> [quickstart]` runs ZeroClaw under `umask 077`, first removes
+  only the group/other write bits of `~/.zeroclaw` and `~/.zeroclaw/data` when each is a real
+  folder owned by the user (never through a link), and after ZeroClaw exits keeps the pane open
+  with its last output and `[<bin> exited with status N. Press Enter to close.]`. Found with 0.8.6
+  as the user (temporary HOME, tmux attached through node-pty like `cliOpen`): ZeroClaw creates
+  those folders with the session umask (002 → 775) and its daemon then refuses them ("config
+  lifecycle directory …/data is writable by other users (mode 775)"), so `zerocode` exited before
+  drawing and tmux's alternate screen took its error with it. The facts reads (`settings.ts`) run
+  under the same umask. `zeroclaw quickstart` itself drew fine in tmux.
+- "Configure agent showed nothing" (2.1.44.1): the setup terminal's mount was a block, so the
+  terminal body was 0 px high, xterm fitted 1 row and `cliOpen` asked for `rows: 1`, which the IPC
+  schema (2–200) refuses before anything starts (no tmux session, no `~/.zeroclaw/config.toml`);
+  the refusal was written into the 0 px terminal. Fixed in `settings.css` (the mount is a flex
+  column) and `workspace-terminal.ts` (sizes sent to main are clamped to 2–500 × 2–200). Proof:
+  `cli-chat-ui.test.ts`, `cli-modules.test.ts` (launcher argv, the script with a real `sh`).
+- UI (`renderer/upstream-manage-ui.ts` in the module's card): installed version (or "not installed
+  by Chat Marks" for a PATH binary), latest release, "Update available", support notes, OpenCode's
+  background service (running on port / stopped, starts on first use / run by another OpenCode,
+  restart pending) with Start / Stop / Restart (Stop and Restart confirmed), and one Install/Update
+  button confirmed with `window.confirm` naming the source (npm registry / GitHub).
+Proof: `test/upstream-release.test.ts` (npm platform package matrix, the 2.x gate, `opencode
+v2.1.2` parsing, registry host allowlist, exact versions, sha512 integrity ok/mismatch, no
+redirect, canonical tarball URL, member allowlist of the npm tarball, OpenCode install/update with
+rename, refusals (moved latest, integrity, missing platform build, foreign tarball URL, extra or
+linked member, non-ELF, wrong version); GitHub digest/SHA256SUMS, redirect hosts and ZeroClaw's bin
+swap, with real `tar` archives). Installed through this code from the real sources on Linux
+(OpenCode 2.1.2 from npm, integrity-verified, `opencode v2.1.2`; ZeroClaw 0.8.6, `zeroclaw 0.8.6
+(c473221)`, `zerocode 0.8.6`).
+
+### Claude Code Router module (`ccr`)
+
+`main/ccr/` (Marks-owned; IPC `marksCcr:request` `status|install|service|openUi`, sender/frame
+checked; preload `ccrStatus/Install/Service/OpenUi`, progress `marksCcr:progress`) manages Claude Code
+Router (`@musistudio/claude-code-router`, MIT, `musistudio/claude-code-router`; checked against
+3.1.3), the gateway behind the "Via Claude Code Router" route. It is a module card in Settings >
+Modules (`renderer/ccr-manage-ui.ts`, created by `marks-modules-ui.ts` after the CLI modules), not a
+chat or terminal type, with no activation toggle: the route needs it installed and configured.
+- Copies (`service.ts`): Chat Marks' own copy is an npm prefix `<userData>/modules/ccr/versions/
+  v<x.y.z>-<8 hex>/`, the one in use named by `<userData>/modules/ccr/current` (replaced by rename),
+  plus the launcher `<userData>/modules/ccr/bin/ccr` (`exec <node> <cli.js> "$@"`); it takes
+  precedence over PATH. A new version is a new folder, so a running daemon keeps its files; an older
+  folder is removed only when no daemon runs from it (`pruneVersions`, by the process list). A copy
+  the user installed (the `ccr` on PATH, else `~/.local/bin`, `~/.npm-global/bin`, `~/.volta/bin`,
+  `/usr/local/bin`, `/usr/bin`) must resolve to this package's `dist/main/cli.js` (its package.json
+  name, x.y.z version and `bin.ccr`); it is shown as "Using installed <path> <version>" (home as `~`)
+  and used as it is. It can be updated in place only after confirmation and only when its npm
+  prefix (`<prefix>/lib/node_modules/…`) and package folder are writable by the user (never with
+  administrator rights; otherwise `external_not_writable`), and "Install a copy managed by Chat Marks"
+  is offered beside it.
+- Install/update (`release.ts`): CCR is a Node.js program (`engines.node >=22`) with runtime
+  dependencies, one native (`better-sqlite3`, its config store): 3.1.3 pulls 101 packages, ~110 MB.
+  So the system's own Node.js (>= the `engines` major, else `node_too_old`) and npm do the tree,
+  under these rules: the main tarball comes from the registry through `npm-release.ts` (registry
+  only, no redirect, canonical URL, latest must still be the confirmed version: `version_changed`)
+  and is used only after its SHA-512 equals `dist.integrity`; `npm install --prefix=<stage>/app
+  --ignore-scripts --omit=dev --no-save --registry=https://registry.npmjs.org/ --userconfig=<empty>
+  --no-audit --no-fund -- <verified package.tgz>` (no package runs a script; `npm_config_*` and the
+  app's Electron variables are removed from its environment); then `npm rebuild -- better-sqlite3`
+  only (`NATIVE_PACKAGES`: its `prebuild-install || node-gyp rebuild` fetches the prebuilt binding
+  from better-sqlite3's own GitHub releases); the installed package must report exactly the version
+  and the binding must open a memory database (`node -e`) before the folder is renamed into
+  `versions/`. Stage `<module>/.stage-<uuid>` (0700) is removed in every case. The gate:
+  `ccrSupport` 3.x (`ok`, `newer` above 3.1.3), anything else `unsupported` (never offered).
+  Errors: `node_missing`, `node_too_old`, `npm_missing`, `npm_failed`, `version_mismatch`,
+  `native_failed`, `checksum_mismatch`, `version_changed`, `unsupported_version`, … (translated in
+  the card).
+- Service: `node <cli.js> start --daemon --no-open` (it starts `cli.js serve --daemon-child` for the
+  web UI and a gateway child, then exits; its stdout names the web UI with its token, so it is
+  never logged or returned) and `node <cli.js> stop` (stops the daemon `~/.claude-code-router/
+  service.json` names), with the copy in use; Restart = stop, wait for the gateway to go, start,
+  wait for `/health`. State = the gateway's own `GET http://<host>:<port>/health` (200 JSON with a
+  `status`; checked: `{"runtimeId":…,"status":"ok",…}` on 3456; the web UI port answers 404 there),
+  plus `ps -eo pid=,args=` for which copy the daemon came from. The gateway address is read,
+  read-only, from CCR's store `~/.claude-code-router/config.sqlite` (`node:sqlite` with
+  `readOnly`, `app_config` row `default`, only `gateway.host`/`gateway.port`, else `HOST`/`PORT`),
+  else from the user's CLI files' loopback router URL (`routerAddressFromCliFiles`), else
+  127.0.0.1:3456. "Open router UI" opens the `url` CCR registered in `service.json` (only an http
+  loopback URL of a live pid) with `shell.openExternal`; the address never reaches the renderer.
+- No downtime: after an install or update the router restarts with the copy in use only when no
+  routed Codex/Claude Code turn runs (`routedTurnsRunning`, probes registered by both engines), else
+  `restartPending` (checked every 5 s); a stopped router stays stopped. Stop and Restart are
+  confirmed, saying when routed chats are answering.
+- The user's files: the module never writes `~/.claude/settings.json`, `~/.codex/config.toml` or
+  anything in `~/.claude-code-router` (CCR edits those itself), and never prints or copies a key or
+  token. `configured` = the router detection of those files (Claude Code, Codex).
+- Card: state (Running / Stopped / Not installed), installed version (managed / "Using installed"),
+  latest release with "Update available", router address and which copy runs it, restart pending,
+  which CLIs it is configured for (or how to configure them in the router UI), notes (newer/
+  unsupported version, why it cannot install), one confirmed Install/Update button naming the npm
+  registry, Start / Stop / Restart router, Open router UI. Linux only (`unsupported_platform`
+  elsewhere; the routes detect nothing on Windows).
+Proof: `test/ccr-module.test.ts` (version gate, registry-only metadata, moved latest, integrity
+mismatch, npm/service argv, install into a version folder with launcher and pointer, refusals before
+npm, failures keeping the old copy, an installed copy shown and updated in place, daemon process
+parsing, `/health`, the config store read-only with synthetic keys, web UI URL checks, start/stop
+through the CLI, restart only without routed turns, fresh machine, configured-but-missing/stopped
+fallback), `test/ccr-manage-ui.test.ts` (card states), `test/agent-engine-claude.test.ts` and
+`test/agent-engine-codex.test.ts` (fallback/refusal with an unavailable router), `test/api-chat-ui.test.ts`
+(route notice). Checked live as the user (2026-10-22): the installed 3.1.3 (`~/.local`) was found,
+running from that copy on 127.0.0.1:3456 (port read from its store), configured for Claude Code and
+Codex, read-only; an install of 3.1.3 through this code into a temporary prefix and HOME (integrity
+verified, 92 top-level entries, 110 MB, better-sqlite3 built, 21 s with a cold npm cache) whose
+launcher answered `--help` and whose `start --daemon --no-open --port 3497` / `stop` ran in that
+temporary HOME without touching the user's running router.
+
+### CLIProxyAPI module management
+
+`main/modules.ts` adapts the systemd service (`cli-proxy-api.service`, `/usr/local/bin/cli-proxy-api`,
+start/stop/restart/enable/disable through `pkexec systemctl`). It identifies the service by the root
+banner (`GET /` → `CLI Proxy API Server`) and the console page title, never by an unauthenticated
+management request: CLIProxyAPI counts each one as a failed login and bans the loopback client for
+30 minutes after five. `main/cliproxy/` (Marks-owned, IPC `marksCliProxy:request`, sender/frame
+checked; preload `cliProxy*`, progress `marksCliProxy:progress`) adds:
+- versions (`release.ts`): installed = the binary's own `CLIProxyAPI Version:` line (`-config
+  <absent> -h`, 5 s); latest = GitHub `releases/latest` of `router-for-me/CLIProxyAPI` (official
+  community releases only, x.y.z, cached 1 h, bounded). A version that is not exactly x.y.z
+  (e.g. `-dirty`) is a local build and the UI warns that updating replaces it;
+- install/update (`installer.ts`, Linux x64/arm64; other platforms keep the guide/releases page):
+  the default `CLIProxyAPI_<v>_linux_<amd64|aarch64>.tar.gz` (never `_no-plugin`) and
+  `checksums.txt`, redirects only to GitHub release hosts, SHA-256 checked before extraction,
+  `/usr/bin/tar … -- cli-proxy-api` into a private 0700 staging dir, ELF check, then ONE
+  `pkexec /bin/sh -c <constant script> <name> <staged paths>`: update = install as
+  `.marks-new` + `mv` + restart if active; fresh install = system user, state dir, config only
+  when absent (from the release's `config.example.yaml`: 127.0.0.1:18081, generated management
+  password and `sk-marks-` key, saved as secrets only when the script printed `config-written`),
+  fixed unit (upstream unit + `ReadWritePaths=/etc/cli-proxy-api`), `enable --now`. The renderer
+  sends the version the user confirmed; a different latest release is refused;
+- management (`management.ts`): password = encrypted secret `marks:cliproxyManagementKey`, saved
+  only after `GET /v0/management/config` answers 200 (401 = wrong), never returned; a rejected
+  password is not retried until replaced. API keys: `GET /v0/management/api-keys` (renderer sees
+  sha256-prefix id + last 4), Create = `PATCH {old:new,new:new}` (appends) then `setApiChatKey`,
+  Revoke = `DELETE ?index=n` after re-reading the list by id (clears the chat key if it was it).
+  Writes fail with `management_save_failed` when the service cannot write its config (the
+  upstream unit mounts `/etc` read-only);
+- save repair for existing installs (`installer.ts` `repairConfigWrites`): offered when a key write
+  answered `management_save_failed`, or proactively when `systemctl show -p ProtectSystem -p
+  ReadWritePaths` reports strict/full without `/etc/cli-proxy-api` covered, or root still owns
+  that directory. After confirmation, ONE `pkexec /bin/sh -c <constant script>` (no arguments)
+  writes the drop-in `cli-proxy-api.service.d/marks-writable-config.conf`
+  (`ReadWritePaths=/etc/cli-proxy-api`), `chown cli-proxy-api:` the directory and `config.yaml`
+  (modes unchanged), `daemon-reload`, and restarts only an active service; the unit is not edited.
+The installed version probe is cached by the binary's path, mtime and size.
+The console opens signed in: with a stored password, `seedConsoleLogin` loads `/healthz` in the
+ephemeral partition, checks the origin, writes the page's own `managementKey`/`apiBase`/
+`isLoggedIn` localStorage entries, then loads `management.html` (same request fence).
+UI: `renderer/cliproxy-manage-ui.ts` inside the CLIProxyAPI card (confirmations via
+`window.confirm`). Proof: `test/cliproxy-module.test.ts`, `test/modules.test.ts`,
+`scripts/verify-cliproxy-module.cjs`.
+
+### MarksPanel application admission
+
+`main/markspanel-auth.ts` owns the mandatory MarksPanel login boundary. On every startup,
+the encrypted OS credential store is consulted and the bearer is validated against
+`https://marks.ia.br/api/user`; expired access tokens are renewed through the existing
+device-token endpoint. Without valid identity proof, the main workspace, IPC and MCP
+listeners do not start. The dedicated sandboxed login window offers server-mediated
+email/password and device-code authorization, with credentials and tokens withheld from
+the renderer. The encrypted session records the instant of successful user authentication:
+login admission expires after seven days even if the bearer/refresh token is still accepted.
+Refreshing a bearer preserves that instant; an older stored session without an authentic
+timestamp requires a new login. After admission, one main-owned check refreshes or validates
+the session every 60 seconds. A revoked/invalid/expired login clears the local secret and closes the app;
+an unavailable server closes this runtime while retaining encrypted credentials for a
+later startup. The General page's sign-out action clears that local session and exits.
+There is no verified server-side token-revocation endpoint, so local sign-out must not
+claim to invalidate already issued remote credentials. `test/markspanel-auth.test.ts`
+covers startup/refresh/revocation and negative network responses; a real account remains
+necessary for provider-side acceptance evidence.
 
 ### Images
 
@@ -1663,6 +2654,33 @@ model/effort, inserts the full text, uploads native files,
 rechecks composer and attachment nodes, crosses app authorization, then **rechecks again after
 every await before Send**. Native stable user-message and conversation identity establish
 acceptance. Composer insertion, button disappearance and a local “sent” variable do not.
+An occupied composer blocks delivery unless it holds this message's own text, or exactly one of the
+app's own unsent messages for that chat: `/input/claim` returns `ownUnsent` (`ownUnsentTexts`: claimed
+with `requiresAuthorization`, then failed or withdrawn before Send authorization, no images or
+attachments, not part of a combined companion claim, the last 24 h, at most 5, newest first; never the
+claimed message itself). The page re-reads it after model selection, where ChatGPT may restore it. The page compares with whitespace removed, also
+Markdown-unescaped, and replaces that text as a whole; edited or unlisted text stays the person's
+draft (#1922: a rotation continue left in the box refused every later message).
+Browser repairs recognise one more leftover in an occupied composer (#2074): each repair offer
+carries `ownSent` (`ownSentResidue`: the app's own automatic sends in that chat that ChatGPT
+received, `automaticSendKind` with a `messageId`, as `{ text, messageId }`; no images, attachments or
+companions, last 24 h, at most 5; never an unsent text). Each chat's latest such send is also kept in
+the durable `own-sent-receipts` (one per chat, at most 200 chats, texts up to 20,000 characters), so it
+is still known after the outbox history (newest 50 finished rows across all chats) drops it. A
+chat's record goes with the chat (`forgetOwnSent`: deleting it in the app, for every conversation id
+it had, saved before the chat itself is removed; or ChatGPT reporting it deleted). The store is
+`{ version: 1, receipts, forgotten }`: `forgotten` lists chats deleted in the last 24 h, so a send
+acknowledged late for one is not recorded again. Nothing older than 24 h is kept: it is trimmed when
+the store loads, on each read, and hourly. All changes run in the store's own lock (not the input
+queue, which the deletion path may already hold). `clf-repair-check` clears the composer only
+when the chat's latest user message has one of those message ids, the composer holds exactly that
+send's text (line breaks and outer spaces aside, or ChatGPT's Markdown-escaped form; no
+whitespace-blind match), and nothing is attached, through the `captureComposerDraft` lease (unchanged
+text only). The page then reports `cleared: 'own-sent'` (`/status?repairCleared=`, logged once; that
+report, like `repairHeld` and `repairFailed`, hands out no work: no repairs and no placement, since
+its reply is not read). Anything else is held as `draft` as before. A
+`repairHeld` reply stamps `claimAskedAt`, so a page that keeps holding never spends the no-page
+offer budget.
 
 Direct active-turn corrections freeze `directTurn` in the same outbox entry. The exact turn
 start decides eligibility; earlier or running MCP calls do not revoke it. Recheck the exact claim
@@ -1745,10 +2763,15 @@ holds a call before it is sent, so nothing reaches the app and only the user can
 page reports it on every `/activity` poll as optional `approval=1|0` (older extensions omit it);
 `src/main/approval-wait.ts` keeps the episode fresh for 75 s. While it stands, silence recovery
 (before the no-recorded-call verdict), `recoveryHeldByCalls`, the worker sleep sweep and the page's
-ten-minute stall clock all wait. The chat gets one `approval-wait:` progress row (texts in
+ten-minute stall clock all wait. Nor does the page end the turn while the card stands: neither the
+quiet window after Stop goes nor a native final closes it (`heldForApproval` in the observer, and the
+Fiber terminal check), since the turn goes on once the person answers (#1977: 2.1.49 closed it after
+12 s and lost every answer section that followed). Its last message is not published as `final`
+meanwhile (the recorder closes a turn on a final), nor for 10 s after the card goes (`APPROVAL_SETTLE_MS`: the old final can still be on the page while the turn goes on), and the app's Stop still ends it as stopped. The chat gets one `approval-wait:` progress row (texts in
 `src/shared/approval-wait.ts`, translated by the renderer, with Open in browser) and, after 30 s, one
 stop-notice-style desktop notice whose click opens the chat in the app. The app never answers the
-card on its own. The session list carries every waiting chat as `approval`; a catalog-only
+card on its own, except marks-coo's opt-in Company authority below.
+The session list carries every waiting chat as `approval`; a catalog-only
 `session:changed` fires when a wait starts, ends, or goes stale with no poll left to say so.
 
 Since 2.1.38 the person can answer it in the app. With `approval=1` the page also sends
@@ -1766,6 +2789,33 @@ the page carries each token out once and reports `approvalResult` (`clicked`, `c
 `unavailable`) on its next poll. A new card drops an unsent answer; one nobody took within 30 s is
 `expired`. A standing card polls at the active cadence (2 s) even in a hidden tab.
 `sessions:approvalCard { id }` gives the panel the card and the last answer's outcome.
+
+Chat Marks (2026-10-29): the one other filer of that same answer is marks-coo, under the CEO's
+opt-in, revocable authority in Company settings (`cooHostApproval` in company.json: `enabled`,
+`epoch`, `riskTerms`, `audit`; off by default; enabling asks a native confirmation, IPC
+`marksCompany:request { action: 'cooHostPolicy' }`). After each `/activity` poll's
+`noteApprovalCard`, `cooHostApprover().consider(conversationId)` (`src/main/company-coo-approval.ts`)
+files Allow once through `requestApprovalAnswer` and `wakeApprovalConversation` only when
+`companyApprovalOwner` finds the conversation id on exactly one live admitted/running ticket (or the
+verified delegated chief binding), no CEO risk term matches the card's words, the card is not at the
+8-line/300-character bound, Allow once is enabled and no person's answer is pending. A chat no
+Company record names is left alone; ambiguous, risky or Allow-disabled cards are audited as
+`held-*` and the CEO is told through the notification center (`approval-pending`). Every policy
+change bumps the epoch and first calls `revoke`, which withdraws unsent answers
+(`withdrawApprovalAnswer`); the store refuses an `allowed` audit row of another epoch.
+
+A card waiting in a chat that is not on screen is named in the window's notices
+(`#approvalNotice`, renderer `paintApprovalNotice`): one line per waiting chat, "worker-1 waits for
+your approval" for a worker of the open chat (its parent's title added otherwise, a chat's own title
+for any other chat), the open chat's workers first, each with Open (shows the Chat page and that chat)
+and the same `approvalCardPanel` Deny / Allow once. Lines are kept by session id, so a repaint never
+re-reads a card or drops an answer being sent; the open chat's own card stays in its timeline only.
+Off the Chat page the catalog is not reread, so a `session:changed` there reads only the waiting set
+(`scheduleApprovalRead`). The desktop notice is retried on later polls while the notifier returns
+`false` (the window had focus), so leaving the window still tells the person. A poll that sees the
+card go keeps the episode as answered before it awaits anything, and writes "answered" only when no
+redraw took the episode back meanwhile (live 2.1.44.1, 2026-10-22: two workers of the open prime
+waited 85 minutes while the window had focus and only a folded dot said so).
 
 At ordinary silence recovery, a never-offered immediate correction takes priority over generated
 Goal/Loop work and is sent as a normal native user message. Include at most the next eligible
@@ -1967,6 +3017,21 @@ composition retain their ordinary editing behavior.
   message limit, preserving the brief's ends with an explicit middle-omission notice when needed.
   Plan statuses are reported progress, not verification evidence. This card neither delivers
   instructions nor completes/deletes queued checkpoints.
+- **Steps for the person (#1695):** `ask_user_to_run` records one step (exact command, folder
+  inside an approved root, purpose, expected files, constraints) in the session's `requests.json`
+  (`fileUserRequest`, serialized with the session's other writes) and returns its `ur_…` id. The
+  app never runs, retries or reroutes it, and nothing labels it safe or checked. The same open
+  command and folder returns the first id; at most 20 open and 60 kept per session (oldest answered
+  dropped); an unreadable file is renamed aside (`requests.json.unreadable-<ms>`), never
+  overwritten. Expected files are placed inside approved roots when recorded and only `lstat`ed
+  later (size, time); server folders and paths outside are reported unchecked. Only the person
+  answers (`sessions:answerUserRequest` → `answerUserRequest`, first answer stands). Session
+  controls carry `userRequests` (open ones with `found`); the timeline renders an `ok`
+  `ask_user_to_run` call as the step's card outside round folding, and the composer dock lists open
+  steps. Prepared handoffs list open steps (at most 10) and Goal/Loop get one system line while any
+  is open. Tools stay registered once offered (`exposedUserRequests`); handlers refuse while
+  recording or command (unless Read-only over command) is off. The boundary against asking the
+  person to run what the model declined is stated to the model only; it is not enforceable.
   Before attribution, `request-plans.ts` durably retains the latest complete plan for each
   request (256 entries / seven days) and attaches it on proof or restart. The session's rebind
   commit records `retiredChatAt` alongside its existing lineage. Recovery may attach a historical
@@ -2029,15 +3094,59 @@ A chat's own message sent into that same chat at set times; one schedule per cha
 (1–24, real hours from when it was saved), daily, weekdays and weekly at a local `HH:MM`. A time
 the spring clock change skips runs at the first minute after it; a repeated autumn hour runs once.
 Checked every 30 s and on `powerMonitor` resume. A due run is one `enqueueInput` row with
-`scheduled { scheduleId, dueAt, late }`, mode `after-turn` while the chat has an active turn
-(never joining it), else `auto`, so read-only mode, the "slow down" hold and a missing browser hold
+`scheduled { scheduleId, dueAt, late }`. The outbox chooses `after-turn` only for a
+recorded active turn with a durable completion boundary; browser-only activity without such a
+boundary remains an `auto` browser send that waits for the live idle policy. Scheduled rows never
+join the active model turn through the tool or direct-composer path; browser claim and Send
+authorization recheck eligibility. Read-only mode, the "slow down" hold and a missing browser hold
 it like any automatic send. Exactly once: the row id is derived from the schedule id and `dueAt`, so
 a crash before the schedule is saved queues the same id and the queue keeps one row. Missed runs
 (app closed, asleep) send one run, `late` when more than 2 min after its time; a time whose previous
-run still waits in the queue is skipped; a refused queueing skips that time once (no 30 s retry
-loop); saving or resuming starts at the next time; an ended schedule sends nothing; a deleted chat's
+run still waits in the queue is skipped; a deterministic admission refusal skips that time once,
+while a transient outbox read/write failure durably retains `retryDueAt` and retries the exact
+same occurrence id after restart instead of silently losing it. A pending retry also blocks a
+new random-id Run now until reconciled, avoiding duplicates. Saving or resuming starts at the
+next time; an ended schedule sends nothing; a deleted chat's
 schedule is removed. IPC `schedules:get|save|pause|delete`; errors are sentences the renderer
 translates. Queue rows and pending messages say "Scheduled" (late: "Scheduled · late, was due …").
+The global Scheduled page projects these same per-chat records with `schedules:list`, resolving
+current chat titles and bounded message previews rather than full stored prompts, without
+creating a second task store. It opens the existing chat and
+calls the existing pause/resume/delete actions. Only a chat already bound to a ChatGPT
+conversation can create or manually run a schedule. `schedules:runNow` queues a manual run through
+the same input outbox (waiting for the active turn if necessary) without advancing the
+recurrence cursor; it durably records a recoverable manual-run intent (the exact input id, text and
+time) before enqueue. Run now first checks the same outbox and returns `false` (already waiting)
+instead of queueing another identical message while any row for that schedule remains pending;
+the due runner checks every pending outbox row for the schedule id, not only the latest
+`lastInputId`, so a newer manual run cannot hide an older queued run. An interrupted manual intent
+is reconciled against its exact outbox row or replayed with the same id only after no different
+scheduled message is still pending. An unconfirmed authorized/cancelled browser Send also blocks
+another manual id until a definitive delivery/no-send receipt is available. If enqueue rejects,
+it re-reads the outbox:
+keep the intent when the row exists or the read fails, but drop it after a successful read proves
+the row is absent, so a pre-commit refusal does not retry forever. The intent is cleared only after
+that reconciliation is saved. If saving a new intent fails, the prior schedule snapshot supersedes
+that failed durable generation before returning; a refused click cannot become a hidden enqueue on
+retry or shutdown. Failure logs use safe error codes only, never raw error messages, local paths or
+chat ids. All schedule outcome logs omit local session ids. Schedule IPC returns only allowlisted,
+translated domain errors; unexpected persistence/queue failures become one generic translated
+message, never a native filesystem error or local path. A successful manual Run now clears an old
+`missedDueAt` marker just like a newly queued recurring run, but does not advance the recurrence
+cursor. A failed/absent manual enqueue leaves the missed marker intact. A failed session read is
+logged and retains the schedule. A deleted chat cannot be targeted, and a
+confirmed orphan record is removed and logged. A chat whose session directory is still present
+but whose metadata cannot be read is retained; only a positively absent session directory is
+treated as a deleted chat. A chat that cannot be read during the global list refresh is kept and
+omitted from that refresh while the other schedules continue loading. A missing schedules file
+is the only empty first-run state; invalid JSON, schema errors and a file from a newer version
+fail closed and remain on disk rather than being overwritten by the next edit. The runner
+notifies the renderer after each persisted schedule change, including recovered manual intents
+and missed/ended/blocked outcomes that do
+not enqueue a message. The global list projects `missedDueAt` until a later run is sent, so a run
+missed while the app was closed or asleep remains visible outside the chat. Its recurrence times
+use the selected locale's 12/24-hour clock, and keyboard focus is restored when a background
+refresh or language change rebuilds the rows.
 The delivered `user_message` records `scheduled { dueAt, late }` (copied from the input in
 `recordDeliveredInput`, kept when a later page echo lacks it), so the sent message keeps the same
 line in the chat after the outbox row is pruned.
@@ -2110,6 +3219,15 @@ UUID plus sediment asset id. They are neither assistant prose nor local tool cal
 establish turn completion, Goal eligibility or activity. Typed public tool/assistant image
 outputs supply metadata first; final provider status and a complete, exactly owned native IMG
 permit optional preview capture. Main/thumbnail/mask clones of the same asset share that identity.
+Public `generated-image` items are read both at the turn's top level and as direct children of
+`chatgpt-reasoning-group`. Both use the same exact message/asset and pixel-ownership checks;
+an image inside a working group never establishes top-level answer completion or exposes reasoning text.
+A gallery (several images in one answer) mounts one large preview plus a thumbnail strip
+(`div[role=group] > button[aria-pressed] > img`, part of `GENERATED_IMAGE`). Its blob pixels belong to
+an asset only through `galleryImageAsset` (#2005): the image's own id (the preview's `imageId`, which
+must say `isComplete` and not `isPreview`, or a thumbnail's `image.id`) must match exactly one typed
+`generated-image` of this turn, with the same message and source, and that one completed. The gallery's
+shell `item` is only its first image, so matching against it alone recorded one picture per gallery.
 The extension captures already-loaded pixels without fetching signed URLs; route, document epoch,
 owner, node and source revision must survive each await. At most two captures run concurrently.
 Previews are WebP, at most 384,000 encoded bytes, 1,600 pixels per edge and 2.56 million decoded
@@ -2258,7 +3376,150 @@ or reloading attachment previews. Old history gains badges when natively reobser
 
 Continuous recording serves the local transcript, exact identity and continuation infrastructure.
 There is no model-facing session lookup tool. `update_plan` remains recording-backed; historical
-lookup tool calls remain displayable in existing transcripts.
+lookup tool calls remain displayable in existing transcripts. Chat Marks Brain (H1a) is a
+separate, user-curated local memory store: it does not read the session archive or expose a
+general session-history lookup. H2 searches staged copies of old MarksCode/OpenCode/MarksClaw
+history for the user only; no model tool reads it.
+
+### Chat Marks Brain (H1a)
+
+`src/main/brain/store.ts` owns `<userData>/brain/brain.sqlite` with SQLite WAL and FTS5;
+`src/main/brain/settings.ts` owns `state/marks-brain-settings.json`. Neither owns Chat Marks
+session history, MarksCode/MarksClaw data or a remote synchronization stream. Memory writes
+are serialized, deduplicated by normalized content hash, and redact credential shapes and
+values loaded from the K vault before storage. A damaged existing database fails closed and
+is retained for deliberate recovery; its default file mode is 0600. The database is local
+even when no model-facing Brain tools have been enabled.
+
+Brain tools default Off separately for native ChatGPT Core and CLIProxy API chats.
+`memory_search` returns bounded, untrusted background context, never instructions;
+`memory_save` requires a proven exact local session, edit permission and a non-read-only
+context, then human approval by default. Native chats use an ephemeral exact-chat pending
+approval, and API chats reuse the existing per-turn approval gate. Validate the exact
+session and active capability after approval before writing. The settings page and the
+explicit `/remember <text>` are user-authored saves; `/recall` inserts a bounded
+`<memory-context>` draft without sending it.
+
+`/remember` memorizes the chat it is called in (`renderer/brain-ui.ts` `rememberChatContext`,
+`main/brain/chat-memory.ts`). Bare, with nothing selected or left in the composer, it asks main
+`chat.tools` whether that chat's model has `memory_save` now (ChatGPT: `chatgptTools`, edit
+permission and a `current` Core refresh; CLIProxy: `apiChatTools`; Claude Code/Codex/OpenCode:
+`enginesEnabled`, not on Windows, not MarksCode). Available: one localized instruction (review the
+conversation, one memory per decision/fact/preference/next step, title and tags, no chit-chat or
+secrets) goes through the ordinary `sendComposer` path, so each proposed memory meets the usual
+approval card. Unavailable: nothing is sent; a toast names the switch, with Open Brain and Save
+last answer buttons. `/remember-answer` (and that button) is the model-free fallback
+`chat.saveLatestAnswer`: the newest finished answer (`latestAnswer`, overflow read back, 3,600
+characters at most, redacted by `brainSave`), titled with the chat. `/remember <text>` and selected
+or drafted text in a chat go through `chat.save`. Every chat-made memory, model or user, gets
+`{source:'chat', sessionId, engine}` (`chatgpt`, `cliproxy` or the engine id) and scope
+`project:<projectId>` (`global` without a project) resolved in main; the renderer sends only the
+session id and cannot set scope or provenance. Proof: `test/brain-chat-memory.test.ts` and the
+`/remember` cases of `test/renderer-timeline.test.ts`. The `marksBrain:request` IPC is a fixed,
+Zod-validated action list guarded to the main window/frame. Its preload is not a generic
+filesystem bridge. Keep the few Core/API registration hooks marked `Chat Marks:`.
+
+### Chat Marks Brain (H1b sources)
+
+`src/main/brain/recall.ts` owns combined recall and remote sync; `providers/` holds one module
+per optional source: `ai-memory.ts` (remote MCP, minimal streamable-HTTP JSON-RPC client:
+initialize, tools/list, then `memory_query` / `memory_write_page`), `openviking.ts`
+(`/api/v1/system/status`, `/api/v1/search/find`) and `marks-remote.ts` (`/health`,
+`/memories/human/recall`, `/memories/human`, `/memories/{id}/delete`). Every provider is Off by
+default in `settings.providers`, has its own timeout and error, and is reported in Doctor/Sources.
+Nothing leaves the machine unless a provider is enabled *and* `remoteRecall` (query text) or
+`remoteSync` (saved memories) is on; queries and synced content are redacted first and imported
+memories never sync. Results are merged round-robin, de-duplicated by remote id/content hash,
+budgeted and labelled with their source in `/recall` and `memory_search`.
+
+Credentials come only from K vault entries bound to the provider's exact origin
+(`brain.ai-memory`, `brain.openviking`, `brain.marks-memories`); a missing key sends nothing.
+"Import from MarksCode" copies the one needed value (ai-memory Authorization header, Marks
+`memories_api_key`) into the vault after the user clicks and enters the master password; no value
+reaches the renderer or logs. Plain HTTP is allowed only on loopback or, for the Marks API, behind
+its explicit `insecureHttp` acknowledgement; the vault accepts an `http:` origin only with an
+entry-level `insecureHttp` flag, and model-facing `vault_use` refuses such entries. Markspanel
+bearer auth uses the main-only `markspanelBrainSession()`. Brain logs one `brain: …` line per save,
+recall, held approval and provider error, never content. Settings patches merge only sent keys
+(Zod 4 `partial()` fills defaults). ai-memory is a Brain provider, not a Plugins catalog entry:
+the curated catalog requires OAuth remotes and reviewed license inventory.
+
+H1b has no engine MCP, automatic prompt injection or MarksCode/MarksClaw archive import. Those
+are separate H phases.
+H1a has no remote Marks API, OpenViking or MarksCode/MarksClaw archive import. Those are
+later separately approved H phases.
+
+### Chat Marks Brain for agent engines (H1c)
+
+`src/main/brain/engine-mcp.ts` owns a local-only MCP route `http://127.0.0.1:<port>/mcp/brain/<secret>`
+exposing only `memory_search` and `memory_save`, Off unless `enginesEnabled`. It is its own lazily
+started loopback listener, not a path on the connector listener: that one runs only while
+ChatGPT is connected, moves port on reconnect and its origin may be published by a user's tunnel.
+Nothing hands this URL to a tunnel; the route answers 404 off its secret path, refuses a non-loopback
+Host, any Origin and forwarding headers, and needs `Authorization: Bearer <token>` (401 otherwise).
+Claude Code (one process per chat) gets a per-chat token in a 0600 `--mcp-config` file under
+`userData/brain/engine-mcp/` (0700, emptied at startup and quit) plus `--allowedTools` for the two
+tools; never `--strict-mcp-config`, so the user's own MCP servers keep loading. A changed switch
+restarts an idle host. Codex (one shared app-server) gets `-c mcp_servers.chat_marks_brain.url=…`,
+`.bearer_token_env_var="CHAT_MARKS_BRAIN_TOKEN"` and `.default_tools_approval_mode="approve"` after
+the safe overrides, the token only in the server's environment, rotated per app-server launch; a
+switch change applies at the next app-server start. OpenCode 2.1.x gets the server at runtime per
+chat location through `PUT /api/experimental/mcp/chat-marks-brain` (live on 2.1.2: no config file
+is written, a service restart forgets it), removed on quit or when the switch is off; TUI sessions
+in that location see it too. Codex and OpenCode tokens name only the engine: a save is attributed
+to the one chat whose own turn reported the same Brain call with the same arguments (`mcpToolCall`
+item, `session.tool.called`); unmatched or ambiguous saves are refused. Saves take the H1a approval,
+then re-check the chat and switch before writing with `{source:'chat', sessionId, engine}`.
+Windows/WSL engines are not wired (another loopback). Engine rows show `mcp:chat-marks-brain/<tool>`
+whichever engine spelled it (`brain/engine-names.ts`, `tool-row.ts`).
+
+`src/main/brain/context.ts` is optional automatic context (`autoInject`, Off): a `<memory-context>`
+block framed as data, at most 3,000 characters, local memories only. API chats add it to the system
+message each turn; ChatGPT gets it only in the opening message's COS_CONTEXT (`brainContext` scope
+in `prepareSessionPrompt`), so it counts against the 96k ceiling, is frozen in `deliveryText` and is
+dropped rather than failing when it does not fit. Follow-ups, workers and engines get none.
+H1a has no remote Marks API, OpenViking, engine MCP or automatic prompt injection.
+Those are later separately approved H phases.
+
+### Chat Marks Brain H2: old-history search and selective import
+
+`src/main/brain/import/` (actions `import.*`, `history.*`, `archive.*` of `marksBrain:request`,
+list in `shared/brain-import-actions.ts`; push `marksBrain:progress`, preload `onBrainProgress`;
+UI `renderer/brain-import-ui.ts`, mounted once from `main.ts` into `#brainImport`) imports
+MarksCode/OpenCode/MarksClaw history SELECTIVELY. Nothing is imported in bulk; every write
+carries `confirmed: true` from the user's click and is refused without it.
+- Originals are never opened by the app. All reads go through staged copies in
+  `~/.local/state/chat-marks/brain-import/staging/<uuid>/` (0700, `manifest.json` with each
+  source's sha256/size/mtime before and after; `unchanged` false = it moved during the copy).
+- Root sources (`sources.ts` `ADMIN_SOURCES`: root `markscode.db`, `opencode.db`,
+  `markscode-11510/-143/-1227_7.db`, `memory/*.jsonl`, legacy `storage/{session,message,part,project}`)
+  are copied by ONE `pkexec /bin/sh -c ADMIN_EXPORT_SCRIPT chat-marks-brain-export <uuid>`
+  (`admin-export.ts`, CLIProxy precedent). The constant script has no single quote (the same
+  text is offered for `sudo /bin/sh -c '…'`), takes the owner from `PKEXEC_UID`/`SUDO_UID`
+  (never 0), checks free space (2x the source sizes), opens originals only with
+  `sqlite3 -readonly` / `mode=ro&immutable=1` (a non-empty WAL: db+wal+shm are copied first and
+  only the copy is opened), creates only `session_v2`, `session_message`, `project` and v1
+  `session/message/part` for ids missing from v2 (`filteredCopyStatements` is the Node twin),
+  never `credential`/`account`/`kv`/`auth.json`, then `chown -R` to the requester.
+  `user-export.ts` does the same in-process for sources the user can read (`opencode.db` of the
+  running 2.0.25 service, MarksClaw `sessions.db` whose data is only in the WAL): db+wal+shm copied
+  together (3 tries while hashes move), only the private copy opened.
+- `indexer.ts` `buildIndex` builds `<staging>/index.sqlite` (FTS5) in a `worker_threads` worker
+  (`worker.ts` runs its source text; keep it self-contained). Cursor `(time,id)` per source/pass
+  committed with each batch: cancel/quit resumes. Dedupe by `opencode:<ses_id>` across databases
+  (v2 > v1 > legacy JSON, then more messages, then newer); sub-agent sessions fold under the parent
+  in search and are listed as children in the viewer.
+- `search.ts`/`reader.ts`: AND-of-quoted-terms FTS over every staged index and the archive;
+  reading is bounded (64k chars/message, 2k/tool output, 5 MB and 5,000 messages/conversation) and
+  redacted (`redactSecretText` + vault values).
+- Imports: "Save as memory" = text the user wrote/selected, `brainSave` with provenance
+  `import`; "Keep in archive" = `<userData>/brain/archive.sqlite` (0600, FTS, separate from
+  `brain.sqlite`, 4 GB limit, idempotent by key); "Open as read-only chat" (`materialize.ts`) =
+  a `cosapi-` session with ledger engine `markscode` (retired, view-only), reusing an existing
+  chat with the same `backendSessionId`; hybrid memories: preview with checkboxes, only selected
+  items saved, dedupe by content hash and (file, source_id). "Delete copy" removes only a staged
+  folder. Proof: `test/brain-import.test.ts` (synthetic v1/v2/mixed, credential tables, WAL-only
+  MarksClaw, legacy JSON, hybrid JSONL; originals hashed before/after).
 
 Desktop session lists use stable `(updatedAt,id)` pagination. Each session selection loads a
 recent tail and opens at the bottom after its current load renders, including A -> B -> A;
@@ -2301,6 +3562,12 @@ Expanded tool arguments/results and Compact & Resume content use the chat pane's
 scrolling, without nested vertical text scrollers. Streaming compaction revisions retain the
 disclosure and unchanged sections; the timeline owner preserves the visible row or follows
 the bottom only when the reader was already there. Collapsed bodies leave layout entirely.
+Event rows (`eventRow`) and compaction blocks carry a `<time>` (hours and minutes of when the app saw the message, the question's clock too; `authoredTimeOf` only when the app saw it more than 5 minutes after it was written, as for an earlier answer read after a reload; none for a damaged time; it follows a language change; the full date in its title, `datetime`
+attribute, `rowTime` in `dom.ts`). It is hidden unless `ui.showMessageTimes` (Settings → General,
+"Show message times", off by default; saved through `settings:save` like `followOutput`) puts
+`show-message-times` on the document element; then messages, images, sub-agent messages, chat
+errors and compaction rows show it above themselves, on their own side; the full date is its title
+and accessible name. Tool and progress rows never show one. A damaged saved value loads as off with one warning.
 With Follow new output enabled, only a reader gesture changes that following intent. Its
 pending scroll belongs to the selected-chat generation, not a wall-clock grace period:
 scroll delivery may wait for a slow rendering opportunity. Input with no movement expires
@@ -2316,6 +3583,60 @@ The chat scroll container reserves its scrollbar gutter even without overflow. A
 window/sidebar width and zoom, tool disclosures, history controls and tail reserves must not
 change prose width or line wrapping. `scripts/verify-chat-width.cjs` checks these transitions
 in real Electron at narrow/wide widths and multiple zoom levels.
+
+### Chat Marks Jarvis (J, J2, J3 voice provider)
+
+Jarvis is opt-in push-to-talk for a selected normal ChatGPT or CLIProxy API chat (`src/renderer/jarvis.ts`,
+Settings > Jarvis). J used Windows dictation; J2 added in-memory MediaRecorder capture on every
+OS with CLIProxy `/audio/transcriptions` and an already installed whisper.cpp
+(`src/main/jarvis-audio.ts`, IPC `jarvis:audio`, main-window/main-frame only). J3 adds:
+
+- **Voice provider** (`src/shared/jarvis-voice.ts`, `src/main/jarvis-voice.ts`): any
+  OpenAI-compatible base URL (HTTPS; plain HTTP only on loopback), STT model, TTS model and voice,
+  suggestions from `GET {base}/models`. Keys are Vault K entries `jarvis/voice-primary` and
+  `jarvis/voice-fallback`, bound to the exact origin with header `Authorization`; saving needs the
+  master password (`storeJarvisVoiceKey`), daily use reads them with `useVault` in main and never
+  returns them. Google Gemini uses its origin-bound `x-goog-api-key` header. A 401/403/429/5xx
+  with the primary key is retried once with the fallback.
+  STT is `POST /audio/transcriptions` (multipart, the recorded webm/ogg/mp4; one WAV retry through
+  an installed ffmpeg when the provider rejects the format or returns empty text) or
+  `chat-audio`: a multimodal chat model on `/chat/completions` with `input_audio` WAV (needs
+  ffmpeg). g4f.space currently answers `/audio/transcriptions` with empty text, so its preset
+  uses `chat-audio`; its `srv_…:` model ids change, so the page warns when the chosen id is not in
+  the live list. TTS is `POST /audio/speech` (`response_format: mp3`), bounded and played from a
+  blob URL. Gemini 3.5 Transcribe instead uses `/v1beta/interactions` with inline bounded audio,
+  `generation_config.transcription_config` and `output_text`/`model_output`; `generateContent`
+  cannot be used as its dedicated transcription endpoint. Gemini TTS uses Interactions WAV.
+  Renderer provider status is scoped to the exact config and latest request generation: older
+  missing-key/error checks cannot disable a newly initialized motor, and a different provider's
+  cached credential status cannot arm its microphone. Nothing is written to disk; logs carry
+  timings and statuses, never keys or text.
+- **OS permission and CSP**: the default session denies every permission request except an
+  audio-only `media` request from the main window's own main frame and page URL
+  (`src/main/jarvis-permissions.ts`); before J3 that handler denied the microphone too, so J2
+  capture could not start outside Windows. The renderer CSP adds only `media-src blob:` for the
+  in-memory speech audio.
+- **Engine order** `auto` = provider → CLIProxy → local Whisper → Windows; a recorder engine that
+  fails or returns no text hands the same bytes to the next usable one. Stored J1/J2 preferences
+  without `version: 2` migrate their old default `cliproxy` to `auto`.
+- **Turn-taking** (after JARVIS-OS-V.2): the streamed `assistant_message` rows of the voice turn
+  feed `JarvisSentenceSplitter`; complete sentences go to `JarvisSpeechQueue`
+  (`src/renderer/jarvis-speech.ts`), which synthesizes one sentence ahead while the current one
+  plays and stops everything at once on barge-in (push-to-talk while speaking or thinking, chat
+  change, blur). Typed ChatGPT replies speak only once when the corresponding recorded turn
+  finishes, with prior chat history ignored and newer questions superseding older pending replies.
+  `turn_end` flushes the rest. Optional continuous conversation listens again
+  450 ms after the spoken answer, ending on 1.4 s of silence (`JarvisSilenceGate`, Web Audio
+  level) and pausing after 8 s without speech; push-to-talk stays the default. Earcons are short
+  Web Audio tones (on by default, switchable). The composer shows `#jarvisStatus` and the button
+  `data-state`: listening / transcribing / thinking / speaking.
+- Tests: `test/jarvis-voice.test.ts` (fake OpenAI-compatible HTTP server: models, transcriptions,
+  chat-audio, speech, fallback on 401/403/429/5xx, origin binding, ffmpeg retry),
+  `test/jarvis-speech.test.ts` (splitter, queue, barge-in, silence gate, settings validation),
+  `test/jarvis-conversation.test.ts` (provider-first order, streamed sentence speech, barge-in,
+  continuous mode). Real keys are never used in tests; live checks read them from the process
+  environment only. PersonaPlex was evaluated and deferred:
+  `docs/feature-notes/jarvis-personaplex-assessment.md`.
 
 ### Context pressure and Usage are different measurements
 
@@ -2452,7 +3773,15 @@ refreshes or model-list requests; `/input/claim` and `/repairs/claim` refuse it 
 tab to open through `/activity` or its `/compact` reply either (`opensNewWork`, #1852), which also
 holds for an out-of-date companion. It still records and stops what the person
 opens there, and works on as before once the CoS browser is gone. The chosen CoS browser takes a
-new chat's opening custody over from another browser. `browser-proof.ts` keeps, across restarts, the version last seen there and
+new chat's opening custody over from another browser, and a chat's repair too: `takePendingRepairs`
+skips a chat held by another browser for every browser except the chosen built-in one, since the holder
+may not claim it (#1960; before, such a chat's recovery sat with nobody able to take it). A browser that may not
+claim (not chosen, or out of date) is handed no repair that needs a claim, except a stalled-tab repair for a
+chat it holds, which `/repairs/claim` lets that holder take (`holdsStalledTab`): thawing its own frozen tab opens
+nothing new, and only it can; the chosen browser does not take a stalled repair over. With "browser only" on, the
+chosen browser is not handed a repair for a chat another browser holds (it may not open it): the repair stays
+queued without spending offers, logged once per episode. A refused claim from a browser that is not chosen is
+logged once a minute per chat. `browser-proof.ts` keeps, across restarts, the version last seen there and
 ChatGPT's last signed-in answer, so a closed browser keeps its state and a logout stays a logout;
 a live answer always wins. The extension reports presence and that answer on its own
 (`POST /browser/presence`), from ChatGPT's `/api/auth/session` in an existing regular-profile tab,
@@ -2597,6 +3926,11 @@ release it through existing lifecycle events;
 ordinary idle/reuse/close policy remains unchanged. Session storage retains attachment cleanup
 custody and cancellation, never activity authority. Chrome/user debugger cancellation is not
 retried until that activity scope ends. Browser tools cannot borrow these attachments.
+Lease changes never hold the worker's status pass: each debugger call gives up after 5 s (an attach
+that answers later, and a failed lease whose release fails, go into retiring custody until the release
+is confirmed), and the worker waits at most 3 s for a lease change
+(`renderingLeases`) and ignores its failure. A lease that never answered, or could not be released,
+kept every later pass from reaching its repairs (2026-11-01).
 `test/active-tabs.test.ts` and `test/desktop-input-maintenance.test.ts` cover custody, election,
 document proof and races; `scripts/verify-active-tabs.mjs` verifies native background animation
 pause/resume, same-document handoff and reload/release in isolated Chromium without observing the target
@@ -2695,7 +4029,30 @@ of trusted browser input or successful pointer lock; prefer native actions and o
 
 Traversal, result text, decoded image pixels/bytes, frame/session counts and console/network
 buffers are bounded. Console and network capture starts at attach; retained history is not a
-complete trace. Request bodies are fetched only on request with explicit truncation. Images use
+complete trace. Request bodies are fetched only on request with explicit truncation.
+`browser_network` stream retention is opt-in for an exact owned, in-flight SSE request.
+`browser_network` must refuse ChatGPT or orchestration-protected tabs, including a
+previously attached tab after navigation; ChatGPT request URLs must never enter
+retained network records. Entering a ChatGPT top-level frame clears earlier capture.
+Seed the current top-level tab origin before retaining events, including restored
+attachments; nested frames and SPA URL changes must not retire a live top-level SSE.
+Top-level navigation must retire the previous byte epoch, while an exact destination
+Document loader/frame may be rebound to the new epoch.
+Network events arriving before restore/origin verification must be discarded.
+Child frame/session navigation or detach retires only its own captured bytes;
+ChatGPT child-frame traffic is excluded even without a ChatGPT request URL.
+Check live read permission again after asynchronous body work and before byte publication.
+Unknown or old child debugger sessions must not add requests after a top-level
+document transition; only sessions attached in the current network epoch can do so.
+Child-session request admission also waits for successful debugger initialization;
+pending or failed initialization never grants a readable network record.
+Keep the strict schema and extension handler aligned: 4 MiB retained per tab, byte pages
+of 64 KiB by default and at most 256 KiB, returned as base64. Raw retained bytes must
+never enter metadata listings. Clear, eviction and release dispose retained bytes;
+late CDP completion cannot restore disposed captures. Terminal does not imply complete:
+failure, overflow, invalid bytes or capture errors must keep completeness false.
+Test the real extension handler at the CDP boundary as well as the tool schema.
+Images use
 native MCP image blocks without duplicate base64 in text/structured output. Page data never
 becomes local-tool authority. Tests: `browser-control.test.ts`, `tools-browser.test.ts`, bridge
 HTTP tests and `scripts/verify-browser-control.mjs` (isolated real Chromium, no signed-in tabs).
@@ -2985,6 +4342,12 @@ is still deciding (past the reload check, e.g. waiting for the send check); once
 ready, `/input/claim` from that browser (`x-extension-browser`) hands out nothing for 20 s (checked
 again right before the claim takes its message), and the
 extension's `deliverDesktopInputs` starts nothing while its reload is pending.
+An answering ChatGPT page (`clf-recorder-ping` busy) holds the update as `chat-busy` for at most
+30 minutes per offered build (`CHAT_BUSY_UPDATE_AFTER_MS`; the start is kept in `storage.session` as
+`extensionUpdateBusySince`, so a worker restart does not reset it). After that the update goes ahead at
+a pass where nothing else holds it (no tool call in the app, nothing sent, no command), and
+`/extension/update` receives `{ pastBusyChatsMs }` and logs that it updated past an answering page
+(2026-10-31: long Goal chats answered almost without a pause and the update waited for hours).
 Managed idle/retired/duplicate pruning records a successful removal against the exact tab,
 document, navigation epoch and conversation in the existing session-storage snapshot. Its
 lifecycle event carries a non-manual departure through the close outbox; it does not create
@@ -3006,6 +4369,14 @@ input, a repair, a Compact & Resume replacement with no page waiting — goes on
 holding that chat. A browser handed work for a chat it lacks opens the chat itself, so a second
 copy would otherwise run that work. A chat open nowhere, like a brand-new chat, goes to the
 first browser it is handed to while that browser polls. Requests without an id are not told apart.
+If an elected new-chat tab is absent from a successful all-tab scan, with no surviving input
+marker, the extension reports `/input/opening-unavailable` without reopening by itself. Only the
+browser holding that opening may report it. For an unbound desktop opening still queued with no
+owner, offer, Send authorization or receipt (nothing reached any page), main (`lostBrowserOpening`)
+answers `{ ok: true, reopen: true }` twice (`openingReopens`, logged): the extension then forgets that
+election and its next pass opens a fresh tab. A repeat report of the same lost tab (`openingReopenedTab`: `<browser>:<tab>`, since tab ids are per browser session) gets the same grant without spending another. The third different report fails the opening as before. The existing delivery notice offers
+review in the composer; only an explicit Send creates a new input in the same reserved session.
+Claimed or ambiguous sends retain their custody and cannot be retried through this report.
 
 "Open in ChatGPT" on a chat row is shown by the extension, not the OS: the OS hands a URL to
 whichever browser window last had focus, which can be a browser without the extension or one
@@ -3020,6 +4391,11 @@ only to a browser that already has the chat open, and it lapses after 10 s. The 
 that tab the selected one in its Background chats window. That never focuses the window, opens a
 tab or touches the user's own windows (#1249). With `backgroundPlacement: 'group'` the app sends no
 follow and the extension ignores one (#128).
+New desktop chats keep one in-memory pending selection while awaiting their first catalog/project-history
+binding. The 10 s acceptance window starts at that binding (or selection if already bound), is logged,
+and is never renewed by retries or later observations. A false `sessions:followTab` reply keeps it pending
+for later catalog/bridge updates within that window; no state is saved or restored and no timer is added.
+Every selection clears older follows before lookup; `{ id: null }`, New Chat and deletion cancel them.
 
 Core's `save_image` (created only with the create-files permission) saves the original file of an
 image ChatGPT generated in the calling chat (#889); the recording keeps only a preview. The call's
@@ -3150,12 +4526,43 @@ existing Goal reply ledger. The exact final is checked before its one durable St
 again in the native page. Unfinished Continue keeps its Stop claim in the existing outbox.
 Both use the same native Stop/idle helper, then send on that document. There is **no immediate
 reload after Stop**. Undelivered Continue, queued input and Goal/Loop decisions share one
-pickup projection and the bounded 2/5/10-minute reload schedule (three reloads total). The
-attempt count and next deadline are stored with the exact Goal reply or queued input, so an app
-restart cannot reset the limit. After the third uncollected reload, recovery stops and the composer
-shows a persistent stop status while the original obligation remains saved. A queue item can still
-be sent manually; reactivating the same Goal reply does not refund its attempts. The twelve-hour source
-lifetime remains a separate retirement bound. The session list carries stopped chats as
+pickup projection and its reload schedule (`browserPickupDelay` in `shared/recovery.ts`): three
+quick reloads after 2, 5 and 10 minutes, then slow retries after 15, 30 and every 60 minutes, at most
+`BROWSER_PICKUP_ATTEMPT_LIMIT` (24) in all. The attempt count, the first stop time and the next deadline
+are stored with the exact Goal reply or queued input, so an app restart neither resets nor ends them.
+After the third uncollected reload the composer shows a persistent stop status (the person can
+Continue in one click) and the bridge warns once that it `keeps trying every 15 to 60 minutes`; slow
+reloads log `— reload <n> (slow retry)`. None runs inside a history limit. A queue item can still be
+sent manually; reactivating the same Goal reply does not refund its attempts. The twelve-hour source
+lifetime bounds the slow retries too (2026-10-31: a chat must not stop for good while it is unfinished). Page activity that
+pushes a retry out is saved with its owners (queued input and Goal reply), so a restart keeps the later
+deadline. A stop with no retry left (24 reloads, or 12 hours) carries `exhausted` and reads "Recovery
+stopped" instead of "Recovery slowed".
+When the quick reloads run out, the chat also gets a stop notice ("Recovery slowed", desktop and, under
+its rules, the phone). The notice row offers one click (`sessions:pickupNow` → `pickupNow` in bridge.ts):
+**Continue now** for a waiting automatic Continue (sent at once as an ordinary message through
+`continueAsOrdinaryMessage`, with all its checks), **Try now** for a queued message or Goal/Loop step (its
+next try runs at once and counts as a reload). The click names the stopped step it was shown for
+(`next` and its stop time, the row's `deadline`); a different step now waiting is refused (`changed`), never
+acted on in its name. The reply says only what really started: `queued` (the Continue is a queued ordinary
+message, not yet delivered) or `retrying` (this chat's reload was queued, read from `inspectOwedPickups`'
+`focus`); otherwise a refusal code (`no-chat`, `history-limit`, `nothing-waiting`, `changed`, `not-sent`,
+`not-started`) that the renderer words with fixed, translated texts, and only while the same chat is still
+selected. An exhausted stop offers only Continue now, for a waiting Continue; nothing is left to try again.
+Every click and refusal is logged. Two exceptions keep a chat from stopping while it
+is unfinished (2026-10-31): a queued input the app itself does not offer (`queuedInputOfferBlocker`
+names the gate) spends no reload, and the bridge logs `next automation/input step in <chat> is not
+offered to the page — <gate>; no reload is spent on it` once per chat, input and gate; and an
+automatic Continue (`recovery`) still queued 10 minutes after its boundary (`RECOVERY_ORDINARY_AFTER_MS`)
+with a reload spent, a stop, or an offer gate becomes an ordinary message once
+(`continueAsOrdinaryMessage`: `recovery`, `silenceBoundary` and `pickupRecovery` removed, mode `auto`,
+`continuedFrom: 'recovery'` so `automaticSendKind` still names it `continue` and the send check asks; its 10 minutes
+count from its own boundary, not a pickup it shares; a refusal is logged once per chat, input and reason;
+`continuesQuestionId` keeps its question, and claim, Send authorization and the expiry sweep withdraw it as
+"Automatic Continue cancelled: …" once another user message or the complete answer arrives),
+only while the chat's latest recorded question is still the one it continues, no turn is open, the
+chat is not blocked or closed and no tool call runs; it is logged `input <id>: no page took the
+automatic Continue (<why>); sending it as an ordinary message …`. The session list carries stopped chats as
 `recoveryStopped` (the same `pickup-stopped` predicate); a queued input's stop pushes
 `session:changed` with its outbox write, a Goal reply's stop pushes from the pickup sweep as soon as
 it is recorded (before, and whether or not, its last reload is queued), and a
@@ -3219,6 +4626,9 @@ Continue also refreshes the current native assistant response before recovery St
 before and after asynchronous Send authorization. Its exact final message vetoes Continue
 even when the browser journal has not reached the app or a stale Stop control remains.
 A final from before the latest native question cannot veto recovery of that newer question.
+Nor can an answer that later tool calls of the same turn went past (`turnEndMessageId`, shell
+`end_turn`): live 2026-10-21, GPT-6 answered, ran more calls after a tool approval and ended on a
+plan card with no answer, and the stale end refused the Continue that turn needed.
 
 A trusted native Stop click immediately blocks automatic page input, without emitting a terminal
 observation while native generation continues. Authorized app Stop records the same local intent
@@ -3257,6 +4667,15 @@ drains the old listener without holding the config queue. Shutdown fences prepar
 An unavailable saved port keeps the app running, retains the choice, and reports the startup error
 in Setup; there is no fixed-port fallback, retry button or new retry timer. Settings restores a
 rejected focused selection; unchanged queued snapshots retain their base for three-way merging.
+`/hello` and `/pair` report `instance`, a random id per app profile (`bridge-instance.ts`,
+`state/bridge-instance.json`; optional, no protocol bump). The extension keeps the instance it
+paired with in `storage.local.appInstance` next to `port`/`token`; discovery skips a port whose
+`/hello` names another instance and accepts a match or an app that names none. Unpaired, it takes
+the first app and records the instance at `/pair`; a pre-instance token adopts the app it already
+uses. With its instance gone it reports not connected; only the popup's explicit Connect may pair
+elsewhere (the remembered instance still wins when it answers). The CoS copy asks its own app
+(`__cosBrowserWorker.call('app.bridgeInstance')`, answered in `cos-browser/host.ts`) and drops a
+token another instance minted. Found 2026-10-21 with an installed app on 8766 beside dev on 8765.
 Silent `/pair` provisioning replaces the retired six-digit flow. Validate allowed extension
 origin, bearer, payload bounds and operation identity. The wake socket only prompts maintenance.
 Automatic provisioning requests `reuse: true` to join the current credential generation across
@@ -3396,7 +4815,19 @@ Silence, missing-tab, stalled-tab and queued/Goal repairs also use that exact pr
 offers retain one token; a claimed action is not reissued merely because its ACK is absent.
 When an unclaimed repair exhausts its offers the chat is marked page-less, the session gets its timeline note
 and the user gets one notification through the stuck-chat notifier, once per episode; a page that asks for
-its chat again lifts the verdict.
+its chat again lifts the verdict. A Goal or Loop chat (`goalActiveFor`, so never a worker; not blocked, no
+Stop, not "browser only") is first shown once per episode by a connected browser that can show chats
+(`showUnclaimedChatOnce`, the extension's reveal), with a timeline note and a log line, and its offers start
+over (user, 2026-11-02). Without such a browser nothing could be shown, so it gets the verdict as before.
+Taking the chat is not showing it: a browser whose tab or window step fails posts `/reveal/failed`
+(`unclaimedChatShowFailed`), and that chat may be shown once more when its offers run out. A report
+counts only within 60 s of the show; a second failed show leaves the page-less verdict.
+Only offers no page asked for count toward that budget (#1922): a `/repairs/claim` for the offered token
+that is refused (not current, another chat's events still being saved, replaced) proves a page: for
+2 minutes after it no offer counts (`CLAIM_ASKED_FRESH_MS`, whichever browser polls), nor does any offer to a
+browser that may not claim (`takesWork` false), and the bridge logs `refused the <reason> repair claim for <chat>: <why>`
+once a minute per chat and reason. The observation-write gate stays global: one chat's events can
+commit another's identity (a Compact & resume successor) and so revoke its handout.
 A responsive page flushes native progress and Stop before the main claim, then rechecks its
 captured work/question/document after the claim. An explicit veto or navigation prevents the
 browser action. An unresponsive page supplies no new proof; the original main-process grant
@@ -3658,13 +5089,25 @@ awaiting-summary -> awaiting-chat -> claimed -> committing -> committed
 disk. `sessions:resumeFromHandoff` (preload `resumeFromHandoff(id, handoffId)`, bridge
 `resumeFromSavedSummary`) starts a new run from it through `reopenWithHandoffNow`: only when that
 handoff is still the session's `lastHandoffId`, no continuation is open, and its provenance
-source is the session's current chat. The new run is an ordinary transaction: it reserves A
+source is the session's current chat or an earlier one in its `chatIds` (2026-11-01: ChatGPT can stop
+serving a chat, "temporarily limited access to this conversation history", before it writes a summary
+of its own). A summary from an earlier chat is sent behind `earlierSummaryNote()`, which says work
+may have continued after it and asks to check the current state first. The new run is an ordinary transaction: it reserves A
 again with the abandoned run's project, records the source request as already sent (nothing is
 asked of ChatGPT), and `attachSummary` writes a fresh handoff with the same text bound to the
 new token. Claim, commit, restart recovery and provenance then work unchanged; a failed attach
 aborts the new run. Timeline `handoff` events carry an optional `continuation` token so the
 reopened run's row owns its handoff; the reuse button is shown only on the newest Compact &
 Resume row.
+
+**A Compact & Resume ChatGPT never answers.** `SessionControlsView.lastSummary` (`{ handoffId,
+createdAt, earlierChat }`) is set once a continuation has waited in `awaiting-summary` without a
+handoff for `STUCK_SUMMARY_MS` (15 minutes) and the session has a usable `lastHandoffId`; the context
+meter shows a dot and its popover the button "Continue in a new chat from the last summary". Using
+it, `resumeFromSavedSummary` first cancels that waiting continuation. A chat with Goal or Loop on
+does this by itself (`continueStuckFromSavedSummary`), once per ticket, when an automatic ticket's
+first slowed burst of pickups could not ask either; a chat without them is never moved by itself.
+The new ChatGPT chat joins the same session, as after any Compact & Resume.
 
 Restart restoration must converge on that same committed projection. A persisted send attempt
 can outlive a transport command; expiration releases transport, not permission for another
@@ -3751,6 +5194,13 @@ idle and attachment-free before the one click. Source readiness has a bounded 60
 the native transition then gets its own bounded 12-second phase. Destination proof requires the
 exact Project home, a connected ready editor and no displayed source turns. User interaction,
 cancellation or a foreign route revokes the attempt; no extra tab compensates for a missing result.
+When an automatic Compact & Resume's page acks `project-entry:source-ready-timeout…` or
+`…transition-timeout…` (nothing sent), the bridge releases that attempt's destination claim
+(`releaseContinuationDestinationSendNow`) instead of aborting, logs it, and the next opening pickup
+offers the same brief again (#1882: ChatGPT limiting history or a region change made the Project open
+late, and the written brief was thrown away). A manual press, a user interruption or any other
+failure still aborts. After its three quick opening pickups an automatic ticket tries once an hour
+(`AUTOMATIC_OPENING_SLOW_MS`, logged once): while open it owns the chat's recovery, so it must not stop.
 One exception, measured: a replacement tab opens the source at `/c/<id>` and ChatGPT rewrites that
 route twice (`/g/<project>/c/<id>`, then with the Project's name). A click between the two is
 taken and then dropped by the second rewrite (8 of 14 handoffs in a Project timed out on
@@ -3793,7 +5243,35 @@ across families when the sender already has the destination's explicit run addre
 broker-wide worker-admission cap: `0` preserves the historical unlimited-across-families behavior,
 while a positive value limits slot-holding workers across every active family. Admission counts
 staged unpublished spawn reservations so two primes cannot overbook the final global slot; lowering
-the cap never evicts existing workers. Display names such as
+the cap never evicts existing workers.
+
+**Chats working at once (#1694).** `multiAgent.chatsAtOnce` (`0` off, `1`–`10`; a damaged value
+reads as off) bounds how many chats work at the same time, workers included. `chats-at-once.ts` is
+one gate, not a scheduler: each existing send path keeps its queue, order and no-duplicate rules and
+asks `automaticSendRefusal(key, conversationId)`. Working = `bridge.ts workingChatsNow()`: a live
+turn by the recorder's rule (`chatIsWorkingNow`; a bare open turn counts at most
+`OPEN_TURN_RECOVERY_MS`, 60 minutes) or an exactly owned running call, minus `pagelessChats`; a
+detached page leaves the live set. No other timer releases a running turn. Gated: the
+app's own sends only — input rows with `automaticSendKind` or a non-user finish owner
+(`pendingBrowserInputs`, checked last after every other offer reason; reason in
+`queuedInputOfferBlocker`; `listInputs` adds an unsaved `slotWait`; asked again at
+`claimBrowserInput`, and the pause alone at `authorizeBrowserInput`; saved `slotHold` keeps the
+one-minute pickup deadline from counting held time, across restarts), Goal/Loop at `/goal/draft`
+(409 `chats_at_once`, retryable; the page keeps the turn like `chat_still_working`; `goalWait`
+`slots`/`paused`) and again at Send (a ready draft's `/activity` goal view carries `slotWait`; the
+page keeps it untyped and refuses Send), and worker spawn/wake in `agents.ts`
+(`CHATS_AT_ONCE` refusal like `GLOBAL_WORKER_LIMIT`; the calling prime's slot passes to its
+workers). Never gated: the person's messages, Stop, approvals, the Goal helper's own question.
+Waiters go in the order they began to wait (one gone two minutes leaves the line); an admitted
+send holds its slot until its chat shows as working (at most two minutes; a starting or waking
+worker `WORKER_ADMISSION_HOLD_MS`, six, the revival window). Two chats showing ChatGPT's limit (any
+access-limit notice in `noteRecoveryObservations`, with or without `retryAt`, at its observation
+time; notices from before Resume now ignored) within ten minutes pause every automatic send until
+the latest time named (15 minutes if none); durable `chats-at-once`,
+`BridgeStatus.automaticPauseUntil`, `automation:resumeNow` (Resume now, saved before it answers; a
+failed save keeps the pause). Only while the setting is on.
+
+Display names such as
 `worker-1` are scoped by run incarnation/prime. Resolve a proven caller first, then its family;
 never select the newest run globally. Workspace, inbox, activity and finish routing follow
 that identity. With unattributed calls allowed, `primeRequestId` holds a provisional family
@@ -3912,6 +5390,36 @@ changes a deadline: a worker's `sending` gives its receipt `WORKER_SENDING_GRACE
 report (bounded), because a page that pressed Send may already have delivered the task (#1086).
 Expiry names the last one, or whether the browser or the OS opened the chat and no
 page picked it up, so "did not report back in time" says where a start stopped (#882 worker-11).
+ChatGPT announcements over a page (2026-10-30: "Premium seats just got better" over a fresh chat
+stopped a Compact & Resume and a worker's model choice) are closed by `CLF_DOM.dismissAnnouncements`:
+a visible `[role="dialog"]` the extension did not open, that is not an access-limit notice `errors()`
+reads or the model picker, and has nothing to type into (no text input, textarea, select,
+contenteditable, textbox, combobox or searchbox), gets one synthetic Escape, as a person dismisses it;
+no button in it is pressed. Bootstrap runs it before waiting for the composer, again once if the
+composer never became usable, and once before retrying a refused model choice; queued input runs it
+before its visible-composer wait, so an announcement no longer holds a message behind it. None of
+this runs while the message box is usable, nor for 10 minutes on a chat whose history the page saw
+limited (429; the access-limit notice is a dialog too, recognized by wording in only some languages). Each closed dialog
+is reported, only if the page is still on the chat it was closed on, as the owned message `page_note`
+`{ note: 'announcement-closed', heading, conversationId }`; the worker answers at once and posts
+`POST /page-note` outside the tab's queue, which logs one line with ChatGPT's heading (≤ 80
+characters, no quotes or control characters), at most once a minute per chat and heading.
+The same message says why a page held a queued message back (2026-10-30: a queued Continue sat
+unsent for 17 minutes on a healthy-looking page with nothing in the log): `{ note: 'input-held',
+reason, inputId, conversationId }` from `acceptDesktopInput` when ChatGPT still shows an answer running
+(`still-answering`), the page holds a turn ChatGPT no longer shows running (`turn-held`), a tool call
+runs (`tool-running`), an automatic Continue's question is not the
+page's last one (`recovery-question-changed`) or cannot be read (`recovery-question-unreadable`), its
+unfinished turn is not proved yet (`recovery-not-ready`), or the visible-composer wait ends without a
+usable box (`page-moved` for a reload or navigation, `chat-moved-on` for a new message, turn or progress on the same chat, `question-gone` when the question captured before is no longer on the page, `no-composer`, `composer-hidden`). `/page-note` logs `bridge: the page of
+<chat> held queued message <id> back: <why>` once a minute per chat (a new chat: per message) and
+reason. The page says nothing once the tab shows another chat or the person stopped the automatic
+Continue, and `inputId` must be a UUID. An automatic Continue held for `recovery-question-changed`
+without a break of more than 5 minutes, and with no other hold reason in between, for 30 minutes is retired (`retireMismatchedRecoveryInput`:
+cancelled with its reason, `recovery.ended: 'page-final'`); it would only answer the wrong question
+(2026-11-02: one sat queued for eleven hours). Internal busy states
+(another delivery, a model read, a Goal draft) stay unlogged. A dialog with a field
+(Settings, Rename, a form) is left alone and keeps holding input as before.
 A worker given up for time after a page claimed it (no page-reported failure) is a late-start
 candidate for `LATE_START_WINDOW_MS`, in memory only (#1086: on a memory-starved machine a page's
 reports reached the app 20–90 s after it sent). A `sent` ACK with a conversation from the page
@@ -4154,7 +5662,7 @@ server obligation once safe; do not acknowledge it as handled or require a reloa
 
 | Backend/role | Behavior |
 | --- | --- |
-| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. |
+| ChatGPT decision helper | Default driver backend. Each Goal/Loop decision uses a Temporary Chat with bounded reference history; outputs a decision, never executes that history. A helper whose model the page could not confirm (`detail: 'model-unconfirmed'`, nothing typed) fails with the retryable `goal_helper_model_unconfirmed`, and `goalHelperSelection` then uses ChatGPT's current selection for 30 minutes (`HELPER_MODEL_FALLBACK_MS`, logged), as for a model the account does not offer; every other helper send failure stays settled. One draft may take `goalRequestTimeoutMs`: 3 min for API backends and a ChatGPT helper at low or medium effort, 5 min at high, 12 min at xhigh/max/ultra, 20 min at Pro (the effort actually used; 2026-11-01: xhigh timed out at 3 min five times in a row). |
 | API driver | OpenRouter-compatible default or explicit compatible endpoint/model/key. Supports bounded streamed progress and validated final decision. |
 | Goal templates | Offline explicit terminal-marker policy; only Goal supports this backend. Missing/ambiguous expected markers pause rather than infer completion from prose. |
 | Temporary planner | Captures a new workflow for the user in Temporary Chat. Shares temporary transport with decision helpers while retaining its staged-workflow role. |
@@ -4365,6 +5873,74 @@ alone picks its glyph; static markup names the glyph class. `--ico` sizes the la
 marks. Do not add hand-drawn SVG icons; the sprite keeps only the product mark.
 `test/icon-font.test.ts` checks names, package codepoints and stray SVG.
 
+Chat Marks' outbound **Notification Center** (`renderer/notification-center.ts`,
+`main/notification-{center,credentials,ipc,events,smtp}.ts`, `shared/notification-center.ts`)
+is a dedicated Settings > Notifications page, independent of native desktop notices.
+The five channels (SMTP, Telegram, local WhatsApp Web, Meta WhatsApp Cloud and Evolution API) are disabled
+by default. The main process exclusively owns delivery and credentials: validated
+non-secret channel settings live in the `marks-notification-center` durable record;
+provider credentials are entries `notification/<channel>` in Vault K's portable,
+encrypted store and **never** return through IPC. Writing/rotating a credential
+requires the administrator's master password; routine dispatch invokes Vault K's
+`useVault` in the main process and never asks for the master password. The authenticated,
+main-frame-checked `marksNotify:request` IPC supports `get`, `save`, `credential`
+(write-only), `test`, `export`, and `import`. Preload exposes typed fixed entrypoints,
+never a generic secret reader. File dialogs and IO happen only in the main process:
+the versioned JSON export contains allowlisted non-secret settings, never vault data.
+Import rejects unknown formats/keys and atomically requires credential reactivation
+per channel before applying imported preferences; the separate durable activation
+record is never included in exports. Old Vault K entries may stay encrypted but are
+inert until newly saved from Notifications with the master password.
+Renderer gets only Boolean credential-presence flags. Saved data is schema-validated;
+a missing/invalid record resolves to off-by-default settings, not a network send.
+The session ledger owns turn outcomes, approval-wait owns pending human decisions,
+and the version owners report availability; notifications only observe those events
+and never answer a permission prompt or start an update. Per-event throttling,
+per-channel hourly limits, bounded batch windows, opt-in excerpts, HTTPS/TLS
+enforcement and restricted template substitution belong to the main process.
+A failed test or send is a `NotificationDeliveryError` (`main/notification-failure.ts`) carrying
+only a `NotificationFailure` from `shared/notification-center.ts`: a code from
+`NOTIFICATION_FAILURE_CODES` (DNS, connect timeout, refused, closed, TLS untrusted or name
+mismatch, STARTTLS missing, auth/sender/recipient refused, server error; for HTTP providers
+invalid token, unknown chat/number, rate limited, 4xx/5xx), the channel, the numeric SMTP reply
+or HTTP status, a `cloudflare` flag when a resolved address is in Cloudflare's published proxy
+ranges (embedded as data; proxied records carry no SMTP), and for TLS failures the presented
+certificate's names, self-signed flag and SHA-256 fingerprint. Provider response text is read
+only to classify and is never kept; passwords, tokens, URLs and bodies never enter a failure.
+IPC returns it as `failure` beside the fixed English error, the log line names the code, and the
+renderer's `notificationFailureMessage` translates an actionable sentence per code (12 catalogs).
+`main/notification-smtp.ts` decides trust itself after the handshake (`rejectUnauthorized: false`
+plus an explicit check of `authorized`, the host name and the pin) before writing anything over
+TLS, so no AUTH or mail ever follows an unchecked certificate; replies sent in plain text before
+the STARTTLS handshake are discarded. As a documented fallback for a server without a publicly
+trusted certificate, the SMTP card offers "Trust this certificate" after a `tls_untrusted` or
+`tls_hostname_mismatch` failure: after an explicit confirm showing the fingerprint, the exact
+`fingerprint256` is stored as the non-secret SMTP setting `tlsFingerprint` (validated form).
+With a pin, only that certificate is accepted (still encrypted, STARTTLS still mandatory, host
+names no longer checked); any other one fails `tls_untrusted` with `pinned`. "Remove trust"
+deletes it. A certificate from a public authority for the configured host is the recommendation.
+`sendSmtp(..., { inspectOnly: true, connectAddress })` stops after the certificate check
+without credentials, for diagnostics.
+`test/notification-center.test.ts`, `test/notification-persistence.test.ts`,
+`test/notification-http-providers.test.ts`, `test/notification-smtp.test.ts` (local fake SMTP
+with in-memory test certificates from `test/fixtures/test-certificate.ts`),
+`test/notification-center-renderer.test.ts` and
+`scripts/verify-notification-center.cjs` cover settings import/export round trips,
+Vault K, fake transports and real Electron UI without real credentials. Real-provider
+delivery still requires separate manual homologation. This item is stacked on Vault
+K's PR: do not merge, tag or release it before the Vault contract is integrated.
+
+QR setup: Telegram pairs the user's own BotFather token (stored only in Vault K) to a
+private chat with a random, single-use `/start` code expiring after three minutes.
+`main/notification-telegram-pair.ts` owns the code and `getUpdates` polling; no webhook
+is installed or modified. WhatsApp Web is a separate channel backed by Baileys in
+`main/notification-whatsapp-web.ts`; its session is stored under
+`<userData>/notifications/whatsapp-web/` (0700), and only registered sessions reconnect
+on restart. Disconnect attempts a remote logout and removes local session files. This
+is unofficial and WhatsApp can block the number. QR images are generated locally in
+authenticated IPC. Cloud API and Evolution remain advanced options. Details and
+synthetic screenshots: `docs/feature-notes/notifications-qr.md`.
+
 `renderer/pet-machine.ts` owns the optional Tur Tur Sahur companion's gesture,
 animation and autonomous-action state. `renderer/pet.ts` projects it with Pointer
 Events and one visible-window animation clock. The composer launcher and context
@@ -4407,6 +5983,11 @@ evicted. Historical browsing leaves committed inputs with history. Never infer m
 the minimum event timestamp: old observations and tool start times can occur on newer pages.
 Pushes and async loads are scoped to selection/draft generation; a late load must not overwrite
 focused edits or a newer A → B → A view.
+The Scheduled list coalesces overlapping refreshes, but a mutation waits for only one read requested
+after the mutation; a continuing `session:changed` stream must not keep its controls disabled.
+The Refresh button remains enabled and keyboard-focusable during reads and exposes the read state
+through `aria-busy`; only an active mutation disables it. A successful background read clears a
+load error, never an action error.
 `session:changed` carries a `SessionChange`: the recorder coalesces the exact local ids it
 wrote in one 400 ms burst (`sessionIds`; input-history offered → confirmed revisions publish
 their owner there too), and a mutation without enumerable owners, such as image-storage
@@ -4487,6 +6068,48 @@ drag scope `groups:<projectId>`, each with its chats in scope `group:<groupId>` 
 like the project), then the project's ungrouped chats. A group holding the open chat shows open.
 Project menu: New group; chat menu: Move to group (this project's groups, New group…) and Remove
 from group. Names use the shared in-app dialog `renderer/name-dialog.ts`.
+Move to project (#1919) changes a main chat's project, unlike the one-time binding: IPC
+`sessions:moveProject { sessionId, projectId | null, groupId? }` → `{ from, fromGroup, groups, summaries }`
+(`summaries`: the moved chats' fresh summaries, which the sidebar puts on rows it already shows). Main
+(`moveChatToProject` in `projects.ts`, `moveSessionProject` in the store) refuses a worker or helper
+chat and a missing or removed project, allows a project whose folder is missing, moves every
+descendant sub-agent and helper chat (by `origin.fromSessionId`) with it, sub-agents first and the
+main chat last, and on a move to the project the chat already has moves only the family members
+left behind by an earlier move that stopped half way; never a branch, logs the
+move, and sets `projectChosen: true` on each summary, which stops `bindChatToLinkedProject` from
+binding it again. Moved into a project, the chat's commands then run in that project's folder (the
+binding is the workspace authority); moved out (\`null\`), they run in the folder the chat worked in
+before. Moves of one chat run one at a time, so each reports the project it replaced (for Undo);
+moved into a project, the summary gets `projectNotePending`, and the person's next message there
+(`personsMessage` in ipc.ts: not an opening, automatic Continue, decision, finish or rotation step)
+carries the project's folder line once (`prepareSkillFollowup(..., projectNote)`, the same line a new
+chat there starts with); the flag clears when that message is delivered (`clearProjectNote`), so a
+failed send carries it again. Moving out clears it; nothing is sent to ChatGPT and a linked ChatGPT Project keeps the conversation.
+**Related folders (#1689)** are context for a project's chats, never extra project roots.
+`LocalProject.relatedFolders` holds approved folders' own paths (`Root.path`), at most ten, set
+only through `setRelatedFolders` (IPC `projects:related-set`; `projects:related` returns
+`RelatedFolderView`s): each must be an approved folder, the project's own is skipped, the same
+folder is kept once (compared as paths, not text), and a damaged list reads as none. Nothing else
+changes: the working directory, AGENTS.md (only the project's), Files, the terminal, Git, Review,
+worktrees and permissions stay with the project's folder. The opening message's project header,
+and the once-only project note, add one line after the project directory naming the *available*
+ones by their virtual names (`relatedFoldersLine`, read when the message is prepared, so never
+stale); one no longer approved or no longer there is Unavailable in the dialog and left out. A
+worker in its own worktree gets no such line. A change marks `projectNotePending` on the project's
+main chats used in the last 30 days; a committed Compact & Resume (`rebindSession` with a handoff
+id) marks it too, so the new chat hears the project folder and the current list with the person's
+next message. Old messages are never rewritten. The renderer offers it as the project menu's
+"Related folders…" (`i-related`, a link, unlike the groups' folder) and a dialog
+(`related-folders-dialog.ts`); the project row's hover text lists them; there are no extra sidebar rows.
+`placeMovedChat` drops the old group membership or joins `groupId` of the new project. The renderer
+offers it in the chat menu (projects, then No project) and by dragging a chat row onto a project or
+group (`SidebarDrop` in `sidebar-order.ts`, highlight `.is-drop-target`; Escape cancels), then shows
+a toast with Undo (`toast(message, action)`, 6 s, kept while pointed at), which moves it back to
+`from` and `fromGroup`. A project's row has a + New chat button, and New chat leads its menu.
+Date headings (#1919, `renderer/date-sections.ts`): the chats list and each project's ungrouped list
+show Today, Yesterday, Previous 7 days, Previous 30 days, this year's months, then years, by
+`updatedAt`; pinned chats come first without one; a heading appears only when a chat is older than
+every section shown so far, so a chat dragged above older ones never repeats a heading.
 The worker drawer is a read-only split view of the selected worker's own recorded conversation;
 opening it never switches the prime composer. Its cards show the scoped worker id, task, observed
 current-conversation model and broker status when known, falling back to recorded session activity.
@@ -4627,6 +6250,20 @@ The plan heading is a native disclosure with a visible open/closed chevron. A ne
 chat starts with its plan collapsed. Collapsing it returns height to the conversation;
 status updates preserve the user's current disclosure state.
 
+**Recovery episode (#1883).** `renderer/recovery-episode.ts::recoveryEpisode` reads the chat's own
+events since its last completed turn or the person's own message (`automatic` user messages do not
+count): ChatGPT errors, `browser-repair:` reloads (one item per progress id, showing how it ended),
+failed turns, automatic Continues (a routine fresh turn only once an episode has started) and app
+notes, at most 50. A tool call, an answer or a new turn after the newest item means the chat moved
+on (`current: false`). Whichever recovery row shows (countdown, recent reload receipt or the app's
+latest note) gets "Since 14:47 · 3 tries" beside its text (reloads and automatic Continues count as
+tries), which opens the episode, newest first; the row's text then keeps to one line with the full
+words as its tooltip. The row is amber with a warning icon (`is-stopped`, `--warn-*` tokens) only when
+the app's last word is that it stopped (`isStoppedNote`: "This chat stopped", "Stopped trying to
+recover", "The browser did not pick up this chat", "Goal paused", "Compact & Resume is still
+waiting") or a pickup is exhausted. When nothing else shows and the episode ends on ChatGPT's error
+or a failed turn, that step stays as the row until the chat moves on or is dismissed. Stop notices
+already reach the phone as "needs you".
 The recovery row above Goal/Loop shows read-only countdowns from `bridge.ts::sessionControlsFor`:
 activity-based silence and confirmed reload listening, an outbox/Goal native-busy deferral, and each unresolved
 attribution incident's exact candidate deadline. A live conversation-history 429 cooldown projects
@@ -4682,8 +6319,17 @@ own title is never changed.
 Chat search (#1107) is IPC `sessions:search { query ≤200 }` → `SessionSearchReply { results ≤50,
 indexed, total }`. `session/search.ts` never reads a journal per query: each chat gets
 `<session>/search.txt` (first line the stamp `version:updatedAt:events`, then the user's authored
-words and ChatGPT's answers, overflow text included, capped at 1M characters), built in the
-background newest first, reused while the stamp matches, deleted with the chat. Helper chats are
+words and ChatGPT's answers, overflow text included), built in the background newest first,
+reused while the stamp matches, deleted with the chat. Version 2 indexes cover the full transcript;
+version 1's potentially truncated indexes are rebuilt from the recording. Index construction writes
+one message at a time through a fixed `search.txt.tmp`, truncating an interrupted build on restart
+before atomic publication; failed publication removes that temporary. Queries stream 64 KiB UTF-8
+windows with overlap for words and snippets.
+Only indexes of at most 1M characters are cached, within the existing 24M-character cache budget;
+this is a memory bound, not a searchable-history cutoff. An unreadable index is rebuilt from the
+recording when its directory allows replacement. A missing/stale index discovered during a query
+clears only its own current stamp so polling can recover; this skip and a streamed result superseded
+by a newer stamp each log their reason. Helper chats are
 left out, as in the sidebar. Every query word must match (title or text, any order, case- and
 accent-folded with `foldCase`, which keeps UTF-16 lengths so ranges index the original; `ß` stays). Title matches rank
 first, then text matches, each newest first. `titleMatches` and `snippet.matches` are UTF-16
@@ -4738,6 +6384,19 @@ with no extension catalog reads as English. The same reply carries `browserPrefe
 extension's Overwrite and Timestamps values as it last reported them stored (`preferencesStored` in
 `/diagnostics`; defaults are never kept). An extension with neither value in its storage, such as a
 reinstall under a new id, takes them back; stored values always win.
+`followApp` writes `appLanguage` once per worker and again when the app's language changes, not on
+the stored copy's word alone: its storage read is bounded to 5 s, and an unanswered read still writes
+the language (2026-10-30: one Chrome kept the browser's language for weeks with nothing said). Its
+outcome, with the stored value, goes into `/diagnostics` as `language: { applied, stored, error }`;
+the app logs one `browser: the extension's stored language is …` line per distinct mismatch or error,
+and the diagnostics report's browser section has an `Extension language:` line.
+The same reply carries `appearance: { theme: 'light' | 'dark' | 'system', light, dark }`
+(`main/extension-appearance.ts`, 2026-11-01): the popup's 19 color tokens for each theme, picked from
+`paletteTokens()` for the person's own palette and high contrast, as `#rrggbb` under the app's token names
+(`--page`, `--card`, `--ink` …). `followAppearance` stores it as `appAppearance` when it changes (only a
+known theme and at most 40 `--name: #rrggbb` entries per theme); `popup.js` puts the chosen theme's tokens
+on `:root` and sets `data-theme`, following the computer when the app says `system`. Without a stored
+value the stylesheet's defaults (the app's default palette) follow the computer's light or dark setting.
 Setup uses SVG flags only, with native language names in tooltips and
 accessible labels; Appearance retains the named language dropdown. Both controls share the
 same persisted preference. `translate="no"` protects text and attributes, including native
@@ -4760,6 +6419,9 @@ document, including hidden panels and bound text nodes. Never retain or periodic
 an index of every past label: WeakRef sweeps keep detached trees alive during allocation-heavy
 repaints. `scripts/verify-renderer-label-memory.cjs` checks real Chromium collection under repeated
 row replacement; ordinary language tests preserve controls, drafts and authored values.
+Lists that every state push rebuilds in Setup, Settings or a collapsed card go through
+`dom.paintWhenShown`: a hidden list keeps only its newest paint and runs it when it gets a box, before
+that frame is drawn. Rebuilding hidden lists left Blink's heap at 1.1 GB with 180 MB in use (2026-11-01).
 Authored prose uses automatic text direction; shell/code remain LTR with logical layout edges.
 Theme and layout preferences do not change backend authority.
 Settings places ChatGPT model defaults second and Workers & recovery third, after Continuation
@@ -5140,15 +6802,42 @@ status cannot refresh ChatGPT's cached declarations.
 
 `plugin-refresh.ts` applies to Core, Desktop and Plugins. Its fingerprint includes names,
 descriptions and input schemas, not app-version/instruction churn. Changes debounce for 20s.
+Initial detail-page hydration waits up to one minute, like post-refresh observation, before
+reporting an unreadable card; a slow load must not exhaust inspection attempts after 12 seconds.
 Refresh targets the exact account-observed installed app id, durably claims before clicking,
 and completes only after observed declarations fully match. Automatic refresh is opt-in;
 unsupported/manual-required stays visible instead of opening more helper tabs.
+Plugins inspection preserves external MCP tool names verbatim, including hyphens, periods
+and uppercase characters within MAIN's 64-character name bound; Core/Desktop keep their own naming contract.
 
 Refresh custody uses strict durable reads. Malformed JSON, JSON null, invalid rows,
 duplicate surfaces and I/O failures leave the ledger intact and reject new work with
 `Could not read plugin-refresh state`; parser contents stay private. A missing file still
 allows initial enrollment. Tolerant reads for auxiliary state keep their existing behavior.
 
+
+For native tunnel-backed refresh, the helper preserves unambiguous proven-ID discovery through
+renames; when call-derived aliases collide, it visits only the unique configured-name installed
+row or its durable exact App ID. An unbound request may inspect a unique configured-name row if
+none of its proven-ID rows remains installed, including hidden or unavailable rows; a bound
+target never borrows that replacement.
+Hidden or unavailable configured-name matches also preserve ambiguity; multiple visible matches
+remain separate rows for the caller to reject, not a single selected target.
+Unbound native discovery returns `null` for an unobserved/absent target and an empty array for a
+known installed but unavailable/ambiguous target. The caller keeps the existing eight-second
+hydration wait, then reports the latter through the existing inspection-failure path while it
+still owns the page. A vanished target keeps discovery retry behavior; legacy reads are unchanged.
+The isolated reader passes an optional `refresh: { appId, surface }`
+on `clf-plugin-ask` so the native Fiber reader applies that surface's catalog bound only to the
+exact matching card, even when its learned Plugins alias is missing. Legacy reads keep their
+existing limits. This hint grants only bounded inspection, not ownership or a Refresh click.
+Without a reported native tunnel, a surface-qualified exact-ID observation cannot override a
+learned foreign or colliding surface, whether the refresh row is bound or the card ID was just
+discovered. Older optional-argument callers and legacy-route reads
+retain their prior contracts, including schema-only observations on non-native-tunnel setups.
+Main checks that tunnel against the requested surface before initial enrollment/Current/Claim;
+navigation and page-reported tunnel IDs alone grant no Refresh authority. Other identity
+consumers and legacy pages retain their existing alias checks.
 
 **Scoped refresh receipts.** Each published surface captures its configured tunnel/profile.
 New ledger rows carry `tunnelKey`; old rows with a concrete App ID require that same App ID
@@ -5288,6 +6977,13 @@ opens the app on click. A skipped or failed notice is not retried; notification 
 tunnel state or recovery. No raw tunnel detail or secret identifier enters the notice.
 `test/connection.test.ts` and `test/connection-notice.test.ts` cover grace/recovery, sleep,
 intentional retirement and notification presentation.
+
+`tunnel/workdir.ts` creates each OpenAI client's private temporary directory. On macOS only,
+an inherited directory missing with `ENOENT` is resolved once through the bounded system
+`getconf DARWIN_USER_TEMP_DIR` lookup; other filesystem failures propagate. The client receives
+its live work directory as `TMPDIR`, without changing the app's environment or recreating an
+installer's deleted directory. Stop still terminates the client before removing its directory.
+`tunnel-workdir.test.ts` and `tunnel-lifecycle.test.ts` cover recovery, refusal and child ownership.
 
 tunnel-client reads proxies only from its environment (Go: `HTTPS_PROXY`, `NO_PROXY`). On every
 launch `tunnel/proxy.ts` derives them (#1255): an existing `HTTPS_PROXY` is left alone; otherwise
@@ -5576,11 +7272,62 @@ process once and retains an explicit access error; ordinary network retry remain
 
 ### Native Desktop
 
-Desktop is available only on Windows and supported macOS. Linux removes it from live discovery
-and enforcement while preserving stored preferences. Windows uses the bounded PowerShell/Win32/
+Native physical mouse/keyboard Desktop control is available only on Windows and supported macOS.
+Linux instead offers separately opted-in, semantic AT-SPI `linux_act` input:
+`click` and `set_value` of fresh, chat-owned accessibility refs only, never
+unrestricted pointer/keyboard input or a physical-input fallback.
+Windows uses the bounded PowerShell/Win32/
 UIA helper; macOS uses Swift ScreenCaptureKit/AX/CGEvent through an architecture-matched N-API
 addon on an Electron worker. The packaged Electron app is the macOS permission subject; a
 standalone CLI probe does not prove Screen Recording/Accessibility permission for the app.
+
+**GNOME Wayland read-only display screenshots (Linux staged integration, part 2).** A separate,
+default-off `ui.linuxDesktopEnabled` setting is saved by `config.ts`, projected through
+`shared/types.ts`, edited through Settings/IPC and treated as wider access in settings imports.
+Neither browser permission nor native Control permission enables it. `linux_observe` has only
+`what:'screenshot',display:0` in this stage; a nonzero display is rejected even
+on an internal direct call. It has no window inventory, accessibility refs, clicks, typing
+or coordinates. Its registrar requires live `screen` capability and the Linux opt-in before
+and after backend waits, image decoding and portal consent; a revoked grant emits no image.
+The checked `agent-desktop` 1.0.2 subprocess adapter (`linux-screenshot-backend.ts`)
+admits only `version` and `screenshot`, never uses a shell, bounds output and validates
+the outer response envelope. `linux-screenshot.ts` validates decoded PNG structure and
+dimensions before MCP image output.
+A full-display capture is never a per-window screenshot.
+
+The Settings button calls `linuxScreenshotConsent` via preload →
+`desktop:linuxScreenshotConsent` only from the focused CoS main window. It triggers one
+GNOME screenshot portal request and returns only the PNG byte count; no image is saved or sent
+to the renderer. Aborted/denied portal prompts are not retried. Saved opt-in changes invalidate
+MCP surface exposure so a removed tool is not retained in model-facing discovery. Tests cover
+the backend command boundary, malformed PNG, opt-in and Screen revocation mid-capture, Settings
+consent and twelve locale catalogs.
+
+**Native Linux semantic control (part 3, dependent on part 2).** `linux_observe`
+also admits window/app/display inventories and a semantic accessibility snapshot
+of one identified nonbrowser window. Snapshot references are scoped to a proven
+profile, session and conversation (32 owners maximum, 120-second expiry).
+Unattributed observations may have ephemeral private snapshots but cannot act.
+`linux_act` supports **only** click and set_value of previously observed,
+snapshot-scoped refs: it rejects stale/foreign refs, browsers, changed owners,
+ambiguous process incarnations and revoked Control/Read-only permission.
+CoS's own windows are excluded by its main process PID and recognized app IDs
+(including the packaged `com.chatonsteroids.app.desktop`), even in other app
+instances, to prevent a chat from clicking its own Desktop Ask or Settings.
+It rechecks the exact app identity and grant after any per-chat Desktop Ask
+approval, consumes refs after any attempted action and never falls back to a
+physical pointer, keyboard, coordinate command or automatic action retry.
+The command adapter remains pinned to agent-desktop 1.0.2, never uses a shell,
+and only publishes bounded backend error codes. Tests cover those ownership
+and revocation gates as well as legacy Windows/macOS Desktop Ask behavior.
+The version preflight requires the backend response command to be `version`,
+the OS to be Linux and the version to be 1.0.2. Accessibility refs must match
+`@s<snapshot>:e<element>` and be at most 128 characters: collection, MCP
+action schemas and native subprocess arguments enforce the same bound.
+If the native snapshot tree contains an invalid/foreign ref or traversal would
+skip nodes due to depth (24), children per node (200) or ref count (512),
+`linux_observe` refuses the whole snapshot with a fixed diagnostic; it never
+publishes an unusable ref or logs the ref values.
 
 The permission self-test reports native preflight results, not a completed capture or input.
 An actual screenshot and AX query remain separate evidence; the existing grant-history and
@@ -5687,7 +7434,7 @@ remain semantically targetable; they never receive image coordinates or supply d
 Operational Desktop errors expose their original code, nullable completion evidence and a concrete
 recovery step. Recovery never dispatches another input or treats a target failure as global
 read-only mode. Preserve exact identity, generation, geometry, clipboard and browser policy checks.
-See `docs/worklog-2026-09-19-computer-use-audit.md` for the forty-chat audit and regression coverage.
+See `docs/archive/worklog-2026-09-19-computer-use-audit.md` for the forty-chat audit and regression coverage.
 
 For Chromium browser windows, `BrowserRootView` owns the current accessibility tree, including
 the address bar and displayed document. Legacy renderer HWNDs can expose old tabs with plausible
@@ -5773,7 +7520,10 @@ Failure and recovery stay visible outside native details. Identical pushes prese
 choice/focus; meaningful owner changes reopen attention. A keyboard button controls native
 details and a separate polite live region announces changed status. The card keeps the event
 feed's remaining height and internal scrolling in short windows. Diagnostics uses the existing
-save owner with both buttons disabled during saving, and does not retry updates. Disclosure and
+save owner with both buttons disabled during saving, and does not retry updates. The report
+action is available when either the retained operation error or the latest updater error
+needs diagnostics, including automatic staging failures before Update all. Long translated
+failure text may scroll inside the bounded card so recovery controls are not clipped. Disclosure and
 action regressions stay with the view; real-Electron cross-feature acceptance is added separately.
 
 ## 19. Debugging, tests and working here
@@ -5806,6 +7556,14 @@ the whole run replaying one long workflow; avoid optimizing speculative edge cas
 | Files/patch/output/code-mode | concrete tool owner → kernel serialization | `codex-*`, `exec-*`, `code-mode-*`, `mcp-tool-declarations`, `code-checkpoints` |
 | Plugins/auth/native Desktop | manager/exposure/OAuth or computer frame owner | `plugins-*`, `computer*`, `tools-desktop-*`, `macos-*` |
 | Startup/connection/shipping | lifecycle/config/connection or packaging script | `config`, `window-*`, `shutdown`, `tunnel*`, `control-api`, `packaging`, `update`, `third-party-notices` |
+
+The process-lifetime regression in `test/exec.test.ts` waits for a newline-terminated child-PID
+receipt on stdout (`test/process-ready.ts`), not a polled PID file. Startup errors, premature exits
+and timeout include bounded stdout/stderr, drained through close within the original deadline.
+Failed startup attempts cleanup of the fixture's process tree; the POSIX parent owns a detached
+process group so an unreported child can be reclaimed even after the parent exits.
+Windows retains its PowerShell parent so the assertion still tests parent-only termination rather
+than Node's Windows job-object behavior. Helper tests use fake time, not real startup sleeps.
 
 Discover current suites with `rg --files test`; do not maintain a stale suite count. Vitest runs files in
 parallel but the tests of one file in sequence, so a file that boots the renderer per test is split
@@ -5840,6 +7598,18 @@ with other suites' native windows or input; its assertions remain unchanged. `vi
 forces Node, bounded hooks/tests, `CLF_BRIDGE_PORTS=0`
 and test-only `CLF_EVIDENCE_MS=1500`; never let tests contact the installed production bridge.
 Opt-in live plugin/macOS probes are separate evidence, not implied by the ordinary suite.
+Pull-request CI (`ci.yml`, since 2026-10-31) runs the same checks in parallel jobs rather than
+`verify:ci` per OS (release builds still run `verify:ci`): one Linux job for privacy and the
+typecheck; the notices check (it reads each OS's own optional native packages) in each OS's first shard; the unit tests in shards (`vitest run --shard=i/n`: Windows 3, macOS 2, Linux 2; macOS
+stays at two because the account runs at most five macOS jobs at once); `computer`/`mcp-shutdown`
+and the live plugin suites only in each OS's first shard; the UI checks in two shards on macOS (four
+macOS jobs per pull request in all) and three on Windows
+(`VERIFY_UI_SHARD=i/n` in `verify-ui.mjs`). Shards are balanced by measured seconds, not file count:
+`test/weighted-sequencer.ts` (Vitest's sequencer; it also runs the longest files first) and
+`verify-ui.mjs` share `scripts/shard-plan.mjs`, reading `test/test-weights.json` and
+`scripts/ui-check-weights.json`. A file or check missing from them weighs the median, so new files
+run normally; refresh both with `node scripts/update-ci-weights.mjs [run id]` when the suite's shape
+changes a lot. The pre-push hook typechecks (about two seconds) after the privacy check.
 The fail-first workflow selects Windows for changed `test/windows-*` and `test/computer*`
 suites through `scripts/pr-fail-first.mjs`; other changes keep the Linux runner. The selected
 job still runs changed tests against base code: platform-skipped native tests are not proof.
@@ -5878,11 +7648,15 @@ readable); known personal values (project paths/names, chat titles, worker tasks
 approved roots, tunnel profile/ids) become `<x:xxxx>`. Settings contribute only booleans, numbers
 and short option names; keys naming tunnels, profiles, paths, roots, prompts, URLs, keys or ids are
 dropped unless the value is a number or boolean. Never add message, task or title text to a section.
+The *Active chats* lines end with each chat's Goal/Loop state as the app holds it (`mode loop (this chat)`,
+`mode Normal (app setting)`; #1882), never its id. Compact & Resume logs when a chat's own switch moves to
+the new chat, or is dropped because the new chat already had its own.
 Tests: `report-scrub.test.ts`, `diagnostics-report.test.ts` and `ipc.test.ts` (no personal value survives).
 
-Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report or an idea
-and opens GitHub's issue form filled in: `feedback:openIssue { kind: 'bug', what, steps?, frequency? }`
-or `{ kind: 'idea', problem, proposal }` → `{ trimmed }`. Main builds the address (`feedback.ts`) with the
+Send feedback (Activity's button, `/feedback`; `feedback-dialog.ts`) writes a problem report and opens
+GitHub's bug form filled in: `feedback:openIssue { kind: 'bug', what, steps?, frequency? }` → `{ trimmed }`.
+New features come as pull requests (2026-11-01): there is no idea form, in the app or in
+`.github/ISSUE_TEMPLATE`; the dialog links CONTRIBUTING.md's "New features" instead. Main builds the address (`feedback.ts`) with the
 form's own field ids and dropdown texts (`.github/ISSUE_TEMPLATE`; `feedback-issue.test.ts` fails when a
 template renames one), adds the version, system, architecture and what it knows of the extension, and
 opens it with `shell.openExternal`; nothing is sent from the app. Text that does not fit in a 7800-character
@@ -5944,9 +7718,27 @@ partial file, verify SHA-256 before staging/adoption, and rehash at ordinary qui
 off. Windows NSIS/Linux AppImage can apply automatically; macOS/DEB present the supported manual
 path, development does not stage. Explicit install may relaunch; ordinary quit does not force
 relaunch. Failed checks never replace a verified staged candidate with unverified bytes.
+`userData/updates` is reserved exclusively for updater staging, not backup storage. Ordinary
+direct-child directories named `major.minor.patch` are cache entries; their contents may be
+removed recursively, even if manually placed there. Each packaged check removes installed-or-older
+cache versions even offline. Superseded candidates are removed only after their replacement is
+verified or adopted. Cleanup never scans outside this root, so app copies and backups kept
+elsewhere are untouched. At the root it preserves `handoff.json`, non-version entries and linked
+directories; a linked root is skipped. Locked files defer to the next
+ordinary check without failing an update. `update.test.ts` covers previous-version cache and
+handoff records, failed transfers, restart adoption and directory links.
+Cache cleanup and download preparation retain the update pass's reset generation. After each
+filesystem wait they recheck that owner before removing entries, creating files or retiring
+other candidates; a superseded pass stops rather than being treated as deferred cleanup.
+New download writes reject linked cache roots/version directories. They unlink only the
+selected stale partial-file entry (never recursively) and create its replacement exclusively,
+so a partial-file link cannot truncate another file. Existing checksum-verified adoption is
+still read-only and retains its prior linked-path behavior.
 The updater classifies its own `TypeError('fetch failed')` as `GitHub could not be reached`,
 retaining the original diagnostic in its warning log. The card, update banners and retained
 Update all error share the renderer's update-error formatter; unknown errors remain literal.
+Linked staging paths use a translated cache-folder error and the existing diagnostics-report
+recovery guidance, rather than suggesting an unchanged retry of the same blocked path.
 On Windows the handoff first repeats the installer's own `icacls` sandbox grant on the app folder;
 an exit code there means the folder needs an administrator, so the installer is started through
 `Start-Process -Verb RunAs` (#1490). That PowerShell stays attached (detached it has no console and
@@ -6014,6 +7806,17 @@ shared-tree change may already have addressed them.
 - **Goal cross-ledger controls:** master/config/secret changes still cross separate ledgers.
   Attempt invalidation now preserves debt, but these remaining controls still need one durable
   semantic transaction and effective current-setting enforcement.
+- **OpenCode first start on an existing upstream database:** the user's own
+  `~/.local/share/opencode/opencode.db` (from earlier upstream use) may be migrated by the version
+  Chat Marks installs, and an older OpenCode the user runs elsewhere may then not open it. No
+  one-time backup offer exists yet. Same for `~/.zeroclaw` on ZeroClaw's first run.
+- **OpenCode TUI "always":** an "always" answered in the attached TUI still saves a project-wide
+  allow rule upstream (OpenCode 2.x's own rule, persistent); only the chat's own answers avoid it.
+- **OpenCode service shared with the user:** the background service is per user. When the user's
+  own OpenCode (another binary) runs it, OpenCode chats are unavailable until the user restarts it
+  from the module card; a Restart interrupts that service's running sessions.
+- **MarksCode history import:** MarksCode's databases share the OpenCode 2.x schema; no import
+  exists (see the data-preservation rule).
 
 Do not restore obsolete claims while investigating: two MCP surfaces, one global prime run,
 three browser command kinds, fixed 60s Unattributed repair, tab-query

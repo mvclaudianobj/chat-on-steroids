@@ -114,7 +114,7 @@ it('says a chat with nothing said yet has nothing to share', async () => {
 });
 
 it('labels the page in the interface language and names an untitled chat like the app does', async () => {
-  setMainTextTranslations({ You: 'Du', 'New chat': 'Neuer Chat', hidden: 'ausgeblendet', 'Shared from Chat On Steroids': 'Geteilt aus Chat On Steroids' });
+  setMainTextTranslations({ You: 'Du', 'New chat': 'Neuer Chat', hidden: 'ausgeblendet', 'Shared from Chat Marks': 'Geteilt aus Chat Marks' });
   store.getSession.mockResolvedValue({ id: 'session-1', title: '  ' });
   const result = await preview(false, 'de');
   expect(result.html).toContain('<html lang="de">');
@@ -122,5 +122,5 @@ it('labels the page in the interface language and names an untitled chat like th
   expect(result.html).toContain('<h2>Du</h2>');
   expect(result.html).toContain('<span class="hidden">ausgeblendet</span>');
   expect(result.html).toMatch(/<p class="date">\d{1,2}\. \S+ \d{4}<\/p>/);
-  expect(result.html).toContain('<footer>Geteilt aus Chat On Steroids</footer>');
+  expect(result.html).toContain('<footer>Geteilt aus Chat Marks</footer>');
 });

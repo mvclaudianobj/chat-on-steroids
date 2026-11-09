@@ -12,10 +12,10 @@ const unpackedDir = arch === 'arm64' ? 'mac-arm64' : 'mac';
 const executable = path.resolve(
   'release',
   unpackedDir,
-  'Chat On Steroids.app',
+  'ChatMarks.app',
   'Contents',
   'MacOS',
-  'Chat On Steroids'
+  'ChatMarks'
 );
 if (!existsSync(executable)) throw new Error(`Could not find unpacked macOS ${arch} app executable`);
 
@@ -60,11 +60,14 @@ try {
     if (output.includes('[error] renderer:')) return 'the renderer reported a console error';
     return null;
   };
-  const ready = () =>
-    output.includes('[info] app started') &&
-    output.includes('[info] window loaded') &&
-    output.includes('[info] renderer state ready') &&
-    Date.now() - startedAt >= minimumSurvivalMs;
+  const ready = () => {
+    const loginReady = output.includes('[info] markspanel login ready');
+    const workspaceReady =
+      output.includes('[info] app started') &&
+      output.includes('[info] window loaded') &&
+      output.includes('[info] renderer state ready');
+    return (loginReady || workspaceReady) && Date.now() - startedAt >= minimumSurvivalMs;
+  };
 
   child.on('error', onError);
   child.on('exit', onExit);
@@ -77,7 +80,7 @@ try {
     const failure = startupFailure();
     if (failure) finish(new Error(`macOS GUI startup failed: ${failure}`));
     else if (ready()) finish();
-    else finish(new Error('macOS GUI did not report app started, window loaded and renderer state ready within 15 seconds'));
+    else finish(new Error('macOS GUI did not report MarksPanel login or workspace readiness within 15 seconds'));
   }, startupDeadlineMs);
   });
 } catch (error) {

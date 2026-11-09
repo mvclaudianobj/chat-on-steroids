@@ -126,4 +126,3 @@ describe('finish producer to durable injection integration', () => {
     } finally { vi.unstubAllGlobals(); }
   });
 });
-

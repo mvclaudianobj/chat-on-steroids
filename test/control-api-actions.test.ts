@@ -66,6 +66,7 @@ const { setChatBlocked } = await import('../src/main/session/blocked-chats.js');
 const controlActions = await import('../src/main/control-actions.js');
 const chatModels = await import('../src/main/chat-models.js');
 const controlApi = await import('../src/main/control-api.js');
+const { initCompanyStore } = await import('../src/main/company-store.js');
 const { listInputs, resetInputForTests } = input;
 
 let dir: string;
@@ -191,6 +192,7 @@ beforeAll(async () => {
   initConfigPath(dir);
   initSecretsPath(dir);
   initSessionStore(dir);
+  initCompanyStore(dir);
   initDurableStore(dir);
   controlApi.initControlApiPath(dir);
   chatSession = await makeSession('Chat one', CHAT);
@@ -255,7 +257,7 @@ describe('with actions switched off', () => {
     expect(refused.status).toBe(403);
     expect(refused.continued).toBe(false);
     expect((await call('GET', '/v1/inputs')).status).toBe(200);
-    expect((await call('GET', '/v1/health')).body.actions).toEqual({ enabled: false, routes: ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel', 'POST /v1/workers/{ownerId}/spawn', 'POST /v1/workers/{ownerId}/message', 'POST /v1/workers/{ownerId}/ack', 'POST /v1/sessions/{id}/stop'] });
+    expect((await call('GET', '/v1/health')).body.actions).toEqual({ enabled: false, routes: ['POST /v1/inputs', 'POST /v1/inputs/{id}/cancel', 'POST /v1/workers/{ownerId}/spawn', 'POST /v1/workers/{ownerId}/message', 'POST /v1/workers/{ownerId}/ack', 'POST /v1/workers/{ownerId}/archive-all', 'POST /v1/sessions/{id}/stop', 'POST /v1/sessions/{id}/archive'] });
   });
 
   it('follows the switch on the next request without restarting the listener', async () => {
@@ -893,7 +895,7 @@ describe('cancelling', () => {
     }
   });
 
-  it('leaves to the app whatever cancelling would do beyond the one message', async () => {
+  it('cancels an unsent opening but keeps paired messages and worker ownership guarded', async () => {
     const reserved = randomUUID();
     const opening = row({ id: reserved, sessionId: reserved, text: 'first message of a new chat', opening: true });
     const pairedSession = await makeSession('Paired', 'chat-paired');
@@ -905,19 +907,20 @@ describe('cancelling', () => {
     const cancels = vi.spyOn(startInput, 'cancelDesktopInput');
     try {
       const refusals = await Promise.all([opening, first, second].map((entry) => post('/v1/inputs/' + (entry as { id: string }).id + '/cancel')));
-      expect(refusals.map((reply) => reply.status)).toEqual([409, 409, 409]);
-      expect(refusals.map((reply) => reply.body.error)).toEqual(['not_cancellable', 'not_cancellable', 'not_cancellable']);
-      expect(refusals[0]!.body.detail).toContain('new chat');
+      expect(refusals.map((reply) => reply.status)).toEqual([200, 409, 409]);
+      expect(refusals[0]!.body.cancelled).toBe(true);
+      expect(refusals.slice(1).map((reply) => reply.body.error)).toEqual(['not_cancellable', 'not_cancellable']);
       expect(refusals[1]!.body.detail).toContain('paired');
       const forWorker = await post('/v1/inputs/' + (workers as { id: string }).id + '/cancel');
       expect(forWorker.status).toBe(409);
       expect(forWorker.body.error).toBe('session_not_controllable');
-      expect(cancels).not.toHaveBeenCalled();
+      expect(cancels).toHaveBeenCalledTimes(1);
     } finally {
       cancels.mockRestore();
     }
     const rows = await outbox();
-    expect(rows.every((entry) => entry.state === 'queued')).toBe(true);
+    expect(rows.find(entry => entry.id === reserved)?.state).toBe('cancelled');
+    expect(rows.filter(entry => entry.id !== reserved).every(entry => entry.state === 'queued')).toBe(true);
     // The reserved chat of the opening message is still there.
     const { getSession } = await import('../src/main/session/store.js');
     expect(await getSession(chatSession)).not.toBeNull();
@@ -1136,7 +1139,8 @@ describe('stopping an answer', () => {
     try {
       const reply = await post('/v1/sessions/' + chatSession + '/stop', { turnId: 'turn-1' });
       expect(reply.status).toBe(202);
-      expect(stops).toHaveBeenCalledWith(chatSession, 'turn-1');
+      // #1882: the log names the control API as the Stop's sender.
+      expect(stops).toHaveBeenCalledWith(chatSession, 'turn-1', { from: 'the control API' });
       expect(reply.body.live).toMatchObject({ activeTurnId: 'turn-1', stopPending: true });
     } finally {
       stops.mockRestore();
@@ -1168,6 +1172,29 @@ describe('stopping an answer', () => {
     } finally {
       stops.mockRestore();
     }
+  });
+});
+
+describe('worker cleanup and session archive action gates', () => {
+  it('rejects owner archive without Allow actions and refuses extra body fields', async () => {
+    const owner = randomUUID();
+    gate.actions = false;
+    expect((await post('/v1/workers/' + owner + '/archive-all', {})).body.error).toBe('actions_disabled');
+    expect((await post('/v1/sessions/' + chatSession + '/archive', {})).body.error).toBe('actions_disabled');
+    gate.actions = true;
+    expect((await post('/v1/workers/' + owner + '/archive-all', { all: true })).body.error).toBe('invalid_body');
+    expect((await post('/v1/sessions/' + chatSession + '/archive', { all: true })).body.error).toBe('invalid_body');
+  });
+
+  it('makes empty exact-owner batch idempotent, keeps unknown sessions unavailable and archives settled chats', async () => {
+    const owner = randomUUID();
+    const noWorkers = await post('/v1/workers/' + owner + '/archive-all', {});
+    expect(noWorkers.status).toBe(200);
+    expect(noWorkers.body).toMatchObject({ workers: 0, archived: 0 });
+    expect((await post('/v1/sessions/nosuchsession/archive', {})).body.error).toBe('session_not_found');
+    const archived = await post('/v1/sessions/' + chatSession + '/archive', {});
+    expect(archived.status).toBe(200);
+    expect(archived.body).toMatchObject({ sessionId: chatSession, archived: true });
   });
 });
 

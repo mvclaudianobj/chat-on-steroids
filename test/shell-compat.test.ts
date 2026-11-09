@@ -42,7 +42,7 @@ function fixture() {
     { type: 'user-message', messageId: USER, serverMessageId: USER, message: 'hello' },
     { type: 'chatgpt-reasoning-group', items: [
       { type: 'reasoning', presentation: 'preamble', content: 'Commentary without a provider message id' },
-      { type: 'mcp-tool-call', callId: CALL, completed: false, invocation: { server: 'Chat On Steroids Core', tool: 'link_x/read', arguments: { private: 'NEVER_COPY_TOOL_ARGS' } }, result: null }
+      { type: 'mcp-tool-call', callId: CALL, completed: false, invocation: { server: 'Chat Marks Core', tool: 'link_x/read', arguments: { private: 'NEVER_COPY_TOOL_ARGS' } }, result: null }
     ] },
     { type: 'assistant-message', messageId: ANSWER, content: 'Answer', phase: 'final_answer', completed: false }
   ] as any[] } };
@@ -304,7 +304,7 @@ it('decodes the entities a DIL fallback writes for | and & in plain text, once',
   };
   expect(await read('a&#124;b \\<c> &amp;d \\\\e \\*f\\*\n`a|b <c> &d \\e *f*`\nEND'))
     .toBe('a|b <c> &d \\e *f*\n`a|b <c> &d \\e *f*`\nEND');
-  expect(await read('KIWI &#124; /home/maxim/cos-ssh-live')).toBe('KIWI | /home/maxim/cos-ssh-live');
+  expect(await read('KIWI &#124; /home/you/cos-ssh-live')).toBe('KIWI | /home/you/cos-ssh-live');
   // A literal entity the model wrote has its & encoded, so one pass gives back the literal text.
   expect(await read('Write &amp;#124; or &amp;amp; or &amp;lt;b&amp;gt; &#x7C; &#X7c;')).toBe('Write &#124; or &amp; or &lt;b&gt; | |');
   // Code and formulas keep their own text.
@@ -343,6 +343,24 @@ it('requires the final item and successful turn, while retaining exact messages 
   expect((await f.ask()).turns[0].messages.map((m: any) => m.messageId)).toEqual(completed.messages.map((m: any) => m.messageId));
   f.entry.turn.items.push({ type: 'assistant-message', messageId: OTHER, content: 'retry underway', phase: 'final_answer', completed: false });
   expect((await f.ask()).turns[0].endMessageId).toBeNull();
+});
+it('does not end a turn on an answer its later tool calls went past (live 2026-10-21)', async () => {
+  // GPT-6 answered, asked for a tool approval, ran more calls after Allow and ended on a plan card
+  // with no answer of its own. The earlier answer's end vetoed the automatic Continue.
+  const f = fixture(); f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  expect((await f.ask()).turns[0].endMessageId).toBe(ANSWER);
+  f.entry.turn.items.push({ type: 'chatgpt-reasoning-group', items: [
+    { type: 'mcp-tool-call', callId: OTHER, completed: true, invocation: { server: 'Chat Marks Core', tool: 'link_x/update_plan' } }] });
+  const after = (await f.ask()).turns[0];
+  expect(after.endMessageId).toBeNull();
+  expect(after.messages.find((m: any) => m.rawMessageId === ANSWER)?.rawText).toBe('Answer');
+  // Another server's call or a top-level call goes past the answer just as well.
+  f.entry.turn.items.pop(); f.entry.turn.items.push({ type: 'dynamic-tool-call', callId: OTHER, tool: 'web_search' });
+  expect((await f.ask()).turns[0].endMessageId).toBeNull();
+  // A later answer ends the turn again.
+  const LATER = '66666666-6666-4666-8666-666666666666';
+  f.entry.turn.items.push({ type: 'assistant-message', messageId: LATER, content: 'Done', phase: 'final_answer', completed: true });
+  expect((await f.ask()).turns[0].endMessageId).toBe(LATER);
 });
 it('reports an explicit per-call completion without a synthetic result message', async () => {
   const f = fixture(); f.entry.turn.items[1].items[1].completed = true;
@@ -392,6 +410,181 @@ it('stamps blob pixels only for the exact mounted image item and retires replace
   expect(node.hasAttribute('data-clf-fiber-image-source')).toBe(false);
 });
 
+// #2005 (2026-11-02, live VM 2026-11-03): an ImageGen gallery mounts one large preview plus a thumbnail
+// strip, `div[role=group] > button[aria-pressed] > img`. The gallery's shell item is only its first image,
+// so only that one was ever recorded; the others said "Image preview unavailable".
+function gallery(f: ReturnType<typeof fixture>, selected = 2) {
+  const files = ['file_aaaaaaaaaaaaaaa1', 'file_aaaaaaaaaaaaaaa2', 'file_aaaaaaaaaaaaaaa3', 'file_aaaaaaaaaaaaaaa4'];
+  const images = files.map((file, index) => ({ type: 'generated-image', id: `${ANSWER}:image-asset:${index}`, chatGptMessageId: ANSWER,
+    src: `sediment://${file}`, status: 'completed', isPreview: false, width: 1254, height: 1254 }));
+  f.entry.turn.status = 'complete'; f.entry.turn.messageIds = [USER, ANSWER];
+  f.entry.turn.items = [f.entry.turn.items[0], ...images];
+  f.doc.querySelector('[data-content-search-unit-key$=":assistant"]')!.remove();
+  const wrapper = f.doc.createElement('div');
+  const preview = f.doc.createElement('div'); preview.className = 'group/generated-image-preview';
+  const big = f.doc.createElement('img'); big.src = 'blob:https://chatgpt.com/large'; preview.append(big);
+  const strip = f.doc.createElement('div'); strip.setAttribute('role', 'group');
+  wrapper.append(preview, strip);
+  f.doc.querySelector('[data-turn-key]')!.append(wrapper);
+  // The page's own copies of the typed images: equal values, other objects.
+  const shown = images.map(image => ({ ...image }));
+  const owner = f.chain({ item: images[0] }, f.row);
+  (big as any).__reactFiber$fixture = f.chain({ image: shown[selected], imageId: shown[selected]!.id, isComplete: true, isPreview: false }, owner);
+  const thumbs = shown.map((image, index) => {
+    const button = f.doc.createElement('button'); button.setAttribute('aria-pressed', String(index === selected));
+    const thumb = f.doc.createElement('img'); thumb.src = `blob:https://chatgpt.com/thumb-${index}`; button.append(thumb); strip.append(button);
+    (thumb as any).__reactFiber$fixture = f.chain({ image }, f.chain({ images: shown, selectedImageId: shown[selected]!.id }, owner));
+    return thumb;
+  });
+  return { images, shown, big, thumbs, files };
+}
+const stampedFile = (node: Element, files: string[]) => {
+  const stamp = node.getAttribute('data-clf-fiber-image');
+  return stamp ? files.find(file => stamp.endsWith(`:${encodeURIComponent(file)}`)) ?? 'other' : null;
+};
+
+it('records every image of a gallery: the large preview as whichever image it shows, and each thumbnail (#2005)', async () => {
+  const f = fixture(); const { big, thumbs, files } = gallery(f, 2);
+  const turn = (await f.ask()).turns[0];
+  expect(turn.images.map((image: any) => image.assetId)).toEqual(files);
+  expect(stampedFile(big, files)).toBe(files[2]);
+  expect(thumbs.map(thumb => stampedFile(thumb, files))).toEqual(files);
+});
+
+// Observed public page shape: ImageGen outputs can be children of the working
+// group instead of top-level answer items, including before this turn finishes.
+it.each(['running', 'group-complete', 'assistant-final'] as const)(
+  'reads generated images inside the current reasoning group (%s)', async state => {
+    const f = fixture(); const g = gallery(f, 1);
+    f.entry.turn.status = state === 'running' ? 'in_progress' : 'complete';
+    f.entry.turn.items = [f.entry.turn.items[0], {
+      type: 'chatgpt-reasoning-group', completed: state !== 'running', items: [
+        { type: 'reasoning', presentation: 'analysis', content: 'NEVER_COPY_PRIVATE_REASONING' },
+        ...g.images
+      ]
+    }];
+    if (state === 'assistant-final') {
+      f.entry.turn.messageIds.push(OTHER);
+      f.entry.turn.items.push({ type: 'assistant-message', messageId: OTHER,
+        content: 'Both images are ready.', phase: 'final_answer', completed: true });
+    }
+    const turn = (await f.ask()).turns[0];
+    expect(turn.images.map((image: any) => image.assetId)).toEqual(g.files);
+    expect(turn.images.every((image: any) => image.providerStatus === 'finished_successfully')).toBe(true);
+    expect(stampedFile(g.big, g.files)).toBe(g.files[1]);
+    expect(g.thumbs.map(thumb => stampedFile(thumb, g.files))).toEqual(g.files);
+    expect(turn.endMessageId).toBe(state === 'assistant-final' ? OTHER : null);
+    expect(JSON.stringify(turn)).not.toContain('NEVER_COPY_PRIVATE_REASONING');
+  }
+);
+
+it('keeps newer nested image identities after an older top-level image', async () => {
+  const f = fixture(); const g = gallery(f, 2);
+  const newest = '66666666-6666-4666-8666-666666666666';
+  g.images[1]!.chatGptMessageId = OTHER;
+  g.images[2]!.chatGptMessageId = newest;
+  Object.assign(g.shown[1]!, g.images[1]);
+  Object.assign(g.shown[2]!, g.images[2]);
+  f.entry.turn.status = 'in_progress';
+  f.entry.turn.messageIds.push(OTHER, newest);
+  f.entry.turn.items = [f.entry.turn.items[0], g.images[0], {
+    type: 'chatgpt-reasoning-group', items: [g.images[1], g.images[2]]
+  }];
+  const turn = (await f.ask()).turns[0];
+  expect(turn.images.map((image: any) => [image.messageId, image.assetId])).toEqual([
+    [ANSWER, g.files[0]], [OTHER, g.files[1]], [newest, g.files[2]]
+  ]);
+  expect(stampedFile(g.big, g.files)).toBe(g.files[2]);
+  expect(turn.endMessageId).toBeNull();
+});
+
+it.each([
+  ['an id no typed image of this turn has', (g: ReturnType<typeof gallery>) => { g.shown[1]!.id = `${ANSWER}:image-asset:9`; }],
+  ['another message', (g: ReturnType<typeof gallery>) => { g.shown[1]!.chatGptMessageId = OTHER; }],
+  ['another source', (g: ReturnType<typeof gallery>) => { g.shown[1]!.src = 'sediment://file_bbbbbbbbbbbbbbbb'; }],
+  ['an image still being made', (g: ReturnType<typeof gallery>) => { g.images[1]!.status = 'in_progress'; }],
+  ['two typed images with that id', (g: ReturnType<typeof gallery>, f: ReturnType<typeof fixture>) => {
+    f.entry.turn.items.push({ ...g.images[1]!, src: 'sediment://file_cccccccccccccccc' }); }]
+] as const)('leaves a thumbnail unrecorded when its image is %s', async (_case, change) => {
+  const f = fixture(); const g = gallery(f, 0);
+  change(g as any, f);
+  await f.ask();
+  expect(stampedFile(g.thumbs[1]!, g.files)).toBeNull();
+  // The other images of the gallery are unaffected.
+  expect(stampedFile(g.thumbs[2]!, g.files)).toBe(g.files[2]);
+});
+
+it.each(['foreign message', 'invalid asset', 'running image', 'preview'])(
+  'keeps nested image validation and pixel ownership strict (%s)', async scenario => {
+    const f = fixture(); const { image, node } = generatedAnswer(f);
+    f.entry.turn.items = [f.entry.turn.items[0], { type: 'chatgpt-reasoning-group', items: [image] }];
+    if (scenario === 'foreign message') image.chatGptMessageId = OTHER;
+    if (scenario === 'invalid asset') image.src = 'https://example.com/not-an-owned-asset';
+    if (scenario === 'running image') image.status = 'in_progress';
+    if (scenario === 'preview') image.isPreview = true;
+    const turn = (await f.ask()).turns[0];
+    expect(turn.endMessageId).toBeNull();
+    if (scenario === 'foreign message' || scenario === 'invalid asset') expect(turn.images).toEqual([]);
+    else expect(turn.images).toEqual([expect.objectContaining({ providerStatus: 'in_progress' })]);
+    expect(node.hasAttribute('data-clf-fiber-image')).toBe(false);
+  }
+);
+
+it('does not take a large preview that ChatGPT marks incomplete or a preview', async () => {
+  for (const flags of [{ isComplete: false, isPreview: false }, { isComplete: true, isPreview: true }]) {
+    const f = fixture(); const g = gallery(f, 1);
+    const props = (g.big as any).__reactFiber$fixture.memoizedProps;
+    Object.assign(props, flags);
+    await f.ask();
+    expect(stampedFile(g.big, g.files)).toBeNull();
+  }
+});
+
+// #2005 part B: history found later was recorded at the moment it was read ("new 12:55 timestamps").
+// ChatGPT's own turn says when its work started and ended (live, a 16-turn chat from 2026-10-28: each
+// question's recorded time equals its turn's workStartedAtMs to the minute; sentAtMs was null).
+it('gives a question its turn\'s start and a finished answer its end, as ChatGPT records them', async () => {
+  const f = fixture();
+  const started = Date.parse('2026-09-18T08:30:00Z'), finished = Date.parse('2026-09-18T08:34:00Z');
+  Object.assign(f.entry.turn, { workStartedAtMs: started, workCompletedAtMs: finished });
+  const times = async () => Object.fromEntries((await f.ask()).turns[0].messages.map((m: any) => [m.role, m.createTime ?? null]));
+  // While the answer is running it has no time of its own yet.
+  expect(await times()).toEqual({ user: started, assistant: null });
+  f.entry.turn.status = 'complete'; f.entry.turn.items[2].completed = true;
+  expect(await times()).toEqual({ user: started, assistant: finished });
+  // ChatGPT's own send time, once it keeps one, wins over the turn's start.
+  f.entry.turn.items[0].sentAtMs = started - 2_000;
+  expect((await times()).user).toBe(started - 2_000);
+  // No usable time: nothing is invented.
+  Object.assign(f.entry.turn, { workStartedAtMs: null, workCompletedAtMs: 'soon' });
+  f.entry.turn.items[0].sentAtMs = null;
+  expect(await times()).toEqual({ user: null, assistant: null });
+});
+
+// CodeRabbit on #2064: the turn's start belongs to its opening question, its end to its last answer,
+// and a value that cannot be a ChatGPT time is no time.
+it('gives the turn\'s start only to its opening question, its end only to its last answer, and takes only plausible times', async () => {
+  const f = fixture();
+  const started = Date.parse('2026-09-18T08:30:00Z'), finished = Date.parse('2026-09-18T08:34:00Z');
+  Object.assign(f.entry.turn, { workStartedAtMs: started, workCompletedAtMs: finished, status: 'complete' });
+  f.entry.turn.items[2].completed = true;
+  // A retry left an earlier finished answer, and a follow-up was sent into the running answer.
+  f.entry.turn.items.push(
+    { type: 'user-message', messageId: OTHER, message: 'One more thing' },
+    { type: 'assistant-message', messageId: 'answer-after-retry', content: 'Retried', phase: 'final_answer', completed: true });
+  f.entry.turn.messageIds.push(OTHER, 'answer-after-retry');
+  const times = async () => Object.fromEntries((await f.ask()).turns[0].messages.map((m: any) => [m.messageId, m.createTime ?? null]));
+  expect(await times()).toEqual({ [USER]: started, [ANSWER]: null, [OTHER]: null, 'answer-after-retry': finished });
+  // A follow-up's own send time is still its time.
+  f.entry.turn.items[3].sentAtMs = started + 60_000;
+  expect((await times())[OTHER]).toBe(started + 60_000);
+  for (const odd of [1, 9.9e13, Date.now() + 7 * 86_400_000]) {
+    Object.assign(f.entry.turn, { workStartedAtMs: odd, workCompletedAtMs: odd });
+    f.entry.turn.items[3].sentAtMs = odd;
+    expect(await times()).toEqual({ [USER]: null, [ANSWER]: null, [OTHER]: null, 'answer-after-retry': null });
+  }
+});
+
 it('rejects an image borrowing the authored user message identity', async () => {
   const f = fixture(); const { image } = generatedAnswer(f);
   image.chatGptMessageId = USER;
@@ -438,7 +631,7 @@ it('reads request metadata only for the mounted shell message ids in the exact n
   const f = fixture();
   const message = { id: CALL, author: { role: 'assistant' }, recipient: 'api_tool.call_tool',
     metadata: { request_id: OTHER }, create_time: 1700000000,
-    content: { content_type: 'code', text: '{"path":"/Chat On Steroids Core/link_x/read","args":{"secret":"NEVER_COPY"}}' } };
+    content: { content_type: 'code', text: '{"path":"/Chat Marks Core/link_x/read","args":{"secret":"NEVER_COPY"}}' } };
   f.queries.push({ queryKey: ['chatgpt-conversation', THREAD], state: { data: { mapping: {
     [CALL]: { id: CALL, message },
     [OTHER]: { id: OTHER, message: { ...message, id: OTHER, metadata: { request_id: 'wfr_UNSELECTED' } } }
@@ -469,7 +662,7 @@ function liveShellMapping(f: ReturnType<typeof fixture>, compiler = false) {
   const mapping: any = {
     [USER]: plain(USER, 'user', 'hello'), [ANSWER]: plain(ANSWER, 'assistant', 'Answer', 'final'),
     [CALL]: { id: CALL, message: { id: CALL, author: { role: 'assistant' }, recipient: 'api_tool.call_tool',
-      metadata: { request_id: OTHER }, content: { content_type: 'code', text: '{"path":"/Chat On Steroids Core/link_x/read","args":{"private":"DO_NOT_COPY"}}' } } },
+      metadata: { request_id: OTHER }, content: { content_type: 'code', text: '{"path":"/Chat Marks Core/link_x/read","args":{"private":"DO_NOT_COPY"}}' } } },
     [thought]: { id: thought, message: { id: thought, author: { role: 'assistant' },
       content: { content_type: 'thoughts', thoughts: [{ summary: 'Inspecting the project', content: 'PRIVATE_REASONING_CONTENT' }] }, metadata: {} } },
     [preamble]: plain(preamble, 'assistant', 'I will inspect the project.', 'commentary')
@@ -750,10 +943,10 @@ function pairedShellCall(f: ReturnType<typeof fixture>) {
   const step = f.entry.turn.items[1].items.find((item: any) => item.type === 'mcp-tool-call');
   step.completed = true;
   step.widgetStateSource = { messageId: resultId };
-  step.invocationResourceUri = '/Chat On Steroids Core/link_x/read';
+  step.invocationResourceUri = '/Chat Marks Core/link_x/read';
   mapping[resultId] = { id: resultId, parent: CALL, message: { id: resultId,
     author: { role: 'tool', name: 'api_tool.call_tool' }, recipient: 'all',
-    metadata: { invoked_resource: { app_name: 'Chat On Steroids Core', resource_uri: step.invocationResourceUri } },
+    metadata: { invoked_resource: { app_name: 'Chat Marks Core', resource_uri: step.invocationResourceUri } },
     content: { content_type: 'text', parts: ['PRIVATE_TOOL_RESULT'] } } };
   mapping[ANSWER].parent = resultId;
   f.entry.turn.messageIds = f.entry.turn.messageIds.map(id => id === CALL ? resultId : id);
@@ -785,8 +978,8 @@ it.each(['request', 'result', 'embedded'] as const)('keeps native paired shell r
 it.each(['unselected-source', 'wrong-tool', 'wrong-server', 'wrong-role', 'conflicting-request', 'duplicate-source'])('does not borrow paired shell invocation metadata from %s', async scenario => {
   const f = fixture(), { mapping, step, resultId } = pairedShellCall(f);
   if (scenario === 'unselected-source') step.widgetStateSource.messageId = OTHER;
-  if (scenario === 'wrong-tool') mapping[CALL].message.content.text = '{"path":"/Chat On Steroids Core/link_x/agents","args":{}}';
-  if (scenario === 'wrong-server') mapping[CALL].message.content.text = '{"path":"/Chat On Steroids Core Backup/link_x/read","args":{}}';
+  if (scenario === 'wrong-tool') mapping[CALL].message.content.text = '{"path":"/Chat Marks Core/link_x/agents","args":{}}';
+  if (scenario === 'wrong-server') mapping[CALL].message.content.text = '{"path":"/Chat Marks Core Backup/link_x/read","args":{}}';
   if (scenario === 'wrong-role') mapping[CALL].message.author.role = 'user';
   if (scenario === 'conflicting-request') mapping[resultId].message.metadata.request_id = 'wfr_conflicting_result';
   if (scenario === 'duplicate-source') f.entry.turn.items[1].items.push({ ...step, callId: OTHER });
@@ -809,9 +1002,9 @@ it.each(['duplicate-cache', 'conflicting-conversation', 'duplicate-id', 'unavail
 });
 it('recognizes the shell recipient spelling without admitting similarly named connectors', async () => {
   const f = fixture(), step = f.entry.turn.items[1].items[1];
-  step.invocation.server = 'Chat_On_Steroids_Core'; step.invocation.tool = 'read';
+  step.invocation.server = 'Chat_Marks_Core'; step.invocation.tool = 'read';
   expect((await f.ask()).turns[0].calls).toHaveLength(1);
-  step.invocation.server = 'Chat_On_Steroids_Core_Backup';
+  step.invocation.server = 'Chat_Marks_Core_Backup';
   expect((await f.ask()).turns[0].calls).toEqual([]);
 });
 it('retires shell busy evidence when its owner becomes unreadable or another question is mounted', async () => {
@@ -1757,7 +1950,7 @@ it('reports app sightings for shell turns from the native mapping', async () => 
   mapping[resultId].message.metadata.request_id = OTHER;
   mapping[resultId].message.metadata.invoked_resource.resource_uri = '/asdk_app_x1/link_x/read';
   const turn = (await f.ask()).turns[0];
-  expect(turn.sightings).toEqual([{ requestId: OTHER, appId: 'asdk_app_x1', linkId: 'link_x', appName: 'Chat On Steroids Core' }]);
+  expect(turn.sightings).toEqual([{ requestId: OTHER, appId: 'asdk_app_x1', linkId: 'link_x', appName: 'Chat Marks Core' }]);
   expect(JSON.stringify(turn)).not.toContain('PRIVATE_TOOL_RESULT');
 });
 
@@ -1773,7 +1966,7 @@ it('reports an app sighting for a shell result outside the turn\'s message ids, 
     author: { role: 'tool', name: 'api_tool.call_tool' }, recipient: 'all',
     metadata: { request_id: 'another-turns-request', invoked_resource: { app_name: 'Gmail', resource_uri: '/asdk_app_gmail/link_g/search' } } } };
   const turn = (await f.ask()).turns[0];
-  expect(turn.sightings).toEqual([{ requestId: OTHER, appId: 'asdk_app_x1', linkId: 'link_x', appName: 'Chat On Steroids Core' }]);
+  expect(turn.sightings).toEqual([{ requestId: OTHER, appId: 'asdk_app_x1', linkId: 'link_x', appName: 'Chat Marks Core' }]);
 });
 
 // Edit & resubmit (#365): the shell model has no parent ids. A question follows the previous turn's

@@ -17,7 +17,7 @@ for (const name of ['ink', 'soft', 'edge', 'hover']) {
 const text = (id: string, value: string | null): void => { document.getElementById(id)!.textContent = (value ?? '').slice(0, 200); };
 for (const id of ['title', 'step', 'chat', 'go', 'notNow']) text(id, query.get(id));
 document.getElementById('chat')!.hidden = !query.get('chat');
-document.title = query.get('title')?.slice(0, 200) || 'Chat On Steroids';
+document.title = query.get('title')?.slice(0, 200) || 'Chat Marks';
 const answer = (window as unknown as { cosAsk?: { answer(choice: 'go' | 'not-now'): void } }).cosAsk;
 document.getElementById('go')!.addEventListener('click', () => answer?.answer('go'));
 document.getElementById('notNow')!.addEventListener('click', () => answer?.answer('not-now'));

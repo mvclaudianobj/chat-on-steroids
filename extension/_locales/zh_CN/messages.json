@@ -6,7 +6,7 @@
     "message": "应用未响应"
   },
   "content_app_not_running": {
-    "message": "Chat On Steroids 未在此电脑上运行。"
+    "message": "Chat Marks 未在此电脑上运行。"
   },
   "content_auto_compaction": {
     "message": "自动压缩"
@@ -37,9 +37,6 @@
   },
   "content_bootstrap_composer_replaced": {
     "message": "插入引导消息时，ChatGPT 替换了输入框"
-  },
-  "content_bootstrap_composer_never_ready": {
-    "message": "ChatGPT 未显示可用于启动的输入框"
   },
   "content_bootstrap_composer_unavailable": {
     "message": "选择模型后，ChatGPT 未重新显示可用的输入框"
@@ -84,7 +81,7 @@
     "message": "为它打开的页面显示的是另一个对话"
   },
   "content_browser_disconnected": {
-    "message": "Chat On Steroids 中的浏览器连接已断开。"
+    "message": "Chat Marks 中的浏览器连接已断开。"
   },
   "content_cancel": {
     "message": "取消"
@@ -93,7 +90,7 @@
     "message": "聊天已阻止"
   },
   "content_chat_blocked_tip": {
-    "message": "此聊天已在 Chat On Steroids 应用中被阻止：其工具调用会被拒绝，目标、循环 和自动压缩均已关闭。要解除阻止，请在应用侧边栏中打开此聊天的 ⋯ 菜单，然后选择“解除阻止”。"
+    "message": "此聊天已在 Chat Marks 应用中被阻止：其工具调用会被拒绝，目标、循环 和自动压缩均已关闭。要解除阻止，请在应用侧边栏中打开此聊天的 ⋯ 菜单，然后选择“解除阻止”。"
   },
   "content_chat_still_opening": {
     "message": "此聊天仍在打开中，请重试"
@@ -325,9 +322,6 @@
   },
   "content_delivery_existing_draft": {
     "message": "ChatGPT 中已有未发送的草稿。重试前，请先在 Chrome 中发送或清除该草稿。"
-  },
-  "content_delivery_signed_out": {
-    "message": "此浏览器中未登录 ChatGPT。请在其中登录 ChatGPT，然后重新发送。"
   },
   "content_delivery_model_unconfirmed": {
     "message": "无法确认请求的模型或推理强度"
@@ -597,7 +591,7 @@
     "message": "保存中…"
   },
   "content_settings_aria": {
-    "message": "Chat On Steroids 设置"
+    "message": "Chat Marks 设置"
   },
   "content_stage_handoff_attention": {
     "message": "交接回复需要处理"
@@ -744,13 +738,13 @@
     "message": "正在编写…"
   },
   "extension_action_title": {
-    "message": "Chat On Steroids"
+    "message": "Chat Marks"
   },
   "extension_description": {
-    "message": "将 ChatGPT 连接到 Chat On Steroids，并通过 DOM、截图和开发者工具在后台控制浏览器标签页。"
+    "message": "将 ChatGPT 连接到 Chat Marks，并通过 DOM、截图和开发者工具在后台控制浏览器标签页。"
   },
   "extension_name": {
-    "message": "Chat On Steroids 浏览器扩展"
+    "message": "Chat Marks 浏览器扩展"
   },
   "popup_advanced": {
     "message": "高级"
@@ -888,10 +882,10 @@
     "message": "待处理"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "应用无法通过请求 ID 归属 $1 次调用——已回退为 $2。"
+    "message": "应用无法通过请求 ID 归属 $1 次调用: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "应用无法通过请求 ID 归属一次调用——已回退为 $1。"
+    "message": "应用无法通过请求 ID 归属一次调用: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "在应用连接并确认协议兼容之前，发送将被阻止。"
@@ -954,7 +948,7 @@
     "message": "会话捕获"
   },
   "popup_secure_storage_unavailable": {
-    "message": "安全凭据存储不可用。请打开 Chat On Steroids 查看设置说明。"
+    "message": "安全凭据存储不可用。请打开 Chat Marks 查看设置说明。"
   },
   "popup_sent_to_app": {
     "message": "已发送到应用"
@@ -1044,7 +1038,7 @@
     "message": "重试"
   },
   "popup_version_mismatch_help": {
-    "message": "应用 v$1（协议 $2）；扩展 v$3（协议 $4）。打开浏览器的“扩展程序”页面，启用“开发者模式”，然后更新 / 重新加载此扩展。如果仍不匹配，请在 Chat On Steroids 中使用“打开扩展文件夹”，并加载该文件夹。待 ChatGPT 标签页中的活动工作完成后，再重新加载这些标签页。"
+    "message": "应用 v$1（协议 $2）；扩展 v$3（协议 $4）。打开浏览器的“扩展程序”页面，启用“开发者模式”，然后更新 / 重新加载此扩展。如果仍不匹配，请在 Chat Marks 中使用“打开扩展文件夹”，并加载该文件夹。待 ChatGPT 标签页中的活动工作完成后，再重新加载这些标签页。"
   },
   "popup_yes": {
     "message": "是"
@@ -1083,7 +1077,7 @@
     "message": "自定义继续端点无效。请在设置中检查其 URL；请使用 HTTPS 或本地 HTTP 端点。"
   },
   "content_history_rate_limited": {
-    "message": "ChatGPT 暂时限制了对此对话历史的访问。Chat On Steroids 将暂停自动恢复，直到等待期结束。"
+    "message": "ChatGPT 暂时限制了对此对话历史的访问。Chat Marks 将暂停自动恢复，直到等待期结束。"
   },
   "content_goal_error_rate_limited": {
     "message": "继续提供者正在限制请求频率。请等待显示的重试时间，或选择其他继续模型。"
@@ -1176,7 +1170,13 @@
     "message": "失败。请从 CoS 重新开始登录。"
   },
   "popup_app_not_running_help": {
-    "message": "请确认 Chat On Steroids 已在这台电脑上打开。扩展会自动连接。"
+    "message": "请确认 Chat Marks 已在这台电脑上打开。扩展会自动连接。"
+  },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT 未显示可用于启动的输入框"
+  },
+  "content_delivery_signed_out": {
+    "message": "此浏览器中未登录 ChatGPT。请在其中登录 ChatGPT，然后重新发送。"
   },
   "content_workers_finished": {
     "message": "$1 个已完成"
@@ -1215,6 +1215,15 @@
     "message": "正在等待应用"
   },
   "content_task_waiting_app": {
-    "message": "正在等待 Chat On Steroids 响应。"
+    "message": "正在等待 Chat Marks 响应。"
+  },
+  "content_goal_wait_slots": {
+    "message": "等待空位（同时工作的聊天数）"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT 要求放慢速度 · 等到它指定的时间"
+  },
+  "content_revival_draft_appeared": {
+    "message": "准备唤醒工作者时，对话中输入了内容，因此唤醒没有替换它。"
   }
 }

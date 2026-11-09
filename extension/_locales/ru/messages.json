@@ -6,7 +6,7 @@
     "message": "приложение не ответило"
   },
   "content_app_not_running": {
-    "message": "Chat On Steroids не запущен на этом ПК."
+    "message": "Chat Marks не запущен на этом ПК."
   },
   "content_auto_compaction": {
     "message": "Автосжатие"
@@ -37,9 +37,6 @@
   },
   "content_bootstrap_composer_replaced": {
     "message": "ChatGPT заменил редактор сообщения во время вставки запуска"
-  },
-  "content_bootstrap_composer_never_ready": {
-    "message": "ChatGPT так и не показал доступный редактор сообщения для запуска"
   },
   "content_bootstrap_composer_unavailable": {
     "message": "после выбора модели ChatGPT так и не показал доступный редактор сообщения"
@@ -84,7 +81,7 @@
     "message": "открытая для него страница показывала другой диалог"
   },
   "content_browser_disconnected": {
-    "message": "Подключение браузера в Chat On Steroids разорвано."
+    "message": "Подключение браузера в Chat Marks разорвано."
   },
   "content_cancel": {
     "message": "Отмена"
@@ -93,7 +90,7 @@
     "message": "Чат заблокирован"
   },
   "content_chat_blocked_tip": {
-    "message": "Этот чат заблокирован в Chat On Steroids: вызовы инструментов отклоняются, а Цель, Цикл и автосжатие выключены. Чтобы разблокировать его, откройте меню ⋯ этого чата на боковой панели приложения и выберите «Разблокировать чат»."
+    "message": "Этот чат заблокирован в Chat Marks: вызовы инструментов отклоняются, а Цель, Цикл и автосжатие выключены. Чтобы разблокировать его, откройте меню ⋯ этого чата на боковой панели приложения и выберите «Разблокировать чат»."
   },
   "content_chat_still_opening": {
     "message": "чат ещё открывается — повторите"
@@ -326,9 +323,6 @@
   "content_delivery_existing_draft": {
     "message": "В ChatGPT уже есть неотправленный черновик. Отправьте или очистите его в Chrome перед повтором."
   },
-  "content_delivery_signed_out": {
-    "message": "В этом браузере не выполнен вход в ChatGPT. Войдите в ChatGPT там и отправьте снова."
-  },
   "content_delivery_model_unconfirmed": {
     "message": "Не удалось подтвердить выбранную модель или уровень рассуждений"
   },
@@ -456,15 +450,6 @@
     "message": "Цель достигнута"
   },
   "content_goal_retrying": {
-    "message": "Повтор Цели через $1 с"
-  },
-  "content_goal_retrying__one": {
-    "message": "Повтор Цели через $1 с"
-  },
-  "content_goal_retrying__few": {
-    "message": "Повтор Цели через $1 с"
-  },
-  "content_goal_retrying__many": {
     "message": "Повтор Цели через $1 с"
   },
   "content_goal_save": {
@@ -606,7 +591,7 @@
     "message": "Сохранение…"
   },
   "content_settings_aria": {
-    "message": "Настройки Chat On Steroids"
+    "message": "Настройки Chat Marks"
   },
   "content_stage_handoff_attention": {
     "message": "Ответ передачи контекста требует внимания"
@@ -650,26 +635,8 @@
   "content_tokens_from": {
     "message": "от $1 токена"
   },
-  "content_tokens_from__one": {
-    "message": "от $1 токена"
-  },
-  "content_tokens_from__few": {
-    "message": "от $1 токенов"
-  },
-  "content_tokens_from__many": {
-    "message": "от $1 токенов"
-  },
   "content_tool_calls_count": {
     "message": "$1 вызова инструментов"
-  },
-  "content_tool_calls_count__one": {
-    "message": "$1 вызов инструмента"
-  },
-  "content_tool_calls_count__few": {
-    "message": "$1 вызова инструментов"
-  },
-  "content_tool_calls_count__many": {
-    "message": "$1 вызовов инструментов"
   },
   "content_tool_details_loading": {
     "message": "Загрузка записанных сведений…"
@@ -679,15 +646,6 @@
   },
   "content_tool_more_changed_files": {
     "message": "ещё $1 изменённого файла"
-  },
-  "content_tool_more_changed_files__one": {
-    "message": "ещё $1 изменённый файл"
-  },
-  "content_tool_more_changed_files__few": {
-    "message": "ещё $1 изменённых файла"
-  },
-  "content_tool_more_changed_files__many": {
-    "message": "ещё $1 изменённых файлов"
   },
   "content_tool_outcome_completed": {
     "message": "выполнено"
@@ -706,15 +664,6 @@
   },
   "content_tool_preview_truncated": {
     "message": "Предпросмотр сокращён с $1 символа."
-  },
-  "content_tool_preview_truncated__one": {
-    "message": "Предпросмотр сокращён с $1 символа."
-  },
-  "content_tool_preview_truncated__few": {
-    "message": "Предпросмотр сокращён с $1 символов."
-  },
-  "content_tool_preview_truncated__many": {
-    "message": "Предпросмотр сокращён с $1 символов."
   },
   "content_tool_ran": {
     "message": "Выполнено: $1"
@@ -767,15 +716,6 @@
   "content_waiting_local_tools": {
     "message": "Ожидание завершения локальных инструментов: $1"
   },
-  "content_waiting_local_tools__one": {
-    "message": "Ожидание завершения локальных инструментов: $1"
-  },
-  "content_waiting_local_tools__few": {
-    "message": "Ожидание завершения локальных инструментов: $1"
-  },
-  "content_waiting_local_tools__many": {
-    "message": "Ожидание завершения локальных инструментов: $1"
-  },
   "content_worker_generic": {
     "message": "воркер"
   },
@@ -791,15 +731,6 @@
   "content_workers_still_running": {
     "message": "Воркеры ещё работают: $1"
   },
-  "content_workers_still_running__one": {
-    "message": "Воркеры ещё работают: $1"
-  },
-  "content_workers_still_running__few": {
-    "message": "Воркеры ещё работают: $1"
-  },
-  "content_workers_still_running__many": {
-    "message": "Воркеры ещё работают: $1"
-  },
   "content_working": {
     "message": "работа…"
   },
@@ -807,13 +738,13 @@
     "message": "Запись…"
   },
   "extension_action_title": {
-    "message": "Chat On Steroids"
+    "message": "Chat Marks"
   },
   "extension_description": {
-    "message": "Подключает ChatGPT к Chat On Steroids и управляет вкладками браузера в фоне через DOM, скриншоты и инструменты разработчика."
+    "message": "Подключает ChatGPT к Chat Marks и управляет вкладками браузера в фоне через DOM, скриншоты и инструменты разработчика."
   },
   "extension_name": {
-    "message": "Расширение браузера Chat On Steroids"
+    "message": "Расширение браузера Chat Marks"
   },
   "popup_advanced": {
     "message": "Дополнительно"
@@ -869,25 +800,7 @@
   "popup_count_held": {
     "message": "$1 удерживаются"
   },
-  "popup_count_held__one": {
-    "message": "$1 удерживается"
-  },
-  "popup_count_held__few": {
-    "message": "$1 удерживаются"
-  },
-  "popup_count_held__many": {
-    "message": "$1 удерживаются"
-  },
   "popup_count_held_in_page": {
-    "message": "$1 удерживаются на странице"
-  },
-  "popup_count_held_in_page__one": {
-    "message": "$1 удерживается на странице"
-  },
-  "popup_count_held_in_page__few": {
-    "message": "$1 удерживаются на странице"
-  },
-  "popup_count_held_in_page__many": {
     "message": "$1 удерживаются на странице"
   },
   "popup_count_queued": {
@@ -969,19 +882,10 @@
     "message": "ожидает"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "Приложение не смогло сопоставить $1 вызова по ID запроса — использован резервный способ $2."
-  },
-  "popup_pipeline_call_fallback_many__one": {
-    "message": "Приложение не смогло сопоставить $1 вызов по ID запроса — использован резервный способ $2."
-  },
-  "popup_pipeline_call_fallback_many__few": {
-    "message": "Приложение не смогло сопоставить $1 вызова по ID запроса — использован резервный способ $2."
-  },
-  "popup_pipeline_call_fallback_many__many": {
-    "message": "Приложение не смогло сопоставить $1 вызовов по ID запроса — использован резервный способ $2."
+    "message": "Приложение не смогло сопоставить $1 вызова по ID запроса: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "Приложение не смогло сопоставить вызов по ID запроса — использован резервный способ $1."
+    "message": "Приложение не смогло сопоставить вызов по ID запроса: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "Доставка заблокирована, пока приложение не подключено и не подтверждена совместимость протокола."
@@ -1009,15 +913,6 @@
   },
   "popup_pipeline_request_id_matched_many": {
     "message": "$1 ID запроса сопоставлено с записанной активностью инструментов."
-  },
-  "popup_pipeline_request_id_matched_many__one": {
-    "message": "$1 ID запроса сопоставлен с записанной активностью инструментов."
-  },
-  "popup_pipeline_request_id_matched_many__few": {
-    "message": "$1 ID запросов сопоставлены с записанной активностью инструментов."
-  },
-  "popup_pipeline_request_id_matched_many__many": {
-    "message": "$1 ID запросов сопоставлено с записанной активностью инструментов."
   },
   "popup_pipeline_request_id_matched_one": {
     "message": "1 ID запроса сопоставлен с записанной активностью инструментов."
@@ -1053,7 +948,7 @@
     "message": "Запись сессии"
   },
   "popup_secure_storage_unavailable": {
-    "message": "Защищённое хранилище учётных данных недоступно. Откройте Chat On Steroids для инструкций по настройке."
+    "message": "Защищённое хранилище учётных данных недоступно. Откройте Chat Marks для инструкций по настройке."
   },
   "popup_sent_to_app": {
     "message": "Отправлено в приложение"
@@ -1143,7 +1038,7 @@
     "message": "Повторить"
   },
   "popup_version_mismatch_help": {
-    "message": "Приложение v$1 (протокол $2); расширение v$3 (протокол $4). Откройте страницу Extensions браузера, включите Developer mode, затем Update / Reload для этого расширения. Если версии всё ещё не совпадают, используйте Open extension folder в Chat On Steroids и загрузите эту папку. Перезагрузите вкладки ChatGPT после завершения активной работы."
+    "message": "Приложение v$1 (протокол $2); расширение v$3 (протокол $4). Откройте страницу Extensions браузера, включите Developer mode, затем Update / Reload для этого расширения. Если версии всё ещё не совпадают, используйте Открыть папку расширения в Chat Marks и загрузите эту папку. Перезагрузите вкладки ChatGPT после завершения активной работы."
   },
   "popup_yes": {
     "message": "да"
@@ -1182,7 +1077,7 @@
     "message": "Пользовательский адрес продолжения недействителен. Проверьте URL в настройках; используйте HTTPS или локальный HTTP-адрес."
   },
   "content_history_rate_limited": {
-    "message": "ChatGPT временно ограничил доступ к истории этого чата. Chat On Steroids приостанавливает автоматическое восстановление до окончания периода ожидания."
+    "message": "ChatGPT временно ограничил доступ к истории этого чата. Chat Marks приостанавливает автоматическое восстановление до окончания периода ожидания."
   },
   "content_goal_error_rate_limited": {
     "message": "Провайдер продолжения ограничивает частоту запросов. Дождитесь указанного повторения или выберите другую модель продолжения."
@@ -1275,7 +1170,112 @@
     "message": "Не удалось. Начните вход заново из CoS."
   },
   "popup_app_not_running_help": {
-    "message": "Убедитесь, что Chat On Steroids открыт на этом компьютере. Расширение подключится само."
+    "message": "Убедитесь, что Chat Marks открыт на этом компьютере. Расширение подключится само."
+  },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPT так и не показал доступный редактор сообщения для запуска"
+  },
+  "content_delivery_signed_out": {
+    "message": "В этом браузере не выполнен вход в ChatGPT. Войдите в ChatGPT там и отправьте снова."
+  },
+  "content_goal_retrying__one": {
+    "message": "Повтор Цели через $1 с"
+  },
+  "content_goal_retrying__few": {
+    "message": "Повтор Цели через $1 с"
+  },
+  "content_goal_retrying__many": {
+    "message": "Повтор Цели через $1 с"
+  },
+  "content_tokens_from__one": {
+    "message": "от $1 токена"
+  },
+  "content_tokens_from__few": {
+    "message": "от $1 токенов"
+  },
+  "content_tokens_from__many": {
+    "message": "от $1 токенов"
+  },
+  "content_tool_calls_count__one": {
+    "message": "$1 вызов инструмента"
+  },
+  "content_tool_calls_count__few": {
+    "message": "$1 вызова инструментов"
+  },
+  "content_tool_calls_count__many": {
+    "message": "$1 вызовов инструментов"
+  },
+  "content_tool_more_changed_files__one": {
+    "message": "ещё $1 изменённый файл"
+  },
+  "content_tool_more_changed_files__few": {
+    "message": "ещё $1 изменённых файла"
+  },
+  "content_tool_more_changed_files__many": {
+    "message": "ещё $1 изменённых файлов"
+  },
+  "content_tool_preview_truncated__one": {
+    "message": "Предпросмотр сокращён с $1 символа."
+  },
+  "content_tool_preview_truncated__few": {
+    "message": "Предпросмотр сокращён с $1 символов."
+  },
+  "content_tool_preview_truncated__many": {
+    "message": "Предпросмотр сокращён с $1 символов."
+  },
+  "content_waiting_local_tools__one": {
+    "message": "Ожидание завершения локальных инструментов: $1"
+  },
+  "content_waiting_local_tools__few": {
+    "message": "Ожидание завершения локальных инструментов: $1"
+  },
+  "content_waiting_local_tools__many": {
+    "message": "Ожидание завершения локальных инструментов: $1"
+  },
+  "content_workers_still_running__one": {
+    "message": "Воркеры ещё работают: $1"
+  },
+  "content_workers_still_running__few": {
+    "message": "Воркеры ещё работают: $1"
+  },
+  "content_workers_still_running__many": {
+    "message": "Воркеры ещё работают: $1"
+  },
+  "popup_count_held__one": {
+    "message": "$1 удерживается"
+  },
+  "popup_count_held__few": {
+    "message": "$1 удерживаются"
+  },
+  "popup_count_held__many": {
+    "message": "$1 удерживаются"
+  },
+  "popup_count_held_in_page__one": {
+    "message": "$1 удерживается на странице"
+  },
+  "popup_count_held_in_page__few": {
+    "message": "$1 удерживаются на странице"
+  },
+  "popup_count_held_in_page__many": {
+    "message": "$1 удерживаются на странице"
+  },
+  "popup_pipeline_call_fallback_many__one": {
+    "message": "Приложение не смогло сопоставить $1 вызова по ID запроса: $2"
+  },
+  "popup_pipeline_call_fallback_many__few": {
+    "message": "Приложение не смогло сопоставить $1 вызова по ID запроса: $2"
+  },
+  "popup_pipeline_call_fallback_many__many": {
+    "message": "Приложение не смогло сопоставить $1 вызова по ID запроса: $2"
+  },
+  "popup_pipeline_request_id_matched_many__one": {
+    "message": "$1 ID запроса сопоставлен с записанной активностью инструментов."
+  },
+  "popup_pipeline_request_id_matched_many__few": {
+    "message": "$1 ID запросов сопоставлены с записанной активностью инструментов."
+  },
+  "popup_pipeline_request_id_matched_many__many": {
+    "message": "$1 ID запросов сопоставлено с записанной активностью инструментов."
   },
   "content_workers_finished": {
     "message": "завершено: $1"
@@ -1368,6 +1368,15 @@
     "message": "ожидание ответа приложения"
   },
   "content_task_waiting_app": {
-    "message": "Ожидание ответа Chat On Steroids."
+    "message": "Ожидание ответа Chat Marks."
+  },
+  "content_goal_wait_slots": {
+    "message": "Ждёт свободного места (Чатов, работающих одновременно)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT попросил притормозить · ждёт до указанного времени"
+  },
+  "content_revival_draft_appeared": {
+    "message": "Пока готовилось пробуждение воркера, в чат что-то ввели, поэтому пробуждение не заменило этот текст."
   }
 }

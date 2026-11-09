@@ -22,6 +22,9 @@ export function firefoxManifest(source, build = '') {
   // that later moved), the release names a Firefox-only fourth part: 2.1.43.1, same code.
   if (build) {
     if (!/^[1-9]\d{0,2}$/.test(build)) throw new Error(`Not a Firefox build number: ${build}`);
+    // Chat Marks versions already use the fourth part for the Marks revision, and Firefox takes
+    // at most four. A Firefox-only fix is published as the next Marks revision instead.
+    if (String(source.version).split('.').length > 3) throw new Error('Chat Marks versions already have four parts: publish the next Marks revision instead of a Firefox build');
     manifest.version = `${source.version}.${build}`;
   }
   delete manifest.minimum_chrome_version;

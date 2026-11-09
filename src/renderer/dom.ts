@@ -11,7 +11,9 @@ import { currentLanguage, t, ui } from './i18n.js';
  * The app's icon vocabulary, drawn with the bundled Phosphor font (icons.css).
  *
  * Call sites name what an icon means (`i-retry`); this map alone decides which glyph draws it.
- * `fill:` selects Phosphor's filled family. The dock toggles use the filled half-square that
+ * `fill:` selects Phosphor's filled family. `cm:` selects a Chat Marks drawing (icons.css
+ * `.cm-glyph-*`: a line SVG or the app's fox, painted in currentColor through a CSS mask) for the
+ * chat type icons Phosphor has no glyph for (renderer/chat-types.ts). The dock toggles use the filled half-square that
  * shows the edge they open: drawn upright (no rotation), it stays crisp at fractional scales.
  */
 const ICONS: Readonly<Record<string, string>> = {
@@ -28,12 +30,19 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-browser': 'browser',
   'i-chart': 'chart-line',
   'i-chat': 'chat-circle',
+  'i-chat-chatgpt': 'cm:fox',
   'i-check': 'check',
   'i-check-circle': 'check-circle',
   'i-checks': 'checks',
   'i-clock': 'clock',
   'i-copy': 'copy',
   'i-dock-expand': 'corners-out',
+  'i-engine-claude': 'cm:spark',
+  'i-engine-codex': 'cm:codex',
+  'i-engine-markscode': 'cm:code',
+  'i-engine-opencode': 'cm:opencode',
+  'i-module-zeroclaw': 'cm:claw',
+  'i-module-ccr': 'cm:ccr',
   'i-dock-restore': 'corners-in',
   'i-export': 'download-simple',
   'i-eye': 'eye',
@@ -72,6 +81,7 @@ const ICONS: Readonly<Record<string, string>> = {
   'i-power': 'power',
   'i-pulse': 'activity',
   'i-quote': 'quotes',
+  'i-related': 'link-simple',
   'i-retry': 'arrow-clockwise',
   'i-restore': 'arrow-counter-clockwise',
   'i-search': 'magnifying-glass',
@@ -95,6 +105,7 @@ const ICONS: Readonly<Record<string, string>> = {
 function iconClasses(name: string): string {
   const glyph = ICONS[name];
   if (!glyph) throw new Error(`unknown icon ${name}`);
+  if (glyph.startsWith('cm:')) return `cm-glyph cm-glyph-${glyph.slice(3)}`;
   return glyph.startsWith('fill:') ? `ph-fill ph-${glyph.slice(5)}` : `ph ph-${glyph}`;
 }
 
@@ -140,21 +151,118 @@ export function el(tag: string, className = '', text: string | (() => string) = 
 
 export const $ = <T extends HTMLElement>(id: string): T => document.getElementById(id) as T;
 
+/**
+ * Paints a panel now when it is on screen, and otherwise once it is shown, with the newest paint
+ * only. Every state push used to rebuild Setup and Settings lists nobody could see: about 1,000
+ * nodes a minute of garbage, which left Blink's heap at 1.1 GB with 180 MB of it in use
+ * (2026-11-01, 80–92% fragmented pages that a collection never hands back).
+ */
+const pendingPaints = new Map<Element, () => void>();
+/** Elements the observer watches. Observing an element again, or inside the observer's own callback, makes
+ * Chromium report it once more in the same frame: "ResizeObserver loop completed with undelivered notifications". */
+const watched = new Set<Element>();
+let shownWatch: ResizeObserver | undefined;
+let rewatch = 0;
+
+/** The outermost hidden element around `node`: the one whose box appears when the panel is shown. */
+function hiddenRoot(node: Element): Element {
+  let root = node;
+  while (root.parentElement && !root.parentElement.checkVisibility()) root = root.parentElement;
+  return root;
+}
+
+function watch(node: Element): void {
+  shownWatch ??= new ResizeObserver(flushShownPaints);
+  for (const target of [hiddenRoot(node), node]) {
+    if (watched.has(target)) continue;
+    watched.add(target);
+    shownWatch.observe(target);
+  }
+}
+
+function flushShownPaints(): void {
+  for (const [node, paint] of [...pendingPaints]) {
+    if (!node.isConnected) { pendingPaints.delete(node); continue; }
+    if (!node.checkVisibility()) continue;
+    pendingPaints.delete(node);
+    paint();
+  }
+  // Keep watching what still waits; stop watching the rest. A hidden root that changed is watched
+  // after this frame, never from inside this callback.
+  const needed = new Set<Element>();
+  for (const node of pendingPaints.keys()) { needed.add(node); needed.add(hiddenRoot(node)); }
+  for (const target of [...watched]) {
+    if (needed.has(target)) continue;
+    watched.delete(target);
+    shownWatch!.unobserve(target);
+  }
+  if ([...needed].some(target => !watched.has(target)) && !rewatch) {
+    rewatch = window.setTimeout(() => {
+      rewatch = 0;
+      for (const node of pendingPaints.keys()) if (node.isConnected && !node.checkVisibility()) watch(node);
+    }, 0);
+  }
+}
+
+export function paintWhenShown(node: Element, paint: () => void): void {
+  // Without the two browser features (tests in jsdom), paint as before.
+  if (typeof node.checkVisibility !== 'function' || typeof ResizeObserver !== 'function' || node.checkVisibility()) {
+    pendingPaints.delete(node);
+    paint();
+    return;
+  }
+  pendingPaints.set(node, paint);
+  // A shown panel gets a box before the frame is painted, so it never shows the older list.
+  watch(node);
+}
+
 let toastTimer: number | undefined;
 let toastWatch: ResizeObserver | undefined;
 
-export function toast(message: string): void {
+/** A button in a toast (Chat Marks): it runs once and closes the toast. */
+export interface ToastAction { label: string; run: () => void }
+
+/** How long a toast with one action (Undo) stays before it fades. */
+export const ACTION_TOAST_MS = 6000;
+
+/** Toast accepts one community action or the multiple actions used by Chat Marks. */
+export function toast(message: string, action?: ToastAction | readonly ToastAction[]): void {
+  const actions: readonly ToastAction[] = action === undefined ? [] : Array.isArray(action) ? action : [action as ToastAction];
   document.querySelector('.toast')?.remove();
   toastWatch?.disconnect();
   const node = el('div', 'toast', message);
   node.setAttribute('role', 'status');
+  const before = document.activeElement as HTMLElement | null;
+  const close = () => {
+    const hadFocus = node.contains(document.activeElement);
+    node.remove(); toastWatch?.disconnect();
+    if (hadFocus && before?.isConnected && typeof before.focus === 'function') before.focus({ preventScroll: true });
+  };
+  if (actions.length) {
+    node.classList.add('has-action', 'has-actions');
+    const row = el('div', 'toast-actions');
+    for (const item of actions) {
+      const button = el('button', 'toast-action', item.label) as HTMLButtonElement;
+      button.type = 'button';
+      button.addEventListener('click', () => { window.clearTimeout(toastTimer); close(); item.run(); });
+      row.append(button);
+    }
+    node.append(row);
+    // Pointer or keyboard focus keeps the action available until the person leaves it.
+    const hold = () => window.clearTimeout(toastTimer);
+    const release = () => { window.clearTimeout(toastTimer); toastTimer = window.setTimeout(close, 2000); };
+    node.addEventListener('pointerenter', hold);
+    node.addEventListener('pointerleave', () => { if (!node.contains(document.activeElement)) release(); });
+    node.addEventListener('focusin', hold);
+    node.addEventListener('focusout', event => { if (!node.contains(event.relatedTarget as Node | null) && !node.matches(':hover')) release(); });
+  }
   document.body.append(node);
   placeToast(node);
   // The composer and its dock can grow or the window resize while the toast shows: it follows.
   toastWatch = typeof ResizeObserver === 'function' ? new ResizeObserver(() => { if (node.isConnected) placeToast(node); }) : undefined;
   for (const target of document.querySelectorAll('main, .card.is-session > .composer, .card.is-session > .composer-dock')) toastWatch?.observe(target);
   window.clearTimeout(toastTimer);
-  toastTimer = window.setTimeout(() => { node.remove(); toastWatch?.disconnect(); }, 3200);
+  toastTimer = window.setTimeout(close, actions.length > 1 ? 10_000 : actions.length ? ACTION_TOAST_MS : 3200);
 }
 
 /** Shown over the content it is about: centred on the open chat's composer and just above it and
@@ -230,6 +338,24 @@ export function elapsedDurationText(seconds: number, parts: 1 | 2): string {
 /** A clock time for one event in a timeline. */
 export function clockTime(atMs: number): string {
   return new Date(atMs).toLocaleTimeString(currentLanguage());
+}
+
+/**
+ * A chat row's time: hours and minutes ("3:52 PM", "15:52"), its full date in the title, and a
+ * machine-readable `datetime`. Shown only with "Show message times" on.
+ */
+export function rowTime(atMs: number): HTMLTimeElement {
+  const time = document.createElement('time');
+  const at = new Date(atMs);
+  // A damaged saved time (say 1e20) has no date; the row shows none rather than failing to draw.
+  if (!Number.isFinite(at.getTime())) return time;
+  // Bound, so a language change repaints rows already drawn. The full date is also the accessible
+  // name: the title alone is out of reach without a pointer (CodeRabbit on #1948).
+  ui(time, 'textContent', () => at.toLocaleTimeString(currentLanguage(), { hour: 'numeric', minute: '2-digit' }));
+  ui(time, 'title', () => at.toLocaleString(currentLanguage()));
+  ui(time, 'aria-label', () => at.toLocaleString(currentLanguage()));
+  time.dateTime = at.toISOString();
+  return time;
 }
 
 /** "1.2k", "3.4M" — for token and character counts that get large. */

@@ -1,4 +1,5 @@
 import { t } from './i18n.js';
+import { RELEASE_VERSION_PATTERN } from '../shared/types.js';
 
 /** Localize the updater's authored reasons; unknown external diagnostics remain verbatim. */
 export function updateErrorText(source: string): string {
@@ -9,6 +10,8 @@ export function updateErrorText(source: string): string {
       return t('The downloaded update could not be confirmed for installation.');
     case 'Could not read plugin-refresh state':
       return t('The saved plugin update state could not be read.');
+    case 'the update staging path must use ordinary directories':
+      return t('The update cache and its version folders must be ordinary folders, not files or links.');
     case 'the latest release has no usable version tag':
     case 'the release page named no usable version tag':
       return t('The release information has no valid version number.');
@@ -20,7 +23,7 @@ export function updateErrorText(source: string): string {
   if (http) return t('Could not check for updates: HTTP {0}.', [http[1]]);
   const download = /^(.+) answered (\d{3})$/.exec(source);
   if (download) return t('Could not download {0}: HTTP {1}.', [download[1], download[2]]);
-  const absent = /^release (\d+\.\d+\.\d+) publishes no (.+)$/.exec(source);
+  const absent = new RegExp(`^release (${RELEASE_VERSION_PATTERN}) publishes no (.+)$`).exec(source);
   if (absent) return t('Release {0} does not include {1}.', [absent[1], absent[2]]);
   if (/^downloading .+ returned no content$/.test(source)) return t('The update download returned no data.');
   if (/^.+ is not the published file: sha256 [a-f\d]{64} instead of [a-f\d]{64}$/.test(source)) {
@@ -29,8 +32,12 @@ export function updateErrorText(source: string): string {
   return t(source);
 }
 
+export function updateErrorNeedsDiagnostics(source: string | null): boolean {
+  return source === 'Could not read plugin-refresh state' || source === 'the update staging path must use ordinary directories';
+}
+
 export function updateErrorNextStep(source: string): string {
-  return source === 'Could not read plugin-refresh state'
+  return updateErrorNeedsDiagnostics(source)
     ? t('Save a Diagnostics report from Activity for help with recovery. The saved state has been kept.')
     : t('Choose Update all to retry.');
 }

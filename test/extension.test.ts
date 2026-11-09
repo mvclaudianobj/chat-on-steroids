@@ -35,9 +35,9 @@ describe('extension release metadata', () => {
     const manifest = JSON.parse(
       await fs.readFile(path.join(process.cwd(), 'extension', 'manifest.json'), 'utf8')
     ) as { version: string };
-    expect(pkg.version).toBe(APP_VERSION);
-    expect(lock.version).toBe(APP_VERSION);
-    expect(lock.packages?.['']?.version).toBe(APP_VERSION);
+    expect(pkg.version.replace('+', '.')).toBe(APP_VERSION);
+    expect(lock.version).toBe(pkg.version);
+    expect(lock.packages?.['']?.version).toBe(pkg.version);
     expect(manifest.version).toBe(APP_VERSION);
     expect(BRIDGE_PROTOCOL).toBe(14);
     expect(backgroundSource).toContain('const BRIDGE_PROTOCOL = 14;');
@@ -527,8 +527,12 @@ function loadWorker(options: {
   >;
   tabsSendMessage?: (tabId: number, message: Record<string, unknown>) => Promise<unknown>;
   windowsGet?: (windowId: number) => Promise<{ focused?: boolean }>;
+  /** A Chrome debugger API: the worker then keeps background tabs rendering with the real active-tabs.js. */
+  debuggerApi?: Record<string, unknown>;
   /** Chrome's tab-group API with these groups; omitted, the browser has none. */
   tabGroups?: Array<{ id: number; windowId: number; title?: string; collapsed?: boolean }>;
+  /** The CoS browser's worker preload (`__cosBrowserWorker`); omitted, a person's own browser. */
+  cosWorker?: { call(name: string, args: unknown[]): Promise<unknown>; subscribe?(fn: unknown): void };
 }): WorkerHarness {
   let listener: ((message: any, sender: any, sendResponse: (value: any) => void) => boolean) | null = null;
   const tabRemovedListeners: Array<(tabId: number) => void> = [];
@@ -657,7 +661,11 @@ function loadWorker(options: {
   const fetch = options.fetch ?? (async () => response(503, {}));
   // This legacy VM harness exercises non-debugger hosts. The real MV3 entry fixture
   // separately loads the unchanged module graph and verifies browser registration.
-  vm.runInNewContext(backgroundSource.replace(/^import .*$/gm, ''), {
+  if (options.debuggerApi) (chrome as Record<string, unknown>).debugger = options.debuggerApi;
+  const activeTabsSource = options.debuggerApi ? readFileSync('extension/active-tabs.js', 'utf8').replace('export function', 'function') : '';
+  vm.runInNewContext(activeTabsSource + backgroundSource.replace(/^import .*$/gm, ''), {
+    // The browser-control module is imported in the real worker; with a debugger it is asked for one.
+    ...(options.debuggerApi ? { createBrowserControl: () => ({ pump: async () => undefined, event: async () => undefined }) } : {}),
     chrome,
     fetch,
     AbortController,
@@ -666,7 +674,8 @@ function loadWorker(options: {
     URL,
     TextEncoder,
     crypto: globalThis.crypto,
-    console
+    console,
+    ...(options.cosWorker ? { __cosBrowserWorker: options.cosWorker } : {})
   }, { filename: 'background.js' });
   if (!listener) throw new Error('background.js did not register a message listener');
 
@@ -1330,8 +1339,8 @@ describe('this install\'s Core app for fresh tabs (#1086)', () => {
   it('hands a redeeming page this install\'s Core identity with its command', async () => {
     // A tab the app opened runs its command before its first status reply, so the command
     // carries what the page needs to mention this install's own Core rather than another's.
-    const names = { core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' };
-    const ownCoreApp = { appId: 'asdk_app_win2222', name: 'Chat On Steroids Core (Windows)' };
+    const names = { core: 'Chat Marks Core (Windows)', desktop: 'Chat Marks Desktop (Windows)', plugins: 'Chat Marks Plugins (Windows)' };
+    const ownCoreApp = { appId: 'asdk_app_win2222', name: 'Chat Marks Core (Windows)' };
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token', connectorNames: names, ownCoreApp });
     const worker = loadWorker({
       local, session: new FakeStorageArea(),
@@ -1347,7 +1356,7 @@ describe('this install\'s Core app for fresh tabs (#1086)', () => {
   });
 
   it('remembers the Core app a page lists under this install\'s name, and forgets it when it goes missing', async () => {
-    const names = { core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)' };
+    const names = { core: 'Chat Marks Core (Windows)', desktop: 'Chat Marks Desktop (Windows)', plugins: 'Chat Marks Plugins (Windows)' };
     const local = new FakeStorageArea({ port: 8765, token: 'paired-token', connectorNames: names });
     const worker = loadWorker({
       local, session: new FakeStorageArea(),
@@ -1357,7 +1366,7 @@ describe('this install\'s Core app for fresh tabs (#1086)', () => {
     await worker.registerTab(1);
     expect((await worker.send({ type: 'status' }, 1)).ownCoreApp).toBeNull();
     expect((await worker.send({ type: 'core_plugin', appId: 'asdk_app_win2222' }, 1)).ok).toBe(true);
-    const remembered = { appId: 'asdk_app_win2222', name: 'Chat On Steroids Core (Windows)' };
+    const remembered = { appId: 'asdk_app_win2222', name: 'Chat Marks Core (Windows)' };
     expect((await worker.send({ type: 'status' }, 1)).ownCoreApp).toEqual(remembered);
     expect((await local.get(['ownCoreApp'])).ownCoreApp).toEqual(remembered);
     // The page's complete plugin list without this install's Core takes the sighting back.
@@ -1560,6 +1569,55 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     }
   );
 
+  // 2026-11-01, the maintainer's Mac: a Loop chat's repairs were handed out ten times and never claimed, twice,
+  // and the app stopped recovering it. Each status pass waited for the rendering leases (a debugger command to
+  // every background chat tab, without a time limit) before it looked at its repairs. A lease that never answers
+  // or fails to release must not keep recovery waiting.
+  it.each(['hangs', 'cannot release'] as const)('performs a handed repair when keeping tabs rendering %s', async mode => {
+    let armed = false;
+    let handed = false;
+    const trace: string[] = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/repairs/claim') { trace.push('claim'); return response(200, { allowed: true }); }
+      if (url.pathname === '/status') {
+        if (url.searchParams.has('repaired')) trace.push('repaired');
+        // Released once the repair is due: a lease whose release keeps failing rejected every later pass.
+        const leased = mode === 'hangs' || !armed ? [CHAT] : [];
+        if (!armed || handed) return response(200, { nonDiscardableConversations: leased, repairs: [] });
+        handed = true;
+        return response(200, { nonDiscardableConversations: leased,
+          repairs: [{ conversationId: CHAT, token: 'stuck-lease', reason: 'assistant-error', requiresClaim: true }] });
+      }
+      return response(200, {});
+    });
+    const debuggerApi = {
+      attach: vi.fn(async () => undefined),
+      detach: vi.fn(async () => { throw new Error('detach failed'); }),
+      getTargets: vi.fn(async () => [{ tabId: 21, attached: true }]),
+      sendCommand: vi.fn(() => mode === 'hangs' ? new Promise(() => undefined) : Promise.resolve({})),
+      onDetach: { addListener: () => undefined },
+      onEvent: { addListener: () => undefined }
+    };
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch, debuggerApi,
+      tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}` }),
+      tabsSendMessage: async (_id, message) => message.type === 'clf-repair-check'
+        ? { safe: true, revision: 1, turnId: 'source', questionId: 'question' }
+        : message.type === 'clf-page-status' ? { ok: true, conversationId: CHAT } : { ok: true },
+      tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }] });
+    await worker.registerTab(21);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+    await worker.fireAlarm();
+    armed = true;
+    // Alarms keep coming, as Chrome's do; a pass still running takes none. Each lease change waits at most
+    // three seconds, so the repair follows instead of never.
+    const alarms = setInterval(() => void worker.fireAlarm(), 1000);
+    try { await vi.waitFor(() => expect(trace).toContain('repaired'), { timeout: 25_000 }); } finally { clearInterval(alarms); }
+    expect(trace).toContain('claim');
+    expect(worker.tabsReload).toHaveBeenCalledExactlyOnceWith(21);
+  }, 40_000);
+
   it.each([
     { page: 'still loading', status: 'loading', answers: false, reload: false },
     { page: 'answering', status: 'complete', answers: true, reload: false },
@@ -1617,6 +1675,40 @@ describe('exact chat recovery from a fresh Chrome tab scan', () => {
     await worker.fireAlarm();
     expect(reports).toEqual(['held-attempt:sending']);
     expect(worker.tabsReload).not.toHaveBeenCalled();
+  });
+
+  // #2074: the page is told which texts the app sent by itself, and a cleared leftover is reported.
+  it("hands the page the app's own sent texts for its check, and tells the app it cleared one", async () => {
+    let handed = false;
+    const cleared: string[] = [];
+    const checks: Array<Record<string, unknown>> = [];
+    const fetch = vi.fn(async (input: string) => {
+      const url = new URL(input);
+      if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+      if (url.pathname === '/repairs/claim') return response(200, { allowed: false });
+      if (url.pathname === '/status') {
+        if (url.searchParams.has('repairCleared')) cleared.push(url.searchParams.get('repairCleared')!);
+        if (handed) return response(200, { repairs: [] });
+        handed = true;
+        return response(200, { repairs: [{ conversationId: CHAT, token: 'own-leftover', reason: 'silence', requiresClaim: true,
+          ownSent: [{ text: 'Continue with the task', messageId: 'm-continue' }, { text: 'no id' }] }] });
+      }
+      return response(200, {});
+    });
+    const worker = loadWorker({ local: new FakeStorageArea(paired), session: new FakeStorageArea(), fetch,
+      tabsGet: async () => ({ id: 21, url: `https://chatgpt.com/c/${CHAT}` }),
+      tabsSendMessage: async (_id, message) => {
+        if (message.type !== 'clf-repair-check') return { ok: true };
+        checks.push(message);
+        return { safe: true, cleared: 'own-sent' };
+      },
+      tabsQuery: async () => [{ id: 21, url: `https://chatgpt.com/c/${CHAT}` }] });
+    await worker.registerTab(21);
+    await worker.send({ type: 'bind', conversationId: CHAT }, 21);
+    await worker.fireAlarm();
+    expect(checks[0]).toMatchObject({ conversationId: CHAT, ownSent: [{ text: 'Continue with the task', messageId: 'm-continue' }] });
+    expect((checks[0]!.ownSent as unknown[]).length).toBe(1);
+    expect(cleared).toEqual(['own-leftover']);
   });
 
   /**
@@ -2175,6 +2267,33 @@ describe('active agent tab discard protection', () => {
     }
   });
 
+  // CodeRabbit on #2027: taking a chat is not showing it. A show that fails is reported, so the app can
+  // show it again instead of counting it as done.
+  it('reports a chat it could not show', async () => {
+    const TARGET = 'dddddddd-eeee-4fff-8aaa-444444444444';
+    const failed: string[] = [];
+    let handed = false;
+    const worker = loadWorker({
+      local: new FakeStorageArea(paired),
+      session: new FakeStorageArea(),
+      fetch: vi.fn(async (input: string, init?: Record<string, unknown>) => {
+        const url = new URL(input);
+        if (url.pathname === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
+        if (url.pathname === '/reveal/failed') { failed.push(JSON.parse(String(init?.body)).conversationId); return response(200, { ok: true }); }
+        if (url.pathname === '/status') {
+          const reveals = handed ? [] : [TARGET];
+          handed = true;
+          return response(200, { ok: true, repairs: [], reveals });
+        }
+        return response(404, {});
+      }),
+      tabsQuery: async () => [{ id: 5, windowId: 7, url: `https://chatgpt.com/c/${TARGET}`, status: 'complete' }]
+    });
+    worker.windowsUpdate.mockRejectedValue(new Error('No window with id: 7.'));
+    await worker.fireAlarm();
+    await vi.waitFor(() => expect(failed).toEqual([TARGET]), { timeout: 5_000 });
+  });
+
   it.each([
     ['adopts its mirrored window after an extension reload', true],
     ['refuses a mirrored window that also holds a non-ChatGPT tab', false]
@@ -2220,7 +2339,7 @@ describe('active agent tab discard protection', () => {
 
   describe('keep-awake in the app tab group (#128)', () => {
     type GroupTab = { id: number; windowId: number; groupId: number; url: string; status: string; active: boolean; frozen: boolean };
-    const GROUP = { id: 50, windowId: 7, title: 'Chat On Steroids', collapsed: true };
+    const GROUP = { id: 50, windowId: 7, title: 'Chat Marks', collapsed: true };
     const groupWorker = (tabs: GroupTab[], placement: () => string = () => 'group', groups = [GROUP]) => loadWorker({
       local: new FakeStorageArea({ ...paired, backgroundPlacement: 'group' }),
       session: new FakeStorageArea({ chatBackgroundGroup: 50 }),
@@ -2443,7 +2562,8 @@ describe('active agent tab discard protection', () => {
 
   it.each([
     ['selects its tab in the Background chats window', 'dddddddd-eeee-4fff-8aaa-777777777777', 12],
-    ['leaves a chat whose only tab is in the user\'s window alone', 'dddddddd-eeee-4fff-8aaa-888888888888', null]
+    ['leaves a chat whose only tab is in the user\'s window alone', 'dddddddd-eeee-4fff-8aaa-888888888888', null],
+    ['discards the follow for a closed chat tab without recreating it', 'dddddddd-eeee-4fff-8aaa-999999999999', null]
   ])('follows the chat selected in the app: %s (#1249)', async (_name, target, selected) => {
     const BACKGROUND = 9;
     let handed = false;
@@ -2581,19 +2701,27 @@ describe('active agent tab discard protection', () => {
 });
 
 describe('app-owned retained tab pool', () => {
+  // Use the exact original queue when running the fail-first test against
+  // unpatched main; include the optional guard only when the patch is present.
+  const closeQueueCode = () => {
+    const guarded = backgroundSource.indexOf('async function verifiedConversationGone(');
+    return backgroundSource.slice(guarded < 0 ? backgroundSource.indexOf('async function enqueueClose(') : guarded,
+      backgroundSource.indexOf('\n/**\n * Removes one tab'));
+  };
   it('keeps a later manual close queued when an older automatic close response arrives', async () => {
     const conversationId = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000071';
     let release!: () => void;
     const first = new Promise<void>(resolve => { release = resolve; });
     const bodies: Array<{ manual: boolean }> = [];
-    const code = backgroundSource.slice(backgroundSource.indexOf('async function enqueueClose('),
-      backgroundSource.indexOf('\n/**\n * Removes one tab'));
+    const code = closeQueueCode();
     const outbox = vm.runInNewContext(`${code}\n({enqueueClose, drainCloses})`, {
       cleanConversationId: (id: string) => id, recoveryMonitoring: false,
-      closeOutbox: [], closing: false, token: 'paired',
+      closeOutbox: [], closeOutboxDecision: null, closing: false, token: 'paired',
       load: async () => undefined, persistLive: async () => undefined,
       scheduleRetry: () => undefined, clearRetryIfIdle: () => undefined,
       conversationStillOpen: () => false,
+      chrome: { tabs: { query: async () => [] } }, CHATGPT_TAB_URLS: ['*://chatgpt.com/*'],
+      conversationFromUrl: () => null,
       call: async (_route: string, init: { body: string }) => {
         bodies.push(JSON.parse(init.body));
         if (bodies.length === 1) await first;
@@ -2608,6 +2736,102 @@ describe('app-owned retained tab pool', () => {
     expect(await draining).toMatchObject({ pending: 1 });
     expect(await outbox.drainCloses()).toMatchObject({ pending: 0 });
     expect(bodies).toEqual([{ conversationId, manual: false }, { conversationId, manual: true }]);
+  });
+
+  it('does not report a deliberate close when Chrome still has the chat after the worker cache loses its binding', async () => {
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000072';
+    const closed = vi.fn(async () => ({ ok: true }));
+    const info = vi.fn();
+    const report = vi.fn();
+    let tabOpen = true;
+    const code = closeQueueCode();
+    const api = vm.runInNewContext(`${code}\n({enqueueClose, drainCloses, queued: () => closeOutbox})`, {
+      closeOutbox: [], closeOutboxDecision: null, closing: false, token: 'paired', recoveryMonitoring: false,
+      cleanConversationId: (id: string) => id, load: async () => undefined,
+      persistLive: async () => undefined, scheduleRetry: () => undefined,
+      clearRetryIfIdle: () => undefined, conversationStillOpen: () => false,
+      CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
+      chrome: { tabs: { query: async () => tabOpen ? [{ id: 2, url: `https://chatgpt.com/c/${chat}` }] : [] } },
+      conversationFromUrl: (url: string) => new URL(url).pathname.split('/c/')[1], call: closed,
+      console: { info }, publishCompanionDiagnostics: report
+    });
+    await api.enqueueClose(chat);
+    expect(await api.drainCloses()).toMatchObject({ pending: 1 });
+    expect(api.queued()).toHaveLength(1);
+    expect(closed).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('close outbox: deferred close; chrome_tab_open');
+    expect(report).toHaveBeenCalledTimes(1);
+    // A streaming answer can drain the close outbox after every event batch.
+    // Rechecking an unchanged open tab must not spam diagnostics or the app log.
+    expect(await api.drainCloses()).toMatchObject({ pending: 1 });
+    expect(info).toHaveBeenCalledTimes(1);
+    expect(report).toHaveBeenCalledTimes(1);
+    // A late true departure must still be reported: the close was deferred,
+    // not dropped just because the tab was visible before navigation.
+    tabOpen = false;
+    expect(await api.drainCloses()).toMatchObject({ pending: 0 });
+    expect(closed).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the close queued if Chrome cannot provide the tab list', async () => {
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000073';
+    const closed = vi.fn(async () => ({ ok: true }));
+    const info = vi.fn();
+    const code = closeQueueCode();
+    const api = vm.runInNewContext(`${code}\n({enqueueClose, drainCloses, queued: () => closeOutbox})`, {
+      closeOutbox: [], closeOutboxDecision: null, closing: false, token: 'paired', recoveryMonitoring: false,
+      cleanConversationId: (id: string) => id, load: async () => undefined,
+      persistLive: async () => undefined, scheduleRetry: () => undefined,
+      clearRetryIfIdle: () => undefined, conversationStillOpen: () => false,
+      CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
+      chrome: { tabs: { query: async () => { throw new Error('Chrome restarting'); } } },
+      conversationFromUrl: () => null, call: closed, console: { info }
+    });
+    await api.enqueueClose(chat);
+    expect(await api.drainCloses()).toMatchObject({ pending: 1 });
+    expect(api.queued()).toHaveLength(1);
+    expect(closed).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('close outbox: deferred close; chrome_inventory_unavailable');
+  });
+
+  it('reports one diagnostic per changed reason for the same pending close', async () => {
+    const chat = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000074';
+    const info = vi.fn(), report = vi.fn(), close = vi.fn(async () => ({ ok: true }));
+    let browser = 'open';
+    const api = vm.runInNewContext(`${closeQueueCode()}\n({enqueueClose, drainCloses})`, {
+      closeOutbox: [], closeOutboxDecision: null, closing: false, token: 'paired', recoveryMonitoring: false,
+      cleanConversationId: (id: string) => id, load: async () => undefined,
+      persistLive: async () => undefined, scheduleRetry: () => undefined,
+      clearRetryIfIdle: () => undefined, conversationStillOpen: () => false,
+      CHATGPT_TAB_URLS: ['https://chatgpt.com/*'],
+      chrome: { tabs: { query: async () => {
+        if (browser === 'error') throw Error('Chrome restarting');
+        return browser === 'open' ? [{ url: `https://chatgpt.com/c/${chat}` }] : [];
+      } } },
+      conversationFromUrl: (url: string) => new URL(url).pathname.split('/c/')[1],
+      call: close, console: { info }, publishCompanionDiagnostics: report
+    });
+    await api.enqueueClose(chat);
+    await api.drainCloses();
+    await api.drainCloses();
+    expect(report).toHaveBeenCalledTimes(1);
+    expect(info).toHaveBeenCalledTimes(1);
+
+    browser = 'error';
+    await api.drainCloses();
+    await api.drainCloses();
+    expect(report).toHaveBeenCalledTimes(2);
+    expect(info).toHaveBeenNthCalledWith(2, 'close outbox: deferred close; chrome_inventory_unavailable');
+
+    browser = 'open';
+    await api.drainCloses();
+    await api.drainCloses();
+    expect(report).toHaveBeenCalledTimes(3);
+    expect(info).toHaveBeenNthCalledWith(3, 'close outbox: deferred close; chrome_tab_open');
+
+    browser = 'gone';
+    expect(await api.drainCloses()).toMatchObject({ pending: 0 });
+    expect(close).toHaveBeenCalledTimes(1);
   });
 
   const id = (n: number) => `aaaaaaaa-bbbb-4ccc-8ddd-${String(n).padStart(12, '0')}`;
@@ -2813,14 +3037,15 @@ describe('worker settings authority', () => {
     const sourceError = 'The browser could not insert the handoff request (native_edit_rejected).';
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceLost: true, sourceError }, 44);
     const deferredError = 'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.';
-    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }, 44);
+    await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError, sourceErrorCode: 'results-unconfirmed' }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, sourceDispatch: true }, 44);
     await worker.send({ type: 'compact', conversationId: CHAT, token, destinationDispatch: true }, 44);
 
     expect(posted).toEqual([
       expect.objectContaining({ conversationId: CHAT, ticket: true, automatic: true }),
       expect.objectContaining({ conversationId: CHAT, token, sourceLost: true, sourceError }),
-      expect.objectContaining({ conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError }),
+      // Why it stopped, as a code the app counts (2026-11-03), not only the translated sentence.
+      expect.objectContaining({ conversationId: CHAT, token, sourceDeferred: true, sourceError: deferredError, sourceErrorCode: 'results-unconfirmed' }),
       expect.objectContaining({ conversationId: CHAT, token, sourceDispatch: true }),
       expect.objectContaining({ conversationId: CHAT, token, destinationDispatch: true })
     ]);
@@ -3446,10 +3671,14 @@ describe('extension command delivery', () => {
     expect(worker.scriptingExecuteScript.mock.calls).toEqual([
       [{ target: { tabId: 41 }, files: ['i18n.js'] }],
       [{ target: { tabId: 41 }, files: ['chatgpt-dom.js'] }],
+      // The app's colors before content.js, as the manifest loads them (CodeRabbit on #2038).
+      [{ target: { tabId: 41 }, files: ['app-palette.js'] }],
       [{ target: { tabId: 41 }, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target: { tabId: 41 }, files: ['content.js'] }],
       [{ target: { tabId: 42 }, files: ['i18n.js'] }],
       [{ target: { tabId: 42 }, files: ['chatgpt-dom.js'] }],
+      // The app's colors before content.js, as the manifest loads them (CodeRabbit on #2038).
+      [{ target: { tabId: 42 }, files: ['app-palette.js'] }],
       [{ target: { tabId: 42 }, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target: { tabId: 42 }, files: ['content.js'] }]
     ]);
@@ -3551,6 +3780,7 @@ describe('extension command delivery', () => {
     expect(worker.scriptingExecuteScript.mock.calls).toEqual([
       [{ target, files: ['i18n.js'] }],
       [{ target, files: ['chatgpt-dom.js'] }],
+      [{ target, files: ['app-palette.js'] }],
       [{ target, world: 'MAIN', files: ['usage.js', 'fiber.js'] }],
       [{ target, files: ['content.js'] }]
     ]);
@@ -3677,6 +3907,34 @@ describe('extension command delivery', () => {
     expect(result.ok).toBe(true);
     expect(tokens).toEqual(['Bearer stale-token', 'Bearer second-token']);
     expect(local.data.token).toBe('second-token');
+  });
+
+  it.each(['external Chromium', 'native Chromium'] as const)('keeps its paired token through %s worker reload', async kind => {
+    const local = new FakeStorageArea({ port: 8765, token: 'fixture-credential', appInstance: 'f'.repeat(32) });
+    const session = new FakeStorageArea();
+    const headers: Array<{ host: unknown; auth: unknown }> = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const route = new URL(input).pathname;
+      if (route === '/hello') return response(200, { app: 'chat-on-steroids', paired: true, instance: 'f'.repeat(32) });
+      if (route === '/status') {
+        const sent = (init.headers ?? {}) as Record<string, string>;
+        headers.push({ host: sent['x-extension-host'], auth: sent.authorization });
+        return response(200, { nonDiscardableConversations: [], inputOpeningIds: [], commandIds: [] });
+      }
+      return response(404, {});
+    });
+    const options = { local, session, fetch, ...(kind === 'native Chromium' ? {
+      cosWorker: { call: async () => 'f'.repeat(32) }
+    } : {}) };
+    const before = loadWorker(options);
+    await before.send({ type: 'status' });
+    await before.installed('update');
+    const after = loadWorker(options);
+    await after.send({ type: 'status' });
+    expect(local.data.token).toBe('fixture-credential');
+    expect(local.data.disconnected).not.toBe(true);
+    expect(fetch.mock.calls.some(([input]) => new URL(String(input)).pathname === '/pair')).toBe(false);
+    expect(headers.every(header => header.auth === 'Bearer fixture-credential')).toBe(true);
   });
 });
 
@@ -5108,6 +5366,8 @@ describe('extension observation journal', () => {
       local: new FakeStorageArea({ port: 8765, token: 'paired-token' }), session,
       tabsGet: async () => ({ id: 12, status: 'loading',
         url: `https://chatgpt.com/c/${conversationId}`, pendingUrl: 'https://example.com/away' }),
+      tabsQuery: async () => [{ id: 12, status: 'loading',
+        url: `https://chatgpt.com/c/${conversationId}`, pendingUrl: 'https://example.com/away' }],
       fetch: async (input, init = {}) => {
         const path = new URL(input).pathname;
         if (path === '/hello') return response(200, { app: 'chat-on-steroids', paired: true });
@@ -5117,7 +5377,8 @@ describe('extension observation journal', () => {
     });
     await worker.send({ type: 'bind', conversationId }, 12);
     await worker.startTabNavigation(12);
-    expect(closed).toEqual([conversationId]);
+    // The actual Chrome tab inventory is read asynchronously before /closed.
+    await vi.waitFor(() => expect(closed).toEqual([conversationId]));
     expect(session.data.tabConversations).toEqual({});
   });
 
@@ -5971,6 +6232,9 @@ describe('the goal opening, which waits on a model', () => {
     expect(workerMs).toBeGreaterThan(appMs);
     // And it is the goal opening that spends it. Nothing else here waits on a model.
     expect(backgroundSource).toContain("await call('/goal/open', {\n      method: 'POST',\n      timeoutMs: MODEL_REQUEST_TIMEOUT_MS,");
+    // A ChatGPT helper may take longer than that (#2033); the page's opening message stays capped.
+    const bridgeSource = await fs.readFile(path.join(process.cwd(), 'src', 'main', 'bridge.ts'), 'utf8');
+    expect(bridgeSource).toContain('await draftOpeningMessage(text, opening, undefined, undefined, REQUEST_TIMEOUT_MS)');
   });
 });
 
@@ -6185,7 +6449,7 @@ it('replaces the usage observer of an open tab only once it is not streaming', a
 
 describe('this install\'s connector names', () => {
   const windows = {
-    core: 'Chat On Steroids Core (Windows)', desktop: 'Chat On Steroids Desktop (Windows)', plugins: 'Chat On Steroids Plugins (Windows)'
+    core: 'Chat Marks Core (Windows)', desktop: 'Chat Marks Desktop (Windows)', plugins: 'Chat Marks Plugins (Windows)'
   };
   const paired = { port: 8765, token: 'paired-token' };
   it('keeps the app\'s proven connector apps across a worker restart, drops malformed ones and hands them to pages', async () => {
@@ -6237,16 +6501,16 @@ describe('this install\'s connector names', () => {
     expect((await restarted.send({ type: 'status' }) as any).connectorNames).toEqual(windows);
 
     for (const foreign of [
-      { ...windows, core: 'Chat On Steroids Backup' },
-      { ...windows, core: 'Chat On Steroids Desktop (Windows)' },
-      { ...windows, plugins: 'Chat On Steroids Plugins (Win/VM)' },
-      'Chat On Steroids Core'
+      { ...windows, core: 'Chat Marks Backup' },
+      { ...windows, core: 'Chat Marks Desktop (Windows)' },
+      { ...windows, plugins: 'Chat Marks Plugins (Win/VM)' },
+      'Chat Marks Core'
     ]) {
       names = foreign;
       await worker.fireAlarm();
       expect((await worker.send({ type: 'status' }) as any).connectorNames).toEqual(windows);
     }
-    names = { core: 'Chat On Steroids Core', desktop: 'Chat On Steroids Desktop', plugins: 'Chat On Steroids Plugins' };
+    names = { core: 'Chat Marks Core', desktop: 'Chat Marks Desktop', plugins: 'Chat Marks Plugins' };
     await worker.fireAlarm();
     expect((await worker.send({ type: 'status' }) as any).connectorNames).toEqual(names);
   });
@@ -6352,4 +6616,150 @@ describe('a ChatGPT page that moves to a new address', () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     expect(routeNotices(worker)).toEqual([]);
   });
+});
+
+describe('discovery finds the app instance this browser paired with', () => {
+  // Measured: `npm run dev` started first and took 8765, the installed app took 8766, and the
+  // installed app's extensions attached to the dev app because it answered first.
+  const DEV = 'd'.repeat(32);
+  const PROD = 'a'.repeat(32);
+  type App = { instance?: string; disconnected?: boolean };
+  function apps(byPort: Record<number, App>) {
+    const authorized: Array<{ port: number; route: string; auth: string }> = [];
+    const pairs: number[] = [];
+    const fetch = vi.fn(async (input: string, init: Record<string, unknown> = {}) => {
+      const url = new URL(input);
+      const port = Number(url.port);
+      const app = byPort[port];
+      if (!app) throw new TypeError('Failed to fetch');
+      const auth = ((init.headers ?? {}) as Record<string, string>).authorization;
+      if (auth) authorized.push({ port, route: url.pathname, auth });
+      if (url.pathname === '/hello') {
+        return response(200, { app: 'chat-on-steroids', paired: true, disconnected: app.disconnected === true,
+          ...(app.instance ? { instance: app.instance } : {}) });
+      }
+      if (url.pathname === '/pair') {
+        pairs.push(port);
+        return response(200, { token: `token-${port}`, ...(app.instance ? { instance: app.instance } : {}) });
+      }
+      if (auth && auth !== `Bearer token-${port}` && auth !== 'Bearer legacy-token') return response(401, { error: 'unauthorised' });
+      return response(200, { ok: true });
+    });
+    return { fetch, authorized, pairs };
+  }
+
+  it('skips another instance and connects to its own on a later port, never latching that one\'s Disconnect', async () => {
+    const { fetch, authorized, pairs } = apps({ 8765: { instance: DEV, disconnected: true }, 8766: { instance: PROD } });
+    const local = new FakeStorageArea({ token: 'token-8766', appInstance: PROD });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    const status = await worker.sendPopup({ type: 'status' });
+    expect(status).toMatchObject({ connected: true, port: 8766, paired: true, disconnected: false });
+    expect(pairs).toEqual([]);
+    expect(authorized.every(row => row.port === 8766)).toBe(true);
+    expect((await local.get(['port', 'appInstance', 'token']))).toEqual({ port: 8766, appInstance: PROD, token: 'token-8766' });
+  });
+
+  it('pairs an unpaired browser with the first app found, and keeps to that instance', async () => {
+    const { fetch, pairs } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const local = new FakeStorageArea();
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8765, paired: true });
+    expect(pairs[0]).toBe(8765);
+    expect((await local.get(['appInstance'])).appInstance).toBe(DEV);
+  });
+
+  it('accepts an app too old to report an instance while it wants no particular instance', async () => {
+    const { fetch, pairs } = apps({ 8765: {} });
+    const local = new FakeStorageArea({ token: 'legacy-token' });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8765, paired: true });
+    expect(pairs).toEqual([]);
+  });
+
+  it('waits for its own instance instead of an app too old to report one, until an explicit Connect', async () => {
+    const { fetch, pairs, authorized } = apps({ 8765: {} });
+    const local = new FakeStorageArea({ token: 'token-8766', appInstance: PROD });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: false, port: null, paired: true });
+    expect(authorized.some(row => row.auth === 'Bearer token-8766')).toBe(false);
+    expect(await worker.sendPopup({ type: 'pair' })).toMatchObject({ ok: true });
+    expect(pairs).toEqual([8765]);
+  });
+
+  it('keeps a CoS browser copy off an older installed app that reports no instance (measured 2026-10-21)', async () => {
+    // The installed 2.1.43.1 on 8765 reports no instance; `npm run dev` beside it is on 8766.
+    const { fetch, pairs, authorized } = apps({ 8765: {}, 8766: { instance: DEV } });
+    const cosWorker = { call: vi.fn(async () => DEV), subscribe: () => undefined };
+    const local = new FakeStorageArea({ port: 8765, token: 'token-8765' });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch, cosWorker });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8766, paired: true });
+    expect(pairs.every(port => port === 8766)).toBe(true);
+    expect(authorized.some(row => row.port === 8765)).toBe(false);
+    expect((await local.get(['appInstance', 'port']))).toEqual({ appInstance: DEV, port: 8766 });
+  });
+
+  it('adopts the instance of the app a token from before instances already talks to', async () => {
+    const { fetch } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const local = new FakeStorageArea({ port: 8766, token: 'token-8766' });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8766 });
+    expect((await local.get(['appInstance'])).appInstance).toBe(PROD);
+  });
+
+  it('reports not connected while its instance is closed, and moves only on an explicit Connect', async () => {
+    const { fetch, pairs } = apps({ 8765: { instance: DEV } });
+    const local = new FakeStorageArea({ port: 8766, token: 'token-8766', appInstance: PROD });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: false, port: null, paired: true });
+    expect(pairs).toEqual([]);
+    expect((await local.get(['appInstance', 'token']))).toEqual({ appInstance: PROD, token: 'token-8766' });
+    expect(await worker.sendPopup({ type: 'pair' })).toMatchObject({ ok: true });
+    expect(pairs).toEqual([8765]);
+    expect((await local.get(['appInstance', 'token', 'port']))).toEqual({ appInstance: DEV, token: 'token-8765', port: 8765 });
+  });
+
+  it('an explicit Connect keeps the paired instance when it still answers', async () => {
+    const { fetch, pairs } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const local = new FakeStorageArea({ token: 'token-8766', appInstance: PROD });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch });
+    expect(await worker.sendPopup({ type: 'pair' })).toMatchObject({ ok: true });
+    expect(pairs.at(-1)).toBe(8766);
+    expect((await local.get(['appInstance'])).appInstance).toBe(PROD);
+  });
+
+  it('keeps the CoS browser\'s copy with the app that runs it, dropping a token another instance minted', async () => {
+    const { fetch, pairs, authorized } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const cosWorker = { call: vi.fn(async (name: string) => {
+      if (name === 'app.bridgeInstance') return PROD;
+      throw new Error(`${name} is not available in the CoS browser.`);
+    }), subscribe: () => undefined };
+    // Mis-paired by an earlier build: it held the dev app's port and token.
+    const local = new FakeStorageArea({ port: 8765, token: 'token-8765', appInstance: DEV });
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch, cosWorker });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8766, paired: true });
+    expect(cosWorker.call).toHaveBeenCalledWith('app.bridgeInstance', []);
+    expect(pairs.every(port => port === 8766)).toBe(true);
+    expect(authorized.some(row => row.auth === 'Bearer token-8765')).toBe(false);
+    expect((await local.get(['appInstance', 'token', 'port']))).toEqual({ appInstance: PROD, token: 'token-8766', port: 8766 });
+    // Not even an explicit Connect moves it to another app.
+    expect(await worker.sendPopup({ type: 'pair' })).toMatchObject({ ok: true });
+    expect((await local.get(['appInstance'])).appInstance).toBe(PROD);
+  });
+
+  it('pairs a fresh CoS browser copy with its own app although another answers first', async () => {
+    const { fetch, pairs } = apps({ 8765: { instance: DEV }, 8766: { instance: PROD } });
+    const cosWorker = { call: vi.fn(async () => PROD), subscribe: () => undefined };
+    const local = new FakeStorageArea();
+    const worker = loadWorker({ local, session: new FakeStorageArea(), fetch, cosWorker });
+    expect(await worker.sendPopup({ type: 'status' })).toMatchObject({ connected: true, port: 8766, paired: true });
+    expect(pairs).toEqual([8766]);
+    expect((await local.get(['appInstance'])).appInstance).toBe(PROD);
+  });
+// CodeRabbit on #2027: every lease change the worker waits for goes through the bounded, non-failing
+// `renderingLeases`, so another tab's stuck lease can neither hold nor fail an unrelated caller.
+it('waits for rendering leases only through renderingLeases', () => {
+  const source = readFileSync('extension/background.js', 'utf8');
+  const raw = source.split('\n').filter(line => /await\s+activeTabs/.test(line) && !line.includes('renderingLeases'));
+  expect(raw).toEqual([]);
+});
 });

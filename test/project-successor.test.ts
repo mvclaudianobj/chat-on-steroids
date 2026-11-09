@@ -109,6 +109,12 @@ describe('the URL the app opens when no page places the chat', () => {
     expect(commandUrl('cmd-2', null, null, null)).toBe('https://chatgpt.com/?clf=cmd-2#clf=cmd-2');
   });
 
+  it('opens a temporary worker on the provider temporary route without changing the command marker', () => {
+    const url = commandUrl('cmd-temporary', null, null, null, null, true);
+    expect(url).toBe('https://chatgpt.com/?clf=cmd-temporary&temporary-chat=true#clf=cmd-temporary');
+    expect(commandUrl('cmd-ordinary')).not.toContain('temporary-chat');
+  });
+
   it('falls back to the root rather than building an address from an unusable value', () => {
     // Degrading to exactly the old behaviour is the point. A value this app does not recognise
     // must never become a path, because a wrong Project page is worse than no Project at all.

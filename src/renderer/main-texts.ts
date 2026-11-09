@@ -2,24 +2,32 @@ import { onLanguageChange, t } from './i18n.js';
 import type { MainText } from '../shared/main-texts.js';
 
 /**
- * The tray menu, Session finish notice, tunnel-loss notices and CoS browser tray notice in the
+ * The tray menu, Session finish notice, tunnel-loss notices and Chat Marks browser tray notice in the
  * selected language, including native update restart confirmation. The main process has no
  * catalogs, so this document translates the exact source texts and hands them over.
  * Literal `t()` calls keep the catalog audit able to see each key.
  */
 export function mainTexts(): Record<MainText, string> {
   return {
+    'Cancel': t('Cancel'),
+    'Synchronize': t('Synchronize'),
+    'SFTP mirror synchronization': t('SFTP mirror synchronization'),
+    'Upload local files to the selected SSH profile?': t('Upload local files to the selected SSH profile?'),
+    'Download remote files into the local mirror?': t('Download remote files into the local mirror?'),
+    'Existing files can be overwritten. No files are deleted. Secrets and common credential files are excluded.': t('Existing files can be overwritten. No files are deleted. Secrets and common credential files are excluded.'),
+    'Authorize': t('Authorize'),
+    'Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?': t('Let marks-coo press Allow once on tool approval cards in chats the Company provably owns?'),
     'Open': t('Open'),
     'Show browser': t('Show browser'),
     'Hide browser': t('Hide browser'),
     'Connect': t('Connect'),
     'Disconnect': t('Disconnect'),
     'Quit': t('Quit'),
-    'Updating Chat On Steroids': t('Updating Chat On Steroids'),
+    'Updating Chat Marks': t('Updating Chat Marks'),
     'Saving your work…': t('Saving your work…'),
     'Waiting for your permission in Windows…': t('Waiting for your permission in Windows…'),
-    'Starting the installer. Chat On Steroids opens again by itself.':
-      t('Starting the installer. Chat On Steroids opens again by itself.'),
+    'Starting the installer. Chat Marks opens again by itself.':
+      t('Starting the installer. Chat Marks opens again by itself.'),
     'Connected': t('Connected'),
     'No internet': t('No internet'),
     'OpenAI outage': t('OpenAI outage'),
@@ -28,13 +36,13 @@ export function mainTexts(): Record<MainText, string> {
     'Core connection lost': t('Core connection lost'),
     'Desktop connection lost': t('Desktop connection lost'),
     'Plugins connection lost': t('Plugins connection lost'),
-    'The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.':
-      t('The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.'),
+    'The tunnel disconnected unexpectedly. Open Chat Marks to check the connection.':
+      t('The tunnel disconnected unexpectedly. Open Chat Marks to check the connection.'),
     'Astra is wrapping up': t('Astra is wrapping up'),
     'Send an automatic Goal or write your next instruction.': t('Send an automatic Goal or write your next instruction.'),
     'Send Automatic Goal': t('Send Automatic Goal'),
     'Write Directly': t('Write Directly'),
-    'The Chat On Steroids browser is still running': t('The Chat On Steroids browser is still running'),
+    'The Chat Marks browser is still running': t('The Chat Marks browser is still running'),
     'Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.':
       t('Your chats keep going. Choose Show browser in the tray icon’s menu to bring it back.'),
     'Your chats keep going. Choose Show browser in the menu bar icon’s menu to bring it back.':
@@ -50,10 +58,10 @@ export function mainTexts(): Record<MainText, string> {
     'Export as HTML': t('Export as HTML'),
     'Export usage as CSV': t('Export usage as CSV'),
     'A chat is waiting for you.': t('A chat is waiting for you.'),
-    'Something failed in Chat On Steroids.': t('Something failed in Chat On Steroids.'),
+    'Something failed in Chat Marks.': t('Something failed in Chat Marks.'),
     'A chat finished.': t('A chat finished.'),
     'Finished after {0} min.': t('Finished after {0} min.'),
-    'This is a test from Chat On Steroids. Phone notifications work.': t('This is a test from Chat On Steroids. Phone notifications work.'),
+    'This is a test from Chat Marks. Phone notifications work.': t('This is a test from Chat Marks. Phone notifications work.'),
     'Import CoS Pet folder': t('Import CoS Pet folder'),
     'Export settings': t('Export settings'),
     'Import settings': t('Import settings'),
@@ -85,11 +93,24 @@ export function mainTexts(): Record<MainText, string> {
     'The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.': t('The Git branch and its commits are kept. Uncommitted files cannot be recovered from Git.'),
     'Keep checkout': t('Keep checkout'),
     'Remove checkout; preserve Git branch': t('Remove checkout; preserve Git branch'),
+    'Authorize Company workers': t('Authorize Company workers'),
     'ChatGPT finished.': t('ChatGPT finished.'),
+    'Export encrypted Chat Marks vault': t('Export encrypted Chat Marks vault'),
+    'Import encrypted Chat Marks vault': t('Import encrypted Chat Marks vault'),
+    'Import GPG secrets': t('Import GPG secrets'),
+    'Chat Marks vault': t('Chat Marks vault'),
+    'GPG encrypted files': t('GPG encrypted files'),
+    'Export Brain memories': t('Export Brain memories'),
+    'JSON Lines': t('JSON Lines'),
+    'Export notification settings': t('Export notification settings'),
+    'Import notification settings': t('Import notification settings'),
+    'Chat Marks notification settings': t('Chat Marks notification settings'),
+    'Select a copy of remote-targets.json': t('Select a copy of remote-targets.json'),
+    'JSON files': t('JSON files'),
     'Goal result needs review': t('Goal result needs review'),
     'The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.':
       t('The Goal helper thinks the work is complete, but this has not been checked. Review the chat or send another instruction.'),
-    'Chat On Steroids wants to use your mouse and keyboard': t('Chat On Steroids wants to use your mouse and keyboard'),
+    'Chat Marks wants to use your mouse and keyboard': t('Chat Marks wants to use your mouse and keyboard'),
     'Click': t('Click'),
     'Double-click': t('Double-click'),
     'Type': t('Type'),
@@ -106,7 +127,39 @@ export function mainTexts(): Record<MainText, string> {
     'Open {0}': t('Open {0}'),
     'New chat': t('New chat'),
     'hidden': t('hidden'),
-    'Shared from Chat On Steroids': t('Shared from Chat On Steroids'),
+    'Shared from Chat Marks': t('Shared from Chat Marks'),
+    'Connected to Chat Marks. Its notifications arrive here.': t('Connected to Chat Marks. Its notifications arrive here.'),
+    'This code is not valid any more. Get a new one in Chat Marks: Settings → Phone notifications → Telegram.': t('This code is not valid any more. Get a new one in Chat Marks: Settings → Phone notifications → Telegram.'),
+    'Send /start with the code shown in Chat Marks: Settings → Phone notifications → Telegram.': t('Send /start with the code shown in Chat Marks: Settings → Phone notifications → Telegram.'),
+    'Chat Marks notifications arrive here. Commands: /status, /stop, /pause, /resume. Reply to a notification to send that chat a message.': t('Chat Marks notifications arrive here. Commands: /status, /stop, /pause, /resume. Reply to a notification to send that chat a message.'),
+    'I know /status, /stop, /pause, /resume and /help. Reply to a notification to send that chat a message.': t('I know /status, /stop, /pause, /resume and /help. Reply to a notification to send that chat a message.'),
+    'Deny': t('Deny'),
+    'Denied from Telegram at {0}.': t('Denied from Telegram at {0}.'),
+    'Already answered.': t('Already answered.'),
+    'Could not deny it. Open the chat in Chat Marks.': t('Could not deny it. Open the chat in Chat Marks.'),
+    'Stopped.': t('Stopped.'),
+    'Nothing is running there.': t('Nothing is running there.'),
+    'Nothing is running.': t('Nothing is running.'),
+    'Paused. /resume starts it again.': t('Paused. /resume starts it again.'),
+    'Goal and Loop are not on there.': t('Goal and Loop are not on there.'),
+    'No chat has Goal or Loop on.': t('No chat has Goal or Loop on.'),
+    'Resumed.': t('Resumed.'),
+    'It was not paused from here.': t('It was not paused from here.'),
+    'No chat was paused from here.': t('No chat was paused from here.'),
+    'Could not do that. Open the chat in Chat Marks.': t('Could not do that. Open the chat in Chat Marks.'),
+    'Several chats could be meant. Reply to that chat\'s notification with {0}.': t('Several chats could be meant. Reply to that chat\'s notification with {0}.'),
+    'On its way to the chat.': t('On its way to the chat.'),
+    'Queued: it goes to the chat after its current answer.': t('Queued: it goes to the chat after its current answer.'),
+    'Sending messages to chats from Telegram is off. Turn it on in Chat Marks: Settings → Phone notifications → Telegram.': t('Sending messages to chats from Telegram is off. Turn it on in Chat Marks: Settings → Phone notifications → Telegram.'),
+    'That chat cannot take messages from here.': t('That chat cannot take messages from here.'),
+    'That notification is too old to answer. Send /status to see your chats.': t('That notification is too old to answer. Send /status to see your chats.'),
+    'Nothing is running and nothing waits for you.': t('Nothing is running and nothing waits for you.'),
+    'Working: {0}': t('Working: {0}'),
+    'Waiting for your approval: {0}': t('Waiting for your approval: {0}'),
+    'waits for your approval': t('waits for your approval'),
+    'working': t('working'),
+    '{0} more': t('{0} more'),
+    'This is a test from Chat Marks. Telegram notifications work.': t('This is a test from Chat Marks. Telegram notifications work.')
   };
 }
 

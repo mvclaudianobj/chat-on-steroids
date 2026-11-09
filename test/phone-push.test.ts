@@ -28,7 +28,7 @@ describe('what reaches the phone', () => {
     const { push, sent, log } = setUp();
     expect(await push.notify({ kind: 'needs-you', sessionId: 's1', chatTitle: 'Payroll export', conversationId: 'c-1' })).toBe('sent');
     expect(sent).toEqual([{ url: 'https://ntfy.sh', headers: { 'Content-Type': 'application/json' },
-      body: { topic: 'cos-k3j9x2m4q8w7e5r1', title: 'Chat On Steroids', message: 'A chat is waiting for you.', priority: 4, tags: ['raising_hand'] } }]);
+      body: { topic: 'cos-k3j9x2m4q8w7e5r1', title: 'Chat Marks', message: 'A chat is waiting for you.', priority: 4, tags: ['raising_hand'] } }]);
     expect(JSON.stringify(sent)).not.toContain('Payroll');
     expect(log).toHaveBeenCalledWith('phone push: sent "needs you" to the phone');
   });
@@ -72,7 +72,7 @@ describe('what reaches the phone', () => {
     setToken('tk_secret');
     await push.notify({ kind: 'failed', detail: 'The tunnel disconnected unexpectedly.' });
     expect(sent[0]).toEqual({ url: 'https://ntfy.example.org', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer tk_secret' },
-      body: { topic: 'cos-k3j9x2m4q8w7e5r1', title: 'Chat On Steroids', message: 'The tunnel disconnected unexpectedly.', priority: 4, tags: ['warning'] } });
+      body: { topic: 'cos-k3j9x2m4q8w7e5r1', title: 'Chat Marks', message: 'The tunnel disconnected unexpectedly.', priority: 4, tags: ['warning'] } });
   });
 });
 
@@ -194,7 +194,7 @@ describe('a test message', () => {
     const { push, sent, setNow } = setUp({ quietHours: { from: '00:00', to: '23:59' } }, 'active');
     setNow(at(12));
     await expect(push.test()).resolves.toBeUndefined();
-    expect(sent[0]!.body).toMatchObject({ message: 'This is a test from Chat On Steroids. Phone notifications work.', priority: 3 });
+    expect(sent[0]!.body).toMatchObject({ title: 'Chat Marks', message: 'This is a test from Chat Marks. Phone notifications work.', priority: 3 });
     const failing = createPhonePush({ settings: () => settings(), token: async () => null, now: () => at(14), idleState: () => 'idle', log: vi.fn(),
       post: async () => ({ ok: false, status: 401 }) });
     await expect(failing.test()).rejects.toThrow('The ntfy server refused the message. Check the server, the topic and the access token.');
@@ -220,3 +220,67 @@ describe('settings checks', () => {
 });
 
 beforeEach(() => vi.clearAllMocks());
+
+describe('ntfy and Telegram as two destinations (#1934)', () => {
+  const telegramFake = (works = true) => {
+    const messages: Array<{ text: string; about?: { sessionId?: string; cardId?: string } }> = [];
+    return { messages, destination: { send: vi.fn(async (text: string, about?: { sessionId?: string; cardId?: string }) => {
+      messages.push({ text, ...(about ? { about } : {}) }); return works; }) } };
+  };
+  function withTelegram(over: Partial<PhonePushSettings>, telegram: ReturnType<typeof telegramFake> | null, ntfyWorks = true) {
+    const sent: unknown[] = [];
+    const log = vi.fn();
+    const push = createPhonePush({
+      settings: () => settings(over), token: async () => null, now: () => at(14), idleState: () => 'idle',
+      post: async (_url, body) => { sent.push(JSON.parse(body)); return { ok: ntfyWorks, status: ntfyWorks ? 200 : 500 }; },
+      log, telegram: () => telegram?.destination ?? null
+    });
+    return { push, sent, log };
+  }
+
+  it('sends to both under the same rules, with Deny under an approval only in Telegram', async () => {
+    const telegram = telegramFake();
+    const { push, sent, log } = withTelegram({}, telegram);
+    expect(await push.notify({ kind: 'needs-you', sessionId: 's1', chatTitle: 'Payroll export', approval: { sessionId: 's1', cardId: 'card-1' } })).toBe('sent');
+    expect(sent).toHaveLength(1);
+    expect(telegram.messages).toEqual([{ text: 'A chat is waiting for you.', about: { sessionId: 's1', cardId: 'card-1' } }]);
+    // No name without "Include chat names and answers", in Telegram as in ntfy.
+    expect(JSON.stringify(telegram.messages)).not.toContain('Payroll');
+    expect(log).toHaveBeenCalledWith('phone push: sent "needs you" to Telegram with Deny');
+    // A finished chat has no approval to deny; it still names its chat, so a reply acts on it.
+    await push.notify({ kind: 'finished', sessionId: 's2', workedMs: 20 * 60_000, approval: { sessionId: 's2', cardId: 'card-2' } });
+    expect(telegram.messages[1]).toEqual({ text: 'Finished after 20 min.', about: { sessionId: 's2' } });
+  });
+
+  it('names the chat and links it in Telegram only with details on', async () => {
+    const telegram = telegramFake();
+    const { push } = withTelegram({ includeDetails: true, ntfy: false }, telegram);
+    await push.notify({ kind: 'finished', sessionId: 's1', chatTitle: 'Payroll export', conversationId: '68f9a1b2-1c2d-8e3f-9a0b-1c2d3e4f5a6b', workedMs: 12 * 60_000, detail: 'All tests pass.' });
+    expect(telegram.messages[0]!.text).toBe('Payroll export\nFinished after 12 min. All tests pass.\nhttps://chatgpt.com/c/68f9a1b2-1c2d-8e3f-9a0b-1c2d3e4f5a6b');
+  });
+
+  it('sends to Telegram alone with ntfy off, and needs no ntfy topic for it', async () => {
+    const telegram = telegramFake();
+    const { push, sent } = withTelegram({ ntfy: false, topic: '' }, telegram);
+    expect(await push.notify({ kind: 'failed', detail: 'Core connection lost' })).toBe('sent');
+    expect(sent).toEqual([]);
+    expect(telegram.messages).toEqual([{ text: 'Core connection lost' }]);
+  });
+
+  it('counts a message that reached one destination as sent, and one that reached none as not', async () => {
+    const half = withTelegram({}, telegramFake(false));
+    expect(await half.push.notify({ kind: 'needs-you', sessionId: 's1' })).toBe('sent');
+    expect(half.log).toHaveBeenCalledWith('phone push: "needs you" did not reach Telegram');
+    const none = withTelegram({}, telegramFake(false), false);
+    expect(await none.push.notify({ kind: 'needs-you', sessionId: 's1' })).toBe('error');
+    // Not counted against the repeat window: the next try goes out.
+    expect(await none.push.notify({ kind: 'needs-you', sessionId: 's1' })).toBe('error');
+    expect(none.log.mock.calls.filter(([line]) => String(line).includes('the same was sent'))).toHaveLength(0);
+  });
+
+  it('says there is nowhere to send with ntfy off and no linked bot', async () => {
+    const { push, log } = withTelegram({ ntfy: false }, null);
+    expect(await push.notify({ kind: 'needs-you', sessionId: 's1' })).toBe('off');
+    expect(log).toHaveBeenCalledWith('phone push: not sent "needs you": neither ntfy nor a linked Telegram bot is on');
+  });
+});

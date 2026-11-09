@@ -42,7 +42,7 @@ vi.mock('../src/main/mcp/persistent-paths.js', () => ({
 
 const { defaultConfig, getConfig, initConfigPath, saveConfig } = await import('../src/main/config.js');
 const { initSecretsPath, resetSecretsCacheForTests } = await import('../src/main/secrets.js');
-const { appendEvent, createSession, getSession, initSessionStore, rebindSession, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
+const { appendEvent, createSession, getSession, initSessionStore, listSessionPage, rebindSession, resetSessionStoreForTests, upsertMessageEvent } = await import('../src/main/session/store.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { pendingCommands, resetBridgeForTests, setBrowserOpener, startBridge, stopBridge } = await import(
   '../src/main/bridge.js'
@@ -66,7 +66,7 @@ const {
   spawn,
   swarmStateForCaller
 } = await import('../src/main/agents.js');
-const { registerIpc, cleanSessionName } = await import('../src/main/ipc.js');
+const { registerIpc, cleanSessionName, personsMessage } = await import('../src/main/ipc.js');
 const { openInPreferredBrowser } = await import('../src/main/browser.js');
 const bridgeModule = await import('../src/main/bridge.js');
 const { app, nativeTheme, safeStorage, shell, dialog } = await import('electron');
@@ -91,6 +91,32 @@ const removeRoot = (payload: unknown): Promise<any> => handlers.get('roots:remov
 const sessionEvents = (payload: unknown): Promise<any> => handlers.get('sessions:events')!(null, payload) as Promise<any>;
 const sessionList = (): Promise<any> => handlers.get('sessions:list')!(null, undefined) as Promise<any>;
 
+it('routes Marks Agency skills exclusively through their pinned Agency installer and updater', async () => {
+  const id = 'agency-engineering-backend-architect';
+  for (const [channel, payload] of [
+    ['skills:githubLink', { id, url: 'https://github.com/msitarzewski/agency-agents/tree/main/engineering' }],
+    ['skills:githubCheck', { id }],
+    ['skills:githubUpdate', { id }]
+  ] as const) {
+    const reply = await handlers.get(channel)!(null, payload) as { ok: boolean; error?: string };
+    expect(reply.ok).toBe(false);
+    expect(reply.error).toMatch(/Agency/);
+  }
+});
+
+it('saves "Chats working at once" from Settings and refuses a value outside 0–10 (#1694)', async () => {
+  const before = getConfig();
+  try {
+    await save({ ...before, multiAgent: { ...before.multiAgent, chatsAtOnce: 3 } }, before);
+    expect(getConfig().multiAgent.chatsAtOnce).toBe(3);
+    const reply = await save({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, chatsAtOnce: 11 } }, getConfig()).catch((error: Error) => ({ error }));
+    expect(getConfig().multiAgent.chatsAtOnce).toBe(3);
+    expect(reply).toBeTruthy();
+  } finally {
+    await save({ ...getConfig(), multiAgent: { ...getConfig().multiAgent, chatsAtOnce: 0 } }, getConfig());
+  }
+});
+
 it('keeps the reported interface language and the extension preferences through a Settings save', async () => {
   // Neither is part of the settings form. The save replaces the whole `ui` object, so both must be
   // carried through, or the extension would lose its language and its kept preferences.
@@ -105,7 +131,7 @@ it('keeps the reported interface language and the extension preferences through 
   expect(getConfig().ui.browserPreferences).toEqual({ overwrite: false, durations: true });
 });
 
-it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as const)('saves the %s display switch from Settings', async key => {
+it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns', 'showMessageTimes'] as const)('saves the %s display switch from Settings', async key => {
   // Both are plain ui booleans saved by the general Settings save. The save schema dropped keys
   // it did not list, so a switch that was not listed reverted on the next state push.
   const base = getConfig();
@@ -115,6 +141,18 @@ it.each(['playfulStatus', 'playfulContinue', 'followOutput', 'announceTurns'] as
   // A stale snapshot that never touched the switch keeps the saved value.
   expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base)).toMatchObject({ ok: true });
   expect(getConfig().ui[key]).toBe(wanted);
+});
+
+// CodeRabbit on #1948: a form from before the switch existed sends it off without an edit; that is not
+// turning it off.
+it('keeps Show message times on through a stale save whose form sends the switch off without an edit', async () => {
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, showMessageTimes: true } }, base)).toMatchObject({ ok: true });
+  const now = getConfig();
+  const { showMessageTimes: _, ...older } = now.ui;
+  const stale = { ...now, ui: older };
+  expect(await save({ ...stale, ui: { ...older, showMessageTimes: false, theme: now.ui.theme === 'light' ? 'dark' : 'light' } }, stale)).toMatchObject({ ok: true });
+  expect(getConfig().ui.showMessageTimes).toBe(true);
 });
 
 it('saves the ask-before-mouse-and-keyboard choice (#1804), keeps it through a stale save, and refuses an unknown one', async () => {
@@ -220,6 +258,33 @@ it('saves Personality and Writing style from Settings: own text, emptied, and ba
   expect(getConfig().ui.chatWritingStyle).toBeUndefined();
 });
 
+it('persists the Marks form of address through Settings, restart, new chat and resumed prompts', async () => {
+  const { loadConfig } = await import('../src/main/config.js');
+  const { prepareSessionPrompt } = await import('../src/main/session/prompt.js');
+  const { currentMarksSystemPrompt } = await import('../src/main/marks-system-prompt.js');
+  const base = getConfig();
+  expect(await save({ ...base, ui: { ...base.ui, marksSystemPromptEnabled: true, marksPreferredName: '  Senhor Marcos  ' } }, base))
+    .toMatchObject({ ok: true });
+  expect(getConfig().ui.marksPreferredName).toBe('Senhor Marcos');
+  // An older form edited an unrelated preference in the meantime.
+  expect(await save({ ...base, ui: { ...base.ui, theme: base.ui.theme === 'light' ? 'dark' : 'light' } }, base))
+    .toMatchObject({ ok: true });
+  await loadConfig(); // Re-read the actual persisted config.json, as the next app start does.
+  expect(getConfig().ui).toMatchObject({ marksSystemPromptEnabled: true, marksPreferredName: 'Senhor Marcos' });
+  const opening = await prepareSessionPrompt('Start this chat');
+  expect(opening).toContain('Trate a pessoa por "Senhor Marcos".');
+  expect(currentMarksSystemPrompt('chatgpt')).toContain('"Senhor Marcos"'); // Compact & Resume bootstrap.
+  for (const kind of ['cliproxy', 'claude', 'codex', 'opencode'] as const) {
+    expect(currentMarksSystemPrompt(kind)).toContain('"Senhor Marcos"');
+  }
+  const live = getConfig();
+  expect(await save({ ...live, ui: { ...live.ui, marksSystemPromptEnabled: false, marksPreferredName: undefined } }, live))
+    .toMatchObject({ ok: true });
+  await loadConfig();
+  expect(getConfig().ui.marksPreferredName).toBeUndefined();
+  expect(currentMarksSystemPrompt('chatgpt')).toBe('');
+});
+
 it('saves the send check address from Settings, keeps it through a stale save, and clears it when emptied (#1794)', async () => {
   const base = getConfig();
   expect(await save({ ...base, ui: { ...base.ui, sendCheckUrl: ' http://127.0.0.1:8091/check ' } }, base)).toMatchObject({ ok: true });
@@ -263,6 +328,184 @@ it('saves, reads, pauses and removes a chat\'s schedule, and refuses one that ca
     .toEqual({ ok: false, error: 'This chat no longer exists.' });
   expect(await call('schedules:delete', { sessionId: session.id })).toEqual({ ok: true, data: true });
   expect(await call('schedules:get', { sessionId: session.id })).toEqual({ ok: true, data: null });
+});
+
+it('lists schedules with chat titles and Run now uses the ordinary outbox without changing recurrence', async () => {
+  const input = await import('../src/main/session/input.js');
+  const original = await input.listInputs();
+  await writeDurableNow('session-input', []); input.resetInputForTests();
+  const session = await createSession({ conversationId: 'ipc-schedule-list-chat', title: 'Nightly review' });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  try {
+    const saved = await call('schedules:save', { sessionId: session.id, text: 'Review queue', repeat: { kind: 'hours', every: 6 }, until: null });
+    const listed = await call('schedules:list');
+    expect(listed).toMatchObject({ ok: true });
+    expect(listed.data).toContainEqual(expect.objectContaining({
+      id: saved.data.id,
+      sessionId: session.id,
+      sessionTitle: 'Nightly review',
+      text: 'Review queue',
+      nextRunAt: expect.any(Number)
+    }));
+
+    const before = await call('schedules:get', { sessionId: session.id });
+    expect(await call('schedules:runNow', { sessionId: session.id })).toEqual({ ok: true, data: true });
+    const rows = (await input.listInputs()).filter(row => row.sessionId === session.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      text: 'Review queue',
+      mode: 'auto',
+      conversationId: 'ipc-schedule-list-chat',
+      scheduled: { scheduleId: saved.data.id, late: false }
+    });
+    const after = await call('schedules:get', { sessionId: session.id });
+    expect(after.data).toMatchObject({ lastDueAt: before.data.lastDueAt, createdAt: before.data.createdAt });
+    expect(after.data.lastInputId).toBe(rows[0]!.id);
+  } finally {
+    await call('schedules:delete', { sessionId: session.id });
+    await writeDurableNow('session-input', original); input.resetInputForTests();
+  }
+});
+
+it('refuses to schedule an unbound local chat instead of silently losing every due occurrence', async () => {
+  const session = await createSession({ title: 'No ChatGPT conversation yet', conversationId: null });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  expect(await call('schedules:save', {
+    sessionId: session.id, text: 'Do not silently skip',
+    repeat: { kind: 'daily', at: '09:00' }, until: null
+  })).toEqual({ ok: false, error: 'This chat is not connected to a ChatGPT conversation yet.' });
+  expect(await call('schedules:get', { sessionId: session.id })).toEqual({ ok: true, data: null });
+  expect(await call('schedules:runNow', { sessionId: session.id }))
+    .toEqual({ ok: false, error: 'This chat is not connected to a ChatGPT conversation yet.' });
+});
+
+it('does not expose a local filesystem path to the Scheduled page when Run now persistence fails', async () => {
+  const input = await import('../src/main/session/input.js');
+  const original = await input.listInputs();
+  await writeDurableNow('session-input', []); input.resetInputForTests();
+  const session = await createSession({ conversationId: 'ipc-schedule-private-path', title: 'Private path check' });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  try {
+    await call('schedules:save', { sessionId: session.id, text: 'Check the queue', repeat: { kind: 'hours', every: 1 }, until: null });
+    const privatePath = path.join(dir, 'state', 'scheduled-runs.json');
+    const failure = Object.assign(new Error(`rename '${privatePath}.tmp' -> '${privatePath}'`), { code: 'EIO' });
+    const rename = vi.spyOn(fs, 'rename').mockRejectedValueOnce(failure);
+    const result = await call('schedules:runNow', { sessionId: session.id });
+    rename.mockRestore();
+
+    expect(result).toEqual({ ok: false, error: 'The schedule operation failed. Check the local app logs for details.' });
+    expect(JSON.stringify(result)).not.toContain(dir);
+    expect((await input.listInputs()).filter(row => row.sessionId === session.id)).toHaveLength(0);
+    expect(await call('schedules:get', { sessionId: session.id })).toMatchObject({ ok: true, data: { text: 'Check the queue' } });
+  } finally {
+    await call('schedules:delete', { sessionId: session.id });
+    await writeDurableNow('session-input', original); input.resetInputForTests();
+  }
+});
+
+it('keeps the translated scheduled-state read error at the IPC boundary without exposing its path', async () => {
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  const privatePath = path.join(dir, 'state', 'scheduled-runs.json');
+  const failure = Object.assign(new Error(`read '${privatePath}'`), { code: 'EIO' });
+  const read = vi.spyOn(fs, 'readFile').mockRejectedValueOnce(failure);
+  const result = await call('schedules:get', { sessionId: 'scheduled-read-error' });
+  read.mockRestore();
+
+  expect(result).toEqual({ ok: false, error: 'Could not read scheduled-runs state' });
+  expect(JSON.stringify(result)).not.toContain(dir);
+});
+
+it('reports a newer schedule store as incompatible instead of claiming there are no schedules', async () => {
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  const original = await readDurable('scheduled-runs');
+  const future = { version: 2, schedules: [{ id: 'a future schedule' }] };
+  try {
+    await writeDurableNow('scheduled-runs', future);
+    const result = await call('schedules:list');
+    expect(result).toEqual({
+      ok: false,
+      error: 'These schedules were saved by a newer version of Chat Marks. Update the app to change them.'
+    });
+    expect(await call('schedules:get', { sessionId: 'future-session-id' })).toEqual(result);
+    expect(await readDurable('scheduled-runs')).toEqual(future);
+  } finally {
+    await writeDurableNow('scheduled-runs', original);
+  }
+});
+
+it.each([
+  ['malformed JSON', '{"version":1,"schedules":'],
+  ['invalid schedule envelope', '{"version":1,"schedules":"not-an-array"}'],
+  ['invalid individual schedule', '{"version":1,"schedules":[{}]}']
+])('refuses to replace %s when listing and saving schedules', async (_kind, damaged) => {
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  const session = await createSession({ conversationId: 'ipc-corrupt-schedule-store', title: 'Keep schedules safe' });
+  const original = await readDurable('scheduled-runs');
+  const file = path.join(dir, 'state', 'scheduled-runs.json');
+  try {
+    await fs.writeFile(file, damaged);
+    const listing = await call('schedules:list');
+    expect(listing).toEqual({ ok: false, error: 'Could not read scheduled-runs state' });
+    const saving = await call('schedules:save', {
+      sessionId: session.id, text: 'Never replace unreadable schedules',
+      repeat: { kind: 'daily', at: '09:00' }, until: null
+    });
+    expect(saving).toEqual({ ok: false, error: 'Could not read scheduled-runs state' });
+    expect(await fs.readFile(file, 'utf8')).toBe(damaged);
+  } finally {
+    await writeDurableNow('scheduled-runs', original);
+  }
+});
+
+it('keeps the translated manual-intent mismatch error at the IPC boundary', async () => {
+  const input = await import('../src/main/session/input.js');
+  const original = await input.listInputs();
+  await writeDurableNow('session-input', []); input.resetInputForTests();
+  const session = await createSession({ conversationId: 'ipc-schedule-intent-mismatch', title: 'Intent mismatch' });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  try {
+    const saved = await call('schedules:save', { sessionId: session.id, text: 'Check the queue', repeat: { kind: 'hours', every: 1 }, until: null });
+    const intentId = '99999999-9999-4999-8999-999999999999';
+    const otherScheduleId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+    const dueAt = Date.now();
+    await input.enqueueInput({ id: intentId, sessionId: session.id, text: 'Other scheduled message', mode: 'auto',
+      dueAt, model: null, reasoningEffort: null,
+      scheduled: { scheduleId: otherScheduleId, dueAt, late: false } });
+    await writeDurableNow('scheduled-runs', { version: 1, schedules: [{ ...saved.data,
+      manualRunIntent: { id: intentId, dueAt, text: saved.data.text } }] });
+
+    const result = await call('schedules:runNow', { sessionId: session.id });
+    expect(result).toEqual({ ok: false, error: 'The saved manual run id belongs to a different scheduled message.' });
+    expect((await input.listInputs()).filter(row => row.sessionId === session.id)).toHaveLength(1);
+  } finally {
+    await call('schedules:delete', { sessionId: session.id });
+    await writeDurableNow('session-input', original); input.resetInputForTests();
+  }
+});
+
+it('keeps a schedule when its chat directory exists but its metadata cannot be read', async () => {
+  const session = await createSession({ conversationId: 'ipc-schedule-damaged-meta', title: 'Damaged metadata' });
+  const call = (name: string, payload?: unknown) => handlers.get(name)!(null, payload) as Promise<any>;
+  await call('schedules:save', { sessionId: session.id, text: 'Preserve this schedule', repeat: { kind: 'daily', at: '09:00' }, until: null });
+  const folder = path.join(dir, 'sessions', session.id);
+  await fs.writeFile(path.join(folder, 'meta.json'), '{"id":"damaged');
+  await fs.rm(path.join(folder, 'meta.backup.json'), { force: true });
+  resetSessionStoreForTests();
+
+  try {
+    const listed = await call('schedules:list');
+    expect(listed).toMatchObject({ ok: true, data: [] });
+    expect(await call('schedules:runNow', { sessionId: session.id })).toMatchObject({
+      ok: false, error: 'The session exists but its metadata could not be read.'
+    });
+    expect(await call('schedules:get', { sessionId: session.id })).toMatchObject({
+      ok: true, data: { sessionId: session.id, text: 'Preserve this schedule' }
+    });
+  } finally {
+    await call('schedules:delete', { sessionId: session.id });
+    await fs.rm(folder, { recursive: true, force: true });
+    resetSessionStoreForTests();
+  }
 });
 
 it('answers a turn\'s changed files and refuses a malformed request (#1827)', async () => {
@@ -793,6 +1036,9 @@ beforeAll(async () => {
       quitToInstallCalls += 1;
     }
   );
+  // registerIpc normally uses Electron app.getPath('userData'); the Electron mock above
+  // deliberately returns '', so pin the Company store to this test's disposable directory.
+  (await import('../src/main/company-store.js')).initCompanyStore(dir);
 });
 
 afterAll(async () => {
@@ -826,6 +1072,115 @@ beforeEach(async () => {
     sessions: { ...defaultConfig().sessions, record: true },
     multiAgent: { enabled: true, maxWorkers: 3, allowUnattributedCalls: false, recoverAgentTabs: true }
   });
+});
+
+it('archives over Electron IPC, preserves the session on restart and refuses active broker members', async () => {
+  const ordinary = await createSession({ title: 'Archived ordinary', conversationId: 'archive-ipc-chat' });
+  await appendEvent(ordinary.id, { time: Date.now(), source: 'app', kind: 'note',
+    message: { text: 'Keep this timeline', chars: 18, truncated: false } });
+  const invoke = (channel: string, payload: unknown) => handlers.get(channel)!(null, payload) as Promise<any>;
+  expect(await invoke('sessions:archive', { id: ordinary.id, archived: true })).toMatchObject({ ok: true, data: { id: ordinary.id } });
+  const live = await invoke('sessions:list', { limit: 1 });
+  expect(live.data.sessions).not.toContainEqual(expect.objectContaining({ id: ordinary.id }));
+  const stored = await invoke('sessions:list', { archived: true, limit: 60 });
+  expect(stored.data.sessions).toContainEqual(expect.objectContaining({ id: ordinary.id }));
+  expect((await invoke('sessions:events', { id: ordinary.id, limit: 10 })).data.events).toEqual(
+    expect.arrayContaining([expect.objectContaining({ kind: 'note' })]));
+
+  resetSessionStoreForTests();
+  expect((await listSessionPage({ archived: true })).sessions.find(row => row.id === ordinary.id)?.id).toBe(ordinary.id);
+  expect(await invoke('sessions:archive', { id: ordinary.id, archived: false })).toMatchObject({
+    ok: true, data: { id: ordinary.id, archivedAt: undefined }
+  });
+  expect((await getSession(ordinary.id))?.events).toBe(1);
+
+  const prime = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a001';
+  const workerChat = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a002';
+  const run = spawn({ workers: [{ task: 'Work is still active' }], caller: { conversationId: prime } });
+  expect(bindConversation('worker-1', workerChat, run.runId)).toBe(true);
+  const worker = await createSession({ title: 'Active worker', conversationId: workerChat,
+    origin: { kind: 'worker', fromSessionId: ordinary.id, agentId: 'worker-1', task: 'Work is still active' } });
+  expect((await invoke('sessions:archive', { id: worker.id, archived: true })).ok).toBe(false);
+  const primeSession = await createSession({ title: 'COO prime owner', conversationId: prime });
+  expect((await invoke('sessions:archive', { id: primeSession.id, archived: true })).ok).toBe(false);
+});
+
+it('refuses approval, exact COO and live Company integration bindings; archives a finished worker and revives it on new work', async () => {
+  const invoke = (id: string, archived = true) => handlers.get('sessions:archive')!(null, { id, archived }) as Promise<any>;
+  const companyStore = await import('../src/main/company-store.js');
+  const approval = await import('../src/main/approval-wait.js');
+  const companyFile = path.join(dir, 'company', 'company.json');
+  const previous = await fs.readFile(companyFile, 'utf8').catch(() => null);
+  const approvalChat = 'archive-waiting-approval';
+  const waiting = await createSession({ title: 'Waiting for approval', conversationId: approvalChat });
+  const now = Date.now();
+  try {
+    await approval.noteApprovalCard(approvalChat, true, waiting.id, {
+      record: async () => ({ seq: 1, time: now }), notify: () => undefined, log: () => undefined
+    }, now);
+    expect((await invoke(waiting.id)).ok).toBe(false);
+    approval.resetApprovalWaits();
+
+    const coo = await createSession({ title: 'Company COO', conversationId: 'company-coo-proof' });
+    const integration = await createSession({ title: 'Active integration', conversationId: 'company-integration-proof' });
+    const snapshot = await companyStore.mutateCompany('create', {
+      title: 'Synthetic integration', project: 'Fixture', owner: 'marks-coo',
+      origin: 'ceo', acceptance: 'Synthetic acceptance', engine: 'chatgpt', model: 'test',
+      tokenBudget: 100, timeBudgetMinutes: 5, dueAt: null
+    });
+    snapshot.delegation = {
+      mode: 'delegated', delegate: 'marks1', chiefTitle: 'operations',
+      scopes: ['internal-triage'], epoch: 1, grantedAt: now, revokedAt: null,
+      binding: { seat: 'marks1', ownerId: snapshot.requests[0]!.id,
+        runId: 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a101', workerId: 'worker-1', label: 'COO',
+        conversationId: coo.conversationId!, verifiedAt: now, expiresAt: now + 60_000 }
+    };
+    snapshot.requests[0]!.execution = {
+      mode: 'live', phase: 'running', ownerId: snapshot.requests[0]!.id,
+      workerId: 'worker-1', runId: 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a102',
+      conversationId: integration.conversationId!, reportId: null, result: null,
+      evidence: null, authorizedAt: now
+    };
+    await fs.writeFile(companyFile, JSON.stringify(snapshot), 'utf8');
+    expect((await invoke(coo.id)).ok).toBe(false);
+    expect((await invoke(integration.id)).ok).toBe(false);
+  } finally {
+    approval.resetApprovalWaits();
+    if (previous === null) await fs.rm(companyFile, { force: true });
+    else await fs.writeFile(companyFile, previous, 'utf8');
+  }
+
+  const prime = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a201';
+  const conversation = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a202';
+  const run = spawn({ caller: { conversationId: prime }, workers: [{ task: 'Completed work' }] });
+  expect(bindConversation('worker-1', conversation, run.runId)).toBe(true);
+  const worker = await createSession({ title: 'Verified worker completion', conversationId: conversation, origin: {
+    kind: 'worker', fromSessionId: waiting.id, agentId: 'worker-1', task: 'Completed work'
+  } });
+  // The browser can prove completion without a second MCP `agents finish` recording.
+  finishAgent({ conversationId: conversation }, 'Completed work');
+  expect((await getSession(worker.id))?.lastFinishReportAt).toBeNull();
+  expect((await invoke(worker.id)).ok).toBe(true);
+  expect((await getSession(worker.id))?.archivedAt).toBeTypeOf('number');
+
+  sendMessage({ conversationId: prime }, 'worker-1', 'Follow-up task');
+  expect((await import('../src/main/agents.js')).agentInfoForOwnedConversation(conversation)?.state).toBe('waking');
+  expect((await invoke(worker.id)).ok).toBe(true); // Idempotent archival is harmless while already hidden.
+  await appendEvent(worker.id, { time: Date.now() + 500, source: 'extension', kind: 'turn_start', turnId: 'worker-revived' });
+  expect((await getSession(worker.id))?.archivedAt).toBeUndefined();
+  await appendEvent(worker.id, { time: Date.now() + 600, source: 'extension', kind: 'turn_end', turnId: 'worker-revived', outcome: 'completed' });
+  expect((await invoke(worker.id)).ok).toBe(false); // Waking still owns its reserved slot.
+
+  const quietPrime = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a301';
+  const quietChat = 'aaaaaaaa-aaaa-4aaa-8aaa-00000000a302';
+  const quiet = spawn({ caller: { conversationId: quietPrime }, workers: [{ task: 'No proved completion' }] });
+  expect(bindConversation('worker-1', quietChat, quiet.runId)).toBe(true);
+  (await import('../src/main/agents.js')).sleepWorker('worker-1', 'No contact', quiet.runId);
+  const uncertain = await createSession({ title: 'Unproven sleeping worker', conversationId: quietChat, origin: {
+    kind: 'worker', fromSessionId: waiting.id, agentId: 'worker-1', task: 'No proved completion'
+  } });
+  expect((await import('../src/main/agents.js')).agentInfoForOwnedConversation(quietChat)?.state).toBe('sleeping');
+  expect((await invoke(uncertain.id)).ok).toBe(false);
 });
 
 it('keeps origin history navigation separate from live revision cursors over IPC', async () => {
@@ -920,6 +1275,9 @@ describe('turning multi-agent mode off', () => {
   });
 
   it('does not acknowledge the toggle until the parked retained history is durable', async () => {
+    // Earlier tests may already have retired workers. Disabling a run must not
+    // retire another worker, but it must also preserve the prior ledger.
+    const retiredBefore = await readDurable<any>('ipc-retired-workers');
     const prime = '11111111-2222-4333-8444-555555555555';
     const worker = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
     spawn({ workers: [{ task: 'must stay fenced after disable' }], caller: { conversationId: prime } });
@@ -950,7 +1308,8 @@ describe('turning multi-agent mode off', () => {
         })
       ]
     });
-    expect(await readDurable<any>('ipc-retired-workers')).toMatchObject({ workers: [] });
+    const retiredAfter = await readDurable<any>('ipc-retired-workers');
+    expect(retiredAfter?.workers).toEqual(retiredBefore?.workers ?? []);
   });
 
   it('survives a disabled restart and re-enable with the exact old worker chat still revivable', async () => {
@@ -1564,7 +1923,8 @@ describe('in-app feedback', () => {
 
   it.each([
     { kind: 'bug', what: '   ' },
-    { kind: 'idea', problem: 'p', proposal: '' },
+    // New features come as pull requests: the app opens no idea form (2026-11-01).
+    { kind: 'idea', problem: 'p', proposal: 'q' },
     { kind: 'bug', what: 'x', template: 'blank.yml' },
     { kind: 'bug', what: 'x', frequency: 'Always' },
     { kind: 'bug', what: 'x'.repeat(4001) },
@@ -2168,6 +2528,29 @@ describe('session IPC contracts', () => {
     }
   });
 
+  // CodeRabbit on #2079: the app's record of a chat's latest automatic message goes with the chat.
+  it("removes a deleted chat's own-sent record and keeps other chats' records", async () => {
+    const outbox = await import('../src/main/session/input.js');
+    const conversationId = 'cccccccc-1111-2222-3333-444444444444', other = 'dddddddd-1111-2222-3333-444444444444';
+    const session = await createSession({ title: 'own-sent then deleted', conversationId });
+    await writeDurableNow('own-sent-receipts', [
+      { conversationId, text: 'Scheduled: the person\'s own words', messageId: 'deleted-chat-message', at: Date.now() },
+      { conversationId: other, text: 'Continue the task', messageId: 'other-chat-message', at: Date.now() }
+    ]);
+    outbox.resetInputForTests();
+    expect(await outbox.ownSentResidue(conversationId)).toHaveLength(1);
+    const deleted = (await handlers.get('sessions:delete')!(null, { id: session.id })) as any;
+    expect(deleted.ok, deleted.error).toBe(true);
+    expect(await outbox.ownSentResidue(conversationId)).toEqual([]);
+    expect(await outbox.ownSentResidue(other)).toEqual([{ text: 'Continue the task', messageId: 'other-chat-message' }]);
+    // On disk before the delete answered, not on a later timer (CodeRabbit on #2079).
+    expect(((await readDurable('own-sent-receipts')) as any).receipts.map((row: any) => row.messageId)).toEqual(['other-chat-message']);
+    // Saved that way: a restart does not bring it back.
+    await flushDurable();
+    outbox.resetInputForTests();
+    expect(await outbox.ownSentResidue(conversationId)).toEqual([]);
+  });
+
   it('releases a block when the row that carries its button is deleted', async () => {
     const { isChatBlocked, resetBlockedChatsForTests } = await import('../src/main/session/blocked-chats.js');
     resetBlockedChatsForTests();
@@ -2180,6 +2563,23 @@ describe('session IPC contracts', () => {
     expect(deleted.ok, deleted.error).toBe(true);
     // Otherwise the conversation stays refused with nothing left in the app to release it.
     expect(isChatBlocked(conversationId)).toBe(false);
+  });
+
+  it('deletes an API engine ledger entry and fences late updates after removing its chat', async () => {
+    const ledger = await import('../src/main/agent-engine/ledger.js');
+    const conversationId = 'cosapi-00000000-0000-4000-8000-000000000071';
+    const session = await createSession({ title: 'removed API engine', conversationId });
+    await ledger.updateChatRecord(session.id, () => ({ engine: 'codex', backendSessionId: 'thread-deleted',
+      model: null, effort: null }));
+    expect((await ledger.storedChatRecord(session.id))?.backendSessionId).toBe('thread-deleted');
+    const deleted = await handlers.get('sessions:delete')!(null, { id: session.id }) as { ok: boolean; error?: string };
+    expect(deleted.ok, deleted.error).toBe(true);
+    expect(await getSession(session.id)).toBeNull();
+    expect(await ledger.storedChatRecord(session.id)).toBeUndefined();
+    await ledger.updateChatRecord(session.id, () => ({ engine: 'codex', backendSessionId: 'late-thread', model: null, effort: null }));
+    expect(await ledger.storedChatRecord(session.id)).toBeUndefined();
+    const stored = await readDurable<Record<string, unknown>>(ledger.API_CHAT_SESSIONS_STATE);
+    expect(stored).not.toHaveProperty(session.id);
   });
 
   it('removes trust when the row that carries its button is deleted', async () => {
@@ -2455,7 +2855,7 @@ it('follows only the newest chat selection when an earlier lookup finishes last 
   const store = await import('../src/main/session/store.js');
   const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
   const second = await createSession({ title: 'second', conversationId: 'bbbbbbbb-1111-4222-8333-444444444444' });
-  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => undefined);
+  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => true);
   const lookup = store.getSession;
   let releaseFirst: () => void = () => undefined;
   const firstHeld = new Promise<void>(resolve => { releaseFirst = resolve; });
@@ -2469,8 +2869,86 @@ it('follows only the newest chat selection when an earlier lookup finishes last 
     expect(later.ok, later.error).toBe(true);
     releaseFirst();
     expect(((await earlier) as any).ok).toBe(true);
-    expect(followed.mock.calls).toEqual([['bbbbbbbb-1111-4222-8333-444444444444']]);
+    expect(followed.mock.calls).toEqual([[null], [null], ['bbbbbbbb-1111-4222-8333-444444444444']]);
   } finally { slow.mockRestore(); followed.mockRestore(); }
+});
+
+it.each([false, true])('reports browser tab-follow acceptance (%s) instead of acknowledging a rejected follow', async accepted => {
+  const bridge = await import('../src/main/bridge.js');
+  const session = await createSession({ title: 'selected', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
+  const follow = vi.spyOn(bridge, 'followChatInBackground').mockReturnValue(accepted);
+  try {
+    expect(await handlers.get('sessions:followTab')!(null, { id: session.id })).toEqual({ ok: true, data: accepted });
+  } finally { follow.mockRestore(); }
+});
+
+it('keeps an unbound desktop selection pending instead of claiming its follow was accepted', async () => {
+  const session = await createSession({ title: 'opening', conversationId: null });
+  const logger = await import('../src/main/logger.js');
+  const info = vi.spyOn(logger, 'logInfo');
+  try {
+    expect(await handlers.get('sessions:followTab')!(null, { id: session.id })).toEqual({ ok: true, data: false });
+    expect(info).toHaveBeenCalledWith('browser follow: selected chat has no conversation binding; follow stays pending for retry');
+  } finally { info.mockRestore(); }
+});
+
+it('logs the never-bound selection once across repeated renderer catalog observations', async () => {
+  const { createSelectedTabFollow } = await import('../src/renderer/selected-tab-follow.js');
+  const bridge = await import('../src/main/bridge.js');
+  const logger = await import('../src/main/logger.js');
+  const session = await createSession({ title: 'never bound', conversationId: null });
+  const info = vi.spyOn(logger, 'logInfo');
+  const follow = vi.spyOn(bridge, 'followChatInBackground').mockReturnValue(true);
+  const send = vi.fn((id: string | null) => handlers.get('sessions:followTab')!(null, { id }) as Promise<{ ok: boolean; data?: boolean }>);
+  try {
+    const selection = { id: session.id, conversationId: null,
+      origin: { kind: 'desktop' as const, fromSessionId: null, agentId: null, task: '' } };
+    const pending = createSelectedTabFollow(send);
+    pending.select(selection);
+    await send.mock.results[0]!.value;
+    for (let i = 0; i < 50; i++) pending.observe(selection);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(follow.mock.calls).toEqual([[null]]); // Clears an older follow; no chat is handed to the browser.
+    expect(info.mock.calls.filter(([line]) => line === 'browser follow: selected chat has no conversation binding; follow stays pending for retry'))
+      .toHaveLength(1);
+  } finally { info.mockRestore(); follow.mockRestore(); }
+});
+
+it('cancels an already queued tab follow when the user selects New Chat', async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
+  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => true);
+  try {
+    const initial = await handlers.get('sessions:followTab')!(null, { id: first.id }) as any;
+    const clear = await handlers.get('sessions:followTab')!(null, { id: null }) as any;
+    expect(initial.ok, initial.error).toBe(true);
+    expect(clear.ok, clear.error).toBe(true);
+    expect(followed.mock.calls).toEqual([
+      [null], ['aaaaaaaa-1111-4222-8333-444444444444'], [null]
+    ]);
+  } finally { followed.mockRestore(); }
+});
+
+it('discards a slow tab lookup if New Chat is selected before the lookup resolves', async () => {
+  const bridge = await import('../src/main/bridge.js');
+  const store = await import('../src/main/session/store.js');
+  const first = await createSession({ title: 'first', conversationId: 'aaaaaaaa-1111-4222-8333-444444444444' });
+  const followed = vi.spyOn(bridge, 'followChatInBackground').mockImplementation(() => true);
+  const lookup = store.getSession;
+  let release!: () => void;
+  const held = new Promise<void>(resolve => { release = resolve; });
+  const slow = vi.spyOn(store, 'getSession').mockImplementation(async (id, ...rest) => {
+    if (id === first.id) await held;
+    return lookup(id, ...rest);
+  });
+  try {
+    const earlier = handlers.get('sessions:followTab')!(null, { id: first.id });
+    const later = await handlers.get('sessions:followTab')!(null, { id: null }) as any;
+    expect(later.ok, later.error).toBe(true);
+    release();
+    expect(((await earlier) as any).ok).toBe(true);
+    expect(followed.mock.calls).toEqual([[null], [null]]);
+  } finally { slow.mockRestore(); followed.mockRestore(); release(); }
 });
 
 it('saves this computer\'s connector suffix normalized, refuses an invalid one, and keeps a newer one through an older form', async () => {
@@ -2536,9 +3014,21 @@ describe('Stop IPC exact session and turn authority', () => {
     const session = await createSession({ title: 'Stop IPC', conversationId });
     await appendEvent(session.id, { time: Date.now(), source: 'app', kind: 'turn_start', turnId: 'ipc-stop-one' });
     expect((await invoke({ id: session.id })).ok).toBe(false);
-    expect(await invoke({ id: session.id, expectedTurnId: 'other-turn' })).toMatchObject({ ok: false, error: 'active_turn_changed' });
+    // The person reads what happened, never an error code (Haz on #1883).
+    const nothing = 'That answer had already ended; there was nothing to stop.';
+    expect(await invoke({ id: session.id, expectedTurnId: 'other-turn' })).toMatchObject({ ok: false, error: nothing });
     // A stored historical start alone cannot authorize stopping a browser turn.
-    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: 'active_turn_changed' });
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).toMatchObject({ ok: false, error: nothing });
+    // Stop shown for another chat than the session's now (a Compact & Resume moved it): nothing here changes.
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one', expectedConversationId: 'f3333333-aaaa-4bbb-8ccc-111111111111' })).toMatchObject({
+      ok: false, error: 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.' });
+    // Main's own read of the controls fails meanwhile: the named chat still binds, nothing else is touched.
+    const bridge = await import('../src/main/bridge.js');
+    const read = vi.spyOn(bridge, 'sessionControlsFor').mockRejectedValueOnce(new Error('conversation_changed'));
+    expect(await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one', expectedConversationId: 'f3333333-aaaa-4bbb-8ccc-111111111111' })).toMatchObject({
+      ok: false, error: 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.' });
+    expect(read).toHaveBeenCalled();
+    read.mockRestore();
     await rebindSession(session.id, conversationId, 'f2222222-aaaa-4bbb-8ccc-111111111111');
     expect((await invoke({ id: session.id, expectedTurnId: 'ipc-stop-one' })).ok).toBe(false);
     const missing = await createSession({ title: 'No browser ownership', conversationId: null });
@@ -2566,7 +3056,7 @@ it('saves a diagnostics report through the renderer channel without personal det
     (app as { getPath: typeof getPath }).getPath = getPath;
   }
   const report = await fs.readFile(target, 'utf8');
-  expect(report).toContain('# Chat On Steroids diagnostics report');
+  expect(report).toContain('# Chat Marks diagnostics report');
   expect(report).toContain('did not report back in time');
   expect(report).toMatch(/open '~[\\/]<p:[0-9a-f]{4}>[\\/]<p:[0-9a-f]{4}>\.xlsx'/);
   for (const personal of ['home-jane', 'Acme', 'invoice', 'jane@example.com', 'Quarterly tax return']) expect(report).not.toContain(personal);
@@ -3005,7 +3495,7 @@ describe('settings backup over IPC', () => {
   it('refuses a file that is not a backup, and does nothing when a dialog is cancelled', async () => {
     const other = path.join(dir, 'package.json');
     await fs.writeFile(other, JSON.stringify({ name: 'something' }));
-    expect(await pick(other)).toEqual({ ok: false, error: 'This file is not a Chat On Steroids settings backup.' });
+    expect(await pick(other)).toEqual({ ok: false, error: 'This file is not a Chat Marks settings backup.' });
     vi.mocked(dialog.showOpenDialog).mockResolvedValueOnce({ canceled: true, filePaths: [] });
     expect(await handlers.get('settings:importPick')!(null, undefined)).toEqual({ ok: true, data: null });
     vi.mocked(dialog.showSaveDialog).mockResolvedValueOnce({ canceled: true } as never);
@@ -3194,7 +3684,7 @@ describe('settings backup over IPC', () => {
 });
 
 describe('phone notifications over IPC', () => {
-  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
+  const phone = (over: Record<string, unknown> = {}) => ({ enabled: true, ntfy: true, server: 'https://ntfy.sh/', topic: 'cos-fixturetopic234567', needsYou: true, failures: true,
     finishedAfterMinutes: 5, onlyWhenAway: true, quietHours: null, includeDetails: false, ...over });
   beforeAll(() => {
     // An earlier test registers the handlers against a destroyed window; these use the live one.
@@ -3213,6 +3703,39 @@ describe('phone notifications over IPC', () => {
     // Switched off, a half-filled form still saves.
     expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ enabled: false, topic: '' }) } }, now)).ok).toBe(true);
     expect(getConfig().ui.phonePush).toMatchObject({ enabled: false, topic: '' });
+  });
+
+  // #1934: with ntfy off (Telegram only), its topic and server are not asked for, and an older form
+  // without the switch leaves it as it is.
+  it('needs no ntfy topic with ntfy off, and keeps the switch through a form that has none', async () => {
+    const base = getConfig();
+    const first = await save({ ...base, ui: { ...base.ui, phonePush: phone({ ntfy: false, topic: '', server: '' }) } }, base);
+    expect(first.ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ enabled: true, ntfy: false, topic: '' });
+    const now = getConfig();
+    const { ntfy: _ntfy, ...older } = phone({ ntfy: false, topic: '', server: '', includeDetails: true });
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: older as never } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ ntfy: false, includeDetails: true });
+    const later = getConfig();
+    expect(await save({ ...later, ui: { ...later.ui, phonePush: phone({ ntfy: true, topic: '' }) } }, later))
+      .toEqual({ ok: false, error: 'Choose a topic of letters, digits, - and _ (up to 64).' });
+  });
+
+  // Telegram phase 2 (2026-10-31): replies as messages stay off until switched on, and a form without
+  // the switch (an older window or backup) leaves it as it is.
+  it('keeps the Telegram reply switch off by default and through a form that has none', async () => {
+    const base = getConfig();
+    expect((await save({ ...base, ui: { ...base.ui, phonePush: phone() } }, base)).ok).toBe(true);
+    expect(getConfig().ui.phonePush?.telegramSteer).toBeUndefined();
+    const on = getConfig();
+    expect((await save({ ...on, ui: { ...on.ui, phonePush: phone({ telegramSteer: true }) } }, on)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ telegramSteer: true });
+    const now = getConfig();
+    expect((await save({ ...now, ui: { ...now.ui, phonePush: phone({ includeDetails: true }) } }, now)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ telegramSteer: true, includeDetails: true });
+    const later = getConfig();
+    expect((await save({ ...later, ui: { ...later.ui, phonePush: phone({ telegramSteer: false }) } }, later)).ok).toBe(true);
+    expect(getConfig().ui.phonePush).toMatchObject({ telegramSteer: false });
   });
 
   it('checks the settings as they will be saved, not the stale form, and logs a refusal', async () => {
@@ -3269,4 +3792,15 @@ describe('phone notifications over IPC', () => {
     expect(await handlers.get('phonePush:token')!(null, { token: '' })).toMatchObject({ ok: true, data: { hasPhonePushToken: false } });
     expect(await getSecret('ntfyToken')).toBeNull();
   });
+});
+
+// #1919: only a message the person wrote carries a moved chat's folder line.
+it('tells a person\'s message from the app\'s own', () => {
+  const base = { id: 'i1', sessionId: 's1', text: 'Next step', mode: 'auto', state: 'queued' } as never as Parameters<typeof personsMessage>[0];
+  expect(personsMessage(base)).toBe(true);
+  expect(personsMessage({ ...base, scheduled: { scheduleId: 'x', dueAt: 1, late: false } } as never)).toBe(true);
+  for (const own of [{ opening: true }, { recovery: { questionId: 'q' } }, { continuedFrom: 'recovery' }, { purpose: 'decision' },
+    { purpose: 'rotation' }, { finishOwner: 'f' }, { mode: 'finish', authoredSource: 'none' }, { authoredSource: 'none' }]) expect(personsMessage({ ...base, ...own } as never)).toBe(false);
+  // A message the person wrote and queued for the finish is still theirs (CodeRabbit on #1981).
+  expect(personsMessage({ ...base, mode: 'finish', authoredSource: 'text' } as never)).toBe(true);
 });

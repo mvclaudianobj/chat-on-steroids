@@ -1,6 +1,6 @@
 // Exercise Pets with isolated userData against the built renderer or the live Vite dev renderer.
 // Run after `npm run build`; ELECTRON_RENDERER_URL=http://localhost:5173 also checks dev CSS loading.
-const { app, BrowserWindow, screen } = require('electron');
+const { app, BrowserWindow, screen, safeStorage } = require('electron');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -9,6 +9,7 @@ const assert = require('node:assert/strict');
 const sharp = require('sharp');
 
 const root = path.resolve(__dirname, '..');
+const petId = process.argv.includes('--marks') ? 'marks' : 'capy';
 const { defaultConfig, merge } = require('./fixtures/app-defaults.cjs');
 const reuseAt = process.argv.indexOf('--reuse');
 const reusing = reuseAt >= 0;
@@ -16,7 +17,7 @@ const userData = reusing ? path.resolve(process.argv[reuseAt + 1]) : fs.mkdtempS
 if (!reusing) {
   fs.mkdirSync(path.join(userData, 'state'));
   fs.writeFileSync(path.join(userData, 'state', 'pet-library.json'), JSON.stringify({
-    version: 1, enabled: ['capy'], favorites: []
+    version: 1, enabled: [petId], favorites: []
   }));
   // Start from the app's own defaults so the config is valid and not reset on load.
   fs.writeFileSync(path.join(userData, 'config.json'), JSON.stringify(merge(defaultConfig(), {
@@ -30,6 +31,7 @@ app.setName('CoS Pets Render Probe');
 app.setPath('userData', userData);
 app.setAppPath(root);
 process.env.CLF_BRIDGE_PORTS = '0';
+const assertPetLogin = require('./fixtures/pet-markspanel-login.cjs').installPetMarkspanelLogin({ app, BrowserWindow, safeStorage });
 
 // Windows production proximity is owned by screen.getCursorScreenPoint(). Substitute only that
 // boundary so this fixture exercises the real sampler -> renderer -> IPC path without moving the
@@ -86,6 +88,7 @@ function attachOverlay(win) {
   whenLoaded(() => {
     setTimeout(async () => {
       try {
+        await until(() => win.webContents.executeJavaScript(`Boolean(document.querySelector('.pet-shell .pet-body'))`), 'enabled pet rendered', 10_000);
         const geometry = await win.webContents.executeJavaScript(`(() => {
           const shell = document.querySelector('.pet-shell');
           const body = document.querySelector('.pet-body');
@@ -138,7 +141,7 @@ function attachOverlay(win) {
             `The idle overlay must be click-through: ${JSON.stringify(ignoredMouseCalls)}`);
           assert.equal(win.isFocusable(), true,
             'Windows Pets must remain focusable so explicit clicks survive hide/show.');
-          const hoverOwner = BrowserWindow.getAllWindows().find(candidate => candidate !== win && candidate.getTitle() === 'Chat On Steroids');
+          const hoverOwner = BrowserWindow.getAllWindows().find(candidate => candidate !== win && candidate.getTitle() === 'Chat Marks');
           assert.ok(hoverOwner, 'The hover regression requires the visible owner behind Pets.');
           await hoverOwner.webContents.executeJavaScript(`(() => {
             clearInterval(window.__petBehindTimer);
@@ -290,7 +293,7 @@ function attachOverlay(win) {
           await new Promise(resolve => setTimeout(resolve, 100));
           const moved = await win.webContents.executeJavaScript(`(() => {
             const rect = document.querySelector('.pet-shell').getBoundingClientRect();
-            return { x: rect.x, y: rect.y, saved: localStorage.getItem('cos.ui.petDesktop.capy.v1') };
+            return { x: rect.x, y: rect.y, saved: localStorage.getItem('cos.ui.petDesktop.${petId}.v1') };
           })()`);
           assert.ok(Math.abs(moved.x - 333) < 2 && Math.abs(moved.y - 444) < 2,
             `Electron input drag did not move the pet: ${JSON.stringify(moved)}`);
@@ -298,7 +301,7 @@ function attachOverlay(win) {
         }
         const owners = BrowserWindow.getAllWindows().filter(candidate => candidate !== win);
         assert.ok(owners.length > 0, 'The desktop overlay needs an independently hosted owner window.');
-        const owner = owners.find(candidate => candidate.getTitle() === 'Chat On Steroids') ?? owners[0];
+        const owner = owners.find(candidate => candidate.getTitle() === 'Chat Marks') ?? owners[0];
         const titlebar = await owner.webContents.executeJavaScript(`(() => {
           const bar = document.querySelector('.app-topbar');
           const rect = bar?.getBoundingClientRect();
@@ -359,7 +362,7 @@ function attachOverlay(win) {
           window.api.petsOverlayState()
         ])`);
         assert.equal(hidden[0].ok, true);
-        assert.equal(hidden[0].data.pets.find(pet => pet.id === 'capy')?.enabled, true,
+        assert.equal(hidden[0].data.pets.find(pet => pet.id === petId)?.enabled, true,
           'Hide pet must leave the clicked library member Active.');
         assert.equal(hidden[1].ok, true);
         assert.equal(hidden[1].data.visible, false);
@@ -372,12 +375,14 @@ function attachOverlay(win) {
         assert.equal(restored.data.visible, true);
         assert.equal(restored.data.activeCount, 1);
         assert.equal(win.isVisible(), true, 'The View visibility command must restore a dismissed active pet.');
+        await until(() => win.webContents.executeJavaScript(`document.querySelectorAll('.pet-shell').length === 1`), 'dismissed pet restored', 10_000);
         assert.equal(await win.webContents.executeJavaScript('document.querySelectorAll(".pet-shell").length'), 1);
         const restoredRect = await win.webContents.executeJavaScript('document.querySelector(".pet-shell").getBoundingClientRect().toJSON()');
         assert.ok(Math.abs(restoredRect.x - 333) < 2 && Math.abs(restoredRect.y - 444) < 2,
           `Restoring a dismissed pet must retain its position: ${JSON.stringify(restoredRect)}`);
         console.log(`petContextHide=${JSON.stringify({ menu: contextMenu, hidden: hidden[1].data, restored: restored.data })}`);
         owner.minimize();
+        assertPetLogin();
         clearTimeout(timeout);
         if (process.argv.includes('--hold')) {
           console.log('Holding the desktop overlay for 20 seconds for compositor inspection.');

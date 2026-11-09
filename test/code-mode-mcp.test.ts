@@ -448,7 +448,8 @@ it('allows unattributed file edits through code mode while preserving permission
     await saveConfig({ ...config, multiAgent: { ...config.multiAgent, enabled: true } });
     const spawn = await call(undefined, 'text(await tools.agents({action:"spawn",workers:[{task:"Must never start"}]}));');
     expect(JSON.parse(emittedText(spawn)).isError).toBe(true);
-    expect(text(spawn)).toContain('UNIDENTIFIED_CALLER');
+    // The broker now raises the exact proof failure before generic caller fallback.
+    expect(text(spawn)).toContain('WORKER_IDENTITY_LOST');
   } finally {
     await saveConfig(config);
   }
@@ -529,5 +530,5 @@ it('explains a "not a function" from another connector\'s tool in a Core script 
   const response = await call(who.requestId, 'try { await tools.read_clipboard({}); } catch (error) { text(String(error)); }');
   const all = text(response);
   expect(all).toContain('not a function');
-  expect(all).toContain('UNKNOWN_TOOL_NAMES: this script used tools.read_clipboard (a Chat On Steroids Desktop tool), which Chat On Steroids Core does not offer');
+  expect(all).toContain('UNKNOWN_TOOL_NAMES: this script used tools.read_clipboard (a Chat Marks Desktop tool), which Chat Marks Core does not offer');
 });

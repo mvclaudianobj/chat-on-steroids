@@ -66,10 +66,10 @@ export function createTurnNotifier(deps: TurnNotifierDeps) {
         const body = noticeText(await deps.lastAnswer(id).catch(() => null));
         if (deps.phone) {
           const started = await deps.turnStartedAt?.(id).catch(() => null) ?? null;
-          deps.phone({ sessionId: id, chatTitle: session.title || 'Chat On Steroids', conversationId: session.conversationId ?? null,
+          deps.phone({ sessionId: id, chatTitle: session.title || 'Chat Marks', conversationId: session.conversationId ?? null,
             ...(started !== null && started <= end ? { workedMs: end - started } : {}), detail: body });
         }
-        if (desktop) deps.show(session.title || 'Chat On Steroids', body, id);
+        if (desktop) deps.show(session.title || 'Chat Marks', body, id);
       }
     }
   };

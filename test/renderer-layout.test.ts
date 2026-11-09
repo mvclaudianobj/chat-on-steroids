@@ -102,7 +102,7 @@ it('keeps recorded DIL surfaces on CoS tokens across themes and high-contrast pa
 
 it('finds settings on every settings page by name, description and section, never a row its page hides', () => {
   const entries = collectSettings(document);
-  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'usage', 'setup', 'settings', 'appearance']));
+  expect(new Set(entries.map(entry => entry.tab))).toEqual(new Set(['home', 'general', 'notifications', 'usage', 'setup', 'settings', 'modules', 'appearance', 'brain', 'remote-hosts', 'jarvis']));
   const [finish] = searchSettings(entries, '  SESSION FINISH  ', 'en');
   expect([finish!.title, finish!.page, finish!.section, finish!.tab]).toEqual(['Session finish', 'Agents & automation', 'Keep the turn open', 'settings']);
   expect(finish!.target.contains(document.getElementById('finishTool'))).toBe(true);
@@ -123,10 +123,12 @@ it('finds settings on every settings page by name, description and section, neve
   // Titles are the setting's name alone, never its description or the choices of its menu.
   const language = searchSettings(entries, 'language', 'en')[0]!;
   expect([language.title, language.section]).toEqual(['Language', 'Preferences']);
+  expect(searchSettings(entries, 'cliproxyapi', 'en')[0]!.tab).toBe('modules');
+  expect(searchSettings(entries, 'management console', 'en')[0]!.target.contains(document.getElementById('moduleCliOpen'))).toBe(true);
 });
 
 it('titles every settings page the same way, Activity included', () => {
-  for (const panel of ['home', 'general', 'usage', 'appearance', 'activity']) {
+  for (const panel of ['home', 'general', 'notifications', 'usage', 'modules', 'appearance', 'activity']) {
     const head = document.querySelector(`[data-panel="${panel}"] .settings-page-head`);
     expect(head?.querySelector('h1')?.textContent?.trim(), panel).toBeTruthy();
     expect(head?.querySelector('p')?.textContent?.trim(), panel).toBeTruthy();
@@ -248,7 +250,7 @@ function rule(selector: string): string {
 
 describe('the session card header', () => {
   it('indents rendered project tasks once and gives worker children their additional depth', () => {
-    expect(rule('.project-group > .sess, .project-group > .worker-group')).toContain('margin-inline-start: 24px');
+    expect(rule('.project-group > .sess, .project-group > .worker-group, .project-group > .chat-date-section')).toContain('margin-inline-start: 24px');
     expect(rule('.worker-group')).toContain('padding-left: 16px');
     expect(css).not.toContain('.project-group .session-row');
   });
@@ -531,7 +533,9 @@ describe('the chat panel cards', () => {
     expect(document.getElementById('backgroundExecStatus')!.nextElementSibling?.id).toBe('backgroundExecLiveStatus');
     expect((document.getElementById('backgroundExecLiveStatus') as HTMLElement).hidden).toBe(true);
     expect(document.getElementById('backgroundExecLiveStatus')!.nextElementSibling?.id).toBe('backgroundExecList');
-    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('agentPlan');
+    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('userRequests');
+    // Steps waiting for the person (#1695) come first: they wait on someone, the plan only reports.
+    expect(document.getElementById('userRequests')!.nextElementSibling?.id).toBe('agentPlan');
     expect(document.getElementById('inputQueue')!.closest('#chatBody')).not.toBeNull();
     expect(card.classList.contains('is-session')).toBe(true);
     expect(tracks("[data-panel='chat'] .card.is-session")).toHaveLength(layoutChildren.length);
@@ -545,7 +549,9 @@ describe('the chat panel cards', () => {
     expect(rule('.background-exec-list')).toContain('overflow-y: auto');
     expect(document.getElementById('backgroundExecStatus')!.nextElementSibling?.id).toBe('backgroundExecLiveStatus');
     expect(document.getElementById('backgroundExecLiveStatus')!.nextElementSibling?.id).toBe('backgroundExecList');
-    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('agentPlan');
+    expect(document.getElementById('backgroundExecList')!.nextElementSibling?.id).toBe('userRequests');
+    // Steps waiting for the person (#1695) come first: they wait on someone, the plan only reports.
+    expect(document.getElementById('userRequests')!.nextElementSibling?.id).toBe('agentPlan');
     expect(document.getElementById('finishQueue')!.previousElementSibling?.id).toBe('taskPlanPreview');
     // A chat's schedule (#1826) is one quiet line right under its queue.
     expect(document.getElementById('finishQueue')!.nextElementSibling?.id).toBe('scheduleLine');
@@ -686,7 +692,7 @@ describe('the settings sheet', () => {
   it('asks for a single compaction threshold', () => {
     const pane = document.querySelector('.view[data-view="settings"]')!;
     const numbers = [...pane.querySelectorAll('input[type="number"]')].map((input) => input.id);
-    expect(numbers).toEqual(['maWorkers', 'globalMaWorkers', 'autoCompactTokens']);
+    expect(numbers).toEqual(['maWorkers', 'globalMaWorkers', 'archiveWorkerDelayMinutes', 'autoCompactTokens']);
     const globalWorkers = document.getElementById('globalMaWorkers') as HTMLInputElement;
     expect([globalWorkers.min, globalWorkers.max, globalWorkers.step]).toEqual(['0', '64', '1']);
     const globalSetting = globalWorkers.closest('.setting')!;

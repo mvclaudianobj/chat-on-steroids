@@ -45,6 +45,23 @@ it('keeps credential edits private and stable while status updates arrive', asyn
   expect(document.body.textContent).not.toContain('never-show-this');
 });
 
+it('shows a saved credential only from secure-storage presence and never submits the mask', async () => {
+  state.plugins[0]!.credentialPresence = { TOKEN: true };
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  const password = document.querySelector<HTMLInputElement>('#pluginDialog input[type=password]')!;
+  expect(password.value).toBe('');
+  expect(password.placeholder).toBe('••••••••');
+  expect(password.getAttribute('aria-description')).toBe('Credential saved');
+  [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click();
+  await tick();
+  expect(api.pluginsConfigure).toHaveBeenCalledWith('one', expect.objectContaining({ credentials: {} }));
+  state.plugins[0]!.credentialPresence = { TOKEN: false };
+  await refreshPlugins();
+  [...document.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Configure')!.click();
+  expect(document.querySelector<HTMLInputElement>('#pluginDialog input[type=password]')!.placeholder).toBe('');
+});
+
 it('saves a changed longest-call limit alone without a reconnect or connector-refresh reminder', async () => {
   state.plugins[0]!.longestCallSeconds = 120;
   state.plugins[0]!.fields = [{ key: 'REGION', label: 'Region' }];
@@ -103,7 +120,7 @@ it('keeps the longest-call limit independent per plugin and reconnects when othe
   document.querySelector<HTMLInputElement>('#pluginDialog .plugin-field input')!.value = 'Renamed plugin';
   [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog button')].find(node => node.textContent === 'Save')!.click(); await tick();
   expect(api.pluginsConfigure).toHaveBeenLastCalledWith('one', expect.objectContaining({ name: 'Renamed plugin', longestCallSeconds: 40 }));
-  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat On Steroids Plugins in ChatGPT');
+  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat Marks Plugins in ChatGPT');
 });
 
 it('recognizes cleared configuration values and additional JSON keys as reconnecting changes', async () => {
@@ -136,7 +153,7 @@ it('sends the full patch for a new empty config key and changed longest-call lim
     config: { REGION: 'eu', HTTP_PROXY: '' },
     longestCallSeconds: 45,
   }));
-  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat On Steroids Plugins in ChatGPT');
+  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat Marks Plugins in ChatGPT');
 });
 
 it('keeps the limit-only path when an existing config key is already empty', async () => {
@@ -156,11 +173,11 @@ it('routes exact plugin and tool identity for disabling a discovered tool', asyn
   const toggle = document.querySelector<HTMLInputElement>('.plugin-tool input')!;
   toggle.checked = false; toggle.dispatchEvent(new dom.window.Event('change')); await tick();
   expect(api.pluginsSetToolEnabled).toHaveBeenCalledWith('one', 'remember', false);
-  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat On Steroids Plugins in ChatGPT');
+  expect(document.querySelector('.toast')!.textContent).toContain('Refresh Chat Marks Plugins in ChatGPT');
 });
 
 it('distinguishes a serving connector from evidence of ChatGPT contact', () => {
-  applyPluginsState({ config: { tunnel: { kind: 'manual' } }, status: { surfaces: [{ id: 'plugins', state: 'live', connectorName: 'Chat On Steroids Plugins', description: 'Plugins', localUrl: 'http://localhost/mcp', lastRequestAt: null }] } } as unknown as AppState);
+  applyPluginsState({ config: { tunnel: { kind: 'manual' } }, status: { surfaces: [{ id: 'plugins', state: 'live', connectorName: 'Chat Marks Plugins', description: 'Plugins', localUrl: 'http://localhost/mcp', lastRequestAt: null }] } } as unknown as AppState);
   expect(document.getElementById('pluginsConnectionStatus')!.textContent).toBe('Plugin online · waiting for ChatGPT');
   expect(document.getElementById('pluginsSetup')).toBeNull();
   expect(document.querySelector('[data-panel="setup"] #pluginsTunnelId')).toBeNull();
@@ -171,7 +188,7 @@ it('distinguishes a serving connector from evidence of ChatGPT contact', () => {
 it('keeps saved plugin setup compact after restart even while its connector is offline', () => {
   applyPluginsState({ config: { tunnel: { kind: 'openai', pluginsTunnelId: 'saved-plugins' } }, status: { surfaces: [] } } as unknown as AppState);
   expect(document.querySelector('.plugin-connection')!.classList.contains('is-configured')).toBe(true);
-  expect(document.getElementById('pluginsConnectionStatus')!.textContent).toBe('Chat On Steroids Plugins offline');
+  expect(document.getElementById('pluginsConnectionStatus')!.textContent).toBe('Chat Marks Plugins offline');
   expect(document.getElementById('pluginsSetupLink')!.textContent).toBe('Plugin setup');
   applyPluginsState({ config: { tunnel: { kind: 'openai', pluginsTunnelId: '' } }, status: { surfaces: [] } } as unknown as AppState);
   expect(document.querySelector('.plugin-connection')!.classList.contains('is-configured')).toBe(false);
@@ -182,8 +199,8 @@ it('keeps first-use setup and the connector-refresh instruction visible, includi
   expect(document.querySelector('.plugin-connection')!.textContent).toContain('before your first use');
   expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain('After installing, updating or changing enabled plugins');
   applyPluginsState({ config: { tunnel: { kind: 'manual' } }, status: { surfaces: [{ id: 'plugins', state: 'live', lastRequestAt: 1, tools: [] }] } } as unknown as AppState);
-  expect(document.getElementById('pluginsSetupTitle')!.textContent).toBe('Chat On Steroids Plugins in ChatGPT');
-  expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain('refresh Chat On Steroids Plugins in ChatGPT');
+  expect(document.getElementById('pluginsSetupTitle')!.textContent).toBe('Chat Marks Plugins in ChatGPT');
+  expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain('refresh Chat Marks Plugins in ChatGPT');
   document.getElementById('pluginsOpenChatGPT')!.click(); await tick();
   expect(api.openLink).toHaveBeenCalledExactlyOnceWith('https://chatgpt.com/plugins');
   document.getElementById('pluginsSetupLink')!.click();
@@ -194,7 +211,7 @@ it('keeps first-use setup and the connector-refresh instruction visible, includi
 });
 
 it('keeps plugin connection setup local, preserves a draft and saves through the existing settings authority', async () => {
-  const next = { hasApiKey: true, config: { tunnel: { kind: 'openai', tunnelId: 'core-original', pluginsTunnelId: 'plugins-original' }, ui: { theme: 'dark' } }, status: { surfaces: [{ id: 'plugins', state: 'live', tools: ['get_scene_info'], connectorName: 'Chat On Steroids Plugins', description: 'External tools', lastRequestAt: 1 }] } } as unknown as AppState;
+  const next = { hasApiKey: true, config: { tunnel: { kind: 'openai', tunnelId: 'core-original', pluginsTunnelId: 'plugins-original' }, ui: { theme: 'dark' } }, status: { surfaces: [{ id: 'plugins', state: 'live', tools: ['get_scene_info'], connectorName: 'Chat Marks Plugins', description: 'External tools', lastRequestAt: 1 }] } } as unknown as AppState;
   initPlugins(); applyPluginsState(next); await tick();
   document.getElementById('pluginsSetupLink')!.click();
   expect(document.getElementById('pluginDialogTitle')!.textContent).toBe('Plugin setup');
@@ -380,7 +397,7 @@ it('keeps a custom remote server without OAuth on its static credential', async 
 it('names this computer\'s own Plugins connector everywhere the page tells the user to act on it', async () => {
   // One ChatGPT account on several computers: this computer's connector carries its suffix,
   // and an instruction naming the plain one would send the user to the other computer's plugin.
-  const named = 'Chat On Steroids Plugins (Windows)';
+  const named = 'Chat Marks Plugins (Windows)';
   const withName = (lastRequestAt: number | null) => ({ config: { tunnel: { kind: 'openai', pluginsTunnelId: '' } },
     status: { surfaces: [{ id: 'plugins', state: 'off', connectorName: named, lastRequestAt, tools: [] }] } }) as unknown as AppState;
   initPlugins(); await tick();
@@ -397,7 +414,7 @@ it('names this computer\'s own Plugins connector everywhere the page tells the u
   expect(document.querySelector('.plugin-refresh-guide')!.textContent).toContain(named);
   setLanguage('en');
   applyPluginsState({ config: { tunnel: { kind: 'openai', pluginsTunnelId: '' } }, status: { surfaces: [] } } as unknown as AppState);
-  expect(document.querySelector('.plugin-refresh-guide strong')!.textContent).toBe('Chat On Steroids Plugins');
+  expect(document.querySelector('.plugin-refresh-guide strong')!.textContent).toBe('Chat Marks Plugins');
 });
 
 it('asks before uninstalling like removing a skill: Cancel first and focused, the destructive step last', async () => {
@@ -415,4 +432,48 @@ it('asks before uninstalling like removing a skill: Cancel first and focused, th
   [...document.querySelectorAll<HTMLButtonElement>('.plugin-card button')].find(node => node.textContent === 'Uninstall')!.click();
   [...document.querySelectorAll<HTMLButtonElement>('#pluginDialog .pet-delete-actions button')].find(node => node.textContent === 'Uninstall plugin')!.click(); await tick();
   expect(api.pluginsUninstall).toHaveBeenCalledExactlyOnceWith('one');
+});
+
+// Design audit 2026-11-01: a failed first load kept saying "Loading…" for good.
+it('says the plugins could not be loaded when the first load fails, and lists them once a retry works', async () => {
+  vi.resetModules();
+  const fresh = await import('../src/renderer/plugins.js');
+  api.pluginsSnapshot!.mockImplementationOnce(async () => ({ ok: false, error: 'Plugin store unavailable' }));
+  // The page's own start, so its search box is wired as in the app.
+  fresh.initPlugins(); await tick(); await tick();
+  expect(document.getElementById('pluginsCount')!.textContent).toBe('');
+  expect(document.getElementById('pluginsInstalled')!.textContent).toBe('Plugins could not be loaded.');
+  // Typing in the search repaints the list, and the failure stays (CodeRabbit on #2002).
+  const search = document.getElementById('pluginsSearch') as HTMLInputElement;
+  search.value = 'mem'; search.dispatchEvent(new (window as any).Event('input'));
+  expect(document.getElementById('pluginsInstalled')!.textContent).toBe('Plugins could not be loaded.');
+  expect(document.getElementById('pluginsCount')!.textContent).toBe('');
+  search.value = ''; search.dispatchEvent(new (window as any).Event('input'));
+  await fresh.refreshPlugins();
+  expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
+  // Once a list has shown, a later failed refresh keeps it and only says so in the toast.
+  api.pluginsSnapshot!.mockImplementationOnce(async () => ({ ok: false, error: 'Plugin store unavailable' }));
+  await fresh.refreshPlugins();
+  expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
+});
+
+// CodeRabbit on #2002: a refresh that a newer one replaced says nothing while the newer one is on its way.
+// Either order: the older failure arriving first, or only after the newer list is already shown (CodeRabbit on #2002).
+it.each(['before', 'after'] as const)('shows no load error for a plugin refresh that a newer one replaced (failure %s the list)', async order => {
+  vi.resetModules();
+  const fresh = await import('../src/renderer/plugins.js');
+  const replies: Array<(reply: unknown) => void> = [];
+  api.pluginsSnapshot!.mockImplementation(() => new Promise(resolve => replies.push(resolve)));
+  const first = fresh.refreshPlugins();
+  const second = fresh.refreshPlugins();
+  const fail = async () => {
+    replies[0]!({ ok: false, error: 'Plugin store unavailable' });
+    await first;
+    expect(document.getElementById('pluginsInstalled')!.textContent).not.toBe('Plugins could not be loaded.');
+  };
+  if (order === 'before') await fail();
+  replies[1]!({ ok: true, data: state });
+  await second;
+  if (order === 'after') await fail();
+  expect(document.querySelectorAll('#pluginsInstalled .plugin-card')).toHaveLength(1);
 });

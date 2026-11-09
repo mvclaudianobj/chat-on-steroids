@@ -8,6 +8,8 @@ export interface LocalProject {
   path: string;
   /** A folder on a server (#1469); `path` is then its `host[:port]:/path` identity. */
   remote?: import('./types.js').RemoteFolder;
+  /** Local mirror with an SSH profile and a specific SFTP folder; never a server root. */
+  remoteProfile?: { profileId: string; folder: string };
   /** Optional presentation-only sidebar accent. Never changes workspace or permission semantics. */
   color?: ProjectColor;
   createdAt: number;
@@ -20,7 +22,16 @@ export interface LocalProject {
    * this existed have one; it grants no filesystem permission.
    */
   chatgpt?: ChatgptProjectLink;
+  /**
+   * Related folders (#1689): other approved folders this work also uses, by their approved folder's
+   * path. Context for ChatGPT only: they never change the working directory and grant no access.
+   */
+  relatedFolders?: string[];
 }
+
+/** A related folder as the dialog shows it; unavailable ones are left out of what ChatGPT is told. */
+export interface RelatedFolderView { path: string; name: string | null; virtual: string | null; available: boolean }
+export const MAX_RELATED_FOLDERS = 10;
 
 /**
  * One CoS project's native ChatGPT Project, from request to verified identity.

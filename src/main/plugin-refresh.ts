@@ -9,6 +9,7 @@ import { surfaceDefinition } from './mcp/surfaces.js';
 import { APP_VERSION } from './version.js';
 import { PLUGIN_MAX_TOOLS } from './plugins/exposure.js';
 import type { PluginPublication, PluginRefreshRequest, PluginRefreshStatus, PluginSurface, PluginToolSchema } from '../shared/plugin-refresh.js';
+import { isReleaseVersion } from '../shared/types.js';
 
 const app = z.string().regex(/^asdk_app_[a-zA-Z0-9_-]{1,160}$/);
 const LEGACY_PLUGIN_MAX_TOOLS = 64;
@@ -18,7 +19,7 @@ const LEGACY_PLUGIN_MAX_TOOLS = 64;
  * extension's page readers use the same number; a test keeps it above what they declare.
  */
 export const OWN_CONNECTOR_MAX_TOOLS = 64;
-const requestedVersion = z.string().regex(/^\d+\.\d+\.\d+$/).optional();
+const requestedVersion = z.string().refine(isReleaseVersion).optional();
 const rowSchema = z.object({
   surface: z.enum(['core', 'desktop', 'plugins']), schemaId: z.string(), id: z.string().uuid(), appId: app.nullable(),
   completedSchemaId: z.string().nullable(), attempted: z.boolean(), manual: z.boolean().optional().default(false),
@@ -190,6 +191,13 @@ function enrollable(tools: unknown, publication: PluginPublication): boolean {
   const legacyCount = tools.length === LEGACY_PLUGIN_MAX_TOOLS ||
     (tools.length === LEGACY_PLUGIN_MAX_TOOLS + 1 && tools.some(tool => tool.name === 'exec'));
   if (publication.surface === 'plugins' && legacyCount && publication.tools.length > tools.length) {
+    const expected = new Map(publication.tools.map(tool => [tool.name, hash(declaration([tool]))]));
+    return tools.every(tool => expected.get(tool.name) === hash(declaration([tool])));
+  }
+  // A Desktop installation created before newly enabled controls were published can expose
+  // a proper subset. Only unchanged complete declarations are evidence of that installation;
+  // an unrelated tool or a changed description/schema cannot enroll it by name alone.
+  if (publication.surface === 'desktop' && tools.length >= 2 && tools.length < publication.tools.length) {
     const expected = new Map(publication.tools.map(tool => [tool.name, hash(declaration([tool]))]));
     return tools.every(tool => expected.get(tool.name) === hash(declaration([tool])));
   }
@@ -448,9 +456,15 @@ type Identity = { id: string; appId: string };
  * by the caller against this app's own configuration, never taken from the page alone.
  */
 type Enrollment = { connectorName: string; tools: unknown; tunnelId?: string; ownsTunnel?: (surface: PluginSurface, tunnelId: string) => boolean };
+function acceptsReportedTunnel(surface: PluginSurface, input: Enrollment): boolean {
+  if (input.tunnelId && input.ownsTunnel && !input.ownsTunnel(surface, input.tunnelId)) {
+    logWarn(`plugin refresh refused surface=${surface}: reported tunnel does not belong to this surface`);
+    return false;
+  }
+  return true;
+}
 function enrolls(row: Row, publication: PluginPublication, input: Enrollment): boolean {
   if (input.connectorName !== publication.connectorName) return false;
-  if (input.tunnelId && input.ownsTunnel && !input.ownsTunnel(row.surface, input.tunnelId)) return false;
   if (enrollable(input.tools, publication)) return true;
   return typeof input.tunnelId === 'string' && input.tunnelId.length > 0 && input.ownsTunnel?.(row.surface, input.tunnelId) === true;
 }
@@ -470,6 +484,7 @@ export function claimPluginRefresh(input: Identity & Enrollment & { alreadyCurre
   return serial(async () => {
     const current = await rows(); const row = exact(current, input, true);
     if (!row || (!automatic && !requestedHere(row)) || !recognizable(input.tools, row.surface)) return false;
+    if (!acceptsReportedTunnel(row.surface, input)) return false;
     const publication = publications.get(row.surface)!;
     const legacy = legacyIdentity(row), migrationClick = legacy && refreshableLegacy(row, publication);
     const observation = (row.observe || legacy) && !migrationClick;
@@ -505,6 +520,7 @@ export function requireManualPluginRefresh(input: Identity & Enrollment & { erro
   return serial(async () => {
     const current = await rows(); const row = exact(current, input, true);
     if (!row || !recognizable(input.tools, row.surface)) return false;
+    if (!acceptsReportedTunnel(row.surface, input)) return false;
     const publication = publications.get(row.surface)!;
     const legacy = legacyIdentity(row);
     if (legacy ? !refreshableLegacy(row, publication) || !provesLegacyTunnel(row, input) || !enrolls(row, publication, input)

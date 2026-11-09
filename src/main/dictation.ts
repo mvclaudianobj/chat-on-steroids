@@ -24,6 +24,7 @@ const SCRIPT = [
   '[Console]::OutputEncoding = New-Object System.Text.UTF8Encoding($false)',
   '$cosParentPid = __COS_PARENT_PID__',
   "$cosStopFile = '__COS_STOP_FILE__'",
+  "$cosLanguage = '__COS_LANGUAGE__'",
   'function Send([string]$type,[string]$value,[string]$engine) {',
   "  $data = if($type -eq 'status') { @{type='status';status=$value} } elseif($type -eq 'error') { @{type='error';message=$value} } else { @{type=$type;text=$value} }",
   '  if($engine) { $data.engine = $engine }',
@@ -45,6 +46,7 @@ const SCRIPT = [
   'using System.Text;',
   'using System.Threading;',
   'using Windows.Foundation;',
+  'using Windows.Globalization;',
   'using Windows.Media.SpeechRecognition;',
   'public static class CosDictation {',
   '  static SpeechRecognizer recognizer;',
@@ -69,9 +71,10 @@ const SCRIPT = [
   '    while (op.Status == AsyncStatus.Started && DateTime.UtcNow < until) Thread.Sleep(10);',
   '    if (op.Status == AsyncStatus.Error) throw op.ErrorCode;',
   '  }',
-  '  public static void Start() {',
+  '  public static void Start(string language) {',
   "    // No constraint added: the recognizer's default is Windows' dictation topic.",
-  '    recognizer = new SpeechRecognizer();',
+  '    if (String.IsNullOrEmpty(language)) { recognizer = new SpeechRecognizer(); }',
+  '    else { recognizer = new SpeechRecognizer(new Language(language)); }',
   '    var compiled = Await(recognizer.CompileConstraintsAsync());',
   '    if (compiled.Status != SpeechRecognitionResultStatus.Success) throw new InvalidOperationException("Dictation is not available: " + compiled.Status);',
   '    session = recognizer.ContinuousRecognitionSession;',
@@ -99,6 +102,7 @@ const SCRIPT = [
   '  $options = New-Object System.CodeDom.Compiler.CompilerParameters',
   '  $options.ReferencedAssemblies.AddRange([string[]]@(',
   "    \"$env:windir\\System32\\WinMetadata\\Windows.Foundation.winmd\",",
+  "    \"$env:windir\\System32\\WinMetadata\\Windows.Globalization.winmd\",",
   "    \"$env:windir\\System32\\WinMetadata\\Windows.Media.winmd\",",
   '    "${runtime}System.Runtime.dll",',
   '    "${runtime}System.Runtime.InteropServices.WindowsRuntime.dll"))',
@@ -116,7 +120,7 @@ const SCRIPT = [
   '  try {',
   '    CompileRecognizer',
   '    $modern = $true',
-  '    [CosDictation]::Start()',
+  '    [CosDictation]::Start($cosLanguage)',
   "    $engine = 'modern'",
   "    Send 'status' 'listening' 'modern'",
   '  } catch {',
@@ -130,9 +134,10 @@ const SCRIPT = [
   '    Add-Type -AssemblyName System.Speech',
   '    $available = @([System.Speech.Recognition.SpeechRecognitionEngine]::InstalledRecognizers())',
   "    if($available.Count -eq 0) { throw 'No Windows speech recognizer is installed. Install a Windows speech language pack.' }",
-  '    $culture = [System.Globalization.CultureInfo]::CurrentUICulture',
+  '    $culture = if($cosLanguage) { [System.Globalization.CultureInfo]::GetCultureInfo($cosLanguage) } else { [System.Globalization.CultureInfo]::CurrentUICulture }',
   '    $choice = $available | Where-Object { $_.Culture.Name -eq $culture.Name } | Select-Object -First 1',
   '    if(-not $choice) { $choice = $available | Where-Object { $_.Culture.TwoLetterISOLanguageName -eq $culture.TwoLetterISOLanguageName } | Select-Object -First 1 }',
+  "    if(-not $choice -and $cosLanguage) { throw 'Selected Windows speech language is not installed.' }",
   '    if(-not $choice) { $choice = $available[0] }',
   '    $legacy = [System.Speech.Recognition.SpeechRecognitionEngine]::new($choice)',
   '    $legacy.LoadGrammar([System.Speech.Recognition.DictationGrammar]::new())',
@@ -232,7 +237,7 @@ export function registerDictationIpc(getWindow: () => BrowserWindow | null): voi
     active.child.kill();
     fs.rmSync(active.stopFile, { force: true });
   });
-  ipcMain.handle('dictation:start', async event => {
+  ipcMain.handle('dictation:start', async (event, request?: unknown) => {
     const window = getWindow();
     if (!window || window.isDestroyed() || event.sender !== window.webContents)
       return { ok: false as const, error: 'Dictation can only start from the CoS window' };
@@ -240,9 +245,14 @@ export function registerDictationIpc(getWindow: () => BrowserWindow | null): voi
       return { ok: false as const, error: 'Microphone dictation currently requires Windows' };
     if (active)
       return { ok: false as const, error: 'Dictation is already running' };
+    const language = request && typeof request === 'object' && 'language' in request
+      ? (request as { language: unknown }).language : '';
+    if (typeof language !== 'string' || (language && !/^[a-zA-Z]{2,3}(?:-[a-zA-Z0-9]{2,8}){0,2}$/.test(language)))
+      return { ok: false as const, error: 'Invalid speech language' };
     const stopFile = path.join(os.tmpdir(), `cos-dictation-${process.pid}-${randomUUID()}.stop`);
     const script = SCRIPT.replace('__COS_PARENT_PID__', String(process.pid))
-      .replace('__COS_STOP_FILE__', () => stopFile.replaceAll("'", "''"));
+      .replace('__COS_STOP_FILE__', () => stopFile.replaceAll("'", "''"))
+      .replace('__COS_LANGUAGE__', language);
     const encoded = Buffer.from(script, 'utf16le').toString('base64');
     let child: ChildProcessWithoutNullStreams;
     try {

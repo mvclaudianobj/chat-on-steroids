@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
 import { SftpClient, SftpError } from './sftp.js';
 
 /**
@@ -42,8 +43,10 @@ export function remoteIdentity(remote: RemoteFolder): string {
 
 /** Arguments for `ssh`: options, then `--`, the host and the remote part. */
 export function sshArgs(remote: RemoteFolder, options: string[], rest: string[]): string[] {
+  const masterKey = path.join(os.homedir(), '.ssh', 'marks-key-mestra');
   return [
     '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3',
+    ...(existsSync(masterKey) && !options.includes('-i') ? ['-i', masterKey] : []),
     ...(remote.port ? ['-p', String(remote.port)] : []), ...options, '--', remote.host, ...rest
   ];
 }

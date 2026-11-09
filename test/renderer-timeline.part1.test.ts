@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { T0, boot, settle, settleHistoryFrame, summary, text, toolCall, waitFor, type Handoff, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
+import { T0, boot, closeDom, settle, settleHistoryFrame, summary, text, toolCall, waitFor, type Handoff, type InputEntry, type LocalProject, type SessionEvent, type SessionSummary } from './renderer-timeline.harness.js';
 
 vi.mock('../src/renderer/workspace-terminal.js', () => ({ createWorkspaceTerminal: () => ({
   update: vi.fn(), show: vi.fn(), hide: vi.fn(), hasTabs: () => false,
@@ -64,6 +64,48 @@ it('shows elapsed runtime and stops the owned background process from the dock',
   await settle();
   expect((w as any).api.stopProcess).toHaveBeenCalledWith(summary([]).id, 4101, 91);
   expect(row.hidden).toBe(true);
+});
+
+// CodeRabbit on #2052: Output appears only when the app offers it, and a repaint keeps its keyboard focus.
+it('offers Output only with agent output available, and keeps its focus across a repaint', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  const row = { processId: 4111, incarnation: 92, command: 'npm run dev', startedAt: Date.now() - 30_000, tty: false };
+  const host = w.document.getElementById('backgroundExecStatus')!;
+  // An older preload without agent output: no Output button.
+  (w as any).api.agentOutputOpen = undefined;
+  await publishBackgroundProcesses([row]);
+  expect(host.querySelector('.background-exec-output')).toBeNull();
+  (w as any).api.agentOutputOpen = vi.fn(async () => ({ ok: true, data: true }));
+  await publishBackgroundProcesses([{ ...row, startedAt: row.startedAt - 1 }]);
+  const output = host.querySelector<HTMLButtonElement>('.background-exec-output')!;
+  expect(output).not.toBeNull();
+  output.focus();
+  await publishBackgroundProcesses([{ ...row, startedAt: row.startedAt - 2 }]);
+  const repainted = host.querySelector<HTMLButtonElement>('.background-exec-output')!;
+  // The same button stays, so a press that spans a repaint still lands (CodeRabbit on #2052).
+  expect(repainted).toBe(output);
+  expect(w.document.activeElement).toBe(repainted);
+});
+
+it('keeps each expanded row\'s Output button across a repaint while its process is the same', async () => {
+  const { w, publishBackgroundProcesses } = await boot([]);
+  (w as any).api.agentOutputOpen = vi.fn(async () => ({ ok: true, data: true }));
+  const startedAt = Date.now() - 45_000;
+  const rows = [
+    { processId: 4301, incarnation: 111, command: 'npm run watch', startedAt, tty: false },
+    { processId: 4302, incarnation: 112, command: 'node server.js', startedAt: startedAt + 5_000, tty: true }
+  ];
+  await publishBackgroundProcesses(rows);
+  w.document.getElementById('backgroundExecStatus')!.click();
+  const list = w.document.getElementById('backgroundExecList')!;
+  const before = [...list.querySelectorAll<HTMLButtonElement>('.background-exec-output')];
+  expect(before).toHaveLength(2);
+  // A repaint with the same processes keeps both buttons (CodeRabbit on #2052); a new incarnation gets a new one.
+  await publishBackgroundProcesses([rows[0]!, { ...rows[1]!, incarnation: 113 }]);
+  const after = [...list.querySelectorAll<HTMLButtonElement>('.background-exec-output')];
+  expect(after[0]).toBe(before[0]);
+  expect(after[1]).not.toBe(before[1]);
+  expect(after[1]!.dataset.process).toBe('4302:113');
 });
 
 it('expands multiple background processes and stops each one from its own row', async () => {
@@ -303,6 +345,170 @@ it('asks for the selected chat\'s background tab once per switch (#1249)', async
   row(second.id).click();
   row(first.id).click();
   expect(followed).toEqual([second.id, first.id]);
+});
+
+it('follows a newly sent chat when its first native conversation ID arrives, once', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const sessions = [opening];
+  const { w, notifySession } = await boot([], false, [], [], { sessions });
+  const followed: string[] = [];
+  (w as any).api.followSessionTab = async (id: string) => { followed.push(id); return { ok: true, data: true }; };
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${opening.id}"]`)!.click();
+  followed.length = 0; // The initial selection cannot follow a chat that has no provider ID yet.
+
+  sessions[0] = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+});
+
+it('follows the first binding even when project history merges it before the newest-page refresh', async () => {
+  const project: LocalProject = { id: '33333333-3333-4333-8333-333333333333', name: 'Project', path: '/repo', createdAt: T0 };
+  const opening: SessionSummary = { ...summary([]), projectId: project.id, conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const bound = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  const { w, notifySession } = await boot([], false, [], [project], { sessions: [opening] });
+  const api = (w as any).api;
+  const followed: string[] = [];
+  api.followSessionTab = async (id: string) => { followed.push(id); return { ok: true, data: true }; };
+  w.document.querySelector<HTMLElement>('#sessionList [data-id="' + opening.id + '"]')!.click();
+  followed.length = 0;
+  let newestPage = opening;
+  api.listSessions = async (options: { projectId?: string }) => ({ ok: true, data: {
+    sessions: options?.projectId === project.id ? [bound] : [newestPage],
+    total: 1, nextCursor: null, activeId: null, pressure: [], blocked: [], approval: [], recoveryStopped: []
+  } });
+
+  const heading = w.document.querySelector<HTMLElement>('.project-group .project-heading')!;
+  // Selecting the chat already expands its project; close and reopen to request history.
+  heading.click(); heading.click();
+  await settle(300);
+  expect(followed).toEqual([opening.id]);
+  newestPage = bound;
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+  // A stale newest page may briefly show the old unbound summary again.
+  newestPage = opening;
+  notifySession(); await settle(550);
+  newestPage = bound;
+  notifySession(); await settle(550);
+  expect(followed).toEqual([opening.id]);
+});
+
+it('invalidates a queued browser follow when New Chat replaces the selected session', async () => {
+  const first = summary([]);
+  const { w } = await boot([], false, [], [], { sessions: [first] });
+  const followed: Array<string | null> = [];
+  (w as any).api.followSessionTab = async (id: string | null) => { followed.push(id); return { ok: true, data: true }; };
+  w.document.querySelector<HTMLElement>('#sessionList [data-id="' + first.id + '"]')!.click();
+  w.document.getElementById('newChat')!.click();
+  expect(followed).toEqual([first.id, null]);
+});
+
+it.each(['catalog removal', 'delete action'])('cancels an unbound chat follow after %s, even if its bound row is seen later', async removal => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const sessions = [opening];
+  const follow = vi.fn(async (_id: string | null) => ({ ok: true, data: false }));
+  const { w, notifySession } = await boot([], false, [], [], { sessions, followSessionTab: follow });
+  const selector = `#sessionList [data-id="${opening.id}"]`;
+  w.document.querySelector<HTMLElement>(selector)!.click();
+  if (removal === 'delete action') {
+    (w as any).api.deleteSession = async () => { sessions.splice(0); return { ok: true, data: true }; };
+    w.document.querySelector<HTMLElement>(`${selector} [data-row-menu]`)!.click();
+    w.document.querySelector<HTMLElement>('[data-row-action="remove"]')!.click();
+  } else {
+    sessions.splice(0);
+    notifySession();
+  }
+  await waitFor(() => expect(follow.mock.calls).toEqual([[opening.id], [null]]));
+  await waitFor(() => expect(w.document.querySelector(selector)).toBeNull());
+  sessions.push({ ...opening, title: 'Late bound row', conversationId: 'late-chat', chatIds: ['late-chat'] });
+  notifySession();
+  await waitFor(() => expect(w.document.querySelector(selector)?.textContent).toContain('Late bound row'));
+  expect(follow.mock.calls).toEqual([[opening.id], [null]]);
+});
+
+it('drops the unbound follow across a renderer restart with the previous window storage restored', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const sessions = [opening];
+  const follow = vi.fn(async (_id: string | null) => ({ ok: true, data: false }));
+  const previous = await boot([], false, [], [], { sessions, followSessionTab: follow });
+  const selector = `#sessionList [data-id="${opening.id}"]`;
+  previous.w.document.querySelector<HTMLElement>(selector)!.click();
+  expect(follow.mock.calls).toEqual([[opening.id]]);
+  const storage = Object.fromEntries(Array.from({ length: previous.w.localStorage.length }, (_, i) => {
+    const key = previous.w.localStorage.key(i)!;
+    return [key, previous.w.localStorage.getItem(key)!];
+  }));
+  closeDom();
+  vi.resetModules();
+  const restarted = await boot([], false, [], [], { sessions, storage, followSessionTab: follow });
+  sessions[0] = { ...opening, title: 'Bound after restart', conversationId: 'late-chat', chatIds: ['late-chat'] };
+  restarted.notifySession();
+  await waitFor(() => expect(restarted.w.document.querySelector(selector)?.textContent).toContain('Bound after restart'));
+  expect(follow.mock.calls).toEqual([[opening.id]]);
+  // Only a fresh user selection in the new window authorizes another follow.
+  restarted.w.document.querySelector<HTMLElement>(selector)!.click();
+  expect(follow.mock.calls).toEqual([[opening.id], [opening.id]]);
+});
+
+it('does not focus a newly bound chat after the person has selected another one', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const other: SessionSummary = { ...summary([]), id: '2026-09-02-test0002', title: 'Other chat' };
+  const sessions = [opening, other];
+  const { w, notifySession } = await boot([], false, [], [], { sessions });
+  const followed: string[] = [];
+  (w as any).api.followSessionTab = async (id: string) => { followed.push(id); return { ok: true, data: true }; };
+  const row = (id: string) => w.document.querySelector<HTMLElement>(`#sessionList [data-id="${id}"]`)!;
+  row(opening.id).click();
+  row(other.id).click();
+  followed.length = 0;
+
+  sessions[0] = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  notifySession(); await settle(550);
+  expect(followed).toEqual([]);
+});
+
+it('keeps a first binding pending until main accepts it and retries on a catalog refresh', async () => {
+  const opening: SessionSummary = { ...summary([]), conversationId: null, chatIds: [],
+    origin: { kind: 'desktop', fromSessionId: null, agentId: null, task: '' } };
+  const rows = [opening];
+  const { w, notifySession } = await boot([], false, [], [], { sessions: rows });
+  const follow = vi.fn(async () => ({ ok: true, data: false }));
+  (w as any).api.followSessionTab = follow;
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${opening.id}"]`)!.click();
+  rows[0] = { ...opening, conversationId: 'new-native-chat', chatIds: ['new-native-chat'] };
+  notifySession();
+  await waitFor(() => expect(follow).toHaveBeenCalledTimes(2));
+  follow.mockResolvedValue({ ok: true, data: true });
+  notifySession();
+  await waitFor(() => expect(follow).toHaveBeenCalledTimes(3));
+  notifySession(); await settle(550);
+  expect(follow).toHaveBeenCalledTimes(3);
+});
+
+it('does not let a delayed acknowledgement erase the newer selected chat follow', async () => {
+  const origin = { kind: 'desktop' as const, fromSessionId: null, agentId: null, task: '' };
+  const first = { ...summary([]), origin };
+  const second = { ...summary([]), id: '2026-09-02-test0002', origin };
+  const { w, notifySession } = await boot([], false, [], [], { sessions: [first, second] });
+  let release!: (value: { ok: true; data: boolean }) => void;
+  const follow = vi.fn()
+    .mockImplementationOnce(() => new Promise(resolve => { release = resolve; }))
+    .mockResolvedValue({ ok: true, data: false });
+  (w as any).api.followSessionTab = follow;
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${first.id}"]`)!.click();
+  w.document.querySelector<HTMLElement>(`#sessionList [data-id="${second.id}"]`)!.click();
+  release({ ok: true, data: true });
+  await settle();
+  notifySession();
+  await waitFor(() => expect(follow).toHaveBeenCalledTimes(3));
+  expect(follow.mock.calls.map(([id]) => id)).toEqual([first.id, second.id, second.id]);
 });
 
 it('clears control projections on an existing-session switch and fences A to B to A responses', async () => {
@@ -609,6 +815,26 @@ it('keeps the scheduled label on the sent message in the chat', async () => {
   expect(labels()).toEqual(['Scheduled', null]);
   await append([{ ...sent, seq: 3, origin: 1, scheduled: { dueAt, late: true } }]);
   expect(labels()).toEqual([`Scheduled · late, was due ${new Date(dueAt).toLocaleTimeString('en', { hour: '2-digit', minute: '2-digit' })}`, null]);
+});
+
+// Haz on #1990: a reply from Telegram says so in the chat, in the scheduled label's style, while it
+// waits and once sent, so the person can check what happened remotely.
+it('marks a message from Telegram in the queue and in the chat', async () => {
+  const sent: SessionEvent = { kind: 'user_message', seq: 1, origin: 1, time: T0, source: 'app', messageId: 'telegram-sent', inputId: 'telegram-run',
+    message: text('Run the tests'), via: 'telegram' };
+  const typed: SessionEvent = { kind: 'user_message', seq: 2, origin: 2, time: T0 + 1, source: 'app', messageId: 'typed-2', message: text('And this?') };
+  const { w, live, append } = await boot([sent, typed]);
+  const labels = () => [...w.document.querySelectorAll('.said.is-user')].map(bubble => bubble.querySelector('.said-origin')?.textContent ?? null);
+  expect(labels()).toEqual(['From Telegram', null]);
+  const queued = { id: 'telegram-queued', sessionId: summary(live.events).id, text: 'Then deploy', mode: 'auto', dueAt: 0, model: null,
+    reasoningEffort: null, state: 'queued', owner: null, createdAt: 0, conversationId: 'chat-a', via: 'telegram' } as InputEntry;
+  live.inputs.push(queued);
+  await append([]);
+  await waitFor(() => expect(w.document.querySelector('#inputQueue [data-input-id="telegram-queued"] .pending-message-origin')?.textContent).toBe('From Telegram'));
+  // Waiting for a running turn, its task card carries the same words.
+  live.inputs[0] = { ...queued, mode: 'after-turn' };
+  await append([]);
+  await waitFor(() => expect(w.document.querySelector('#finishQueue [data-input-id="telegram-queued"] .queue-label')?.textContent).toBe('From Telegram · Then deploy'));
 });
 
 // #1402: the app's own fresh-turn continue is no one's typed message. Waiting, it shows as the
@@ -966,6 +1192,61 @@ it('says when the send check holds an automatic message, with its reason', async
   expect(w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '').not.toContain('Held');
 });
 
+// 2026-11-03 (Mac): the chat's page had the person's Continue and held it while ChatGPT still answered.
+it('says a queued message waits for ChatGPT\'s answer while the chat\'s page holds it, and stops saying so once that is old', async () => {
+  // A frozen clock: a slow runner can never let a hold lapse before its wording is checked (CodeRabbit on #2054).
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(new Date(2026, 10, 3, 15, 0));
+  try {
+    const asked = Date.now() - 12_000;
+    const { w, live, append } = await boot([
+      { seq: 1, time: asked - 100, source: 'extension', kind: 'turn_start', turnId: 'held-turn' },
+      { kind: 'user_message', seq: 2, origin: 2, time: asked, source: 'extension', turnId: 'held-turn', messageId: 'q-now', message: text('Run the tests') }
+    ]);
+    const api = (w as any).api;
+    const chat = await import('../src/renderer/chat.js');
+    const state = (await api.getState()).data;
+    chat.chatApply({ ...state, bridge: { ...state.bridge, present: true } });
+    const queued: InputEntry = { id: 'held-one', sessionId: summary(live.events).id, state: 'queued', owner: null, text: 'Continue',
+      mode: 'auto', model: null, reasoningEffort: null, dueAt: T0, createdAt: T0, conversationId: 'chat-a',
+      pageHold: { reason: 'still-answering', at: Date.now() - 2_000 } };
+    const status = () => w.document.querySelector('#inputQueue .pending-message')?.textContent ?? '';
+    // Each change is announced the way main does, then the queue's own refresh is waited for (CodeRabbit on #2054).
+    const shows = async (expected: string | null, absent?: string) => {
+      await append([]);
+      await waitFor(() => {
+        if (expected) expect(status()).toContain(expected);
+        if (absent) expect(status()).not.toContain(absent);
+      });
+    };
+    live.inputs.push(queued);
+    await shows('Waiting for ChatGPT to finish its answer');
+    live.inputs[0] = { ...queued, pageHold: { reason: 'turn-held', at: Date.now() - 2_000 } };
+    await shows("Waiting for ChatGPT's page to end its turn");
+    live.inputs[0] = { ...queued, pageHold: { reason: 'tool-running', at: Date.now() - 2_000 } };
+    await shows('Waiting for the running tool call to finish');
+    // A hold no page repeats lapses after 75 s by itself, with no queue refresh to repaint it (CodeRabbit on #2054).
+    live.inputs[0] = { ...queued, pageHold: { reason: 'still-answering', at: Date.now() - 73_500 } };
+    await shows('Waiting for ChatGPT to finish its answer');
+    const button = w.document.querySelector<HTMLButtonElement>('#inputQueue .pending-message button')!;
+    const control = [button.className, button.getAttribute('aria-label')];
+    button.focus();
+    // Only now does the hold grow past 75 s; the lapse timer repaints by itself.
+    vi.setSystemTime(Date.now() + 2_000);
+    await waitFor(() => expect(status()).not.toContain('Waiting for ChatGPT'), { timeout: 5_000 });
+    // The rebuilt row's same control keeps the keyboard focus.
+    const focused = w.document.activeElement as HTMLElement;
+    expect(focused.closest('.pending-message')).not.toBeNull();
+    expect([focused.className, focused.getAttribute('aria-label')]).toEqual(control);
+    // The message fails while its Cancel has focus: the failed row's own first control takes it, not the page.
+    live.inputs[0] = { ...queued, pageHold: undefined, state: 'failed', error: 'Not sent: the browser did not pick up this message within 60 seconds.' };
+    await shows('Not sent');
+    const after = w.document.activeElement as HTMLElement;
+    expect(after.tagName).toBe('BUTTON');
+    expect(after.closest('.pending-message')).not.toBeNull();
+  } finally { vi.useRealTimers(); }
+});
+
 it('says why a queued message waits: no extension, or a running tool call', async () => {
   const asked = Date.now() - 12_000;
   const { w, live, append } = await boot([
@@ -1234,4 +1515,86 @@ it.each([7, 10, 11])('uses the same visible delivery choice and payload for %s a
   expect(live.sent).toHaveLength(1);
   expect(live.sent[0]?.attachments).toEqual(files);
   expect(live.sent[0]?.delivery).toBe(count > 10 ? undefined : 'tool');
+});
+
+// 2026-10-31: a chat whose next step was not picked up offers one click to go on, in words.
+it.each([['continue', 'Continue now', 'queued', 'Continue queued. It goes out as soon as ChatGPT takes it.'], ['queue', 'Try now', 'retrying', 'Trying again now.']] as const)(
+  'offers %s on a slowed pickup and says what it did', async (next, label, did, said) => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  const id = summary([]).id;
+  const stoppedAt = Date.now() - 60_000;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: id, automation: 'off', objective: '', blocked: '', job: null,
+    recovery: [{ kind: 'pickup-stopped', deadline: stoppedAt, attempts: 3, next }] } });
+  const pickupNow = vi.fn(async () => ({ ok: true, data: { ok: true, did } }));
+  api.pickupNow = pickupNow;
+  await append([]);
+  const button = await waitFor(() => {
+    const found = w.document.querySelector<HTMLButtonElement>('#recoveryStatus .dock-action.is-labelled');
+    expect(found?.textContent).toBe(label);
+    return found!;
+  });
+  button.click();
+  // The click names the stopped step it was shown for (CodeRabbit on #1979).
+  await waitFor(() => expect(pickupNow).toHaveBeenCalledWith(id, { next, stoppedAt }));
+  await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe(said));
+});
+
+it('says why a pickup could not be tried now', async () => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, automation: 'off', objective: '', blocked: '', job: null,
+    recovery: [{ kind: 'pickup-stopped', deadline: Date.now() - 60_000, attempts: 3, next: 'goal' }] } });
+  api.pickupNow = async () => ({ ok: true, data: { ok: false, code: 'history-limit' } });
+  await append([]);
+  // Asserted inside the wait: a null element must keep it waiting (CodeRabbit on #1979).
+  const button = await waitFor(() => {
+    const found = w.document.querySelector<HTMLButtonElement>('#recoveryStatus .dock-action.is-labelled');
+    expect(found).not.toBeNull();
+    return found!;
+  });
+  button.click();
+  await waitFor(() => expect(w.document.querySelector('.toast')?.textContent).toBe('ChatGPT is limiting this chat right now. The app tries again when the wait is over.'));
+});
+
+// CodeRabbit on #1979: tries used up leave only a waiting Continue to send; nothing to try again.
+it.each([['goal', false], ['continue', true]] as const)('offers a button on an exhausted %s pickup: %s', async (next, offered) => {
+  const { w, append } = await boot([]);
+  const api = (w as any).api;
+  api.getSessionControls = async () => ({ ok: true, data: { sessionId: summary([]).id, automation: 'off', objective: '', blocked: '', job: null,
+    recovery: [{ kind: 'pickup-stopped', deadline: Date.now() - 60_000, attempts: 24, exhausted: true, next }] } });
+  await append([]);
+  await waitFor(() => expect(w.document.querySelector('#recoveryStatus')?.textContent).not.toBe(''));
+  expect(!!w.document.querySelector('#recoveryStatus .dock-action.is-labelled')).toBe(offered);
+});
+
+// CodeRabbit on #1979: the answer for one chat is not shown over another chat selected meanwhile.
+it('keeps the answer of a pickup click off another chat selected meanwhile', async () => {
+  const first: SessionSummary = { ...summary([]), id: 'pickup-first', title: 'First', conversationId: 'pickup-first-chat', chatIds: ['pickup-first-chat'] };
+  const second: SessionSummary = { ...summary([]), id: 'pickup-second', title: 'Second', conversationId: 'pickup-second-chat', chatIds: ['pickup-second-chat'] };
+  const { w } = await boot([], false, [], [], { sessions: [first, second] });
+  const api = (w as any).api;
+  api.getSessionControls = async (id: string) => ({ ok: true, data: { sessionId: id, automation: 'off', objective: '', blocked: '', job: null,
+    recovery: id === first.id ? [{ kind: 'pickup-stopped', deadline: Date.now() - 60_000, attempts: 3, next: 'queue' }] : [] } });
+  let answer: ((value: unknown) => void) | undefined;
+  api.pickupNow = () => new Promise(resolve => { answer = resolve; });
+  const select = async (id: string) => {
+    w.document.querySelector<HTMLElement>(`[data-id="${id}"] [data-session-select]`)!
+      .dispatchEvent(new w.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+    await settle();
+  };
+  await select(first.id);
+  const button = await waitFor(() => {
+    const found = w.document.querySelector<HTMLButtonElement>('#recoveryStatus .dock-action.is-labelled');
+    expect(found).not.toBeNull();
+    return found!;
+  });
+  button.click();
+  await waitFor(() => expect(answer).toBeTypeOf('function'));
+  await select(second.id);
+  expect(w.document.querySelector(`.sess.is-sel[data-id="${second.id}"]`)).not.toBeNull();
+  answer!({ ok: true, data: { ok: true, did: 'retrying' } });
+  await settle();
+  await new Promise(resolve => setTimeout(resolve, 50));
+  expect([...w.document.querySelectorAll('.toast')].map(node => node.textContent)).not.toContain('Trying again now.');
 });

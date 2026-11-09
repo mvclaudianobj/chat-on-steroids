@@ -3,26 +3,17 @@ import { createReadStream, existsSync, readFileSync, writeFileSync } from 'node:
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { strFromU8, unzipSync } from 'fflate';
+import { releaseTargets } from './release-targets.mjs';
 
-/** The files release.yml publishes, in its SHA256SUMS.txt order. */
-export const RELEASE_FILES = [
-  'Chat-On-Steroids-Setup-x64.exe',
-  'Chat-On-Steroids-Setup-arm64.exe',
-  'Chat-On-Steroids-macOS-x64.dmg',
-  'Chat-On-Steroids-macOS-x64.zip',
-  'Chat-On-Steroids-macOS-arm64.dmg',
-  'Chat-On-Steroids-macOS-arm64.zip',
-  'Chat-On-Steroids-Linux-x64.AppImage',
-  'Chat-On-Steroids-Linux-x64.deb',
-  'Chat-On-Steroids-Linux-arm64.AppImage',
-  'Chat-On-Steroids-Linux-arm64.deb',
-  'Chat-On-Steroids-Extension.zip',
-  'Chat-On-Steroids-Native-Sources.tar.gz',
-  'Chat-On-Steroids-Firefox.xpi',
-  'firefox-updates.json'
-];
-const EXTENSION = 'Chat-On-Steroids-Extension.zip';
-const FIREFOX = 'Chat-On-Steroids-Firefox.xpi';
+/**
+ * The files a release publishes, in its SHA256SUMS.txt order: every enabled target in
+ * .github/release-targets.json, then the extension, native sources and Firefox add-on.
+ */
+export const RELEASE_FILES = [...releaseTargets('all').files, 'Chat-Marks-Linux-x64.deb', 'ChatMarks-Firefox.xpi', 'firefox-updates.json'];
+const EXTENSION = 'ChatMarks-Extension.zip';
+const LINUX_DEB = 'ChatMarks-Linux-x64.deb';
+const LEGACY_LINUX_DEB = 'Chat-Marks-Linux-x64.deb';
+const FIREFOX = 'ChatMarks-Firefox.xpi';
 const FIREFOX_UPDATES = 'firefox-updates.json';
 
 function sha256(file) {
@@ -49,6 +40,11 @@ export async function verifyReleaseAssets({ dir, tag }) {
     if (!sums.has(name)) { problems.push(`${name} is not listed in SHA256SUMS.txt.`); continue; }
     if (await sha256(file) !== sums.get(name)) problems.push(`${name} does not match its SHA256SUMS.txt checksum.`);
   }
+  const linuxDeb = path.join(dir, LINUX_DEB);
+  const legacyLinuxDeb = path.join(dir, LEGACY_LINUX_DEB);
+  if (existsSync(linuxDeb) && existsSync(legacyLinuxDeb) && await sha256(linuxDeb) !== await sha256(legacyLinuxDeb)) {
+    problems.push(`${LEGACY_LINUX_DEB} must be a byte-for-byte copy of ${LINUX_DEB}.`);
+  }
   const wanted = tag.replace(/^v/, '');
   const extension = path.join(dir, EXTENSION);
   if (existsSync(extension)) {
@@ -72,7 +68,8 @@ export async function verifyReleaseAssets({ dir, tag }) {
     let offered = [];
     try { offered = Object.values(JSON.parse(readFileSync(updates, 'utf8')).addons ?? {}).flatMap(addon => addon.updates ?? []); } catch { /* reported below */ }
     const hash = `sha256:${await sha256(firefox)}`;
-    if (!offered.some(update => update.version === (ours ? version : wanted) && update.update_hash === hash && String(update.update_link).endsWith(`/v${wanted}/${FIREFOX}`))) {
+    const expectedLink = `https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v${wanted}/${FIREFOX}`;
+    if (!offered.some(update => update.version === (ours ? version : wanted) && update.update_hash === hash && update.update_link === expectedLink)) {
       problems.push(`${FIREFOX_UPDATES} does not offer ${FIREFOX} of ${tag} with its checksum.`);
     }
   }

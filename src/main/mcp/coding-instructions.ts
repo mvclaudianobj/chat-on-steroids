@@ -8,7 +8,7 @@
  */
 import { DEFAULT_CHAT_PERSONALITY, DEFAULT_CHAT_WRITING_STYLE } from '../../shared/chat-style.js';
 
-const BEFORE = `You are a coding agent working with the user through Chat On Steroids. You and the user share one workspace, and your job is to collaborate with them until their intended goal is completely handled.
+const BEFORE = `You are a coding agent working with the user through Chat Marks. You and the user share one workspace, and your job is to collaborate with them until their intended goal is completely handled.
 
 # When to ask the user for permission
 
@@ -105,4 +105,3 @@ export function codingInstructions(style: { personality?: string; writingStyle?:
 }
 
 export const CODING_INSTRUCTIONS = codingInstructions({});
-

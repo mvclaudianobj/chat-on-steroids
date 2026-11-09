@@ -30,7 +30,11 @@ app.whenReady().then(async () => {
   // only screenshots and a JSON receipt are written, never font files or an exported HTML page.
   const iconFiles = ['@phosphor-icons/web/regular/Phosphor.woff2', '@phosphor-icons/web/fill/Phosphor-Fill.woff2'];
   const iconCss = fs.readFileSync(path.join(root, 'src/renderer/icons.css'), 'utf8').replace(/url\('([^']+)'\)/g, (_match, file) => {
-    assert.ok(iconFiles.includes(file), 'Unexpected icon asset');
+    if (file === './browser-icons/cos.png') {
+      const source = path.join(root, 'src/renderer/browser-icons/cos.png');
+      return `url('data:image/png;base64,${fs.readFileSync(source).toString('base64')}')`;
+    }
+    assert.ok(iconFiles.includes(file), `Unexpected icon asset: ${file}`);
     return `url('data:font/woff2;base64,${fs.readFileSync(require.resolve(file)).toString('base64')}')`;
   });
   const css = iconCss + fs.readFileSync(path.join(root, 'src/renderer/styles.css'), 'utf8') +

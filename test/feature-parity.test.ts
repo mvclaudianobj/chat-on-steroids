@@ -23,13 +23,15 @@ describe('portable browser-backed feature parity', () => {
         enabled: true,
         maxWorkers: 2,
         globalMaxWorkers: 0,
+        chatsAtOnce: 0,
         allowUnattributedCalls: true,
         strictChatAllowlist: false,
         recoverAgentTabs: false,
         waitForSubAgents: false,
         autoWorktrees: false,
         endSleepingWorkerProcesses: false,
-        archiveWorkerChats: false
+        archiveWorkerChats: false,
+        archiveWorkerDelayMinutes: 2
       });
       expect(browserExtensionRequired(config)).toBe(true);
     }
@@ -71,10 +73,16 @@ describe('portable browser-backed feature parity', () => {
       'save_image',
       'exec_command',
       'write_stdin',
+      'ask_user_to_run',
+      'user_request_status',
       'update_plan',
       'agents',
       'session_finish',
       'usage',
+      'vault_use',
+      'memory_search',
+      'memory_save',
+      'remote_exec',
       'exec'
     ]);
     expect(surfaceIsUseful('core', config.capabilities, 'darwin')).toBe(true);

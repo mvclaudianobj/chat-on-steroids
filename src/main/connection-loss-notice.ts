@@ -21,7 +21,7 @@ const TITLES: Record<SurfaceId, MainText> = {
   plugins: 'Plugins connection lost'
 };
 
-const BODY: MainText = 'The tunnel disconnected unexpectedly. Open Chat On Steroids to check the connection.';
+const BODY: MainText = 'The tunnel disconnected unexpectedly. Open Chat Marks to check the connection.';
 
 /** The same news in one line, for the phone: "Core connection lost. The tunnel disconnected …". */
 export function connectionLossLine(surface: SurfaceId, text: (source: MainText) => string): string {

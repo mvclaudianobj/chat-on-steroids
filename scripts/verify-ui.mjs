@@ -11,23 +11,54 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import { buildProblem, needsBuild } from './ui-build-state.mjs';
+import { parseShard, readWeights, shardChecks } from './shard-plan.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const electron = createRequire(import.meta.url)('electron');
 const filter = process.argv[2] ?? '';
+// Some developer Linux checkouts cannot run Chromium's SUID sandbox helper: it
+// needs root ownership/mode 4755, which must not be applied to the npm cache as
+// an incidental UI test setup. Explicitly opt into unsandboxed, isolated test
+// Electron windows instead; this never changes the actual packaged app's flags.
+const linuxTestDisplay = process.platform !== 'linux' ? null
+  : process.env.COS_VERIFY_UI_LINUX_WAYLAND === '1' ? 'wayland'
+    : process.env.COS_VERIFY_UI_LINUX_X11 === '1' ? 'x11' : null;
+const linuxTestFlags = linuxTestDisplay
+  ? ['--no-sandbox', `--ozone-platform=${linuxTestDisplay}`, ...(process.env.COS_VERIFY_UI_RENDER_NODE
+    ? [`--render-node-override=${process.env.COS_VERIFY_UI_RENDER_NODE}`] : [])]
+  : [];
 // CI runners have no real GPU and slower timers, so checks that compare pixels or watch an animation
 // fail there although they pass on a real machine. CI names them here; they still run locally.
 const skip = new Set((process.env.VERIFY_UI_SKIP ?? '').split(',').map(name => name.trim()).filter(Boolean));
-const TIMEOUT_MS = 6 * 60_000;
+const requestedTimeout = Number(process.env.COS_VERIFY_UI_TIMEOUT_MS);
+const TIMEOUT_MS = Number.isFinite(requestedTimeout) && requestedTimeout >= 15_000 && requestedTimeout <= 6 * 60_000
+  ? requestedTimeout : 6 * 60_000;
 
 // How each check has to be started, where that differs from `electron <script>`.
 const special = {
   'verify-shell-runtime.cjs': { command: process.execPath, args: [] },
   'verify-pet-performance.cjs': { command: process.execPath, args: ['current', '--check'] }
 };
+// Two pets probes can exit 0 when the product closes its only startup/login window
+// before the assertions run. An Electron process exit is not proof that its GUI
+// checks completed: demand the evidence printed *after* their final assertions.
+const requiredSuccessOutput = {
+  'verify-pet-toggle.cjs': 'Pet toggle/drag/click-through and idle decode checks passed.',
+  'verify-pet-overlay-electron.cjs': 'petContextHide='
+};
 
-const scripts = readdirSync(path.join(root, 'scripts'))
+const found = readdirSync(path.join(root, 'scripts'))
   .filter(name => /^verify-.*\.cjs$/.test(name) && name.includes(filter)).sort();
+// CI runs the checks in parallel jobs: VERIFY_UI_SHARD=2/3 runs this job's third, balanced by the
+// seconds in ui-check-weights.json (a check not listed weighs the median), longest first.
+const shard = parseShard(process.env.VERIFY_UI_SHARD);
+if (process.env.VERIFY_UI_SHARD && !shard) { console.error(`VERIFY_UI_SHARD must look like 1/3, not "${process.env.VERIFY_UI_SHARD}"`); process.exit(2); }
+let weights = new Map();
+try { weights = readWeights(readFileSync(path.join(root, 'scripts', 'ui-check-weights.json'), 'utf8')); } catch { /* every check weighs the same */ }
+// Only the checks that run are planned: a skipped one would take a share of a shard's time while
+// running nowhere. The first shard names the skipped ones, once (CodeRabbit on #1983).
+const scripts = shardChecks(found, skip, weights, shard);
+if (shard) console.log(`UI checks shard ${shard.index} of ${shard.count}: ${scripts.length} of ${found.length} checks`);
 // CI runners are shared and uneven: a different check timed out on each run while all of them
 // passed on a real machine. With VERIFY_UI_RETRY a failed check runs once more; a pass on retry
 // counts, and is named as a flake (a GitHub warning in CI) so it stays visible.
@@ -65,9 +96,15 @@ for (const name of scripts) {
   // locale; otherwise they fail on any machine whose system language the app also speaks.
   const how = special[name] ?? { command: electron, args: ['--lang=en-US'] };
   const started = Date.now();
-  const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE;
+  const env = { ...process.env, LANG: 'en_US.UTF-8', LANGUAGE: 'en_US:en' }; delete env.ELECTRON_RUN_AS_NODE;
   const run = () => new Promise(resolve => {
-    const child = spawn(how.command, [path.join('scripts', name), ...how.args], { cwd: root, env, windowsHide: true });
+    // Electron/Chromium switches belong before the app entrypoint; after it, --lang is
+    // handed to the verification script instead and the UI inherits the host locale.
+    const scriptPath = path.join('scripts', name);
+    const argv = how.command === electron
+      ? [...linuxTestFlags, ...how.args, scriptPath]
+      : [scriptPath, ...how.args];
+    const child = spawn(how.command, argv, { cwd: root, env, windowsHide: true });
     let output = '';
     // A check that throws inside its async body and then quits in a finally block exits 0: its
     // failure only shows as an unhandled rejection. Two checks passed that way for weeks (#1144).
@@ -75,7 +112,13 @@ for (const name of scripts) {
     const keep = chunk => { unhandled ||= /UnhandledPromiseRejection/.test(String(chunk)); output = (output + chunk).slice(-4000); };
     child.stdout.on('data', keep); child.stderr.on('data', keep);
     const timer = setTimeout(() => { child.kill('SIGKILL'); resolve({ code: 'timeout', output }); }, TIMEOUT_MS);
-    child.on('close', (code, signal) => { clearTimeout(timer); resolve({ code: code === 0 && unhandled ? 'unhandled rejection' : code ?? `signal ${signal}`, output }); });
+    child.on('close', (code, signal) => {
+      clearTimeout(timer);
+      const expected = requiredSuccessOutput[name];
+      resolve({ code: code === 0 && unhandled ? 'unhandled rejection'
+        : code === 0 && expected && !output.includes(expected) ? 'exited before completing GUI assertions'
+        : code ?? `signal ${signal}`, output });
+    });
   });
   let outcome = await run();
   const first = outcome;

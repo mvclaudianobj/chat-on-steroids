@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { z } from 'zod';
 import { rawPromises as fs } from './rawfs.js';
 import { readDurable, writeDurableNow } from './durable.js';
@@ -8,11 +8,13 @@ import { nativePathIdentity, resolvePath, uniqueRootName } from './sandbox.js';
 import { parseRemote, remoteIdentity, sftpFor } from './remote/ssh.js';
 import { SftpError, type SftpClient } from './remote/sftp.js';
 import type { RemoteFolder, Root } from '../shared/types.js';
-import { bindSessionProject, findSessionByConversation, getSession } from './session/store.js';
+import { bindSessionProject, findSessionByConversation, getSession, indexedSessions, markProjectNote, moveSessionProject, setSessionRemoteMode } from './session/store.js';
 import { workspaceForChat } from './workspace.js';
+import { chatGroupsState, movedChatGroup, placeMovedChat } from './chat-groups.js';
+import type { ChatGroupsState } from '../shared/chat-groups.js';
 import { logInfo } from './logger.js';
 import { isListedChatgptProject } from './chatgpt-project-catalog.js';
-import { CHATGPT_PROJECT_ID, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor } from '../shared/projects.js';
+import { CHATGPT_PROJECT_ID, MAX_RELATED_FOLDERS, PROJECT_COLORS, type ChatgptProjectLink, type LocalProject, type ProjectColor, type RelatedFolderView } from '../shared/projects.js';
 
 const at = z.number().finite().nonnegative();
 const requestId = z.string().uuid();
@@ -29,7 +31,10 @@ const projectSchema = z.object({
   color: z.enum(PROJECT_COLORS).optional(),
   createdAt: z.number().finite().nonnegative(), ungrouped: z.boolean().optional(), secretsShieldOff: z.boolean().optional(),
   chatgpt: chatgptSchema.optional(),
-  remote: z.object({ host: z.string().min(1).max(255), port: z.number().int().min(1).max(65535).optional(), path: z.string().min(1).max(4096) }).optional()
+  remoteProfile: z.object({ profileId: z.string().uuid(), folder: z.string().min(1).max(4096) }).strict().optional(),
+  remote: z.object({ host: z.string().min(1).max(255), port: z.number().int().min(1).max(65535).optional(), path: z.string().min(1).max(4096) }).optional(),
+  // A damaged list is read as none rather than failing the whole catalog (#1689).
+  relatedFolders: z.array(z.string().min(1).max(32768)).max(MAX_RELATED_FOLDERS).optional().catch(undefined)
 });
 const catalogSchema = z.array(projectSchema).max(200);
 let mutations: Promise<unknown> = Promise.resolve();
@@ -74,6 +79,53 @@ export function addProject(folderPath: string, options: { chatgpt?: 'later' } = 
   });
   mutations = operation.catch(() => undefined);
   return operation;
+}
+
+/** A local, already-approved folder; SFTP never makes it a remote workspace/root. */
+export function addRemoteProfileProject(folderPath: string, profileId: string, remoteFolder: string): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    if (!path.isAbsolute(folderPath) || !/^[a-f0-9-]{36}$/i.test(profileId)) throw new Error('Invalid local folder or profile');
+    const { listRemoteHosts } = await import('./remote/hosts.js');
+    const host = (await listRemoteHosts()).find(row => row.id === profileId && row.type === 'ssh');
+    if (!host) throw new Error('SSH profile no longer exists');
+    const checked = parseRemote(`${host.user}@${host.host}:${host.port}`, remoteFolder);
+    const resolved = await resolvePath(getConfig().roots, folderPath);
+    if (!(await fs.stat(resolved.real)).isDirectory()) throw new Error('Choose a local project folder');
+    const projects = await listProjects();
+    const existing = projects.find(row => samePath(row.path, resolved.real));
+    if (existing && !existing.remoteProfile) throw new Error('This folder already belongs to another project');
+    if (existing && (existing.remoteProfile?.profileId !== profileId || existing.remoteProfile.folder !== checked.path)) throw new Error('This mirror belongs to another remote profile or folder');
+    if (existing) return existing;
+    if (projects.length >= 200) throw new Error('Project catalog limit reached');
+    const project: LocalProject = { id: randomUUID(), name: (path.basename(resolved.real) || resolved.real).slice(0, 160), path: resolved.real,
+      remoteProfile: { profileId, folder: checked.path }, createdAt: Date.now() };
+    await writeDurableNow('projects', [...projects, project]);
+    return project;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
+/** Private local cache for a remote-profile project; remote SSH is its real authority. */
+export async function createRemoteProfileProject(userData: string, profileId: string, remoteFolder: string): Promise<LocalProject> {
+  const { listRemoteHosts } = await import('./remote/hosts.js');
+  const host = (await listRemoteHosts()).find(item => item.id === profileId && item.type === 'ssh');
+  if (!host) throw new Error('SSH profile not found');
+  const checked = parseRemote(`${host.user}@${host.host}:${host.port}`, remoteFolder);
+  if (!path.isAbsolute(userData)) throw new Error('Invalid data directory');
+  const root = path.join(userData, 'remote-mirrors');
+  const target = path.join(root, profileId, createHash('sha256').update(checked.path).digest('hex').slice(0, 24));
+  for (const folder of [root, path.dirname(target), target]) {
+    await fs.mkdir(folder, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => { if (error.code !== 'EEXIST') throw error; });
+    const stat = await fs.lstat(folder);
+    if (!stat.isDirectory() || stat.isSymbolicLink() || await fs.realpath(folder) !== folder) throw new Error('Unsafe mirror folder');
+  }
+  await updateConfig(config => {
+    if (config.roots.some(item => !item.remote && samePath(item.path, target))) return config;
+    if (config.roots.length >= 32) throw new Error('Folder limit reached');
+    return { ...config, roots: [...config.roots, { name: uniqueRootName(`remote-${host.name}`, config.roots), path: target }] };
+  });
+  return addRemoteProfileProject(target, profileId, checked.path);
 }
 
 
@@ -239,6 +291,10 @@ export async function assignSessionProject(sessionId: string, projectId: string)
   if (!project) throw new Error('Project not found');
   await resolveProject(project);
   await bindSessionProject(sessionId, project.id);
+  if (project.remoteProfile) {
+    const session = await getSession(sessionId);
+    if (session?.remoteMode === undefined) await setSessionRemoteMode(sessionId, project.remoteProfile.profileId);
+  }
 }
 export async function projectWorkspace(projectId: string): Promise<{ virtual: string; real: string }> {
   const project = await getProject(projectId);
@@ -302,6 +358,84 @@ export function setProjectSecretsShieldOff(projectId: string, off: boolean): Pro
   return operation;
 }
 
+/**
+ * Related folders (#1689): each one an approved folder, other than the project's own, found by its
+ * path. One that is no longer approved, or no longer there, is unavailable: shown so, and never
+ * told to ChatGPT. Approval is the only access; naming a folder here grants nothing.
+ */
+export async function relatedFolderViews(project: LocalProject): Promise<RelatedFolderView[]> {
+  const roots = getConfig().roots;
+  return Promise.all((project.relatedFolders ?? []).map(async (folder): Promise<RelatedFolderView> => {
+    const root = roots.find(entry => entry.remote ? entry.path === folder : samePath(entry.path, folder));
+    if (!root) return { path: folder, name: null, virtual: null, available: false };
+    const available = root.remote ? true : await fs.stat(root.path).then(stat => stat.isDirectory(), () => false);
+    return { path: folder, name: root.name, virtual: available ? `/${root.name}` : null, available };
+  }));
+}
+
+/** What a project chat's ChatGPT is told about related folders: the available ones, by their approved names. */
+export async function relatedFolderContext(projectId: string | null | undefined): Promise<string[]> {
+  if (!projectId) return [];
+  const project = await getProject(projectId).catch(() => null);
+  if (!project?.relatedFolders?.length) return [];
+  return (await relatedFolderViews(project)).flatMap(view => view.available && view.virtual ? [view.virtual] : []);
+}
+
+/**
+ * The person sets a project's related folders (#1689). Only approved folders other than the
+ * project's own, each once (compared as the same folder, not as text), at most ten. Open chats of the
+ * project tell ChatGPT the new list with the person's next message; nothing already sent changes.
+ */
+export function setRelatedFolders(projectId: string, folders: readonly string[]): Promise<LocalProject> {
+  const operation = mutations.then(async () => {
+    z.string().uuid().parse(projectId);
+    z.array(z.string().min(1).max(32768)).max(MAX_RELATED_FOLDERS * 4).parse(folders);
+    const projects = await listProjects();
+    const project = projects.find(row => row.id === projectId);
+    if (!project) throw new Error('Project not found');
+    const roots = getConfig().roots;
+    const chosen: string[] = [];
+    const saved = project.relatedFolders ?? [];
+    for (const folder of folders) {
+      const root = roots.find(entry => entry.remote ? entry.path === folder : samePath(entry.path, folder));
+      if (!root) {
+        // A saved folder that lost its approval may stay while the person edits the list (removing
+        // another one), shown as unavailable as before; it is never added anew (CodeRabbit on #2053).
+        const kept = saved.find(other => other === folder);
+        if (!kept) throw new Error('Choose a related folder from your approved folders');
+        if (!chosen.includes(kept)) chosen.push(kept);
+        continue;
+      }
+      if (root.remote ? root.path === project.path : samePath(root.path, project.path)) continue;
+      if (chosen.some(other => root.remote ? other === root.path : samePath(other, root.path))) continue;
+      chosen.push(root.path);
+    }
+    if (chosen.length > MAX_RELATED_FOLDERS) throw new Error('A project can have at most 10 related folders');
+    const before = project.relatedFolders ?? [];
+    if (before.length === chosen.length && before.every((folder, index) => folder === chosen[index])) return project;
+    const { relatedFolders: _, ...without } = project;
+    const updated: LocalProject = chosen.length ? { ...without, relatedFolders: chosen } : without;
+    try {
+      await writeDurableNow('projects', projects.map(row => row.id === projectId ? updated : row));
+    } catch (error) {
+      await writeDurableNow('projects', projects).catch(() => undefined);
+      throw error;
+    }
+    let told = 0;
+    // Chats used in the last 30 days: opening every old chat of a big project for this would cost
+    // more than it helps; an older chat gets the list when it is moved, or from a new chat's opening.
+    const since = Date.now() - 30 * 24 * 60 * 60_000;
+    for (const session of await indexedSessions()) {
+      if (session.projectId !== projectId || !session.conversationId || session.updatedAt < since) continue;
+      if (await markProjectNote(session.id, projectId).catch(() => false)) told++;
+    }
+    logInfo(`projects: related folders of project ${projectId} set to ${chosen.length}; ${told} open chat(s) hear the change with their next message`);
+    return updated;
+  });
+  mutations = operation.catch(() => undefined);
+  return operation;
+}
+
 /** #1797: whether this chat's project turned the secrets shield off. A chat without a project never has. */
 export async function sessionSecretsShieldOff(sessionId: string): Promise<boolean> {
   const session = await getSession(sessionId);
@@ -316,6 +450,86 @@ export async function getSessionProject(sessionId: string): Promise<{ virtual: s
   if (!project) throw new Error('The session project is unavailable');
   return resolveProject(project);
 }
+/**
+ * The person moves a main chat to a project, or out of one with `null` (#1919). Its sub-agent and
+ * helper chats move with it: they follow their main chat and are never moved on their own. A
+ * project whose folder is missing is allowed; its row already says so. Returns where it was.
+ */
+const chatMoves = new Map<string, Promise<unknown>>();
+// One move at a time per chat: each reads the project and group it really replaces, so its Undo goes
+// back there, not to where an overlapping move started (CodeRabbit on #1965).
+function queueChatMove<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+  const move = (chatMoves.get(sessionId) ?? Promise.resolve()).catch(() => undefined).then(run);
+  const settled = move.catch(() => undefined);
+  chatMoves.set(sessionId, settled);
+  void settled.then(() => { if (chatMoves.get(sessionId) === settled) chatMoves.delete(sessionId); });
+  return move;
+}
+export function moveChatToProject(sessionId: string, projectId: string | null): Promise<{ from: string | null; moved: string[] }> {
+  return queueChatMove(sessionId, () => moveChatNow(sessionId, projectId));
+}
+/**
+ * The chat menu's and the drop's move: the chat's group place moves inside the same per-chat step
+ * as its project, so an overlapping move never reads a group the other one is about to change.
+ */
+export function moveChatWithGroup(sessionId: string, projectId: string | null, requested?: string | null):
+  Promise<{ from: string | null; fromGroup: string | null; moved: string[]; groups: ChatGroupsState }> {
+  return queueChatMove(sessionId, async () => {
+    const fromGroup = (await chatGroupsState()).members[sessionId] ?? null;
+    const { from, moved } = await moveChatNow(sessionId, projectId);
+    const groups = await placeMovedChat(sessionId, projectId, movedChatGroup(projectId, requested, from, fromGroup));
+    return { from, fromGroup, moved, groups };
+  });
+}
+
+async function moveChatNow(sessionId: string, projectId: string | null): Promise<{ from: string | null; moved: string[] }> {
+  const session = await getSession(sessionId);
+  if (!session) throw new Error('This chat no longer exists');
+  if (session.origin?.kind === 'worker' || session.origin?.kind === 'helper') throw new Error('A sub-agent chat follows its main chat');
+  if (projectId !== null) {
+    const project = await getProject(projectId);
+    if (!project || project.ungrouped) throw new Error('Project not found');
+  }
+  const from = session.projectId ?? null;
+  // Every chat that descends from this one through its sub-agents and helpers, however deep.
+  const all = await indexedSessions();
+  const family = [session.id];
+  for (let index = 0; index < family.length; index++) {
+    for (const child of all) {
+      if ((child.origin?.kind === 'worker' || child.origin?.kind === 'helper') && child.origin.fromSessionId === family[index] && !family.includes(child.id)) family.push(child.id);
+    }
+  }
+  const stray = (id: string) => (all.find(entry => entry.id === id)?.projectId ?? null) !== projectId;
+  if (from === projectId) {
+    // Already there: a family move that stopped half way (a failed write, a restart) left
+    // sub-agents behind. Moving the chat there again brings them along (CodeRabbit on #1965).
+    const behind = family.slice(1).filter(stray);
+    for (const id of behind) await moveSessionProject(id, projectId);
+    if (behind.length) logInfo(`projects: chat ${sessionId} was already in ${projectId ? `project ${projectId}` : 'no project'}; ${behind.length} of its sub-agent chat(s) were not, and now follow it`);
+    return { from, moved: behind };
+  }
+  // Sub-agents first, the main chat last: if a write fails, the main chat still shows where it was,
+  // so the person's retry is a real move and finishes the family.
+  for (const id of family.slice(1)) await moveSessionProject(id, projectId);
+  await moveSessionProject(session.id, projectId);
+  // A sub-agent whose origin was written while this ran missed the scan above: look again now that
+  // the main chat shows its new project (a later one reads that project itself, see setSessionOrigin).
+  for (const id of await strayDescendants(session.id, projectId)) { await moveSessionProject(id, projectId); family.push(id); }
+  logInfo(`projects: the person moved chat ${sessionId}${family.length > 1 ? ` and its ${family.length - 1} sub-agent chat(s)` : ''} from ${from ? `project ${from}` : 'no project'} to ${projectId ? `project ${projectId}` : 'no project'}; its commands now run in ${projectId ? "that project's folder" : 'the folder it worked in before'}`);
+  return { from, moved: family };
+}
+
+async function strayDescendants(sessionId: string, projectId: string | null): Promise<string[]> {
+  const all = await indexedSessions();
+  const family = [sessionId];
+  for (let index = 0; index < family.length; index++) {
+    for (const child of all) {
+      if ((child.origin?.kind === 'worker' || child.origin?.kind === 'helper') && child.origin.fromSessionId === family[index] && !family.includes(child.id)) family.push(child.id);
+    }
+  }
+  return family.slice(1).filter(id => (all.find(entry => entry.id === id)?.projectId ?? null) !== projectId);
+}
+
 /** The broker supplies an exact prime conversation; unrelated families are never consulted. */
 export async function inheritSessionProject(sessionId: string, primeConversationId: string): Promise<void> {
   const prime = await findSessionByConversation(primeConversationId, { requireUnique: true });
@@ -334,7 +548,8 @@ export async function bindChatToLinkedProject(sessionId: string, chatgptProjectI
   if (!CHATGPT_PROJECT_ID.test(chatgptProjectId)) return 'none';
   const session = await getSession(sessionId);
   if (!session) return 'none';
-  if (session.projectId || session.origin?.kind === 'worker' || session.origin?.kind === 'helper') return 'kept';
+  // A chat the person moved, or took out of its project, stays where they put it (#1919).
+  if (session.projectId || session.projectChosen || session.origin?.kind === 'worker' || session.origin?.kind === 'helper') return 'kept';
   if (workspaceForChat(session.conversationId ?? null)) return 'kept';
   const linked = (await listProjects()).filter(project =>
     !project.ungrouped && project.chatgpt?.state === 'linked' && project.chatgpt.id === chatgptProjectId);

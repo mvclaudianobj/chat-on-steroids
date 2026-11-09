@@ -21,6 +21,16 @@ const notices = [
   ''
 ];
 const missing = [];
+notices.push('='.repeat(80),
+  'Habblaud — adapted procedural pixel office and wall art',
+  'Source: https://github.com/marmottajr/habblaud/tree/faa1a012b5fbf632c66dc6801c5383e53a542406',
+  'Copyright (c) 2026 Márcio Junior.',
+  'Includes four unmodified wall-art images and adapted pixel-stamp, character, furniture and room concepts.',
+  'Attribution and the full MIT license are also retained beside the images.',
+  '',
+  '--- Habblaud MIT LICENSE and asset provenance ---',
+  await fs.readFile(path.join(root, 'src/renderer/company-assets/LICENSE.md'), 'utf8'),
+  '');
 notices.push('='.repeat(80), 'OpenAI Codex — adapted coding instructions and update_plan contract',
   'Source: https://github.com/openai/codex/tree/1a4096e273e80da30947e57fdfa45be92858ca91',
   'CoS adapts identity and available tools, removes Codex-specific facilities and adds bounded plan details and session storage.', '');
@@ -58,6 +68,10 @@ for (const [relative, entry] of Object.entries(lock.packages).sort(([a], [b]) =>
     const parent = JSON.parse(await fs.readFile(path.join(root, 'node_modules/koffi/package.json'), 'utf8'));
     if (parent.version !== manifest.version || parent.license !== manifest.license) throw new Error(`Koffi binary license/version mismatch: ${relative}`);
     files.push(path.join(root, 'node_modules/koffi/LICENSE.txt'));
+  }
+  if (['@tokenizer/token', 'whatsapp-rust-bridge'].includes(manifest.name) && !files.length && manifest.license === 'MIT') {
+    // These MIT npm tarballs omit LICENSE; preserve an explicit MIT supplement.
+    files.push(path.join(root, 'docs/licenses/whatsapp-web-MIT-LICENSE'));
   }
   if (manifest.name === 'flora-colossus' && !files.length) files.push(path.join(root, 'docs/licenses/flora-colossus-LICENSE'));
   if (manifest.name.startsWith('@napi-rs/canvas-') && !files.length) {

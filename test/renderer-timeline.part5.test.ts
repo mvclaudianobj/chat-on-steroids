@@ -1640,7 +1640,7 @@ describe('prompt recall in the composer', () => {
   });
 
   it.each([
-    ['a fresh-turn continue', 'Continue the task from where you are. (Chat On Steroids starts a fresh turn so the reply is not cut off.)'],
+    ['a fresh-turn continue', 'Continue the task from where you are. (Chat Marks starts a fresh turn so the reply is not cut off.)'],
     ['a Goal continue', 'Continue with the next step of the Goal.']
   ])('skips %s whose row the outbox no longer keeps', async (_, value) => {
     // The recorder keeps the input id and the sent text on the message, whoever wrote it.
@@ -1658,4 +1658,69 @@ describe('prompt recall in the composer', () => {
     expect(press(w, 'ArrowUp')).toBe(true);
     expect(composer(w).value).toBe('Second question');
   });
+});
+
+// "Show message times" (2026-10-30): a message's time reads as hours and minutes, the full date and
+// seconds on hover.
+it('labels each message with its hour and minute, and the full date in its title', async () => {
+  const at = T0 + 3_723_000;
+  const { w } = await boot([
+    { seq: 1, time: at, source: 'extension', kind: 'user_message', turnId: 't1', message: { text: 'Hello', chars: 5, truncated: false } } as any
+  ]);
+  const time = await waitFor(() => { const node = w.document.querySelector('.ev-user_message > time'); expect(node).toBeTruthy(); return node!; });
+  expect(time.textContent).toBe(new Date(at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' }));
+  expect(time.getAttribute('title')).toBe(new Date(at).toLocaleString('en'));
+  expect(time.getAttribute('datetime')).toBe(new Date(at).toISOString());
+});
+
+// CodeRabbit on #1948: a damaged saved time never breaks the chat; a message shows when it was written
+// (the page's own time) over when the app saw it; and the time follows a language change.
+it('keeps a damaged time from breaking the chat, shows when a message was written, and follows the language', async () => {
+  const written = T0 + 60_000;
+  const { w } = await boot([
+    { seq: 1, time: 1e20, source: 'extension', kind: 'user_message', turnId: 't1', message: { text: 'Hello', chars: 5, truncated: false } } as any,
+    { seq: 2, time: T0 + 3_600_000, authoredAt: written, source: 'extension', kind: 'assistant_message', turnId: 't1', messageId: 'answer-1',
+      final: true, state: 'final', message: { text: 'Answer', chars: 6, truncated: false } } as any
+  ]);
+  const answerTime = await waitFor(() => { const node = w.document.querySelector('.ev-assistant_message > time'); expect(node).toBeTruthy(); return node!; });
+  const damaged = w.document.querySelector('.ev-user_message > time')!;
+  expect(w.document.querySelector('.ev-user_message .said')).toBeTruthy();
+  expect([damaged.textContent, damaged.getAttribute('title'), damaged.getAttribute('datetime')]).toEqual(['', null, null]);
+  expect(answerTime.textContent).toBe(new Date(written).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' }));
+  expect(answerTime.getAttribute('aria-label')).toBe(new Date(written).toLocaleString('en'));
+  const language = w.document.getElementById('uiLanguage') as HTMLSelectElement;
+  language.value = 'de';
+  language.dispatchEvent(new w.Event('change', { bubbles: true }));
+  expect(answerTime.textContent).toBe(new Date(written).toLocaleTimeString('de', { hour: 'numeric', minute: '2-digit' }));
+  expect(answerTime.getAttribute('title')).toBe(new Date(written).toLocaleString('de'));
+});
+
+// 2.1.49 round: answers carry ChatGPT's own time, questions the app's. Mixed, an answer could read a
+// minute before its question. Live rows keep the app's clock; only a message the app saw long after
+// it was written (after a reload) shows when it was written.
+it('keeps one clock for live rows and shows the written time only for a message seen much later', async () => {
+  const question = T0 + 62_000, answerWritten = T0 + 58_000;
+  const { w } = await boot([
+    { seq: 1, time: question, source: 'extension', kind: 'user_message', turnId: 't1', message: { text: 'Hello', chars: 5, truncated: false } } as any,
+    { seq: 2, time: question + 3_000, authoredAt: answerWritten, source: 'extension', kind: 'assistant_message', turnId: 't1', messageId: 'answer-1',
+      final: true, state: 'final', message: { text: 'Answer', chars: 6, truncated: false } } as any
+  ]);
+  const clock = (at: number) => new Date(at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' });
+  const answer = await waitFor(() => { const node = w.document.querySelector('.ev-assistant_message > time'); expect(node).toBeTruthy(); return node!; });
+  expect(answer.textContent).toBe(clock(question + 3_000));
+  expect(w.document.querySelector('.ev-user_message > time')!.textContent).toBe(clock(question));
+});
+
+// CodeRabbit on #1958: a computer clock minutes behind ChatGPT's makes the written time later than
+// the seen one; that is not a message seen late, so the row keeps the app's clock.
+it('keeps the app clock when ChatGPT reports a written time later than the app saw the message', async () => {
+  const seen = T0 + 62_000;
+  const { w } = await boot([
+    { seq: 1, time: seen, source: 'extension', kind: 'user_message', turnId: 't1', message: { text: 'Hello', chars: 5, truncated: false } } as any,
+    { seq: 2, time: seen + 3_000, authoredAt: seen + 6 * 60_000, source: 'extension', kind: 'assistant_message', turnId: 't1', messageId: 'answer-1',
+      final: true, state: 'final', message: { text: 'Answer', chars: 6, truncated: false } } as any
+  ]);
+  const clock = (at: number) => new Date(at).toLocaleTimeString('en', { hour: 'numeric', minute: '2-digit' });
+  const answer = await waitFor(() => { const node = w.document.querySelector('.ev-assistant_message > time'); expect(node).toBeTruthy(); return node!; });
+  expect(answer.textContent).toBe(clock(seen + 3_000));
 });

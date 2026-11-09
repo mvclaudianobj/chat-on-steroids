@@ -1,5 +1,6 @@
 import { toolDeclaration } from './tool-declarations.js';
 import { registerPlanTool } from './plan-tool.js';
+import { registerUserRequestTools } from './user-request-tools.js';
 import { goalWorkerChat, imageExportCapable } from '../bridge.js';
 import { exportImage, ImageExportError } from '../image-export.js';
 import { awaitRequestCorrelation } from '../session/correlation.js';
@@ -58,6 +59,11 @@ import {
   type PatchPathResolver
 } from '../codex/apply-patch/index.js';
 import { approvalCardWaiting } from '../approval-wait.js';
+import { requestVaultApproval } from '../marks-vault-approval.js';
+import { useVault } from '../marks-vault.js';
+import { registerBrainTools } from '../brain/tools.js';
+import { executeRemoteHost, remoteHostByName } from '../remote/hosts.js';
+import { requestRemoteApproval } from '../remote/approval.js';
 import { maybeParseApplyPatchForExec } from '../codex/apply-patch/invocation.js';
 import { composeCommandBatch, parseCommandBatchSections } from '../codex/command-batch.js';
 import { formatExecOutputForModel, newStreamOutput } from '../codex/exec-output.js';
@@ -261,8 +267,76 @@ function execPrincipal(): string | null {
  */
 const SERVER_SHELL = { shellType: 'sh', shellPath: 'sh' } as const;
 
-export function registerCoreTools(reg: SurfaceRegistrar): void {
+export function registerCoreTools(reg: SurfaceRegistrar, brainAudience: 'core' | 'api' = 'core'): void {
   const { ctx, caps, exposedCaps } = reg;
+  // Chat Marks: Brain's local-only memory tools share the Core registrar and permission gates.
+  registerBrainTools(reg, brainAudience);
+  if (exposedCaps.command) reg.register('remote_exec', toolDeclaration('remote_exec', () => ({
+    title: 'Run command on named SSH host',
+    description: 'Execute a command on a saved SSH profile. The app displays the exact host and command for approval before execution. Output and time are bounded.',
+    inputSchema: z.object({ name: z.string().min(1).max(80), command: z.string().min(1).max(8192) }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true }
+  })), async ({ name, command }) => guard('remote_exec', async () => {
+    const caller = currentCaller();
+    if (!caps.command) return fail('Remote execution requires command capability');
+    if (!caller.conversationId || !caller.sessionId) return failIdentity('Verified chat identity is required for remote execution');
+    try {
+      const profile = await remoteHostByName(name);
+      if (profile.type !== 'ssh') return fail('This remote type is not available yet');
+      const { remoteProfileForChat } = await import('../remote/mode.js');
+      const assigned = await remoteProfileForChat(caller.sessionId);
+      if (assigned && assigned.id !== profile.id) return fail('This chat is bound to a different remote profile');
+      const address = `${profile.user}@${profile.host}:${profile.port}`;
+      if (!await requestRemoteApproval(caller.conversationId, address, command)) return fail('Remote command denied or timed out');
+      if (!caps.command) return fail('Remote execution permission was revoked');
+      const owner = await findSessionByConversation(caller.conversationId);
+      if (!owner || owner.id !== caller.sessionId) return failIdentity('This chat no longer owns the approved remote operation');
+      const liveProfile = await remoteProfileForChat(caller.sessionId);
+      if ((assigned?.id ?? null) !== (liveProfile?.id ?? null) || (liveProfile && liveProfile.id !== profile.id))
+        return fail('Remote mode changed during approval');
+      // The profile may have been removed or changed while the approval card was open.
+      if (JSON.stringify(await remoteHostByName(name)) !== JSON.stringify(profile)) return fail('Remote host changed; request approval again');
+      try { return ok(await executeRemoteHost(profile, command)); }
+      catch (error) {
+        // Password bootstrap is permitted only after a separate exact-host approval.
+        // The password remains inside the main process and the PTY, never the model.
+        if (!(error instanceof Error) || !/server did not accept your SSH key|permission denied/i.test(error.message)) throw error;
+        if (!await requestRemoteApproval(caller.conversationId, address, 'Install master public key with Cofre K credential'))
+          return fail('SSH key installation was not approved');
+        const { installMasterKeyFromVault, installMasterKeyWithPassword, saveRemoteHostWithPassword } = await import('../remote/hosts.js');
+        const verified = await findSessionByConversation(caller.conversationId);
+        if (!verified || verified.id !== caller.sessionId ||
+            JSON.stringify(await remoteHostByName(name)) !== JSON.stringify(profile)) return fail('Remote host changed during key approval');
+        const selectedAfterApproval = await remoteProfileForChat(caller.sessionId);
+        if ((assigned?.id ?? null) !== (selectedAfterApproval?.id ?? null)) return fail('Remote mode changed during key approval');
+        const { masterPublicKey } = await import('../remote/hosts.js');
+        try { await masterPublicKey(); }
+        catch {
+          const { requestRemoteMasterKey } = await import('../remote/credential-prompt.js');
+          const keyApproval = await requestRemoteMasterKey(profile.name);
+          if (!keyApproval.confirmed) return fail('Master key setup was not approved');
+          const { prepareMasterKeyPair } = await import('../remote/master-key.js');
+          await prepareMasterKeyPair(keyApproval);
+        }
+        try { await installMasterKeyFromVault(profile); }
+        catch (error) {
+          // Only a missing vault entry leads to a password modal; a locked or
+          // damaged vault must fail closed, never request secrets repeatedly.
+          if (!(error instanceof Error) || error.message !== 'Secret not found') throw error;
+          const { requestRemoteCredential } = await import('../remote/credential-prompt.js');
+          const answer = await requestRemoteCredential(profile.id, profile.name);
+          if (!answer) return fail('SSH password prompt cancelled or unavailable');
+          const stillOwner = await findSessionByConversation(caller.conversationId);
+          const stillMode = await remoteProfileForChat(caller.sessionId);
+          if (!stillOwner || stillOwner.id !== caller.sessionId || (assigned?.id ?? null) !== (stillMode?.id ?? null))
+            return fail('Remote chat changed while requesting the SSH password');
+          await installMasterKeyWithPassword(profile, answer.password);
+          if (answer.remember) await saveRemoteHostWithPassword(profile, answer.password);
+        }
+        return ok(await executeRemoteHost(profile, command));
+      }
+    } catch { return fail('Remote command failed. Check the saved host, trust and SSH key.'); }
+  }));
   // Named from the live roots, never from a `/project` that may not exist: a worked example the
   // model cannot act on costs a refused call and a retry. What followed the root had the same
   // problem and cost more of them. `/<root>/src/main.ts` is a project's shape, so it read as a
@@ -279,6 +353,43 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       ? `Paths inside the live approved roots: ${virtualRoots.join(', ')}. A root is an approved folder, usually a parent of the project rather than the project itself, so name every folder between the root and the file — the same path exec_command takes as workdir. Reading a root lists it one level deep. ` +
         'Absolute native paths copied from command output are also accepted when they resolve inside one of these roots; globs work in either spelling.'
       : 'Paths require an approved virtual root in the form /<root>/...; no root is currently approved. Globs are supported after a root is approved.';
+
+  // The vault never returns a value to the model: the main process applies it to an
+  // administrator-configured exact HTTPS origin only after a live per-chat approval.
+  if (exposedCaps.command) reg.register('vault_use', toolDeclaration('vault_use', () => ({
+    title: 'Use a named secret',
+    description: 'Send an authenticated request with a named vault secret, without receiving its value. The app asks the person to approve once or until this chat session ends. The HTTP host is fixed by the administrator, not by this tool. Returns only HTTP status and a generic [secret:name] receipt.',
+    inputSchema: z.object({ name: z.string().min(1).max(80), path: z.string().max(300).default('/'), method: z.enum(['GET','POST']).default('GET') }).strict(),
+    annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true }
+  })), async ({ name, path: requestPath, method }) => guard('vault_use', async () => {
+    const caller = currentCaller();
+    if (!caps.command) return fail('Vault use requires command capability');
+    if (!caller.conversationId || !caller.sessionId) return failIdentity('Verified chat identity is required for vault authorization');
+    if (!/^\/[a-zA-Z0-9/_~.-]{0,299}$/.test(requestPath) || requestPath.includes('..')) return fail('Invalid safe endpoint path');
+    if (!await requestVaultApproval(caller.conversationId, name, `${method} on saved origin${requestPath}`)) return fail('Vault request not approved or timed out');
+    // Human approval may take two minutes. Neither permission nor ownership survives
+    // automatically while the card is open: deletion/rebind and revocation must win.
+    if (!caps.command) return fail('Vault use was revoked before approval completed');
+    const currentSession = await findSessionByConversation(caller.conversationId);
+    if (!currentSession || currentSession.id !== caller.sessionId) return failIdentity('This chat no longer owns the approved vault operation');
+    try {
+      const status = await useVault(name, async entry => {
+        if (!entry.origin) throw new Error('Secret has no approved HTTPS origin');
+        // Chat Marks H1b: an insecure-HTTP entry exists for Brain providers only, never for models.
+        if (entry.insecureHttp || !entry.origin.startsWith('https:')) throw new Error('Secret is not bound to an HTTPS origin');
+        const target = new URL(requestPath, entry.origin);
+        if (target.origin !== entry.origin) throw new Error('Origin mismatch');
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 12_000);
+        try {
+          const response = await fetch(target, { method, headers: { [entry.header]: entry.header.toLowerCase() === 'authorization' ? `Bearer ${entry.value}` : entry.value }, redirect: 'error', credentials: 'omit', signal: controller.signal });
+          await response.body?.cancel().catch(() => undefined);
+          return String(response.status);
+        } finally { clearTimeout(timer); }
+      });
+      return ok(`Authenticated request completed: HTTP ${status}. Credential [secret:${name}] was not disclosed.`);
+    } catch { return fail(`The approved vault operation failed for [secret:${name}]. No credential was disclosed.`); }
+  }));
 
   // ------------------------------------------------------------------- read
 
@@ -327,7 +438,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
         guard('read', async () => {
           if (!caps.read && !caps.browse && !caps.metadata) {
             return fail(
-              'TOOL_DISABLED: read is disabled by the current Chat On Steroids permissions. Ask the user to enable reading in the app.'
+              'TOOL_DISABLED: read is disabled by the current Chat Marks permissions. Ask the user to enable reading in the app.'
             );
           }
           const targets: ReadTarget[] = [];
@@ -464,7 +575,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
         guard('view_image', async () => {
           if (!caps.read) {
             return fail(
-              'TOOL_DISABLED: view_image is disabled by the current Chat On Steroids permissions. Ask the user to enable reading in the app.'
+              'TOOL_DISABLED: view_image is disabled by the current Chat Marks permissions. Ask the user to enable reading in the app.'
             );
           }
           const resolved = await resolveIn(ctx.roots, path, { access: 'read', remote: true });
@@ -504,7 +615,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
       async ({ path, nth }) =>
         guard('save_image', async () => {
           if (!caps.create) {
-            return fail('TOOL_DISABLED: save_image is disabled by the current Chat On Steroids permissions. Ask the user to enable creating files in the app.');
+            return fail('TOOL_DISABLED: save_image is disabled by the current Chat Marks permissions. Ask the user to enable creating files in the app.');
           }
           const caller = currentCaller();
           const conversationId = caller.conversationId ??
@@ -515,11 +626,11 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
             // may send a chat's call to another computer's Core, which never sees that chat (#1097).
             return fail(`${liveConnectorName('core')} could not tell which chat this save_image call came from, ` +
               'so it does not know which image to save. If the chat belongs to another computer, call save_image of that ' +
-              'computer\'s Chat On Steroids Core instead. Otherwise call save_image directly as its own tool call, not from ' +
+              'computer\'s Chat Marks Core instead. Otherwise call save_image directly as its own tool call, not from ' +
               'inside a JavaScript or exec step, and try again.');
           }
           if (!imageExportCapable()) {
-            return fail('save_image needs the Chat On Steroids browser extension to be connected and up to date, so the chat\'s page can hand over the image.');
+            return fail('save_image needs the Chat Marks browser extension to be connected and up to date, so the chat\'s page can hand over the image.');
           }
           const session = await findSessionByConversation(conversationId);
           const recorded = session ? await readRecentEvents(session.id, 400, { kinds: ['native_image'] }) : [];
@@ -729,7 +840,7 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
         guard('apply_patch', async () => {
           if (!caps.create && !caps.edit && !caps.move && !caps.deleteFile) {
             return fail(
-              'TOOL_DISABLED: apply_patch is disabled by the current Chat On Steroids permissions. Ask the user to enable changing files in the app.'
+              'TOOL_DISABLED: apply_patch is disabled by the current Chat Marks permissions. Ask the user to enable changing files in the app.'
             );
           }
 
@@ -1197,6 +1308,13 @@ export function registerCoreTools(reg: SurfaceRegistrar): void {
     );
   }
 
+  // A step for the person (#1695): offered with the command tools, and also in Read-only mode,
+  // which turns those off: it runs nothing, and the person's own terminal is theirs.
+  // Kept registered once offered (ToolContext.exposedUserRequests); the handler refuses while off.
+  if (ctx.exposedUserRequests ?? ((exposedCaps.command || (ctx.readOnly && getConfig().capabilities.command)) && reg.sessionToolsExposed)) {
+    registerUserRequestTools(reg);
+  }
+
   // ------------------------------------------------------- plan and finish
 
   if (reg.sessionToolsExposed) {
@@ -1299,7 +1417,8 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
                 .optional()
                 .describe(
                   'Only for an effort the user asked for; app settings supply the default. Selects reasoning only, never a model.'
-                )
+                ),
+              temporary_chat: z.boolean().optional().describe('A temporary ChatGPT chat has no provider history.')
             }).strict()
           )
           .min(1)
@@ -1428,7 +1547,7 @@ function registerAgentsTool(reg: SurfaceRegistrar): void {
               run_id: runId,
               self: PRIME_ID,
               became_prime: becamePrime,
-              workers: created.map((info) => ({ id: info.id, label: info.label, state: info.state, model: info.model, reasoning_effort: info.reasoningEffort }))
+              workers: created.map((info) => ({ id: info.id, label: info.label, state: info.state, model: info.model, reasoning_effort: info.reasoningEffort, temporary_chat: info.temporaryChat === true }))
             }
           };
         }

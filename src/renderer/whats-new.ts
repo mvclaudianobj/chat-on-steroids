@@ -14,6 +14,55 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.51.3': {
+    lead: () => t("Search complete chat histories, manage scheduled messages in one place, and resume project chats reliably after a reload."),
+    highlights: [
+      { icon: 'i-clock', title: () => t("Scheduled chats in one list"), text: () => t("Review, pause, run now, or remove scheduled messages across your chats.") },
+      { icon: 'i-search', title: () => t("Search every chat"), text: () => t("Find messages across complete conversation histories.") },
+      { icon: 'i-folder', title: () => t("Resume keeps its place"), text: () => t("After a reload, the app recognises and clears its old project brief.") },
+      { icon: 'i-check-circle', title: () => t("Safer scheduled delivery"), text: () => t("Schedule changes are preserved when saved state is unreadable or belongs to a newer version.") }
+    ]
+  },
+  '2.1.51.1': {
+    lead: () => `${t("A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard.")} ${t("Vault, notifications, Brain memory and new ways to work with agents.")}`,
+    highlights: [
+      { icon: 'i-check-circle', title: () => t("Goal step reviewer"), text: () => t("A second chat checks each Goal step's file changes before the next one.") },
+      { icon: 'i-sun', title: () => t("Follows your system"), text: () => t("Light or dark as your computer is set, also when it switches.") },
+      { icon: 'i-keyboard', title: () => t("Asks before taking over"), text: () => t("A small question asks before a chat uses your mouse and keyboard.") },
+      { icon: 'i-chat', title: () => t("Messages that get through"), text: () => t("Also when you close the chat's tab while sending, or ChatGPT changes its model menu.") },
+      { icon: 'i-chat', title: () => t("Jarvis with ChatGPT normal"), text: () => t("Select a ChatGPT chat, enable Jarvis in Settings, and hold its microphone. CLIProxy is optional.") },
+      { icon: 'i-terminal', title: () => t("Agent routes and remote labs"), text: () => t("Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.") },
+      { icon: 'i-lock', title: () => t("Vault and notifications"), text: () => t("Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.") },
+      { icon: 'i-search', title: () => t("Brain memory"), text: () => t("Recall and save local memories, connect optional sources and selectively import past conversations.") }
+    ]
+  },
+  '2.1.51': {
+    lead: () => t("Steps for you, a limit on busy chats, and Telegram notifications."),
+    highlights: [
+      { icon: 'i-terminal', title: () => t("Steps for you"), text: () => t("When ChatGPT needs something only you can do, it hands you the step. You run it and mark it done.") },
+      { icon: 'i-agents', title: () => t("A limit on busy chats"), text: () => t("Choose how many chats may work at once. Your own messages always go out.") },
+      { icon: 'i-phone', title: () => t("Telegram notifications"), text: () => t("Link your own bot to get a message when a chat finishes or needs you, and stop or pause it from your phone.") },
+      { icon: 'i-stop', title: () => t("Stop works all the way"), text: () => t("After a Stop, a chat no longer stays busy, and your next message goes out.") }
+    ]
+  },
+  '2.1.50': {
+    lead: () => t("Move chats between projects, chats that keep going, and an extension that updates during long runs."),
+    highlights: [
+      { icon: 'i-folder', title: () => t("Move chats between projects"), text: () => t("Drag a chat onto a project, or use Move to project in its menu. Undo puts it back.") },
+      { icon: 'i-retry', title: () => t("Chats keep going"), text: () => t("When a chat's next step is not picked up, the app keeps trying, tells you, and offers Continue now.") },
+      { icon: 'i-plug', title: () => t("The extension updates itself"), text: () => t("It no longer waits for every long-running chat to finish first.") },
+      { icon: 'i-bolt', title: () => t("Big chats stay fast"), text: () => t("Very long chats no longer slow the app down.") }
+    ]
+  },
+  '2.1.49': {
+    lead: () => t("Long chats that get through ChatGPT's limits, pop-ups out of the way, and message times."),
+    highlights: [
+      { icon: 'i-chat', title: () => t("Long chats keep going"), text: () => t("When ChatGPT limits a long chat's history, the app waits instead of reloading it.") },
+      { icon: 'i-check-circle', title: () => t("Pop-ups out of the way"), text: () => t("ChatGPT's announcements no longer block new chats or your messages.") },
+      { icon: 'i-lock', title: () => t("Your mouse stays yours"), text: () => t("Only chats this app can name use your screen, mouse and keyboard.") },
+      { icon: 'i-clock', title: () => t("Message times"), text: () => t("Turn on Show message times in Settings → General to see when each message was sent.") }
+    ]
+  },
   '2.1.48': {
     lead: () => t("A reviewer for Goal steps, a theme that follows your system, and a question before the mouse and keyboard."),
     highlights: [
@@ -30,6 +79,48 @@ const RELEASES: Readonly<Record<string, Release>> = {
       { icon: 'i-git-diff', title: () => t("Changed files"), text: () => t("Each answer that edited files shows what it changed.") },
       { icon: 'i-git-branch', title: () => t("Commit from Review"), text: () => t("Commit the chosen files, then push and open a pull request.") },
       { icon: 'i-pencil', title: () => t("Your own chat style"), text: () => t("Rewrite how ChatGPT talks and writes in new chats.") }
+    ]
+  },
+  '2.1.45.3': {
+    lead: () => t('Jarvis voice now works with normal ChatGPT chats, with clear setup and microphone consent.'),
+    highlights: [
+      { icon: 'i-chat', title: () => t('Jarvis with ChatGPT normal'), text: () => t('Select a ChatGPT chat, enable Jarvis in Settings, and hold its microphone. CLIProxy is optional.') }
+    ]
+  },
+  '2.1.45.2': {
+    lead: () => t("Vault, notifications, Brain memory and new ways to work with agents."),
+    highlights: [
+      { icon: 'i-lock', title: () => t("Vault and notifications"), text: () => t("Keep secrets in the vault and set up notifications with channel tests and SMTP certificate pinning.") },
+      { icon: 'i-search', title: () => t("Brain memory"), text: () => t("Recall and save local memories, connect optional sources and selectively import past conversations.") },
+      { icon: 'i-terminal', title: () => t("Agent routes and remote labs"), text: () => t("Choose Codex or Claude routes, manage SSH hosts, VMs and the agent company prototype.") },
+      { icon: 'i-chat', title: () => t("Jarvis and ZeroClaw"), text: () => t("Use Jarvis voice in your selected ChatGPT conversation or optional CLIProxy chats, and review MarksClaw profiles before importing into ZeroClaw.") }
+    ]
+  },
+  '2.1.45.1': {
+    lead: () => t("Chat groups, bookmarks, drafts that wait for you, and a better Review."),
+    highlights: [
+      { icon: 'i-group', title: () => t("Chat groups"), text: () => t("Sort a project's chats into groups from its ⋯ menu.") },
+      { icon: 'i-bookmark-fill', title: () => t("Bookmarks"), text: () => t("Bookmark an answer and jump back to it from the chat's header.") },
+      { icon: 'i-pencil', title: () => t("Drafts that wait"), text: () => t("A pencil marks chats with an unsent message, and drafts come back after a restart.") },
+      { icon: 'i-git-diff', title: () => t("A better Review"), text: () => t("Right-click an untracked file to add it, or its folder, to .gitignore.") }
+    ]
+  },
+  '2.1.44.2': {
+    lead: () => t("A route for each Codex and Claude Code chat, ZeroClaw's own page, and the right extension notice."),
+    highlights: [
+      { icon: 'i-git-branch', title: () => t("A route for each chat"), text: () => t("Codex and Claude Code use the CLI's own account by default, or Claude Code Router when it is found.") },
+      { icon: 'i-agents', title: () => t("Real model names"), text: () => t("Model lists show each model's full name and version, not just a short alias.") },
+      { icon: 'i-module-zeroclaw', title: () => t("ZeroClaw has its own page"), text: () => t("Open it below Pets in the sidebar; Configure agent now draws its setup.") },
+      { icon: 'i-browser', title: () => t("The right extension notice"), text: () => t("The extension update notice follows the browser you chose for ChatGPT.") }
+    ]
+  },
+  '2.1.44.1': {
+    lead: () => t("Pictures with /image, keyboard shortcuts, and a quicker message after Stop."),
+    highlights: [
+      { icon: 'i-image', title: () => t("Ask for a picture"), text: () => t("Start a message with /image, and ChatGPT draws it with its own image tool.") },
+      { icon: 'i-bolt', title: () => t("Keyboard shortcuts"), text: () => t("{0} starts a new chat, Ctrl+Tab moves between chats, and Esc twice stops an answer.", [primaryShortcut('N')]) },
+      { icon: 'i-stop', title: () => t("Quicker after Stop"), text: () => t("A message you send right after Stop goes out at once.") },
+      { icon: 'i-agents', title: () => t("Sub-agent chats tidy up"), text: () => t("With archiving on, a worker's chat is archived two minutes after its task is done.") }
     ]
   },
   '2.1.46': {
@@ -59,6 +150,24 @@ const RELEASES: Readonly<Record<string, Release>> = {
       { icon: 'i-agents', title: () => t("Sub-agent chats tidy up"), text: () => t("With archiving on, a worker's chat is archived two minutes after its task is done.") }
     ]
   },
+  '2.1.43.2': {
+    lead: () => t("Chat with CLIProxy models in the app's own chat, and manage CLIProxyAPI from Modules."),
+    highlights: [
+      { icon: 'i-chat', title: () => t("Chat with CLIProxy"), text: () => t("New chat → CLIProxy: its models in the same chat screen, with Stop and your own model choice.") },
+      { icon: 'i-gear', title: () => t("CLIProxyAPI managed here"), text: () => t("Install or update the official release, save the console password and create API keys.") },
+      { icon: 'i-pencil', title: () => t("New chat in every layout"), text: () => t("The Inbox layout's new chat button also offers CLIProxy, MarksCode, Codex and Claude.") },
+      { icon: 'i-retry', title: () => t("Console sign-in fixed"), text: () => t("Status checks no longer lock the CLIProxyAPI console out with failed sign-ins.") }
+    ]
+  },
+  '2.1.43.1': {
+    lead: () => t("See what sub-agents do, long work that keeps going, and clearer Settings."),
+    highlights: [
+      { icon: 'i-agents', title: () => t("See what a sub-agent does"), text: () => t("Opening a sub-agent shows each action with its result and the files it changed.") },
+      { icon: 'i-retry', title: () => t("Long work keeps going"), text: () => t("Compact & Resume steps in during long answers, and Goal and Loop continue in a fresh turn.") },
+      { icon: 'i-gear', title: () => t("Clearer Settings"), text: () => t("Plain words throughout, and the sidebar layout picked from a picture.") },
+      { icon: 'i-paw', title: () => t("Meet Whip"), text: () => t("A cheeky new pet that cracks its whip so the work goes faster.") }
+    ]
+  },
   '2.1.43': {
     lead: () => t("See what sub-agents do, long work that keeps going, and clearer Settings."),
     highlights: [
@@ -68,13 +177,22 @@ const RELEASES: Readonly<Record<string, Release>> = {
       { icon: 'i-paw', title: () => t("Meet Whip"), text: () => t("A cheeky new pet that cracks its whip so the work goes faster.") }
     ]
   },
-  '2.1.42': {
+  '2.1.42.1': {
     lead: () => t('Bring back earlier messages, calmer answers, and long work that keeps going.'),
     highlights: [
       { icon: 'i-arrow-up', title: () => t('Bring back earlier messages'), text: () => t('Press Up in an empty message box to bring back what you sent in this chat.') },
       { icon: 'i-file-text', title: () => t('Answers that read calmly'), text: () => t('While ChatGPT writes, whole paragraphs fade in instead of the text jumping.') },
       { icon: 'i-retry', title: () => t('Long work keeps going'), text: () => t('A fresh turn now keeps every tool result and never runs a command twice.') },
       { icon: 'i-agents', title: () => t('Sub-agents start reliably'), text: () => t('Also on a slow computer, and with a second browser that is not updated yet.') }
+    ]
+  },
+  '2.1.41.1': {
+    lead: () => t('Edit your earlier messages, branch a chat, and sub-agents that start every time.'),
+    highlights: [
+      { icon: 'i-pencil', title: () => t('Edit your messages'), text: () => t('Change an earlier message and continue from it; what it replaces folds away, nothing is lost.') },
+      { icon: 'i-git-branch', title: () => t('Branch in new chat'), text: () => t('Continue from any answer in a new chat, and keep the original chat exactly as it was.') },
+      { icon: 'i-chat', title: () => t('Inbox sidebar'), text: () => t('Optional: all your chats together, active ones first. Under Appearance → Sidebar layout.') },
+      { icon: 'i-agents', title: () => t('Sub-agents that start'), text: () => t('Reliable on a busy computer; one that starts late rejoins its run.') }
     ]
   },
   '2.1.41': {
@@ -86,6 +204,13 @@ const RELEASES: Readonly<Record<string, Release>> = {
       { icon: 'i-agents', title: () => t('Sub-agents that start'), text: () => t('Reliable on a busy computer; one that starts late rejoins its run.') }
     ]
   },
+  '2.1.40.1': {
+    lead: () => `${t('Modules')} · MarksPanel`,
+    highlights: [
+      { icon: 'i-terminal', title: () => t('Modules'), text: () => `${t('Modules')}: MarksCode, Codex, Claude, MarksClaw.` },
+      { icon: 'i-check-circle', title: () => t('Authentication'), text: () => `${t('Sign in')} · MarksPanel.` }
+    ]
+  },
   '2.1.40': {
     lead: () => t('Projects on a server, Skills and files anywhere in the composer, and a repair for Mac permissions.'),
     highlights: [
@@ -95,7 +220,21 @@ const RELEASES: Readonly<Record<string, Release>> = {
       { icon: 'i-plug', title: () => t('Prefer Plugins'), text: () => t('If you like, messages the app sends use your Plugins app instead of Core.') }
     ]
   },
-  '2.1.39': {
+  '2.1.39.3': {
+    lead: () => `${t('Modules')} · MarksPanel`,
+    highlights: [
+      { icon: 'i-terminal', title: () => t('Modules'), text: () => `${t('Modules')}: MarksCode, Codex, Claude, MarksClaw.` },
+      { icon: 'i-check-circle', title: () => t('Authentication'), text: () => `${t('Sign in')} · MarksPanel.` }
+    ]
+  },
+  '2.1.39.2': {
+    lead: () => t('Open a project to use Files and Review'),
+    highlights: [
+      { icon: 'i-folder', title: () => t('Files'), text: () => t('Choose a local project for this panel. Your conversation stays where it is.') },
+      { icon: 'i-git-diff', title: () => t('Review'), text: () => t('Choose a local project for this panel. Your conversation stays where it is.') }
+    ]
+  },
+  '2.1.39.1': {
     lead: () => t('Fresh turns that work while ChatGPT thinks, and a fuller diagnostics report.'),
     highlights: [
       { icon: 'i-retry', title: () => t('Fresh turns that hold'), text: () => t('Long work now also continues in a fresh turn while ChatGPT is thinking or running a tool.') },
@@ -111,6 +250,12 @@ const RELEASES: Readonly<Record<string, Release>> = {
       { icon: 'i-check-circle', title: () => t('Approvals in the app'), text: () => t('Answer ChatGPT\'s tool approval cards with Deny or Allow once, right in the app.') },
       { icon: 'i-arrow-down', title: () => t('Update all'), text: () => t('Activity shows the app, the extension and each plugin with its status, and one button updates them.') },
       { icon: 'i-chart', title: () => t('Codex and Claude Code in Usage'), text: () => t('See Codex\'s limits and the tokens Codex and Claude Code used, and ask for your usage in a chat.') }
+    ]
+  },
+  '2.1.37.1': {
+    lead: () => t('Marks joins your pets.'),
+    highlights: [
+      { icon: 'i-paw', title: () => 'Marks', text: () => t('Enable Marks, the silver robotic wolf, in Pets.') }
     ]
   },
   '2.1.37': {
@@ -140,7 +285,7 @@ const RELEASES: Readonly<Record<string, Release>> = {
       { icon: 'i-browser', title: () => t('Background chats in a tab group'), text: () => t('Background chats can stay in one collapsed tab group in your browser window instead of their own window.') },
       { icon: 'i-git-diff', title: () => t('Workers in their own Git copy'), text: () => t('When you turn it on, each new worker gets its own Git worktree and branch, away from your checkout.') },
       { icon: 'i-chat', title: () => t('Dictation on Windows'), text: () => t('The microphone button turns your speech into text in the message box, and you send it when you\'re ready.') },
-      { icon: 'i-plug', title: () => t('Rename your plugins'), text: () => t('Chat On Steroids apps you rename in ChatGPT keep working.') }
+      { icon: 'i-plug', title: () => t('Rename your plugins'), text: () => t('Chat Marks apps you rename in ChatGPT keep working.') }
     ]
   },
   '2.1.34': {
@@ -207,12 +352,14 @@ const RELEASES: Readonly<Record<string, Release>> = {
 };
 
 export function hasHighlights(version: string): boolean {
-  return Object.hasOwn(RELEASES, version);
+  return version === '2.1.48.3' || version === '2.1.46.1' || version === '2.1.47.1' || Object.hasOwn(RELEASES, version);
 }
 
 /** Paints the dialog for one version; separate from showing it so a check can paint any entry. */
 export function paintWhatsNew(version: string): boolean {
-  const release = RELEASES[version];
+  // The Marks patch releases retain community highlights while showing their own version
+  // and opening its own release notes.
+  const release = RELEASES[version === '2.1.47.1' ? '2.1.47' : version === '2.1.46.1' ? '2.1.46' : version];
   if (!release) return false;
   ui($('whatsNewVersion'), 'textContent', () => t('Version {0}', [version]));
   ui($('whatsNewLead'), 'textContent', release.lead);

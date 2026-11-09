@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; form-action 'none'; connect-src 'none'; base-uri 'none'" />
+  <link rel="stylesheet" href="./markspanel-login.css" />
+  <title>Entrar no Chat Marks</title>
+</head>
+<body>
+  <main class="card">
+    <img class="symbol" src="./browser-icons/cos.png" alt="Marks" />
+    <h1>Chat Marks</h1>
+    <p class="subtitle">Entre com sua conta Marks para continuar.</p>
+    <div class="switch" role="group" aria-label="Método de entrada">
+      <button id="passwordTab" class="selected" type="button">E-mail e senha</button>
+      <button id="deviceTab" type="button">Entrar pelo navegador</button>
+    </div>
+    <form id="passwordForm">
+      <label for="email">E-mail</label>
+      <input id="email" type="email" autocomplete="username" placeholder="seu@email.com" required maxlength="254" />
+      <label for="password">Senha</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Sua senha" required maxlength="2048" />
+      <button id="submit" class="primary" type="submit">Entrar</button>
+    </form>
+    <section id="devicePanel" hidden>
+      <p>Abra o MarksPanel no navegador e autorize o código exibido abaixo.</p>
+      <div id="deviceCode" class="code" aria-live="polite">—</div>
+      <button id="start" type="button" class="primary">Abrir MarksPanel</button>
+    </section>
+    <p id="notice" role="status" aria-live="polite"></p>
+    <small>Autenticação segura em marks.ia.br</small>
+  </main>
+  <script type="module" src="./markspanel-login.ts"></script>
+</body>
+</html>

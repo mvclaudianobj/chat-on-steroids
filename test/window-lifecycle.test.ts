@@ -170,6 +170,10 @@ describe('native window activation', () => {
   it.each(['win32', 'linux'] as const)('keeps close-to-tray semantics on %s', (platform) => {
     expect(shouldQuitOnWindowAllClosed(platform, true)).toBe(false);
     expect(shouldQuitOnWindowAllClosed(platform, false)).toBe(true);
+    // Login is the only window at startup: a successful login closes it before
+    // the main window exists. That transition is not a user-requested quit.
+    expect(shouldQuitOnWindowAllClosed(platform, false, true)).toBe(false);
+    expect(shouldQuitOnWindowAllClosed(platform, false, false)).toBe(true);
   });
 
   it('persists normal bounds plus maximized presentation and ignores other transient native states', () => {
@@ -237,11 +241,11 @@ describe('native window activation', () => {
 describe('Windows login startup', () => {
   it('writes only packaged Windows login settings and supports turning the same entry off', () => {
     const app = { isPackaged: true, setLoginItemSettings: vi.fn() };
-    applyLoginStartup(app, true, 'win32', 'C:/Program Files/Chat On Steroids/app.exe');
-    applyLoginStartup(app, false, 'win32', 'C:/Program Files/Chat On Steroids/app.exe');
+    applyLoginStartup(app, true, 'win32', 'C:/Program Files/Chat Marks/app.exe');
+    applyLoginStartup(app, false, 'win32', 'C:/Program Files/Chat Marks/app.exe');
     expect(app.setLoginItemSettings.mock.calls).toEqual([
-      [{ openAtLogin: true, path: 'C:/Program Files/Chat On Steroids/app.exe', args: ['--background'] }],
-      [{ openAtLogin: false, path: 'C:/Program Files/Chat On Steroids/app.exe', args: ['--background'] }]
+      [{ openAtLogin: true, path: 'C:/Program Files/Chat Marks/app.exe', args: ['--background'] }],
+      [{ openAtLogin: false, path: 'C:/Program Files/Chat Marks/app.exe', args: ['--background'] }]
     ]);
     for (const platform of ['darwin', 'linux'] as const) applyLoginStartup(app, true, platform);
     app.isPackaged = false;

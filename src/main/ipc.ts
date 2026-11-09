@@ -1,9 +1,36 @@
+import { modulesStatus, moduleAction } from './modules.js';
+import { registerAgentOutputIpc } from './agent-output-ipc.js';
+import { onChatsAtOnceChange, resumeAutomaticSends } from './chats-at-once.js';
 import { MAX_CHAT_STYLE_CHARS } from '../shared/chat-style.js';
 import { registerWorkspaceTerminalIpc } from './workspace-terminal-ipc.js';
+import { registerCliModuleIpc } from './cli-modules.js';
+import { registerApiChatIpc } from './api-chat/ipc.js';
+import { registerCliProxyIpc } from './cliproxy/ipc.js';
+import { registerUpstreamIpc } from './upstream/ipc.js';
+import { registerCcrIpc } from './ccr/ipc.js';
+import { registerVmsIpc } from './vms.js';
+import { registerCliChatIpc } from './cli-chat.js';
+import { registerNotificationCenterIpc } from './notification-ipc.js';
+import { logoutMarkspanel, markspanelAccessBlocked } from './markspanel-auth.js';
 import { forgetSurfaceTokens } from './mcp/persistent-paths.js';
 import { firefoxAddonUrl } from '../shared/firefox-addon.js';
-import { approvalCardView, requestApprovalAnswer } from './approval-wait.js';
+import { isApiConversationId } from '../shared/api-chat.js';
+import { approvalCardView, approvalCardWaiting, requestApprovalAnswer } from './approval-wait.js';
+import { queueWorkerArchives, workerArchiveFinishDelayMs } from './worker-archive.js';
 import { registerDictationIpc } from './dictation.js';
+import { registerRemoteHostsIpc } from './remote/hosts-ipc.js';
+import { revokeRemoteChat } from './remote/approval.js';
+import { remoteModeInstructions, mentionedRemoteInstructions } from './remote/mode.js';
+import { syncRemoteProfileProject } from './remote/mirror.js';
+import { prependUserPrompt } from '../shared/user-prompt.js';
+import { registerJarvisAudioIpc } from './jarvis-audio.js';
+import { registerVaultIpc } from './marks-vault-ipc.js';
+import { registerBrainIpc } from './brain/ipc.js';
+import { registerCompanyIpc } from './company-ipc.js';
+import { initializeCompanyObservability } from './company-observability.js';
+import { initCompanyStore } from './company-store.js';
+import { initCompanyLocalGrants } from './company-local-grants.js';
+import { revokeVaultChat } from './marks-vault-approval.js';
 import { CONNECTOR_SUFFIX_MAX, CONNECTOR_SUFFIX_PATTERN } from '../shared/connector-names.js';
 import { setStopNoticeTranslations } from './stuck-notice.js';
 import { dialogLabel, mainText, setMainTextTranslations } from './main-texts.js';
@@ -17,14 +44,16 @@ import { mergeAppearance } from '../shared/appearance.js';
 import { prepareSessionPrompt, prepareSkillFollowup } from './session/prompt.js';
 import { importSkillFile, importSkillPackage, listManagedSkills, listSkills, removeSkill } from './skills.js';
 import { checkGitHubSkillUpdates, importGitHubSkill, linkGitHubSkill, updateGitHubSkill } from './skill-github.js';
+import { importAgencyAgent, listAgencyAgents, updateAgencyAgent } from './marks-agency-agents.js';
 import { SKILL_ID_PATTERN } from '../shared/skills.js';
 import { listSkillLibrary } from './skill-library.js';
 import { installRecommendedSkill, listRecommendedSkills } from './recommended-skills.js';
 import { noteChatOrigin } from './session/recorder.js';
 import { refreshAppProxy } from './app-proxy.js';
+import { externalModuleAction } from './external-modules.js';
 import { committedResumeAncestorsFromSummary, DEFAULT_RECORDING_STORAGE_GIB, REASONING_EFFORTS, RECORDING_STORAGE_LIMITS_GIB, type RecordingStorageLimitGiB, type SessionChange } from '../shared/session.js';
 import { safeExternalLink } from '../shared/external-link.js';
-import { wakeBrowserWork } from './browser-wake.js';
+import { wakeApprovalConversation, wakeBrowserWork } from './browser-wake.js';
 import { refreshKeepAwake } from './keep-awake.js';
 import { getChatModels, startChatModelDiscovery, configureChatModelDiscovery } from './chat-models.js';
 import { releaseSessionFinish, requestSessionFinishGoal } from './session/finish.js';
@@ -37,13 +66,14 @@ import { paintWindowTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import { exportUsageCsv } from './session/usage-export.js';
 import { readProviderUsage } from './provider-usage.js';
-import { inputArgs, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs } from './session/input.js';
+import { inputArgs, deliveryProof, enqueueInput, listInputs, editQueuedInput, sendQueuedInputNow, reorderQueuedInputs, setInputAutomation, configureInputDelivery, pausedBrowserHelpers, cancelFinishInputs, cancelSessionInputs, retryStoppedQueuedPickup, forgetOwnSent, type InputEntry } from './session/input.js';
 import { draftOpeningMessage, onGoalChange, nativeGoalFailure } from './goal.js';
 import { cancelTaskRequest, runTaskRequest } from './task-request.js';
 import { randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { isValidTopic, normalizeServer, testPhonePush } from './phone-push.js';
+import { connectTelegram, disconnectTelegram, onTelegramChange, telegramView, testTelegram } from './telegram-app.js';
 
 import { DEFAULT_PHONE_PUSH, type PhonePushSettings } from '../shared/phone-push.js';
 import { retryGoalBrowserHelper } from './goal.js';
@@ -66,8 +96,9 @@ import { confirmedPluginSchemas, pluginRefreshPublications, pluginRefreshStatuse
  */
 
 import { answerDesktopAsk, currentDesktopAsk, mirrorDesktopAsk } from './desktop-ask-window.js';
-import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, nativeTheme, shell } from 'electron';
+import { app, BrowserWindow, clipboard, desktopCapturer, dialog, ipcMain, nativeTheme, shell, type IpcMainInvokeEvent } from 'electron';
 import { repairMacOSPermissions, resetMacOSPermissions } from './computer/macos-grants.js';
+import { testLinuxScreenshotConsent } from './computer/linux-screenshot-consent.js';
 import { z } from 'zod';
 import {
   CAPABILITIES,
@@ -85,6 +116,7 @@ import { DEFAULT_HANDOFF_LENGTH, HANDOFF_LENGTHS, MAX_HANDOFF_PROMPT_CHARS } fro
 import { CUSTOM_CONTINUE_MAX_CHARS } from '../shared/recovery.js';
 import { applySettings, connect, disconnect, getStatus, onStatusChange, rememberRunningSurfaceTokens } from './connection.js';
 import { effectiveCapabilities, getConfig, updateConfig, MAX_MCP_INSTRUCTIONS_CHARS, browserBridgePortSchema, settingsRecovered } from './config.js';
+import { currentMarksSystemPrompt } from './marks-system-prompt.js';
 import { UI_LANGUAGES } from '../shared/ui-language.js';
 import { CHATGPT_PROJECT_ID, PROJECT_COLORS } from '../shared/projects.js';
 import { chatgptProjectChoices } from './chatgpt-project-catalog.js';
@@ -96,8 +128,8 @@ import { onBackgroundExecChange, runningExecProcesses, stopExecProcess } from '.
 import { keychainNoticeReady } from './keychain-notice.js';
 import { runDiagnostics } from './diagnostics.js';
 import { collectReportFacts, readRecentLog, renderDiagnosticsReport, saveDiagnosticsReport, systemFacts, memoryFacts } from './diagnostics-report.js';
-import { listSessions, readTurnTraces } from './session/store.js';
-import { deleteSchedule, listSchedules, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
+import { answerUserRequest, clearProjectNote, getSessionOrNullIfMissing, listSessions, readTurnTraces } from './session/store.js';
+import { deleteSchedule, listScheduleItems, listSchedules, runScheduleNow, saveSchedule, scheduleRepeatSchema, setSchedulePaused } from './scheduled-runs.js';
 import { formatLogAsJson, formatLogForClipboard, getLog, logInfo, logWarn, onLog } from './logger.js';
 import { markStartup } from './startup-timing.js';
 import { managedWorktreeCleanupOffers, acknowledgeManagedWorktreeCleanupOffer } from './agents.js';
@@ -106,7 +138,7 @@ import type { WorkerWorktreeCleanupOffer } from '../shared/session.js';
 import { unifiedExecManager } from './codex/manager.js';
 import { inFlightToolCalls } from './mcp/call-context.js';
 import { RESERVED_ROOT_NAMES, uniqueRootName, validateNewRoot, SandboxError, resolvePath } from './sandbox.js';
-import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, onProjectLinkChange, projectWorkspace, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff } from './projects.js';
+import { addProject, addRemoteProject, createChatgptProjectFor, linkChatgptProject, unlinkChatgptProject, expireArmedProjectCreates, getSessionProject, listProjects, localProjectPath, moveChatWithGroup, onProjectLinkChange, projectWorkspace, relatedFolderViews, removeProject, retryProjectCreate, setProjectColor, setProjectSecretsShieldOff, setRelatedFolders } from './projects.js';
 import { createProjectEntry, listProjectDirectory, previewProjectFile, projectFileTarget, renameProjectEntry, revalidateProjectFileTarget, saveProjectTextFile, serverFileSnapshot } from './project-files.js';
 import { ProjectFileWatchSet } from './project-file-watcher.js';
 import { ProjectGitWatchSet, readProjectGitDiff, readProjectGitSnapshot } from './project-git.js';
@@ -122,7 +154,7 @@ import {
   companionDiagnostics,
   sessionInputActivity,
   recoveryHeldByCalls, recoveryInputAllowed,
-  sessionControlsFor, cancelAssistantRecovery, stopSessionTurn, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction,
+  sessionControlsFor, userRequestViews, cancelAssistantRecovery, pickupNow, stopSessionTurn, endOwnWorkAfterStop, setSessionAutomation, setSessionObjective, compactSession, resumeFromSavedSummary, cancelSessionCompaction, retrySessionResume,
   cancelWorkerCommands,
   chatUrl,
   revealChatInBrowser,
@@ -153,11 +185,15 @@ import {
   readEvents,
   withSessionMutationFence
 } from './session/store.js';
+import { archiveSessionLocally } from './session/local-archive.js';
+import { archiveAllOwnedWorkers } from './worker-cleanup.js';
 import { netTurnChanges, netTurnFileDiff, turnFileEdits, type EditAt } from './session/turn-changes.js';
 import { forgetSession, notifyChanged, onSessionChange } from './session/recorder.js';
 import { findInSession, locateMessage, locateSearchMatch, searchSessions } from './session/search.js';
 import { listBookmarks, setBookmark } from './session/bookmarks.js';
 import { readSessionEvents, readSessionList, sessionListCursorSchema } from './session/read-model.js';
+import { withChatEngines, forgetChatRecord, storedChatRecord } from './agent-engine/ledger.js'; // Chat Marks: chat type icons and deletion
+import { agentEngine } from './agent-engine/registry.js';
 import { exportSessionMarkdown } from './session/markdown-export.js';
 import { commitProjectChanges, createPullRequest, pushProject, readCommitState } from './project-commit.js';
 import { exportSessionPage } from './session/page-export.js';
@@ -167,6 +203,7 @@ import { blockedChatIds, setChatsBlocked } from './session/blocked-chats.js';
 import { setChatsTrusted, trustedChatIds } from './session/trusted-chats.js';
 import {
   clearAgent,
+  completedIdleWorkerConversations,
   onSwarmChange,
   pauseSwarmForDisable,
   persistAgentAuthorityNow,
@@ -195,8 +232,9 @@ import {
 } from './computer/index.js';
 
 /** Why phone settings cannot be saved as they are, or null. Only an enabled form is checked. */
-function phonePushProblem(push: { enabled: boolean; topic: string; server: string }): string | null {
-  if (!push.enabled) return null;
+function phonePushProblem(push: { enabled: boolean; ntfy?: boolean; topic: string; server: string }): string | null {
+  // ntfy's topic and server matter only while ntfy is a destination; Telegram needs neither (#1934).
+  if (!push.enabled || push.ntfy === false) return null;
   if (!isValidTopic(push.topic)) return 'Choose a topic of letters, digits, - and _ (up to 64).';
   if (!normalizeServer(push.server)) return 'Enter the address of an ntfy server, such as https://ntfy.sh.';
   return null;
@@ -248,6 +286,8 @@ const settingsPatch = z.object({
     binaryPath: z.string().max(4096)
   }),
   ui: z.object({
+    marksSystemPromptEnabled: z.boolean().optional(),
+    marksPreferredName: z.string().trim().max(80).optional(),
     appearance: appearanceSchema.optional(),
     autoContinue: z.boolean().optional(),
     defaultChatModel: z.string().trim().min(1).max(80).optional(),
@@ -256,6 +296,7 @@ const settingsPatch = z.object({
     cosBrowserMinimize: z.enum(['taskbar', 'tray']).optional(),
     desktopAsk: z.enum(['off', 'active', 'always']).optional(),
     desktopUnattributed: z.boolean().optional(),
+    linuxDesktopEnabled: z.boolean().optional(),
     developerMode: z.boolean().optional(),
     playfulStatus: z.boolean().optional(),
     playfulContinue: z.boolean().optional(),
@@ -267,6 +308,7 @@ const settingsPatch = z.object({
     // #1794: the renderer saves only an address on this computer; main checks it again before use.
     sendCheckUrl: z.string().trim().max(300).optional(),
     followOutput: z.boolean().optional(),
+    showMessageTimes: z.boolean().optional(),
     mentionCore: z.boolean().optional(),
     mentionPlugins: z.boolean().optional(),
     language: z.enum(UI_LANGUAGES).optional(),
@@ -291,6 +333,9 @@ const settingsPatch = z.object({
     autoConnect: z.boolean(),
     startAtLogin: z.boolean().optional(),
     turnNotifications: z.boolean().optional(),
+    archiveRetentionDays: z.number().int().min(0).max(3650).optional(),
+    archiveRetentionPins: z.array(z.string().uuid()).max(500).optional(),
+    archiveRetentionPinsReady: z.boolean().optional(),
     sounds: z.boolean().optional(),
     rotateTurnMinutes: z.number().int().min(0).max(120).optional(),
     rotateStopFallback: z.boolean().optional(),
@@ -299,10 +344,11 @@ const settingsPatch = z.object({
     keepScreenAwake: z.boolean().optional(),
     privacyScreenshots: z.boolean(),
     phonePush: z.object({
-      enabled: z.boolean(), server: z.string().max(2048), topic: z.string().max(64), needsYou: z.boolean(), failures: z.boolean(),
+      enabled: z.boolean(), ntfy: z.boolean().optional(), server: z.string().max(2048), topic: z.string().max(64), needsYou: z.boolean(), failures: z.boolean(),
       finishedAfterMinutes: z.number().int().min(0).max(240).nullable(), onlyWhenAway: z.boolean(),
       quietHours: z.object({ from: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), to: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).strict().nullable(),
-      includeDetails: z.boolean()
+      includeDetails: z.boolean(),
+      telegramSteer: z.boolean().optional()
     }).strict().optional(),
     secretsShield: z.boolean().optional(),
     // Set from the Commit dialog (projectCommit:flow); a settings save carries it through.
@@ -331,6 +377,7 @@ const settingsPatch = z.object({
     defaultReasoning: z.enum(['', ...REASONING_EFFORTS]).optional(),
     maxWorkers: z.number().int().min(1).max(8),
     globalMaxWorkers: z.number().int().min(0).max(64).optional(),
+    chatsAtOnce: z.number().int().min(0).max(10).optional(),
     allowUnattributedCalls: z.boolean(),
     strictChatAllowlist: z.boolean().optional(),
     recoverAgentTabs: z.boolean(),
@@ -407,14 +454,17 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
   }
   const pick = <T>(live: T, before: T, next: T): T => (Object.is(before, next) ? live : next);
   // Field by field, like the rest of the form: a change elsewhere never undoes one made here.
-  const mergePhonePush = (live: PhonePushSettings | undefined, before: PhonePushSettings | undefined, next: PhonePushSettings | undefined): PhonePushSettings | undefined => {
+  const mergePhonePush = (live: PhonePushSettings | undefined, before: Partial<PhonePushSettings> | undefined, next: (Omit<PhonePushSettings, 'ntfy'> & { ntfy?: boolean }) | undefined): PhonePushSettings | undefined => {
     if (!next) return live;
-    const now = live ?? DEFAULT_PHONE_PUSH, was = before ?? DEFAULT_PHONE_PUSH;
+    const now = { ...DEFAULT_PHONE_PUSH, ...live }, was = { ...DEFAULT_PHONE_PUSH, ...before };
+    // A form or backup from before Telegram has no ntfy switch: it changes nothing about it.
+    const wanted: PhonePushSettings = { ...next, ntfy: next.ntfy ?? was.ntfy, telegramSteer: next.telegramSteer ?? was.telegramSteer };
     const field = <K extends keyof PhonePushSettings>(key: K): PhonePushSettings[K] =>
-      JSON.stringify(was[key]) === JSON.stringify(next[key]) ? now[key] : next[key];
+      JSON.stringify(was[key]) === JSON.stringify(wanted[key]) ? now[key] : wanted[key];
     const merged: PhonePushSettings = {
-      enabled: field('enabled'), server: field('server'), topic: field('topic'), needsYou: field('needsYou'), failures: field('failures'),
-      finishedAfterMinutes: field('finishedAfterMinutes'), onlyWhenAway: field('onlyWhenAway'), quietHours: field('quietHours'), includeDetails: field('includeDetails')
+      enabled: field('enabled'), ntfy: field('ntfy'), server: field('server'), topic: field('topic'), needsYou: field('needsYou'), failures: field('failures'),
+      finishedAfterMinutes: field('finishedAfterMinutes'), onlyWhenAway: field('onlyWhenAway'), quietHours: field('quietHours'), includeDetails: field('includeDetails'),
+      ...(field('telegramSteer') !== undefined ? { telegramSteer: field('telegramSteer') } : {})
     };
     return { ...merged, server: normalizeServer(merged.server) ?? merged.server.trim() };
   };
@@ -472,6 +522,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       // Fields the settings form does not own (the What's New version) stay as they are; every
       // save rebuilt \`ui\` without them, so What's New came back after any changed setting.
       ...current.ui,
+      marksSystemPromptEnabled: pick(current.ui.marksSystemPromptEnabled, base.ui.marksSystemPromptEnabled, wanted.ui.marksSystemPromptEnabled),
+      marksPreferredName: pick(current.ui.marksPreferredName, base.ui.marksPreferredName, wanted.ui.marksPreferredName),
       appearance: mergeAppearance(current.ui.appearance, base.ui.appearance, wanted.ui.appearance),
       autoContinue: pick(current.ui.autoContinue, base.ui.autoContinue, wanted.ui.autoContinue),
       defaultChatModel: pick(current.ui.defaultChatModel, base.ui.defaultChatModel, wanted.ui.defaultChatModel),
@@ -484,6 +536,8 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       // None saved is off, as in desktopAsk: a stale snapshot without the field changes nothing.
       desktopUnattributed: (base.ui.desktopUnattributed === true) === (wanted.ui.desktopUnattributed === true)
         ? current.ui.desktopUnattributed : wanted.ui.desktopUnattributed,
+      linuxDesktopEnabled: (base.ui.linuxDesktopEnabled === true) === (wanted.ui.linuxDesktopEnabled === true)
+        ? current.ui.linuxDesktopEnabled : wanted.ui.linuxDesktopEnabled,
       developerMode: pick(current.ui.developerMode, base.ui.developerMode, wanted.ui.developerMode),
       playfulStatus: pick(current.ui.playfulStatus, base.ui.playfulStatus, wanted.ui.playfulStatus),
       playfulContinue: pick(current.ui.playfulContinue, base.ui.playfulContinue, wanted.ui.playfulContinue),
@@ -496,6 +550,9 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       // An emptied address turns the send check off.
       sendCheckUrl: pick(current.ui.sendCheckUrl, base.ui.sendCheckUrl, wanted.ui.sendCheckUrl || undefined),
       followOutput: pick(current.ui.followOutput, base.ui.followOutput, wanted.ui.followOutput),
+      // An absent value is off: a form from before the switch sends off without an edit (CodeRabbit on #1948).
+      showMessageTimes: (base.ui.showMessageTimes === true) === (wanted.ui.showMessageTimes === true)
+        ? current.ui.showMessageTimes : wanted.ui.showMessageTimes,
       mentionCore: pick(current.ui.mentionCore, base.ui.mentionCore, wanted.ui.mentionCore),
       mentionPlugins: pick(current.ui.mentionPlugins, base.ui.mentionPlugins, wanted.ui.mentionPlugins),
       // Not part of the settings form: reported by the window and the extension, carried through.
@@ -524,9 +581,14 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
       autoConnect: pick(current.ui.autoConnect, base.ui.autoConnect, wanted.ui.autoConnect),
       startAtLogin: pick(current.ui.startAtLogin, base.ui.startAtLogin, wanted.ui.startAtLogin),
       turnNotifications: pick(current.ui.turnNotifications, base.ui.turnNotifications, wanted.ui.turnNotifications),
+      archiveRetentionDays: pick(current.ui.archiveRetentionDays ?? 30, base.ui.archiveRetentionDays ?? 30, wanted.ui.archiveRetentionDays ?? 30),
+      // The sidebar owns pin migration. An unrelated Settings save cannot undo it.
+      archiveRetentionPins: current.ui.archiveRetentionPins,
+      archiveRetentionPinsReady: current.ui.archiveRetentionPinsReady,
       sounds: pick(current.ui.sounds === true, base.ui.sounds === true, wanted.ui.sounds ?? current.ui.sounds === true),
       rotateTurnMinutes: pick(current.ui.rotateTurnMinutes, base.ui.rotateTurnMinutes, wanted.ui.rotateTurnMinutes),
-      rotateStopFallback: pick(current.ui.rotateStopFallback === true, base.ui.rotateStopFallback === true, wanted.ui.rotateStopFallback ?? current.ui.rotateStopFallback === true),
+      // On unless false (2.1.49): a missing value is the default, on.
+      rotateStopFallback: pick(current.ui.rotateStopFallback !== false, base.ui.rotateStopFallback !== false, wanted.ui.rotateStopFallback ?? current.ui.rotateStopFallback !== false),
       localAppUsage: pick(current.ui.localAppUsage, base.ui.localAppUsage, wanted.ui.localAppUsage),
       keepAwake: pick(current.ui.keepAwake, base.ui.keepAwake, wanted.ui.keepAwake),
       keepScreenAwake: pick(current.ui.keepScreenAwake, base.ui.keepScreenAwake, wanted.ui.keepScreenAwake),
@@ -535,7 +597,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.ui.privacyScreenshots,
         wanted.ui.privacyScreenshots
       ),
-      phonePush: mergePhonePush(current.ui.phonePush, base.ui.phonePush, wanted.ui.phonePush),
+      phonePush: mergePhonePush(current.ui.phonePush, base.ui.phonePush as PhonePushSettings | undefined, wanted.ui.phonePush as PhonePushSettings | undefined),
       // Missing means on, here as in the saved settings.
       secretsShield: pick(current.ui.secretsShield !== false, base.ui.secretsShield !== false, wanted.ui.secretsShield ?? current.ui.secretsShield !== false),
       theme: pick(current.ui.theme, base.ui.theme, wanted.ui.theme)
@@ -575,6 +637,7 @@ function mergeSettings(current: Config, base: SettingsSnapshot, wanted: Settings
         base.multiAgent.globalMaxWorkers ?? 0,
         wanted.multiAgent.globalMaxWorkers ?? 0
       ),
+      chatsAtOnce: pick(current.multiAgent.chatsAtOnce ?? 0, base.multiAgent.chatsAtOnce ?? 0, wanted.multiAgent.chatsAtOnce ?? 0),
       allowUnattributedCalls: pick(
         current.multiAgent.allowUnattributedCalls,
         base.multiAgent.allowUnattributedCalls,
@@ -681,6 +744,7 @@ async function buildState(): Promise<AppState> {
     hasGoalKey: await hasSecret('openRouterApiKey'),
     hasCustomProviderKey: await hasSecret('customProviderApiKey'),
     hasPhonePushToken: await hasSecret('ntfyToken'),
+    telegram: telegramView(),
     // After the reads above: only a read can find the file unreadable.
     credentialsUnreadable: storedSecretsUnreadable(),
     resolvedBinary: resolvedBinary(config),
@@ -693,13 +757,38 @@ async function buildState(): Promise<AppState> {
   };
 }
 
+const SCHEDULE_SAFE_ERRORS = new Set([
+  'The session exists but its metadata could not be read.',
+  'Could not read scheduled-runs state',
+  'The saved manual run id belongs to a different scheduled message.',
+  'These schedules were saved by a newer version of Chat Marks. Update the app to change them.',
+  'This chat is not connected to a ChatGPT conversation yet.',
+  'Write the message to send.',
+  'Choose a schedule that runs at least once an hour apart.',
+  'Choose an end date in the future.',
+  'There are too many scheduled chats. Remove one first.',
+  'This chat is not connected to a ChatGPT conversation yet.',
+  'This chat no longer exists.'
+]);
+
+/** Schedule IPC must not expose native filesystem errors or user-data paths to the renderer. */
+function scheduleIpcError(err: unknown): string {
+  if (err instanceof z.ZodError) return err.issues[0]?.message ?? 'Invalid input';
+  return err instanceof Error && SCHEDULE_SAFE_ERRORS.has(err.message)
+    ? err.message
+    : 'The schedule operation failed. Check the local app logs for details.';
+}
+
 /** Wraps a handler so a thrown error becomes a message the UI can show. */
-function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void {
-  ipcMain.handle(channel, async (_event, payload: unknown) => {
+function handle<T>(channel: string, fn: (payload: unknown, event: IpcMainInvokeEvent) => Promise<T>): void {
+  ipcMain.handle(channel, async (event, payload: unknown) => {
     try {
-      return { ok: true as const, data: await fn(payload) };
+      if (markspanelAccessBlocked()) throw new Error('MarksPanel is signing out; local actions are blocked');
+      return { ok: true as const, data: await fn(payload, event) };
     } catch (err) {
-      const message =
+      const message = channel.startsWith('schedules:')
+        ? scheduleIpcError(err)
+        :
         err instanceof SandboxError || err instanceof z.ZodError
           ? err instanceof z.ZodError
             ? (err.issues[0]?.message ?? 'Invalid input')
@@ -716,7 +805,8 @@ function handle<T>(channel: string, fn: (payload: unknown) => Promise<T>): void 
 export async function openSessionChat(id: string): Promise<void> {
   const summary = await getSession(id);
   const conversationId = summary?.conversationId;
-  if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId)) {
+  // Chat Marks: an API chat id is shaped like a ChatGPT id but has no ChatGPT page.
+  if (!conversationId || !/^[0-9a-z-]{8,64}$/i.test(conversationId) || isApiConversationId(conversationId)) {
     throw new Error('This session has no valid ChatGPT conversation');
   }
   // The selected browser owns this explicit action. In particular, a connected companion in
@@ -730,12 +820,94 @@ export async function openSessionChat(id: string): Promise<void> {
   if (!(await revealChatInBrowser(conversationId))) await openInPreferredBrowser(chatUrl(conversationId), { reveal: true });
 }
 
+// Shared by explicit deletion and archive expiration. One fence covers outbox,
+// trust, recorder identity, persistent history and external grants.
+const deletingSessionIds = new Set<string>();
+export async function deleteRecordedSession(id: string): Promise<boolean> {
+  if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
+  deletingSessionIds.add(id);
+  try {
+    const summary = await getSession(id);
+    if (summary?.conversationId) {
+      await setChatsTrusted([summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)], false);
+    }
+    await cancelSessionInputs(id);
+    if (summary) await forgetOwnSent([...new Set([...(summary.conversationId ? [summary.conversationId] : []), ...(summary.chatIds ?? [])])])
+      .catch((error: Error) => logWarn(`session ${id}: its own-sent record could not be removed (${error.message})`));
+    // Stop engine work while the session is still addressable: a deleted Codex chat must not keep
+    // a live turn or be picked up by the next startup recovery sweep.
+    if (summary && isApiConversationId(summary.conversationId)) {
+      const record = await storedChatRecord(id);
+      if (record) await agentEngine(record.engine ?? 'cliproxy').stop(id);
+    }
+    const detached = forgetSession(id);
+    if (summary?.conversationId) {
+      setChatsBlocked([summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)], false);
+    }
+    await deleteSession(id);
+    // The ledger goes only after the session did; serialized updates keep a queued turn write
+    // from restoring a stale entry.
+    if (summary && isApiConversationId(summary.conversationId)) await forgetChatRecord(id);
+    if (summary?.conversationId) {
+      for (const conversationId of [summary.conversationId, ...committedResumeAncestorsFromSummary(summary, summary.conversationId)]) {
+        revokeVaultChat(conversationId);
+        revokeRemoteChat(conversationId);
+      }
+    }
+    await forgetChatGroupMember(id);
+    logInfo(detached.length > 0
+      ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
+      : `session ${id} deleted`);
+    return true;
+  } finally { deletingSessionIds.delete(id); }
+}
+/** The Telegram bot's change listener of the current registration; a second registration replaces it. */
+let dropTelegramListener: (() => void) | null = null;
+
+/** A message the person wrote: not an automatic Continue, a Goal decision, a finish step or an opening. */
+export function personsMessage(entry: InputEntry): boolean {
+  // Who wrote it, not when it goes: a message the person queued for the finish is still theirs,
+  // while the finish's generated checkpoints carry no authored text (CodeRabbit on #1981).
+  return !entry.opening && !entry.recovery && !entry.continuedFrom && !entry.purpose && !entry.finishOwner &&
+    (entry.authoredSource ?? 'text') !== 'none';
+}
+
 export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall: () => void): void {
+  registerVmsIpc(getWindow);
+  initCompanyStore(app.getPath('userData'));
+  initCompanyLocalGrants(app.getPath('userData'));
+  initializeCompanyObservability(app.getPath('userData'));
+  registerCompanyIpc(getWindow);
+  registerNotificationCenterIpc(getWindow);
   registerWorkspaceTerminalIpc(getWindow);
+  registerCliModuleIpc(getWindow);
+  registerApiChatIpc(getWindow);
+  registerCliProxyIpc(getWindow); // Chat Marks: CLIProxyAPI versions, install/update, management keys.
+  registerUpstreamIpc(getWindow); // Chat Marks: upstream OpenCode and ZeroClaw versions and install/update.
+  registerCcrIpc(getWindow); // Chat Marks: Claude Code Router module (install/update, service, router availability for chat routes).
+  registerCliChatIpc(getWindow);
+  // Sign out is an application admission transition. End this process after
+  // clearing its secure session so the next startup must authenticate again.
+  ipcMain.handle('markspanel:logout', async event => {
+    const target = getWindow();
+    if (!target || target.isDestroyed() || event.sender !== target.webContents || event.senderFrame !== target.webContents.mainFrame) {
+      return { ok: false, error: 'Window not authorized' };
+    }
+    try {
+      await logoutMarkspanel();
+      setImmediate(() => app.quit());
+      return { ok: true, data: true };
+    } catch { return { ok: false, error: 'Unable to sign out securely' }; }
+  });
+  registerAgentOutputIpc(getWindow);
   registerDictationIpc(getWindow);
+  registerJarvisAudioIpc(getWindow);
+  registerVaultIpc(getWindow);
+  // Chat Marks: Brain has one fixed, frame-checked, validated IPC surface.
+  registerBrainIpc(getWindow);
+  registerRemoteHostsIpc(getWindow);
   // A session row remains visible until its delete IPC resolves. Fence Trust while deletion is
   // in flight so a second click cannot recreate permission after the row's durable revoke.
-  const deletingSessionIds = new Set<string>();
   let watchedWindow: BrowserWindow | null = null;
   const projectFileWatches = new ProjectFileWatchSet(event => {
     const target = getWindow();
@@ -798,9 +970,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     markStartup('renderer');
     return state;
   });
+  handle('marks:promptPreview', async () => currentMarksSystemPrompt('chatgpt'));
 
   // Phone notifications: a test message now, and the optional access token (kept in secure storage).
   handle('phonePush:test', async () => { await testPhonePush(); });
+  // Telegram (#1934): the token goes to secure storage and never comes back to the window.
+  handle('telegram:connect', async payload => {
+    const { token } = z.object({ token: z.string().max(256) }).strict().parse(payload);
+    await connectTelegram(token);
+    return buildState();
+  });
+  handle('telegram:disconnect', async () => { await disconnectTelegram(); return buildState(); });
+  handle('telegram:test', async () => { await testTelegram(); });
+  dropTelegramListener?.();
+  dropTelegramListener = onTelegramChange(() => { void buildState().then(state => push('state:changed', state)).catch(() => undefined); });
   handle('phonePush:token', async payload => {
     const { token } = z.object({ token: z.string().max(512) }).strict().parse(payload);
     const trimmed = token.trim();
@@ -892,6 +1075,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     // reaches automatic plugin refresh. Cosmetic saves must not invalidate discovery.
     if (before.multiAgent.enabled !== next.multiAgent.enabled || before.sessions.record !== next.sessions.record ||
         before.ui.finishTool !== next.ui.finishTool ||
+        (before.ui.linuxDesktopEnabled === true) !== (next.ui.linuxDesktopEnabled === true) ||
         JSON.stringify(effectiveCapabilities(before)) !== JSON.stringify(effectiveCapabilities(next))) forgetExposedSurface();
     // Order matters, and it used to be wrong. Pausing the run and withdrawing worker browser
     // commands has to happen while the bridge can still cancel those transports; stopping the
@@ -918,6 +1102,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     };
     // Recording, workers and direct browser tools share the same extension transport.
     // Startup and settings saves use one eligibility rule.
+    if (!before.multiAgent.archiveWorkerChats && next.multiAgent.archiveWorkerChats) {
+      // The explicit Off -> On transition is consent to migrate already finished workers.
+      // This is a reversible ChatGPT archive; their durable reports, identity and worktrees
+      // stay untouched. Active workers and unresolved host approvals are never migrated.
+      const eligible = completedIdleWorkerConversations().filter(id => !approvalCardWaiting(id));
+      queueWorkerArchives(eligible, Date.now(), workerArchiveFinishDelayMs());
+      logInfo(`worker archive: user-enabled migration queued ${eligible.length} stopped worker chat(s)`);
+    }
     await step(() => browserExtensionRequired(next) ? startBridge() : stopBridge());
     if (before.ui.chatBrowser !== next.ui.chatBrowser) await step(syncCosBrowser);
     if (before.capabilities.screen !== next.capabilities.screen || before.capabilities.control !== next.capabilities.control || before.readOnly !== next.readOnly) wakeBrowserWork('browser-control');
@@ -1211,6 +1403,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const session = await getSession(sessionId);
     return assignChatGroup(session ? { id: session.id, projectId: session.projectId ?? null, origin: session.origin ?? null } : null, target);
   });
+  // Move to project (#1919): the chat, its sub-agents and its group place change; nothing it does.
+  handle('sessions:moveProject', async payload => {
+    const { sessionId, projectId, groupId: target } = z.object({ sessionId: sessionIdArg.shape.id,
+      projectId: z.string().min(1).max(160).nullable(), groupId: groupId.nullable().optional() }).strict().parse(payload);
+    const { from, fromGroup, moved, groups } = await moveChatWithGroup(sessionId, projectId, target);
+    // The moved chats' own summaries: a row from older history is not on the newest page the
+    // sidebar rereads, and a move does not change its place in the list (CodeRabbit on #1965).
+    const summaries = (await Promise.all([...new Set([sessionId, ...moved])].map(id => getSession(id))))
+      .filter((summary): summary is NonNullable<typeof summary> => !!summary);
+    return { from, fromGroup, groups, summaries };
+  });
   handle('pets:list', async () => petLibraryState());
   handle('pets:overlayState', async () => petOverlayControlState());
   handle('pets:overlayVisible', async payload => {
@@ -1248,6 +1451,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('skills:list', () => listSkills());
   handle('skills:managed', () => listManagedSkills());
   handle('skills:recommended', () => listRecommendedSkills());
+  handle('skills:agencyCatalog', () => listAgencyAgents());
+  handle('skills:agencyImport', async payload => {
+    const { path, commit } = z.object({
+      path: z.string().min(5).max(190), commit: z.string().regex(/^[a-f0-9]{40}$/)
+    }).strict().parse(payload);
+    return importAgencyAgent(path, commit);
+  });
+  handle('skills:agencyUpdate', async payload => {
+    const { path, commit, sha } = z.object({
+      path: z.string().min(5).max(190), commit: z.string().regex(/^[a-f0-9]{40}$/),
+      sha: z.string().regex(/^[a-f0-9]{40}$/)
+    }).strict().parse(payload);
+    return updateAgencyAgent(path, commit, sha, directory => shell.trashItem(directory));
+  });
   handle('skills:installRecommended', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
     return installRecommendedSkill(id);
@@ -1272,14 +1489,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   });
   handle('skills:githubLink', async payload => {
     const { id, url } = z.object({ id: z.string().regex(SKILL_ID_PATTERN), url: z.string().trim().min(1).max(2048) }).strict().parse(payload);
+    if (id.startsWith('agency-')) throw new Error('Marks Agency skills use the verified Agency catalog, not the generic GitHub linker.');
     return linkGitHubSkill(id, url);
   });
   handle('skills:githubCheck', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    if (id.startsWith('agency-')) throw new Error('Check Marks Agency skills through their official catalog.');
     return checkGitHubSkillUpdates(id);
   });
   handle('skills:githubUpdate', async payload => {
     const { id } = z.object({ id: z.string().regex(SKILL_ID_PATTERN) }).strict().parse(payload);
+    if (id.startsWith('agency-')) throw new Error('Update Marks Agency skills through their verified individual update flow.');
     return updateGitHubSkill(id, directory => shell.trashItem(directory));
   });
   handle('skills:remove', async payload => {
@@ -1322,6 +1542,26 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return project;
   });
   // A folder on a server (#1469): the address and folder as typed; the server is asked once.
+  handle('projects:addRemoteProfile', async payload => {
+    const { profileId, folder } = z.object({ profileId: z.string().uuid(), folder: z.string().min(1).max(4096) }).strict().parse(payload);
+    const { createRemoteProfileProject } = await import('./projects.js');
+    const project = await createRemoteProfileProject(app.getPath('userData'), profileId, folder);
+    push('session:changed');
+    return project;
+  });
+  handle('projects:syncRemoteProfile', async payload => {
+    const { projectId, direction } = z.object({ projectId: z.string().uuid(), direction: z.enum(['pull', 'push']) }).strict().parse(payload);
+    const window = getWindow();
+    if (!window) throw new Error('No window');
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'warning', buttons: [mainText('Cancel'), mainText('Synchronize')], defaultId: 0, cancelId: 0, noLink: true,
+      title: mainText('SFTP mirror synchronization'),
+      message: direction === 'push' ? mainText('Upload local files to the selected SSH profile?') : mainText('Download remote files into the local mirror?'),
+      detail: mainText('Existing files can be overwritten. No files are deleted. Secrets and common credential files are excluded.')
+    });
+    if (response !== 1) return null;
+    return syncRemoteProfileProject(projectId, direction);
+  });
   handle('projects:addRemote', async payload => {
     const { address, folder, chatgpt } = (payload ?? {}) as { address?: unknown; folder?: unknown; chatgpt?: unknown };
     if (typeof address !== 'string' || typeof folder !== 'string' || address.length > 300 || folder.length > 4096) throw new Error('Enter an SSH address and a folder');
@@ -1343,29 +1583,62 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
     return (await listSchedules()).find(row => row.sessionId === sessionId) ?? null;
   });
+  handle('schedules:list', async () => listScheduleItems(Date.now(), {
+    session: async id => {
+      const summary = await getSessionOrNullIfMissing(id);
+      return summary ? { id: summary.id, title: summary.title } : null;
+    },
+    inputs: async () => (await listInputs()).map(row => ({
+      id: row.id, state: row.state, deliveredAt: row.deliveredAt, scheduled: row.scheduled,
+      sendAuthorizedAt: row.sendAuthorizedAt, deliveryProof: deliveryProof(row)
+    })),
+    log: logInfo
+  }));
   handle('schedules:save', async payload => {
     const request = z.object({ sessionId: scheduleSession, text: z.string().max(200_000), repeat: z.unknown(), until: z.number().int().nonnegative().nullable(),
       catchUp: z.boolean().optional() }).strict().parse(payload);
     const repeat = scheduleRepeatSchema.parse(request.repeat);
-    if (!(await getSession(request.sessionId))) throw new Error('This chat no longer exists.');
+    const session = await getSessionOrNullIfMissing(request.sessionId);
+    if (!session) throw new Error('This chat no longer exists.');
+    if (!session.conversationId) throw new Error('This chat is not connected to a ChatGPT conversation yet.');
     const saved = await saveSchedule({ sessionId: request.sessionId, text: request.text, repeat, until: request.until, catchUp: request.catchUp === true });
-    logInfo(`scheduled run: schedule saved (${repeat.kind}) for ${request.sessionId}`);
+    logInfo(`scheduled run: schedule saved (${repeat.kind})`);
     push('session:changed');
     return saved;
   });
   handle('schedules:pause', async payload => {
     const { sessionId, paused } = z.object({ sessionId: scheduleSession, paused: z.boolean() }).strict().parse(payload);
     const updated = await setSchedulePaused(sessionId, paused);
-    if (updated) logInfo(`scheduled run: ${paused ? 'paused' : 'resumed'} for ${sessionId}`);
+    if (updated) logInfo(`scheduled run: ${paused ? 'paused' : 'resumed'}`);
     push('session:changed');
     return updated;
   });
   handle('schedules:delete', async payload => {
     const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
     const removed = await deleteSchedule(sessionId);
-    if (removed) logInfo(`scheduled run: schedule removed for ${sessionId}`);
+    if (removed) logInfo('scheduled run: schedule removed');
     push('session:changed');
     return removed;
+  });
+  handle('schedules:runNow', async payload => {
+    const { sessionId } = z.object({ sessionId: scheduleSession }).strict().parse(payload);
+    const session = await getSessionOrNullIfMissing(sessionId);
+    if (session && !session.conversationId) throw new Error('This chat is not connected to a ChatGPT conversation yet.');
+    const changed = () => push('session:changed');
+    const queued = await runScheduleNow(sessionId, Date.now(), {
+      session: async id => {
+        const summary = await getSessionOrNullIfMissing(id);
+        return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null;
+      },
+      enqueue: (input, options) => enqueueInput(input, undefined, options),
+      inputs: async () => (await listInputs()).map(row => ({
+        id: row.id, state: row.state, deliveredAt: row.deliveredAt, scheduled: row.scheduled,
+        sendAuthorizedAt: row.sendAuthorizedAt, deliveryProof: deliveryProof(row)
+      })),
+      log: logInfo,
+      changed
+    });
+    return queued;
   });
   // Linking a project to a ChatGPT Project the account already has (#1756).
   handle('projects:chatgpt-choices', async () => chatgptProjectChoices());
@@ -1395,6 +1668,19 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     logInfo(`secrets shield: turned ${off ? 'off' : 'back on'} for a project's chats`);
     push('session:changed');
     return project;
+  });
+  // Related folders (#1689): context for a project's chats, chosen from approved folders only.
+  handle('projects:related', async payload => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const project = (await listProjects()).find(row => row.id === id);
+    if (!project) throw new Error('Project not found');
+    return relatedFolderViews(project);
+  });
+  handle('projects:related-set', async payload => {
+    const { id, folders } = z.object({ id: z.string().uuid(), folders: z.array(z.string().min(1).max(32768)).max(40) }).strict().parse(payload);
+    const project = await setRelatedFolders(id, folders);
+    push('session:changed');
+    return relatedFolderViews(project);
   });
   handle('projects:color', async payload => {
     const { id, color } = z.object({ id: z.string().uuid(), color: z.enum(PROJECT_COLORS).nullable() }).strict().parse(payload);
@@ -1429,7 +1715,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('roots:rename', async (payload) => {
     const { name, newName } = renameRoot.parse(payload);
     if (RESERVED_ROOT_NAMES.has(newName)) {
-      throw new SandboxError(`/${newName} is reserved by Chat On Steroids and cannot be used as a folder name`);
+      throw new SandboxError(`/${newName} is reserved by Chat Marks and cannot be used as a folder name`);
     }
     await updateConfig((config) => {
       if (!config.roots.some((root) => root.name === name)) throw new Error(`/${name} is not an approved folder`);
@@ -1713,12 +1999,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // submits it there; the app sends nothing itself. The diagnostics report is saved separately.
   handle('feedback:openIssue', async (payload) => {
     const text = (max: number) => z.string().max(max);
-    const report = z.discriminatedUnion('kind', [
-      z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
-        frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict(),
-      z.object({ kind: z.literal('idea'), problem: text(4000).refine(value => value.trim().length > 0),
-        proposal: text(4000).refine(value => value.trim().length > 0) }).strict()
-    ]).parse(payload);
+    const report = z.object({ kind: z.literal('bug'), what: text(4000).refine(value => value.trim().length > 0), steps: text(4000).optional(),
+      frequency: z.enum(['Every time', 'Sometimes', 'It happened once']).optional() }).strict().parse(payload);
     const bridge = await bridgeStatus();
     const { url, trimmed } = feedbackIssueUrl(report, {
       version: app.getVersion(), os: operatingSystemName(process.platform, systemVersion()), arch: process.arch,
@@ -1760,6 +2042,36 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     await refreshMacOSDesktopAccess({ promptAccessibility: true });
     return buildState();
   });
+  // A user action inside the focused main window is necessary for GNOME's Screenshot
+  // portal to display its consent dialog. Never synthesize a grant or send image bytes
+  // to the renderer. This is a diagnostic probe, not a general-purpose screen IPC.
+  let linuxScreenshotConsentPending = false;
+  handle('desktop:linuxScreenshotConsent', async (_payload, event) => {
+    // A different renderer must not borrow the main window's foreground state
+    // to trigger an operating-system access dialog.
+    const window = getWindow();
+    if (!window || window.isDestroyed() || event.sender !== window.webContents) {
+      logInfo('linux screenshot consent: refused because the request was not from the main window');
+      throw new Error('Screenshot permission can be requested only from the Chat Marks main window.');
+    }
+    if (linuxScreenshotConsentPending) {
+      logInfo('linux screenshot consent: refused because another request is already running');
+      throw new Error('A screenshot permission request is already running.');
+    }
+    linuxScreenshotConsentPending = true;
+    try {
+      return await testLinuxScreenshotConsent({
+        focused: () => {
+          const window = getWindow();
+          return !!window && !window.isDestroyed() && window.isFocused();
+        },
+        enabled: () => getConfig().ui.linuxDesktopEnabled === true,
+        screenAllowed: () => effectiveCapabilities(getConfig()).screen === true
+      });
+    } finally {
+      linuxScreenshotConsentPending = false;
+    }
+  });
   // A grant from an earlier build no longer applies, yet System Settings shows it on: reset this
   // app's own entries and ask again, so macOS files the grant under the build running now.
   handle('desktop:repairPermissions', async () => {
@@ -1781,6 +2093,11 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { text } = z.object({ text: z.string().max(1_000_000) }).parse(payload);
     await clipboard.writeText(text);
     return true;
+  });
+  handle('clipboard:read', async (payload) => {
+    const { primary } = z.object({ primary: z.boolean().optional() }).parse(payload ?? {});
+    const read = clipboard.readText as (type?: string) => Promise<string>;
+    return (await read(primary && process.platform === 'linux' ? 'selection' : 'clipboard')).slice(0, 262_144);
   });
   // A code block's Save: a bare `name.ext` suggestion only, so no renderer value can point outside the dialog's choice.
   handle('code:save', async (payload) => {
@@ -1837,6 +2154,17 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // nothing; the URL is built here from the checked release and this process's platform.
   // Opening Settings: ask GitHub again if the last answer is older than ten minutes. The status
   // reaches the window through the ordinary state push; this returns before the check does.
+  handle('modules:status', async () => modulesStatus());
+  handle('modules:action', async payload => {
+    const request = z.object({ id: z.enum(['cli-proxy-api', 'firefox-vpn', 'twindesk']), action: z.enum(['install', 'update', 'start', 'stop', 'restart', 'enable', 'disable', 'open']), managementUrl: z.string().max(256).optional() }).strict().parse(payload);
+    if (request.id !== 'cli-proxy-api') {
+      if (request.managementUrl !== undefined) throw new Error('External modules do not accept arbitrary management URLs.');
+      await externalModuleAction(request.id, request.action);
+      return modulesStatus();
+    }
+    return moduleAction(request.action, request.managementUrl);
+  });
+
   handle('update:refresh', async () => {
     void checkForUpdatesIfStale();
     return true;
@@ -1900,16 +2228,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // ------------------------------------------------------------- sessions
 
   handle('sessions:list', async (payload) => {
-    const { cursor, limit, projectId } = z
+    const { cursor, limit, projectId, archived, search } = z
       .object({
         cursor: sessionListCursorSchema.optional(),
         // Keep one renderer payload small even when the store can index much more history.
         limit: z.number().int().min(1).max(60).optional(),
         // One project's own pages: expanding a project must not page the whole history (#1190).
         projectId: z.string().regex(/^[a-f0-9-]{36}$/i).optional()
+        ,archived: z.boolean().optional(),
+        search: z.string().trim().max(150).optional()
       })
       .parse(payload ?? {});
-    return readSessionList({ cursor, limit: limit ?? 60, ...(projectId ? { projectId } : {}) });
+    const list = await readSessionList({ cursor, limit: limit ?? 60, archived, search, ...(projectId ? { projectId } : {}) });
+    // Chat Marks: each API chat names its engine, for the sidebar's chat type icon.
+    return { ...list, sessions: await withChatEngines(list.sessions) };
   });
 
   handle('sessions:image', async (payload) => {
@@ -1939,7 +2271,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const { actions, ...paging } = options;
     const page = await readSessionEvents(id, actions ? { ...paging, kinds: ['session_start', 'tool_call'] } : paging);
     if (!page) throw new Error('Session not found');
-    return page;
+    // Chat Marks: the same engine projection as the list, so a merged row keeps its type icon.
+    return page.summary ? { ...page, summary: (await withChatEngines([page.summary]))[0]! } : page;
   });
 
   const stageFiles = async (sources: AttachmentSource[]) => {
@@ -1964,8 +2297,28 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return (await stageFiles([{ text }]))[0]!;
   });
   handle('sessions:stopTurn', async payload => {
-    const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
-    return stopSessionTurn(id, expectedTurnId);
+    const { id, expectedTurnId, expectedConversationId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256),
+      expectedConversationId: z.string().min(1).max(256).optional() }).parse(payload);
+    // The chat and its Goal or Loop as Stop found them, before any of it changes. The window names the
+    // chat it showed Stop for: a Compact & Resume that moved the session since is not that chat (CodeRabbit on #2066).
+    const found = await sessionControlsFor(id).catch(() => null);
+    // A failed read is no licence to act on whatever chat the session shows now: the named chat still binds,
+    // and Goal or Loop that could not be read is not counted as stopped (CodeRabbit on #2066).
+    const before = found ? { ...found, conversationId: expectedConversationId ?? found.conversationId }
+      : expectedConversationId ? { conversationId: expectedConversationId, automation: 'off' as const } : null;
+    try {
+      return await stopSessionTurn(id, expectedTurnId);
+    } catch (error) {
+      if (!(error instanceof Error) || error.message !== 'active_turn_changed') throw error;
+      // The answer Stop showed for is no longer running: the app's own work still stops (Haz on #1883),
+      // and the person reads what happened, not an error code.
+      const outcome = await endOwnWorkAfterStop(id, expectedTurnId, before);
+      throw new Error(outcome.resumeGoesOn
+        ? 'That answer had already ended, so ChatGPT was not asked to stop. Compact & Resume was already moving this chat and goes on.'
+        : outcome.ended
+          ? "That answer had already ended, so ChatGPT was not asked to stop. This chat's automatic work is stopped."
+          : 'That answer had already ended; there was nothing to stop.');
+    }
   });
   handle('sessions:releaseFinish', async (payload) => {
     const { id, expectedTurnId } = sessionIdArg.extend({ expectedTurnId: z.string().min(1).max(256) }).parse(payload);
@@ -1981,11 +2334,35 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   handle('browser:preferences', async (payload) => requestBrowserPreferences(payload));
   handle('chatModels:request', async () => startChatModelDiscovery());
   handle('sessions:controls', async (payload) => sessionControlsFor(sessionIdArg.parse(payload).id));
+  // Resume now (#1694): the person ends ChatGPT's pause early, at the risk of the limit returning.
+  handle('automation:resumeNow', async () => resumeAutomaticSends());
+  // A step handed to the person (#1695): only their click answers it, and the app runs nothing.
+  handle('sessions:answerUserRequest', async (payload) => {
+    const parsed = sessionIdArg.extend({
+      requestId: z.string().regex(/^ur_[a-z0-9]{12}$/),
+      answer: z.enum(['done', 'skipped'])
+    }).safeParse(payload);
+    if (!parsed.success) {
+      // Field names only, never the payload (CodeRabbit on #2049).
+      logWarn(`user request answer refused: invalid ${[...new Set(parsed.error.issues.map(issue => String(issue.path[0] ?? 'payload')))].join(', ')}`);
+      throw parsed.error;
+    }
+    const { id, requestId, answer } = parsed.data;
+    const answered = await answerUserRequest(id, requestId, answer);
+    if (answered?.changed) logInfo(`user request ${requestId} marked ${answer} by the person in session ${id}`);
+    else logInfo(`user request ${requestId} not changed: ${answered ? `already ${answered.request.state}` : 'not found'} (session ${id})`);
+    return userRequestViews(id);
+  });
   // #1032: the user keeps this answer from being reloaded; false once the browser claimed it.
   handle('sessions:cancelRecovery', async (payload) => cancelAssistantRecovery(sessionIdArg.parse(payload).id));
+  // A chat whose next step was not picked up: the person's one click (2026-10-31).
+  handle('sessions:pickupNow', async (payload) => {
+    const args = z.object({ id: z.string().min(1).max(200), next: z.enum(['queue', 'goal', 'loop', 'continue']), stoppedAt: z.number().finite() }).parse(payload);
+    return pickupNow(args.id, { next: args.next, stoppedAt: args.stoppedAt });
+  });
   handle('sessions:automation', async (payload) => {
     const { id, automation, afterTurn } = sessionIdArg.extend({ automation: z.enum(['off', 'goal', 'loop']), afterTurn: z.boolean().optional() }).parse(payload);
-    return setSessionAutomation(id, automation, afterTurn);
+    return setSessionAutomation(id, automation, afterTurn, 'the app');
   });
   handle('sessions:objective', async (payload) => {
     const { id, text, mode } = sessionIdArg.extend({ text: z.string().max(MAX_TASK_REQUEST_CHARS), mode: z.enum(['goal', 'loop']) }).parse(payload);
@@ -1997,6 +2374,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return resumeFromSavedSummary(input.id, input.handoffId);
   });
   handle('sessions:cancelCompaction', async (payload) => cancelSessionCompaction(sessionIdArg.parse(payload).id));
+  handle('sessions:retryResume', async (payload) => retrySessionResume(sessionIdArg.parse(payload).id));
   handle('sessions:plan', async (payload) => {
     const { text, backend, requestId } = z.object({ text: z.string().trim().min(1).max(MAX_TASK_REQUEST_CHARS), backend: z.enum(['api', 'chatgpt']), requestId: z.string().uuid().optional() }).parse(payload);
     const publish = (progress: import('../shared/task-progress.js').TaskProgressUpdate) => {
@@ -2006,7 +2384,8 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     return runTaskRequest(requestId ?? randomUUID(), JSON.stringify(['plan', text, backend]), signal => draftTaskPlan(text, backend, publish, signal), publish);
   });
   handle('sessions:send', async (payload) => {
-    const input = inputArgs.parse(payload);
+    // Where a message came from is main's to say: the window never marks one as from Telegram.
+    const { via: _via, ...input } = inputArgs.parse(payload);
     await validateInputImages(input.images ?? []);
     return sendDesktopInput(input);
   });
@@ -2056,6 +2435,12 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     if (sent) wakeBrowserWork();
     return sent;
   });
+  handle('sessions:retryPickup', async (payload) => {
+    const { id } = z.object({ id: z.string().uuid() }).strict().parse(payload);
+    const retried = await retryStoppedQueuedPickup(id);
+    if (retried) wakeBrowserWork();
+    return retried;
+  });
   handle('sessions:editInput', async (payload) => { const { id, text, afterTurn } = z.object({ id: z.string().uuid(), text: inputArgs.shape.text, afterTurn: z.boolean().optional() }).parse(payload); return editQueuedInput(id, text, afterTurn); });
   handle('sessions:cancelInput', async (payload) => cancelDesktopInput(z.object({ id: z.string().uuid() }).parse(payload).id));
   handle('sessions:inputAutomation', async payload => {
@@ -2090,6 +2475,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     const answer = requestApprovalAnswer(conversationId, cardId, choice);
     if (answer.ok) {
       logInfo(`approval card: the user chose ${choice} in the app for ${conversationId}`);
+      wakeApprovalConversation(conversationId);
       return { ok: true as const };
     }
     return answer;
@@ -2099,11 +2485,20 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // the newest selection counts: a slower lookup for an earlier click must not win (#1267).
   let followSelection = 0;
   handle('sessions:followTab', async (payload) => {
-    const { id } = sessionIdArg.parse(payload);
+    const { id } = sessionIdArg.extend({ id: sessionIdArg.shape.id.nullable() }).parse(payload);
     const selection = ++followSelection;
-    const conversationId = (await getSession(id))?.conversationId;
+    // Clear an older queued follow before awaiting a lookup (or when New Chat has no session).
+    followChatInBackground(null);
+    if (id === null) return true;
+    const session = await getSession(id);
+    const conversationId = session?.conversationId;
     if (selection !== followSelection) return true;
-    if (conversationId && /^[0-9a-z-]{8,64}$/i.test(conversationId)) followChatInBackground(conversationId);
+    if (!session) return true;
+    if (!conversationId) {
+      logInfo('browser follow: selected chat has no conversation binding; follow stays pending for retry');
+      return false;
+    }
+    if (/^[0-9a-z-]{8,64}$/i.test(conversationId)) return followChatInBackground(conversationId);
     return true;
   });
 
@@ -2239,47 +2634,22 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     notifyChanged(id);
     return true;
   });
+  handle('sessions:archive', async (payload) => {
+    const { id, archived } = sessionIdArg.extend({ archived: z.boolean() }).parse(payload);
+    const summary = await archiveSessionLocally(id, archived);
+    notifyChanged(id);
+    return summary;
+  });
+  handle('sessions:setPins', async (payload) => {
+    const { ids } = z.object({ ids: z.array(z.string().uuid()).max(500) }).strict().parse(payload);
+    await updateConfig(config => ({ ...config, ui: { ...config.ui,
+      archiveRetentionPins: [...new Set(ids)], archiveRetentionPinsReady: true
+    } }));
+    return true;
+  });
   handle('sessions:delete', async (payload) => {
     const { id } = sessionIdArg.parse(payload);
-    if (deletingSessionIds.has(id)) throw new Error('This session is already being deleted');
-    deletingSessionIds.add(id);
-    try {
-      const summary = await getSession(id);
-      // Trust is permission. Revoke it durably before any other deletion side effect; otherwise
-      // a failed disk commit could leave this chat both trusted and newly unblocked, with its row
-      // already gone and no user control left to repair that authority.
-      if (summary?.conversationId) {
-        await setChatsTrusted([
-          summary.conversationId,
-          ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
-        ], false);
-      }
-      // Detach first. The recorder maps live ChatGPT conversations to session ids, so
-      // deleting the folder underneath a live one left it appending to a session that no
-      // longer existed — the events went to a resurrected half-session with no summary.
-      // Forgetting the mapping makes the next observation open a fresh session instead.
-      const detached = forgetSession(id);
-      // Release first. The current resumed row is also the only UI handle for a Block on one of
-      // its committed predecessors, so deleting the row must clear that whole policy lineage.
-      // Otherwise a hidden source block survives with no remaining row that can release it.
-      if (summary?.conversationId) {
-        setChatsBlocked([
-          summary.conversationId,
-          ...committedResumeAncestorsFromSummary(summary, summary.conversationId)
-        ], false);
-      }
-      await deleteSession(id);
-      // A deleted chat leaves its group too; the group itself stays.
-      await forgetChatGroupMember(id);
-      logInfo(
-        detached.length > 0
-          ? `session ${id} deleted; ${detached.length} live conversation(s) will start a new session`
-          : `session ${id} deleted`
-      );
-      return true;
-    } finally {
-      deletingSessionIds.delete(id);
-    }
+    return deleteRecordedSession(id);
   });
 
   handle('handoff:get', async (payload) => {
@@ -2334,6 +2704,14 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
   // ----------------------------------------------------------------- swarm
 
   handle('swarm:get', async () => swarmState());
+  handle('swarm:archiveAll', async (payload) => {
+    const { sessionId } = z.object({ sessionId: z.string().min(8).max(64) }).strict().parse(payload);
+    const session = await getSession(sessionId);
+    if (!session?.conversationId || session.origin?.kind === 'worker') throw new Error('Owner session not found');
+    const result = await archiveAllOwnedWorkers({ conversationId: session.conversationId });
+    notifyChanged(sessionId);
+    return result;
+  });
   handle('swarm:reset', async () => {
     resetSwarm();
     if (!(await persistAgentAuthorityNow())) {
@@ -2547,18 +2925,28 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       });
     },
     changed: () => push('session:changed'),
-    recordDelivered: (entry, anchorCommitted) => getConfig().sessions.record ? recordDeliveredInput(entry, anchorCommitted) : Promise.resolve(true),
+    recordDelivered: async (entry, anchorCommitted) => {
+      // The message that named a moved chat's folder went out: no other one repeats it (#1919).
+      if (entry.sessionId && personsMessage(entry) && (await getSession(entry.sessionId))?.projectNotePending)
+        await clearProjectNote(entry.sessionId).catch(error => logWarn(`projects: could not mark the folder note sent for ${entry.sessionId}: ${String(error)}`));
+      return getConfig().sessions.record ? recordDeliveredInput(entry, anchorCommitted) : true;
+    },
     prepareText: async (entry, limits, authored) => {
       const control = entry.conversationId ? goalSwitchFor(entry.conversationId) : getConfig().goal;
       const mode = entry.automation ?? (control.enabled ? control.mode : 'off');
-      const text = mode === 'goal' && goalBackendFor('goal') === 'templates' && !entry.text.includes(GOAL_MARKER_INSTRUCTION)
+      const baseText = mode === 'goal' && goalBackendFor('goal') === 'templates' && !entry.text.includes(GOAL_MARKER_INSTRUCTION)
         ? entry.text + GOAL_MARKER_INSTRUCTION : entry.text;
+      const remote = !entry.finishOwner && entry.purpose !== 'decision'
+        ? (await remoteModeInstructions(entry.sessionId, entry.projectId)) || await mentionedRemoteInstructions(entry.text) : '';
+      const text = remote ? prependUserPrompt(baseText, remote) : baseText;
       // Only the opening user input owns executor setup. Existing chats, queued
       // checkpoints and automatic continuations already have their instructions.
       // An edit of a chat's first question (#365) replaces the message that carried its setup.
       return ((entry.opening || !entry.sessionId) && !entry.conversationId && !entry.finishOwner && entry.mode !== 'finish') || entry.editFramed
-        ? prepareSessionPrompt(text, entry, limits, authored)
-        : !entry.finishOwner && entry.purpose !== 'decision' ? prepareSkillFollowup(text, authored, limits, entry) : text;
+        ? prepareSessionPrompt(text, { ...entry, brainContext: true }, limits, authored)
+        : !entry.finishOwner && entry.purpose !== 'decision'
+          ? prepareSkillFollowup(text, authored, limits, entry, personsMessage(entry) && !!entry.sessionId && (await getSession(entry.sessionId))?.projectNotePending === true)
+          : text;
     },
     applyAutomation: async (conversationId, automation, phase, objective, loopAfterTurn) => {
       // This message supersedes the old final; never pick that old final up merely
@@ -2566,7 +2954,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
       const mode = automation === 'off' ? goalSwitchFor(conversationId).mode : automation;
       // Reserve switch ordering immediately, before awaiting another ledger write.
       // A user Off arriving during persistence must remain later than this attempt.
-      const switchWrite = setGoalSwitchNow(conversationId, mode, automation !== 'off', loopAfterTurn);
+      const switchWrite = setGoalSwitchNow(conversationId, mode, automation !== 'off', loopAfterTurn, "the app's message settings");
       const [held] = await Promise.all([switchWrite, setGoalReplyActiveNow(conversationId, false)]);
       // A fresh chat can finish before its send ACK arrives. Its newest final is
       // this message's own response, so it may be picked up after binding.
@@ -2588,6 +2976,7 @@ export function registerIpc(getWindow: () => BrowserWindow | null, quitToInstall
     });
   };
   onStatusChange(pushState);
+  onChatsAtOnceChange(pushState);
   onRecordingStorageFullChange(pushState);
   onBridgeChange(pushState);
   onCosBrowserSignInChange(pushState);

@@ -25,7 +25,8 @@ export default defineConfig({
           'desktop-ask': resolve(__dirname, 'src/preload/desktop-ask.ts'),
           'cos-browser': resolve(__dirname, 'src/preload/cos-browser.ts'),
           'cos-browser-worker': resolve(__dirname, 'src/preload/cos-browser-worker.ts'),
-          'cos-browser-sign-in': resolve(__dirname, 'src/preload/cos-browser-sign-in.ts')
+          'cos-browser-sign-in': resolve(__dirname, 'src/preload/cos-browser-sign-in.ts'),
+          'markspanel-login': resolve(__dirname, 'src/preload/markspanel-login.ts')
         }
       }
     }
@@ -53,7 +54,8 @@ export default defineConfig({
           'update-progress': resolve(__dirname, 'src/renderer/update-progress.html'),
           'desktop-ask': resolve(__dirname, 'src/renderer/desktop-ask.html'),
           'cos-browser': resolve(__dirname, 'src/renderer/cos-browser.html'),
-          'cos-browser-sign-in': resolve(__dirname, 'src/renderer/cos-browser-sign-in.html')
+          'cos-browser-sign-in': resolve(__dirname, 'src/renderer/cos-browser-sign-in.html'),
+          'markspanel-login': resolve(__dirname, 'src/renderer/markspanel-login.html')
         }
       }
     }

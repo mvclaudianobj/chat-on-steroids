@@ -13,17 +13,17 @@ import { makeTempDir, removeTempDir } from './helpers.js';
 
 describe('connector names', () => {
   it('keeps the plain names without a suffix', () => {
-    expect(connectorNames()).toEqual({ core: 'Chat On Steroids Core', desktop: 'Chat On Steroids Desktop', plugins: 'Chat On Steroids Plugins' });
+    expect(connectorNames()).toEqual({ core: 'Chat Marks Core', desktop: 'Chat Marks Desktop', plugins: 'Chat Marks Plugins' });
     expect(connectorNames('')).toEqual(connectorNames());
   });
 
   it('names this computer\'s set with its suffix in parentheses', () => {
     expect(connectorNames('Windows VM')).toEqual({
-      core: 'Chat On Steroids Core (Windows VM)',
-      desktop: 'Chat On Steroids Desktop (Windows VM)',
-      plugins: 'Chat On Steroids Plugins (Windows VM)'
+      core: 'Chat Marks Core (Windows VM)',
+      desktop: 'Chat Marks Desktop (Windows VM)',
+      plugins: 'Chat Marks Plugins (Windows VM)'
     });
-    expect(connectorName('core', '  Büro   PC_2.0-a  ')).toBe('Chat On Steroids Core (Büro PC_2.0-a)');
+    expect(connectorName('core', '  Büro   PC_2.0-a  ')).toBe('Chat Marks Core (Büro PC_2.0-a)');
   });
 
   it.each([
@@ -31,7 +31,7 @@ describe('connector names', () => {
     ['not a string', 42], ['null', null]
   ])('falls back to the plain names for %s', (_case, value) => {
     expect(normalizeConnectorSuffix(value)).toBe('');
-    expect(connectorName('core', value)).toBe('Chat On Steroids Core');
+    expect(connectorName('core', value)).toBe('Chat Marks Core');
   });
 });
 
@@ -59,7 +59,7 @@ describe('the configured suffix', () => {
     expect(SURFACE_IDS.map(id => surfaceDefinition(id).connectorName)).toEqual(Object.values(connectorNames('Windows')));
     // The plain definition table itself is never changed.
     await saveConfig({ ...getConfig(), connectorSuffix: '' });
-    expect(surfaceDefinition('core').connectorName).toBe('Chat On Steroids Core');
+    expect(surfaceDefinition('core').connectorName).toBe('Chat Marks Core');
   });
 });
 

@@ -86,7 +86,10 @@
   /** ChatGPT-rendered authored prose. Tool rows and this extension's own surfaces are excluded. */
   const MARKDOWN = '.markdown, [data-markdown-text-style="assistant-message"]';
   const TOOL = 'span[class*="tool-message"], div.pointer-events-none.contents, div:has(> [data-testid="cot-v5-tool-icon-pile"])';
-  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img, [class~="group/generated-image-preview"] img';
+  // A gallery's thumbnails sit beside its large preview, outside both groups (#2005, seen 2026-11-02/03):
+  // `div[role=group] > button[aria-pressed] > img`. Being matched here is not ownership: each node still
+  // needs its exact typed image below.
+  const GENERATED_IMAGE = '[class~="group/imagegen-image"] img, [class~="group/generated-image-preview"] img, [role="group"] > button[aria-pressed] > img';
   const OWN_SURFACES = '.clf-stream, .clf-stage, .clf-composer, .clf-boot';
   const MAX_RENDERED_HTML = 120_000;
   // An exact, stable assistant final can have far more than 120k of decorative
@@ -127,19 +130,19 @@
    * (`server.ts`), so these are this app naming itself rather than labels somebody typed.
    * The pre-1.7.1 name stays so an older chat's evidence still reads.
    *
-   * Exact names, never a prefix: `Chat On Steroids Backup` would be somebody else's
+   * Exact names, never a prefix: `Chat Marks Backup` would be somebody else's
    * connector, and a prefix test would have this app vouch for its traffic.
    *
    * A computer that shares its ChatGPT account with another names its connectors with a suffix
-   * ("Chat On Steroids Core (Windows)"). The content script passes this install's names with
+   * ("Chat Marks Core (Windows)"). The content script passes this install's names with
    * every ask, and only those are ours: the other computer's calls run there, not here. Measured
    * 2026-10-04: the call path, `invocation.server` and `app_name` all carry the name as typed.
    */
-  const PLAIN_APPS = ['Chat On Steroids Core', 'Chat On Steroids Desktop', 'Chat On Steroids Plugins'];
+  const PLAIN_APPS = ['Chat Marks Core', 'Chat Marks Desktop', 'Chat Marks Plugins'];
   const LEGACY_APPS = ['TobisComputer'];
-  const SUFFIXED_APP = /^Chat On Steroids (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u;
+  const SUFFIXED_APP = /^Chat Marks (Core|Desktop|Plugins) \([\p{L}\p{N} ._-]{1,32}\)$/u;
   let OUR_APPS = [...PLAIN_APPS, ...LEGACY_APPS];
-  /** Takes the names an ask carries: three "Chat On Steroids …" names, in core/desktop/plugins order. */
+  /** Takes the names an ask carries: three "Chat Marks …" names, in core/desktop/plugins order. */
   function adoptAppNames(names) {
     if (!Array.isArray(names) || names.length !== 3) return;
     const words = ['Core', 'Desktop', 'Plugins'];
@@ -791,6 +794,27 @@
    * uploads and every other role/channel is private or unknown. Only the provider message UUID,
    * sediment file id and bounded geometry cross worlds; no signed URL or arbitrary metadata does.
    */
+  /**
+   * The sediment file one mounted gallery image shows, or null. The gallery's own shell item is only its
+   * first image, so each image is found by its id among this turn's typed images (#2005: the large
+   * preview showing another image, and every thumbnail, were all "Image preview unavailable"). The large
+   * preview names its image (`imageId`) and says it is complete and not a preview; a thumbnail names its
+   * image object. Exactly one typed image of this turn must have that id, the same message and the
+   * same source, and be completed.
+   */
+  function galleryImageAsset(control, shown, shellImages) {
+    if (control && (control.isComplete !== true || control.isPreview !== false)) return null;
+    const wanted = control ? control.imageId : shown?.id;
+    if (typeof wanted !== 'string' || !wanted) return null;
+    if (control && shown && shown.id !== wanted) return null;
+    const matches = [...shellImages.keys()].filter(item => item?.id === wanted);
+    if (matches.length !== 1) return null;
+    const item = matches[0];
+    if (item.status !== 'completed' || item.isPreview === true) return null;
+    if (shown && (shown.chatGptMessageId !== item.chatGptMessageId || (typeof shown.src === 'string' && shown.src !== item.src))) return null;
+    return shellImages.get(item);
+  }
+
   function generatedImagesOf(sections, messages, exactImageNodes, shellImages = new Map()) {
     const out = [];
     const seen = new Set();
@@ -854,13 +878,13 @@
             // Current image previews use blob pixels. Only the mounted typed item
             // and its exact per-image control can identify those pixels; a blob URL
             // or a nearby gallery alone is not an asset identity.
-            let control = null;
+            let control = null, shown = null;
             for (let at = fiberOf(node), up = 0; at && up < MAX_CLIMB; up++, at = at.return) {
               const props = at.memoizedProps;
               if (props?.imageId && !control) control = props;
+              if (props?.image && typeof props.image === 'object' && !shown) shown = props.image;
               if (shellImages.has(props?.item)) {
-                if (control?.imageId === props.item.id && control.isComplete === true && control.isPreview === false)
-                  assetId = shellImages.get(props.item);
+                assetId = galleryImageAsset(control, shown, shellImages);
                 break;
               }
               if (props?.entry) break;
@@ -914,6 +938,9 @@
       if (!message || typeof message !== 'object') continue;
       const author = message.author;
       if (!author || author.role !== 'assistant') continue;
+      // A tool request after an answer is the turn going on past it: an earlier end_turn no
+      // longer ends this turn (live 2026-10-21, see shellTurnSource).
+      if (requestOf(message) || message.recipient === 'functions.exec') return null;
       const content = message.content;
       if (!content || typeof content !== 'object' || !['text', 'multimodal_text', 'image'].includes(content.content_type)) continue;
       if (neverTerminalChannel(message)) continue;
@@ -1376,7 +1403,7 @@
     return out;
   }
 
-  /** "/Chat On Steroids Core/link_…/read" -> "read", or null if that is not a name. */
+  /** "/Chat Marks Core/link_…/read" -> "read", or null if that is not a name. */
   function toolName(value) {
     if (typeof value !== 'string' || value.length === 0) return null;
     const tail = value.slice(value.lastIndexOf('/') + 1);
@@ -2256,12 +2283,36 @@
     if (!entry || !turnId || entry.id !== turnId || entry.turn.items.length > MAX_ROWS) return null;
     const place = shellQuestionPlace(entryFiber, entry, section);
     const messages = [], calls = [], slots = [], seen = new Set(), callSources = new Map(), executionIds = [], images = new Map();
-    let lastAnswer = null, previousId = null;
+    let lastAnswer = null, previousId = null, answerMessage = null;
     const remember = id => { if (!id || seen.has(id)) return false; seen.add(id); return true; };
     // GPT-6 (2026-10-12) writes each interim sentence as an assistant message inside the working
     // group while the turn runs. A top-level item owns its id; a nested copy of it is not read twice.
     const topLevel = new Set(entry.turn.items.filter(item => item?.type === 'assistant-message').map(item => str(item.messageId)).filter(Boolean));
     let work = 0;
+    // ChatGPT's own times for this turn (#2005): a question found in older history was recorded at the
+    // moment it was read, hours or months late. The question was sent when the turn's work started
+    // (its own `sentAtMs` once ChatGPT keeps it), and a finished answer was written when it completed.
+    // Only a plausible ChatGPT time counts: after 2020 and not later than a day from now (CodeRabbit on #2064).
+    const at = value => Number.isFinite(value) && value >= 1577836800000 && value <= Date.now() + 86_400_000 ? value : undefined;
+    const startedAt = at(entry.turn.workStartedAtMs), completedAt = at(entry.turn.workCompletedAtMs);
+    const appendGeneratedImage = item => {
+      const id = str(item.chatGptMessageId);
+      const asset = typeof item.src === 'string' && /^sediment:\/\/(file_[A-Za-z0-9_-]{8,100})$/.exec(item.src)?.[1];
+      if (!id || !asset || !Array.isArray(entry.turn.messageIds) || !entry.turn.messageIds.includes(id)) return;
+      images.set(item, asset);
+      // Only typed public output metadata crosses this boundary, wherever the
+      // page places that output. A nested image is not a top-level final answer.
+      const made = item.status === 'completed' && item.isPreview !== true && entry.turn.status === 'complete' ? completedAt : undefined;
+      messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
+        ...(made !== undefined ? { create_time: made } : {}),
+        status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
+        content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
+          asset_pointer: item.src, width: item.width, height: item.height }] } });
+    };
+    // The turn's start is its opening question's; its end is its last answer's. A follow-up sent into the
+    // running answer, or an answer a retry replaced, keeps only a time of its own.
+    const opening = entry.turn.items.findIndex(item => item?.type === 'user-message');
+    const closing = entry.turn.items.findLastIndex(item => item?.type === 'assistant-message' && item.phase === 'final_answer');
     for (const [index, item] of entry.turn.items.entries()) {
       if (++work > MAX_ROWS) return null;
       if (item?.type === 'user-message' || item?.type === 'assistant-message') {
@@ -2272,7 +2323,10 @@
         const final = !user && item.phase === 'final_answer';
         if (final) lastAnswer = item;
         const completed = final && item.completed === true && entry.turn.status === 'complete';
+        const written = user ? at(item.sentAtMs) ?? (index === opening ? startedAt : undefined)
+          : completed && index === closing ? completedAt : undefined;
         messages.push({ id, author: { role }, content: { content_type: 'text', parts: [typeof text === 'string' ? text : ''] },
+          ...(written !== undefined ? { create_time: written } : {}),
           channel: user ? null : final ? 'final' : 'commentary', end_turn: completed,
           status: completed ? 'finished_successfully' : 'in_progress',
           // The turn's place belongs to its first message. A message sent into the running answer
@@ -2280,6 +2334,7 @@
           // of the turn's question, and Edit & resubmit folded that question away (2.1.41 round).
           metadata: !user ? {} : previousId ? { parent_id: previousId, clf_parent_exact: true }
             : place ? { parent_id: place.parentId, clf_parent_exact: place.versioned } : {} });
+        if (final) answerMessage = messages[messages.length - 1];
         previousId = id;
         const key = `${turnId}:${index}:${role}`;
         const nodes = [...section.querySelectorAll('[data-content-search-unit-key]')].filter(node =>
@@ -2287,20 +2342,21 @@
         if (nodes.length === 1) slots.push({ node: nodes[0], id });
       } else if (item?.type === 'generated-image') {
         lastAnswer = item;
-        const id = str(item.chatGptMessageId);
-        const asset = typeof item.src === 'string' && /^sediment:\/\/(file_[A-Za-z0-9_-]{8,100})$/.exec(item.src)?.[1];
-        if (!id || !asset || !Array.isArray(entry.turn.messageIds) || !entry.turn.messageIds.includes(id)) continue;
-        images.set(item, asset);
-        // Typed generated outputs are public tool media, never assistant prose.
-        // Multiple assets may share their owning provider message.
-        messages.push({ id, author: { role: 'tool' }, recipient: 'all', channel: 'final',
-          status: item.status === 'completed' && item.isPreview !== true ? 'finished_successfully' : 'in_progress',
-          content: { content_type: 'multimodal_text', parts: [{ content_type: 'image_asset_pointer',
-            asset_pointer: item.src, width: item.width, height: item.height }] } });
+        appendGeneratedImage(item);
       } else {
         const steps = item?.type === 'chatgpt-reasoning-group' && Array.isArray(item.items) ? item.items : [item];
         for (const step of steps) {
           if (++work > MAX_ROWS) return null;
+          // A tool call after an answer means the turn went on past it. Live 2026-10-21: GPT-6
+          // answered, asked for a tool approval, then after Allow ran a dozen more calls and ended
+          // on an `update_plan` card with no answer of its own. The earlier answer still read as
+          // completed, and its stale end vetoed the automatic Continue the turn needed. Only a
+          // later answer can end the turn now.
+          if (answerMessage && (step?.type === 'mcp-tool-call' || step?.type === 'dynamic-tool-call')) answerMessage.end_turn = false;
+          if (step?.type === 'generated-image') {
+            appendGeneratedImage(step);
+            continue;
+          }
           if (step?.type === 'assistant-message' && item !== step) {
             // Interim prose whatever phase it carries: only a top-level answer can end the turn.
             const id = str(step.messageId), text = shellItemText(step);
@@ -2948,7 +3004,7 @@
    * `danger*` coloured; either marker disqualifies a control in any language. Every CoS connector refresh on the new layout failed with "the connector settings
    * card could not be read", so ChatGPT kept whatever tool list it had before an update.
    */
-  function pagePluginSnapshot(appId) {
+  function pagePluginSnapshot(appId, refresh) {
     const buttons = [...document.querySelectorAll('main button')].slice(0, 200);
     let connector = null, control = null;
     for (const button of buttons) {
@@ -2973,7 +3029,10 @@
       }
     }
     if (!connector || !Array.isArray(connector.actions) || typeof connector.name !== 'string') return null;
-    const externalPlugins = pluginsConnectorApp(connector.name, connector.id);
+    // A surface-qualified native refresh may know the durable App ID before the learned
+    // aliases catch up with a rename. This sets only the read bound, never refresh authority.
+    const surface = refresh?.appId === appId && SURFACES.includes(refresh.surface) ? refresh.surface : null;
+    const externalPlugins = surface ? surface === 'plugins' : pluginsConnectorApp(connector.name, connector.id);
     // A sanity bound, not a catalog: the app's own Core and Desktop declare a few dozen tools at most
     // (Windows Desktop 24 in 2.1.44, which the old bound of 16 refused, #1763); Plugins holds every
     // enabled external plugin's tools. A test keeps 64 above what Core and Desktop declare.
@@ -2991,9 +3050,9 @@
     return { appId, connectorName: connector.name.slice(0, 100), versionId: str(connector.app_metadata?.version_id), tools, refreshAvailable: !!control, tunnelId, settled: true };
   }
 
-  function pluginSnapshot() {
+  function pluginSnapshot(refresh) {
     const pageRoute = /^\/(?:settings\/plugins-settings|plugins)\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.pathname);
-    if (pageRoute && !location.hash) return pagePluginSnapshot(pageRoute[1]);
+    if (pageRoute && !location.hash) return pagePluginSnapshot(pageRoute[1], refresh);
     const route = /^#settings\/Plugins\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(location.hash);
     if (!route) return null;
     // The hash already names one exact installed connector settings route. Provider tab labels
@@ -3127,7 +3186,7 @@
     }
     if (data.source === 'clf-plugin-ask') {
       let plugin = null;
-      try { plugin = pluginSnapshot(); } catch { /* Unrecognized installed settings. */ }
+      try { plugin = pluginSnapshot(data.refresh); } catch { /* Unrecognized installed settings. */ }
       post({ source: 'clf-plugin-reply', nonce, v: 1, plugin }, location.origin);
       return;
     }

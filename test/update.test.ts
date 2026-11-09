@@ -14,7 +14,8 @@
  */
 
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, realpathSync, symlinkSync, linkSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,7 +26,28 @@ const spawnOptions: Array<Record<string, unknown> | undefined> = [];
 const elevation: { exitCode: number | 'held'; finish: ((code: number) => void) | null } = { exitCode: 0, finish: null };
 /** What icacls answers when the app repeats the installer's access grant: an exit code, or a spawn error. */
 const icacls: { calls: Array<{ file: string; args: string[] }>; result: number | string | null } = { calls: [], result: null };
-vi.mock('node:child_process', () => ({
+const cleanupFault = vi.hoisted(() => ({ file: '' }));
+const cacheBoundary = vi.hoisted(() => ({ after: async (_operation: string, _file: string): Promise<void> => undefined }));
+vi.mock('node:fs/promises', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const after = async <T>(operation: string, file: unknown, result: Promise<T>): Promise<T> => {
+    const value = await result;
+    await cacheBoundary.after(operation, String(file));
+    return value;
+  };
+  return { ...actual,
+    lstat: (...args: Parameters<typeof actual.lstat>) => after('lstat', args[0], actual.lstat(...args)),
+    readdir: (...args: Parameters<typeof actual.readdir>) => after('readdir', args[0], actual.readdir(...args)),
+    mkdir: (...args: Parameters<typeof actual.mkdir>) => after('mkdir', args[0], actual.mkdir(...args)),
+    rm: async (file: Parameters<typeof actual.rm>[0], options?: Parameters<typeof actual.rm>[1]) => {
+      if (String(file) === cleanupFault.file) throw Object.assign(new Error('installer still open'), { code: 'EACCES' });
+      return after('rm', file, actual.rm(file, options));
+    }
+  };
+});
+const dpkg = { installed: true, owner: 'chat-on-steroids: /usr/bin/node', calls: [] as string[][] };
+vi.mock('node:child_process', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:child_process')>(),
   spawn: (file: string, args: string[], options?: Record<string, unknown>) => {
     spawned.push({ file, args });
     spawnOptions.push(options);
@@ -41,6 +63,11 @@ vi.mock('node:child_process', () => ({
     icacls.calls.push({ file, args });
     const result = icacls.result;
     queueMicrotask(() => done(result === null ? null : Object.assign(new Error('icacls failed'), { code: result })));
+  },
+  execFileSync: (file: string, args: string[]) => {
+    if (file !== '/usr/bin/dpkg-query') throw new Error(`Unexpected sync execution: ${file}`);
+    dpkg.calls.push(args);
+    return args[0] === '--show' ? (dpkg.installed ? 'install ok installed' : 'deinstall ok config-files') : dpkg.owner;
   }
 }));
 
@@ -74,6 +101,10 @@ const {
   releaseVersion,
   resetUpdateForTests,
   restoreUpdateHandoff,
+  installedDebBinary,
+  DEBIAN_HANDOFF_SH,
+  DEBIAN_ROOT_INSTALL_SCRIPT,
+  setDebPackageProofForTests,
   setInstallFolderAccessForTests,
   stagedArtifact,
   startUpdateChecks,
@@ -81,8 +112,9 @@ const {
 } = await import('../src/main/update.js');
 
 const NEXT = '99.0.0';
-const WINDOWS_ASSET = `Chat-On-Steroids-Setup-${process.arch}.exe`;
-const APPIMAGE_ASSET = `Chat-On-Steroids-Linux-${process.arch}.AppImage`;
+const WINDOWS_ASSET = `ChatMarks-Setup-${process.arch}.exe`;
+const APPIMAGE_ASSET = `ChatMarks-Linux-${process.arch}.AppImage`;
+const DEB_ASSET = `ChatMarks-Linux-${process.arch}.deb`;
 
 const sha256 = (body: string): string => createHash('sha256').update(body).digest('hex');
 
@@ -99,12 +131,17 @@ function github(options: {
   fail?: 'release' | 'sums' | 'asset';
   /** The API's status, for a check refused by GitHub's per-address quota (#1253). */
   apiStatus?: number;
+  /** Simulate a partial/draft/non-stable API answer, independently from the public latest page. */
+  releasePayload?: unknown;
+  apiBody?: string;
+  /** GitHub asset metadata (separate from releases/latest) when SHA256SUMS.txt is absent. */
+  releaseAssets?: unknown;
   /** Where the public `/releases/latest` page lands, or a failing status. */
   page?: string | number;
 } = {}) {
   const version = options.version ?? NEXT;
   const body = options.body ?? 'installer bytes';
-  const sums = options.checksums ?? `${sha256(body)}  ${WINDOWS_ASSET}\n${sha256(body)}  ${APPIMAGE_ASSET}\n`;
+  const sums = options.checksums ?? `${sha256(body)}  ${WINDOWS_ASSET}\n${sha256(body)}  ${APPIMAGE_ASSET}\n${sha256(body)}  ${DEB_ASSET}\n`;
   const asked: string[] = [];
   const fetch = vi.fn(async (input: string | URL) => {
     const url = String(input);
@@ -113,12 +150,17 @@ function github(options: {
     if (url.includes('api.github.com')) {
       if (options.apiStatus) return new Response('{"message":"API rate limit exceeded"}', { status: options.apiStatus });
       if (options.fail === 'release') return new Response('nope', { status: 503 });
-      return new Response(JSON.stringify({ tag_name: `v${version}` }), { status: 200 });
+      if (url.includes('/releases/tags/')) return new Response(JSON.stringify({
+        tag_name: `v${version}`, draft: false, prerelease: false, assets: options.releaseAssets ?? []
+      }), { status: 200 });
+      return new Response(options.apiBody ?? JSON.stringify(options.releasePayload === undefined
+        ? { tag_name: `v${version}`, draft: false, prerelease: false }
+        : options.releasePayload), { status: 200 });
     }
-    if (url === 'https://github.com/totec448-spec/chat-on-steroids/releases/latest') {
+    if (url === 'https://github.com/mvclaudianobj/chat-on-steroids/releases/latest') {
       if (typeof options.page === 'number') return new Response(null, { status: options.page });
       const landed = new Response(null, { status: 200 });
-      Object.defineProperty(landed, 'url', { value: options.page ?? `https://github.com/totec448-spec/chat-on-steroids/releases/tag/v${version}` });
+      Object.defineProperty(landed, 'url', { value: options.page ?? `https://github.com/mvclaudianobj/chat-on-steroids/releases/tag/v${version}` });
       return landed;
     }
     if (name === 'SHA256SUMS.txt') {
@@ -131,6 +173,12 @@ function github(options: {
   vi.stubGlobal('fetch', fetch);
   return { asked, fetch, body };
 }
+
+const publishedAsset = (version: string, name: string, digest: string, extra: Record<string, unknown> = {}) => ({
+  name, state: 'uploaded', size: 100, digest: `sha256:${digest}`,
+  browser_download_url: `https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v${version}/${name}`,
+  ...extra
+});
 
 /** Runs the pass as an installation of the given shape, and puts the real one back. */
 async function asPlatform(platform: string, appImage: string | undefined, run: () => Promise<void>): Promise<void> {
@@ -157,18 +205,25 @@ beforeEach(() => {
   elevation.finish = null;
   relaunched.length = 0;
   warnings.length = 0;
+  cleanupFault.file = '';
+  cacheBoundary.after = async () => undefined;
   resetUpdateForTests();
+  setDebPackageProofForTests(() => true);
+  dpkg.installed = true;
+  dpkg.owner = 'chat-on-steroids: /usr/bin/node';
+  dpkg.calls.length = 0;
 });
 
 afterEach(() => {
   vi.unstubAllGlobals();
+  rmSync(userData, { recursive: true, force: true });
 });
 
 describe('the file Get update opens for an installation that cannot update itself', () => {
   it('names the exact macOS disk image or Linux package for this machine', () => {
-    expect(manualDownloadName('darwin', 'arm64', undefined, true)).toBe('Chat-On-Steroids-macOS-arm64.dmg');
-    expect(manualDownloadName('darwin', 'x64', undefined, true)).toBe('Chat-On-Steroids-macOS-x64.dmg');
-    expect(manualDownloadName('linux', 'x64', undefined, true)).toBe('Chat-On-Steroids-Linux-x64.deb');
+    expect(manualDownloadName('darwin', 'arm64', undefined, true)).toBe('ChatMarks-macOS-arm64.dmg');
+    expect(manualDownloadName('darwin', 'x64', undefined, true)).toBe('ChatMarks-macOS-x64.dmg');
+    expect(manualDownloadName('linux', 'x64', undefined, true)).toBeNull();
     // Installations that update themselves, a dev tree and an unpublished architecture get none.
     expect(manualDownloadName('linux', 'x64', '/opt/cos.AppImage', true)).toBeNull();
     expect(manualDownloadName('win32', 'x64', undefined, true)).toBeNull();
@@ -176,43 +231,366 @@ describe('the file Get update opens for an installation that cannot update itsel
     expect(manualDownloadName('darwin', 'ia32', undefined, true)).toBeNull();
   });
   it('links that file for the announced version, and the release page otherwise', () => {
-    expect(manualDownloadUrl('2.1.17', 'Chat-On-Steroids-macOS-arm64.dmg'))
-      .toBe('https://github.com/totec448-spec/chat-on-steroids/releases/download/v2.1.17/Chat-On-Steroids-macOS-arm64.dmg');
-    expect(manualDownloadUrl(null, 'Chat-On-Steroids-macOS-arm64.dmg')).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
-    expect(manualDownloadUrl('2.1.17', null)).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
-    expect(manualDownloadUrl('../evil', 'x.dmg')).toBe('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
+    expect(manualDownloadUrl('2.1.17', 'ChatMarks-macOS-arm64.dmg'))
+      .toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.17/ChatMarks-macOS-arm64.dmg');
+    expect(manualDownloadUrl(null, 'ChatMarks-macOS-arm64.dmg')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
+    expect(manualDownloadUrl('2.1.17', null)).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
+    expect(manualDownloadUrl('../evil', 'x.dmg')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
+  });
+});
+
+describe('cleanup of updater-owned downloads', () => {
+  /** Hold an actual filesystem result, so a reset can revoke the pass before its next write. */
+  function pauseAfter(operation: string, file: string, occurrence = 1) {
+    let resume!: () => void;
+    let reached!: () => void;
+    const held = new Promise<void>(resolve => { resume = resolve; });
+    const paused = new Promise<void>(resolve => { reached = resolve; });
+    cacheBoundary.after = async (seenOperation, seenFile) => {
+      if (seenOperation === operation && seenFile === file && --occurrence === 0) {
+        reached();
+        await held;
+      }
+    };
+    return { paused, resume };
+  }
+  function cached(version: string, body = 'previous download'): string {
+    const dir = path.join(userData, 'updates', version);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'download.part'), body);
+    return dir;
+  }
+  it('checks the release normally when the existing update cache is empty', async () => {
+    const root = path.join(userData, 'updates');
+    mkdirSync(root);
+    const { asked } = github({ fail: 'release' });
+    await checkForUpdates();
+    expect(readdirSync(root)).toEqual([]);
+    expect(asked).toEqual(['latest']);
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it('handles a 1024-directory mixed cache while preserving reset custody and retained entries', async () => {
+    const obsolete = Array.from({ length: 128 }, (_, i) => cached(`0.0.${i}`));
+    const future = Array.from({ length: 128 }, (_, i) => cached(`99.0.${i}`, 'future candidate'));
+    const root = path.join(userData, 'updates');
+    const unknown = Array.from({ length: 384 }, (_, i) => path.join(root, `saved-${i}`));
+    const damaged = Array.from({ length: 384 }, (_, i) => path.join(root, `2.1.${i}-damaged`));
+    for (const dir of [...unknown, ...damaged]) mkdirSync(dir);
+    const keep = path.join(unknown[0]!, 'keep');
+    writeFileSync(keep, 'unrecognized root entry');
+    const note = path.join(root, 'handoff.json'), receipt = JSON.stringify({ version: '98.0.0', at: 1 });
+    writeFileSync(note, receipt);
+    const { asked } = github({ fail: 'release' });
+    const boundary = pauseAfter('readdir', root);
+    const old = checkForUpdates();
+    await boundary.paused;
+    resetUpdateForTests(); boundary.resume();
+    await old;
+    expect(obsolete.every(existsSync)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(updateStatus().stage).toBe('idle');
+
+    await checkForUpdates();
+    expect(obsolete.some(existsSync)).toBe(false);
+    expect([...future, ...unknown, ...damaged].every(existsSync)).toBe(true);
+    expect(readFileSync(path.join(future[0]!, 'download.part'), 'utf8')).toBe('future candidate');
+    expect(readFileSync(keep, 'utf8')).toBe('unrecognized root entry');
+    expect(readFileSync(note, 'utf8')).toBe(receipt);
+    expect(asked).toEqual(['latest']);
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it.each(['lstat', 'readdir'])('does not prune or contact GitHub after a reset during cache %s', async operation => {
+    const previous = cached('0.0.1');
+    const { asked } = github();
+    const boundary = pauseAfter(operation, path.join(userData, 'updates'));
+    const old = checkForUpdates();
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(existsSync(previous)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(updateStatus().stage).toBe('idle');
+  });
+  it('stops cleanup between entries when the pass is reset', async () => {
+    const first = cached('0.0.1');
+    const second = cached('0.0.2');
+    const { asked } = github();
+    const boundary = pauseAfter('rm', first);
+    const old = checkForUpdates();
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(existsSync(first)).toBe(false);
+    expect(existsSync(second)).toBe(true);
+    expect(asked).toEqual([]);
+    expect(updateStatus().stage).toBe('idle');
+  });
+  it('does not retire other candidates after a reset during successful adoption cleanup', async () => {
+    const previous = cached('98.0.0');
+    const dir = cached(NEXT);
+    writeFileSync(path.join(dir, WINDOWS_ASSET), 'installer bytes');
+    const { asked } = github();
+    // The first root inspection is the offline cleanup; the second retires other candidates.
+    const boundary = pauseAfter('lstat', path.join(userData, 'updates'), 2);
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(existsSync(previous)).toBe(true);
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(updateStatus().stage).toBe('idle');
+    expect(markInstallOnQuit()).toBe(false);
+  });
+  it.each(['lstat', 'mkdir'])('does not remove a partial file after a reset during directory %s', async operation => {
+    const dir = cached(NEXT);
+    const partial = path.join(dir, `${WINDOWS_ASSET}.part`);
+    writeFileSync(partial, 'keep this partial');
+    const { asked } = github();
+    const boundary = pauseAfter(operation, dir);
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await boundary.paused;
+    resetUpdateForTests();
+    boundary.resume();
+    await old;
+    expect(readFileSync(partial, 'utf8')).toBe('keep this partial');
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(updateStatus().stage).toBe('idle');
+    expect(markInstallOnQuit()).toBe(false);
+  });
+  it('preserves a newer pass\'s ready installer when obsolete cleanup resumes after a reset', async () => {
+    const dir = cached(NEXT);
+    writeFileSync(path.join(dir, WINDOWS_ASSET), 'installer bytes');
+    github();
+    const boundary = pauseAfter('lstat', path.join(userData, 'updates'), 2);
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await boundary.paused;
+    resetUpdateForTests();
+    const newer = '100.0.0';
+    github({ version: newer });
+    await checkForUpdates();
+    boundary.resume();
+    await old;
+    expect(readFileSync(path.join(userData, 'updates', newer, WINDOWS_ASSET), 'utf8')).toBe('installer bytes');
+    expect(updateStatus()).toMatchObject({ stage: 'ready', latest: newer, error: null });
+    expect(markInstallOnQuit(newer)).toBe(true);
+  });
+  it('removes installed versions even offline, preserving future candidates and unknown contents', async () => {
+    const old = cached('0.0.1');
+    const current = cached(APP_VERSION);
+    const future = cached(NEXT);
+    const backup = cached('backup');
+    const damaged = cached('2.1.49-damaged');
+    github({ fail: 'release' });
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(false);
+    expect(existsSync(current)).toBe(false);
+    expect([future, backup, damaged].every(existsSync)).toBe(true);
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it('preserves a legacy flat installer while removing an obsolete version offline', async () => {
+    const old = cached('0.0.1');
+    const legacy = path.join(userData, 'updates', WINDOWS_ASSET);
+    writeFileSync(legacy, 'legacy installer bytes');
+    github({ fail: 'release' });
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(false);
+    expect(readFileSync(legacy, 'utf8')).toBe('legacy installer bytes');
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it('never scans a version-shaped backup outside the updater-exclusive cache', async () => {
+    const old = cached('0.0.1');
+    const backup = path.join(userData, 'backups', '0.0.1');
+    mkdirSync(backup, { recursive: true });
+    const installer = path.join(backup, WINDOWS_ASSET);
+    writeFileSync(installer, 'manually saved installer');
+    github({ fail: 'release' });
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(false);
+    expect(readFileSync(installer, 'utf8')).toBe('manually saved installer');
+    expect(updateStatus().stage).toBe('failed');
+  });
+  it('keeps the previous candidate and the handoff note when a newer download fails', async () => {
+    const previous = cached('98.0.0');
+    const note = path.join(userData, 'updates', 'handoff.json');
+    writeFileSync(note, JSON.stringify({ version: '98.0.0', at: 1 }));
+    github({ fail: 'asset' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('failed');
+    expect(existsSync(previous)).toBe(true);
+    expect(JSON.parse(readFileSync(note, 'utf8')).version).toBe('98.0.0');
+  });
+  it('does not discard a previous candidate when the replacement fails its checksum', async () => {
+    const previous = cached('98.0.0');
+    github({ checksums: `${'a'.repeat(64)}  ${WINDOWS_ASSET}\n` });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('failed');
+    expect(existsSync(previous)).toBe(true);
+  });
+  it('defers a locked obsolete installer without failing the update or touching another file', async () => {
+    cleanupFault.file = cached('0.0.1');
+    const removable = cached('0.0.2');
+    github({ version: APP_VERSION });
+    await checkForUpdates();
+    expect(updateStatus().stage).toBe('idle');
+    expect(existsSync(cleanupFault.file)).toBe(true);
+    expect(existsSync(removable)).toBe(false);
+    expect(warnings).toContain('update: obsolete 0.0.1 download is still in use or cannot be removed; cleanup deferred');
+  });
+  it('retires superseded candidates only after verifying the replacement, keeping the handoff receipt', async () => {
+    const previous = cached('98.0.0');
+    const note = path.join(userData, 'updates', 'handoff.json');
+    writeFileSync(note, JSON.stringify({ version: '98.0.0', at: 1 }));
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(existsSync(previous)).toBe(false);
+    expect(existsSync(path.join(userData, 'updates', NEXT, WINDOWS_ASSET))).toBe(true);
+    expect(JSON.parse(readFileSync(note, 'utf8')).version).toBe('98.0.0');
+    await restoreUpdateHandoff();
+    expect(updateStatus().notInstalled).toBe('98.0.0');
+  });
+  it('cleans obsolete files when adopting an already verified download after restart', async () => {
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    resetUpdateForTests();
+    const previous = cached('98.0.0');
+    const { asked } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(existsSync(previous)).toBe(false);
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+  });
+  it('does not follow a version-directory link into a backup', async () => {
+    const backup = path.join(userData, 'saved-app');
+    mkdirSync(backup);
+    writeFileSync(path.join(backup, 'keep'), 'backup');
+    mkdirSync(path.join(userData, 'updates'));
+    symlinkSync(backup, path.join(userData, 'updates', '0.0.1'), 'junction');
+    github({ version: APP_VERSION });
+    await checkForUpdates();
+    expect(readFileSync(path.join(backup, 'keep'), 'utf8')).toBe('backup');
+    expect(existsSync(path.join(userData, 'updates', '0.0.1'))).toBe(true);
+  });
+  it('skips a linked cache root, logging why without failing the release check', async () => {
+    const backup = path.join(userData, 'saved-updates');
+    mkdirSync(path.join(backup, '0.0.1'), { recursive: true });
+    symlinkSync(backup, path.join(userData, 'updates'), 'junction');
+    github({ version: APP_VERSION });
+    await checkForUpdates();
+    expect(existsSync(path.join(backup, '0.0.1'))).toBe(true);
+    expect(updateStatus().stage).toBe('idle');
+    expect(warnings).toContain('update: cache cleanup skipped because the updates root is not an ordinary directory');
+  });
+  it.each(['root', 'version'])('refuses a new download through a linked %s without overwriting its target', async linked => {
+    const target = path.join(userData, 'outside-cache');
+    const dir = linked === 'root' ? path.join(target, NEXT) : target;
+    mkdirSync(dir, { recursive: true });
+    const outside = path.join(dir, WINDOWS_ASSET);
+    writeFileSync(outside, 'keep this file');
+    const updates = path.join(userData, 'updates');
+    if (linked === 'version') mkdirSync(updates);
+    symlinkSync(target, linked === 'root' ? updates : path.join(updates, NEXT), 'junction');
+    const { asked } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(readFileSync(outside, 'utf8')).toBe('keep this file');
+    expect(updateStatus()).toMatchObject({ stage: 'failed', error: 'the update staging path must use ordinary directories' });
+    expect(markInstallOnQuit()).toBe(false);
+    expect(existsSync(`${outside}.part`)).toBe(false);
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+  });
+  it.each(['root', 'version'])('preserves legacy checksum-verified adoption through a linked %s without new writes', async linked => {
+    const target = path.join(userData, 'existing-downloads');
+    const dir = linked === 'root' ? path.join(target, NEXT) : target;
+    mkdirSync(dir, { recursive: true });
+    const outside = path.join(dir, WINDOWS_ASSET);
+    writeFileSync(outside, 'installer bytes');
+    const updates = path.join(userData, 'updates');
+    if (linked === 'version') mkdirSync(updates);
+    symlinkSync(target, linked === 'root' ? updates : path.join(updates, NEXT), 'junction');
+    const { asked } = github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(readFileSync(outside, 'utf8')).toBe('installer bytes');
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt']);
+    expect(spawned).toEqual([]);
+  });
+  it('restarts a linked partial file with a fresh inode instead of truncating its other name', async () => {
+    const outside = path.join(userData, 'keep.txt');
+    writeFileSync(outside, 'keep this file');
+    const dir = path.join(userData, 'updates', NEXT);
+    mkdirSync(dir, { recursive: true });
+    linkSync(outside, path.join(dir, `${WINDOWS_ASSET}.part`));
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('ready');
+    expect(readFileSync(outside, 'utf8')).toBe('keep this file');
+    expect(readFileSync(path.join(dir, WINDOWS_ASSET), 'utf8')).toBe('installer bytes');
+  });
+  it('does not recursively erase an unexpected directory at the selected partial-file name', async () => {
+    const dir = path.join(userData, 'updates', NEXT, `${WINDOWS_ASSET}.part`);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(path.join(dir, 'keep'), 'keep this file');
+    github();
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus().stage).toBe('failed');
+    expect(readFileSync(path.join(dir, 'keep'), 'utf8')).toBe('keep this file');
+  });
+  it('does not clean an installed app cache from an unpackaged developer run', async () => {
+    const old = cached('0.0.1');
+    packaged = false;
+    github();
+    await checkForUpdates();
+    expect(existsSync(old)).toBe(true);
   });
 });
 
 describe('which installations update themselves', () => {
   it('takes the Windows installer and the Linux AppImage, and nothing else', () => {
-    expect(stagedArtifact('win32', 'x64')).toMatchObject({ name: 'Chat-On-Steroids-Setup-x64.exe', kind: 'installer' });
+    expect(stagedArtifact('win32', 'x64')).toMatchObject({ name: 'ChatMarks-Setup-x64.exe', kind: 'installer' });
     expect(stagedArtifact('linux', 'arm64', '/opt/cos.AppImage')).toMatchObject({
-      name: 'Chat-On-Steroids-Linux-arm64.AppImage',
+      name: 'ChatMarks-Linux-arm64.AppImage',
       kind: 'appimage',
       target: '/opt/cos.AppImage'
     });
   });
 
-  /**
-   * A `.deb` is the system package manager's file and replacing it needs root. Asking for a
-   * password during quit is not something this app does, so that installation is told a new
-   * version exists and given the release page - it is not quietly left waiting for a download
-   * that was never going to happen. Same for macOS, where the artifacts ship unsigned.
-   */
-  it('leaves a Linux package install and macOS to be updated by hand', async () => {
-    expect(stagedArtifact('linux', 'x64', undefined)).toBeNull();
+  it('stages a digest-verified Linux package, but requires an explicit install click', async () => {
+    expect(stagedArtifact('linux', 'x64', undefined)).toMatchObject({ kind: 'deb', name: 'ChatMarks-Linux-x64.deb' });
     expect(stagedArtifact('darwin', 'arm64')).toBeNull();
-    expect(stagedArtifact('win32', 'ia32')).toBeNull();
-
     const { asked } = github();
     await asPlatform('linux', undefined, () => checkForUpdates());
-
-    // Told, and told exactly: a version that is newer, and no pretence of a download.
-    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'idle', error: null });
-    expect(asked).toEqual(['latest']);
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt', DEB_ASSET]);
     await applyStagedUpdate();
     expect(spawned).toEqual([]);
+  });
+
+  it('requires proof that dpkg owns the actual binary before selecting a Debian update', async () => {
+    setDebPackageProofForTests(installedDebBinary);
+    const expectedBinary = realpathSync(process.execPath);
+    await asPlatform('linux', undefined, async () => {
+      dpkg.installed = false;
+      expect(stagedArtifact('linux', 'x64', undefined, true)).toBeNull();
+      expect(dpkg.calls).toEqual([['--show', '--showformat=${Status}', 'chat-on-steroids']]);
+      dpkg.calls.length = 0;
+      dpkg.installed = true;
+      dpkg.owner = 'another-package: /usr/bin/node';
+      expect(stagedArtifact('linux', 'x64', undefined, true)).toBeNull();
+      expect(dpkg.calls[1]).toMatchObject(['--search', '--', expect.any(String)]);
+      dpkg.owner = `chat-on-steroids: ${expectedBinary}`;
+      expect(stagedArtifact('linux', 'x64', undefined, true)).toMatchObject({ kind: 'deb' });
+      // APPIMAGE remains authoritative even if dpkg has no record for the executable.
+      expect(stagedArtifact('linux', 'x64', '/tmp/appimage', true)).toMatchObject({ kind: 'appimage' });
+      dpkg.installed = false;
+      dpkg.calls.length = 0;
+      github();
+      await checkForUpdates();
+      expect(updateStatus()).toMatchObject({ stage: 'idle', latest: NEXT });
+      expect(dpkg.calls).toHaveLength(1);
+    });
   });
 
   /**
@@ -238,6 +616,9 @@ describe('finding a newer release', () => {
   it('reads a release tag, and refuses anything that is not one', () => {
     expect(releaseVersion('v2.1.0')).toBe('2.1.0');
     expect(releaseVersion('2.1.0')).toBe('2.1.0');
+    expect(releaseVersion('v2.1.37.1')).toBe('2.1.37.1');
+    expect(releaseVersion('v2.1.37.1.2')).toBeNull();
+    expect(manualDownloadUrl('2.1.37.1', 'ChatMarks-Linux-x64.deb')).toBe('https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v2.1.37.1/ChatMarks-Linux-x64.deb');
     expect(releaseVersion('v2.1.0-rc.1')).toBeNull();
     expect(releaseVersion(null)).toBeNull();
   });
@@ -248,6 +629,12 @@ describe('finding a newer release', () => {
     expect(isNewer('2.0.9', '2.0.10')).toBe(false);
     expect(isNewer('2.0.2', '2.0.2')).toBe(false);
     expect(isNewer('1.9.9', '2.0.0')).toBe(false);
+    expect(isNewer('2.1.37.1', '2.1.37')).toBe(true);
+    expect(isNewer('2.1.37', '2.1.37.1')).toBe(false);
+    expect(isNewer('2.1.37.2', '2.1.37.1')).toBe(true);
+    expect(isNewer('2.1.38', '2.1.37.1')).toBe(true);
+    expect(isNewer('2.1.37.0', '2.1.37')).toBe(false);
+    expect(isNewer('2.1.37-rc.1', '2.1.36')).toBe(false);
   });
 
   /**
@@ -458,11 +845,62 @@ describe('staging the new version', () => {
   });
 
   it('stages nothing when the release does not publish an artifact for this installation', async () => {
-    github({ checksums: `${sha256('x')}  Chat-On-Steroids-Extension.zip\n` });
+    github({ checksums: `${sha256('x')}  ChatMarks-Extension.zip\n` });
     await asPlatform('win32', undefined, () => checkForUpdates());
     expect(updateStatus().stage).toBe('failed');
     expect(updateStatus().error).toContain(`publishes no ${WINDOWS_ASSET}`);
     expect(spawned).toEqual([]);
+  });
+
+  it('refuses to stage or install a Debian release when the published SHA256SUMS.txt is absent', async () => {
+    const { asked } = github({ fail: 'sums' });
+    await asPlatform('linux', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt', `v${NEXT}`]);
+    // The release exists, but without a checksum it cannot become an installable offer.
+    expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed' });
+    expect(updateStatus().error).toContain('no usable GitHub SHA-256 asset digests');
+    expect(markInstallOnQuit()).toBe(false);
+    await applyStagedUpdate();
+    expect(spawned).toEqual([]);
+  });
+
+  it('stages a Debian update using the official GitHub asset digest when SHA256SUMS.txt is absent', async () => {
+    const { asked } = github({ fail: 'sums', releaseAssets: [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'))] });
+    await asPlatform('linux', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt', `v${NEXT}`, DEB_ASSET]);
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+    expect(readFileSync(path.join(userData, 'updates', NEXT, DEB_ASSET), 'utf8')).toBe('installer bytes');
+    // Preparing an update never prompts PolicyKit, installs packages, or modifies the OS.
+    expect(spawned).toEqual([]);
+  });
+
+  it('never overrides a present but contradictory SHA256SUMS.txt with API asset metadata', async () => {
+    const { asked } = github({ checksums: `${sha256('different package')}  ${DEB_ASSET}\n`,
+      releaseAssets: [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'))] });
+    await asPlatform('linux', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'SHA256SUMS.txt', DEB_ASSET]);
+    expect(updateStatus().stage).toBe('failed');
+    expect(updateStatus().error).toContain('not the published file');
+    expect(spawned).toEqual([]);
+  });
+
+  it('rejects untrusted, mismatched or missing GitHub asset metadata without installing anything', async () => {
+    const badAssets = [
+      [publishedAsset(NEXT, DEB_ASSET, '0'.repeat(64))],
+      [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'), { state: 'starter' })],
+      [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'), {
+        browser_download_url: `https://github.com/totec448-spec/chat-on-steroids/releases/download/v${NEXT}/${DEB_ASSET}`
+      })],
+      [publishedAsset(NEXT, DEB_ASSET, sha256('installer bytes'), { digest: 'sha256:INVALID' })]
+    ];
+    for (const releaseAssets of badAssets) {
+      resetUpdateForTests();
+      github({ fail: 'sums', releaseAssets });
+      await asPlatform('linux', undefined, () => checkForUpdates());
+      expect(updateStatus().stage).toBe('failed');
+      expect(markInstallOnQuit()).toBe(false);
+      expect(spawned).toEqual([]);
+    }
   });
 
   /**
@@ -514,7 +952,7 @@ describe('one pass at a time, and one more next time the app opens', () => {
   });
 
   it('finds the release from the public page when GitHub\'s API refuses the check (#1253)', async () => {
-    for (const status of [403, 429]) {
+    for (const status of [403, 404, 429]) {
       resetUpdateForTests();
       github({ apiStatus: status });
       await asPlatform('win32', undefined, () => checkForUpdates());
@@ -522,20 +960,50 @@ describe('one pass at a time, and one more next time the app opens', () => {
     }
   });
 
+  it.each([
+    { tag_name: null, draft: false, prerelease: false },
+    { tag_name: 'not-semver', draft: false, prerelease: false },
+    { tag_name: 'v99.0.0-rc.1', draft: false, prerelease: true },
+    { tag_name: 'v99.0.0', draft: true, prerelease: false },
+    { tag_name: 'v99.0.0', draft: false, prerelease: true },
+    { tag_name: 'v99.0.0', draft: undefined, prerelease: undefined },
+    { tag_name: '99.0.0', draft: false, prerelease: false }
+  ])('recovers the public stable Marks release when the API latest metadata is unusable: %j', async releasePayload => {
+    const { asked } = github({ releasePayload });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'latest', 'SHA256SUMS.txt', WINDOWS_ASSET]);
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+    expect(warnings).toContain('update: GitHub latest release API returned no usable published stable Marks tag; checking the public latest release page');
+  });
+
+  it('recovers a malformed API JSON body through the stable release page', async () => {
+    const { asked } = github({ apiBody: 'unexpected non-JSON upstream response' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(asked).toEqual(['latest', 'latest', 'SHA256SUMS.txt', WINDOWS_ASSET]);
+    expect(updateStatus()).toMatchObject({ latest: NEXT, stage: 'ready', error: null });
+  });
+
   it('trusts the release page only when it lands on a version tag on github.com', async () => {
-    for (const page of ['https://evil.example/totec448-spec/chat-on-steroids/releases/tag/v9.9.9',
-      'https://github.com/totec448-spec/chat-on-steroids/releases', 404]) {
+    for (const page of ['https://evil.example/mvclaudianobj/chat-on-steroids/releases/tag/v9.9.9',
+      'https://github.com/totec448-spec/chat-on-steroids/releases/tag/v9.9.9',
+      'https://github.com/mvclaudianobj/chat-on-steroids/releases/tag/v9.9.9/more',
+      'https://github.com/mvclaudianobj/chat-on-steroids/releases', 404]) {
       resetUpdateForTests();
       github({ apiStatus: 403, page });
       await asPlatform('win32', undefined, () => checkForUpdates());
       expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed' });
     }
+    resetUpdateForTests();
+    github({ releasePayload: { tag_name: 'v99.0.0', draft: true, prerelease: false },
+      page: 'https://github.com/totec448-spec/chat-on-steroids/releases/tag/v99.0.0' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(updateStatus()).toMatchObject({ latest: null, stage: 'failed' });
     // Other API failures are not quota refusals and keep their own error.
     resetUpdateForTests();
     const { fetch } = github({ fail: 'release' });
     await checkForUpdates();
     expect(updateStatus().error).toContain('503');
-    expect(fetch.mock.calls.map(([url]) => String(url))).not.toContain('https://github.com/totec448-spec/chat-on-steroids/releases/latest');
+    expect(fetch.mock.calls.map(([url]) => String(url))).not.toContain('https://github.com/mvclaudianobj/chat-on-steroids/releases/latest');
   });
 
   it('retries the next time the app opens after a download that stopped', async () => {
@@ -670,6 +1138,79 @@ describe('installing on request', () => {
     onInstallerTakeover(async () => undefined);
   });
 
+  it('installs a verified Debian package only after clicking Install, via the system PolicyKit agent', async () => {
+    github();
+    await asPlatform('linux', undefined, async () => {
+      await checkForUpdates();
+      expect(updateStatus().stage).toBe('ready');
+      expect(markInstallOnQuit()).toBe(true);
+      await applyStagedUpdate();
+    });
+    expect(spawned).toHaveLength(1);
+    const [installer] = spawned;
+    expect(installer!.file).toBe('/bin/sh');
+    expect(installer!.args[0]).toBe('-c');
+    expect(installer!.args[1]).toContain('/usr/bin/pkexec /usr/bin/python3 -c "$helper" "$deb" "$digest"');
+    expect(installer!.args[1]).not.toContain('/usr/bin/pkexec /usr/bin/apt-get');
+    expect(installer!.args[1]).toContain('Chat Marks .deb update cancelled');
+    expect(installer!.args[1]).toContain('pkexec exit %s');
+    expect(installer!.args[1]).toContain('kill -0 "$old_pid"');
+    // CI also runs this Linux-handoff fixture on Windows, where /bin/sh is not installed.
+    // Verify the emitted shell syntax only on hosts with a POSIX shell.
+    if (process.platform !== 'win32') {
+      expect(spawnSync('/bin/sh', ['-n'], { input: installer!.args[1], encoding: 'utf8' }).status).toBe(0);
+    }
+    expect(installer!.args[3]).toBe(path.join(userData, 'updates', NEXT, DEB_ASSET));
+    expect(installer!.args[4]).toBe(sha256('installer bytes'));
+    expect(installer!.args[5]).toBe(userData);
+    expect(installer!.args[7]).toBe(String(process.pid));
+    expect(installer!.args[8]).toBe(DEBIAN_ROOT_INSTALL_SCRIPT);
+    expect(installer!.args[1]).toBe(DEBIAN_HANDOFF_SH);
+    expect(DEBIAN_ROOT_INSTALL_SCRIPT).toContain('os.O_NOFOLLOW');
+    expect(DEBIAN_ROOT_INSTALL_SCRIPT).toContain('os.fstat');
+    expect(DEBIAN_ROOT_INSTALL_SCRIPT).toContain('hmac.compare_digest(digest.hexdigest(), expected)');
+    expect(DEBIAN_ROOT_INSTALL_SCRIPT).toContain('subprocess.run(["/usr/bin/apt-get", "install", "--assume-yes", "--only-upgrade", target], check=True)');
+    expect(DEBIAN_ROOT_INSTALL_SCRIPT).not.toContain('subprocess.run(["/usr/bin/apt-get", "install", "--assume-yes", "--only-upgrade", source]');
+    expect(JSON.parse(readFileSync(path.join(userData, 'updates', 'handoff.json'), 'utf8'))).toMatchObject({ version: NEXT });
+  });
+
+  it.skipIf(process.platform !== 'linux')('installs only a digest-checked root-private Debian snapshot, with apt entirely mocked', () => {
+    // Exercise the actual privileged Python source as an ordinary user; replace subprocess.run
+    // before exec so this fixture NEVER invokes apt or pkexec, even for a matching digest.
+    const wrapper = [
+      'import os, stat, subprocess, sys',
+      'def fake_apt(argv, check=False):',
+      '    assert argv[:4] == ["/usr/bin/apt-get", "install", "--assume-yes", "--only-upgrade"]',
+      '    assert check is True',
+      '    assert argv[-1] != sys.argv[1]',
+      '    assert os.stat(os.path.dirname(argv[-1])).st_mode & 0o777 == 0o700',
+      '    assert os.stat(argv[-1]).st_mode & 0o777 == 0o600',
+      '    assert open(argv[-1], "rb").read() == b"verified package bytes"',
+      '    print("MOCK_APT_PRIVATE_SNAPSHOT")',
+      'subprocess.run = fake_apt',
+      'exec(sys.stdin.read())'
+    ].join('\n');
+    const file = path.join(userData, 'file name; $(never-execute).deb');
+    writeFileSync(file, 'verified package bytes');
+    const run = (source: string) => spawnSync('/usr/bin/python3', ['-c', wrapper, source, sha256('verified package bytes')], {
+      input: DEBIAN_ROOT_INSTALL_SCRIPT, encoding: 'utf8', timeout: 5000
+    });
+    const correct = run(file);
+    expect(correct.status, correct.stderr).toBe(0);
+    expect(correct.stdout).toContain('MOCK_APT_PRIVATE_SNAPSHOT');
+    writeFileSync(file, 'changed after the JavaScript handoff digest');
+    const swapped = run(file);
+    expect(swapped.status).not.toBe(0);
+    expect(swapped.stderr).toContain('changed since verification');
+    expect(swapped.stdout).not.toContain('MOCK_APT_PRIVATE_SNAPSHOT');
+    const link = path.join(userData, 'swapped-symlink.deb');
+    symlinkSync(file, link);
+    const linked = run(link);
+    expect(linked.status).not.toBe(0);
+    expect(linked.stdout).not.toContain('MOCK_APT_PRIVATE_SNAPSHOT');
+    rmSync(link);
+  });
+
   it('relaunches an AppImage install itself, having no installer to ask', async () => {
     const live = path.join(userData, 'Chat-On-Steroids.AppImage');
     writeFileSync(live, 'the old build');
@@ -763,9 +1304,9 @@ describe('a check or download that goes wrong on a bad connection', () => {
   it.each(['API', 'public release page', 'artifact'] as const)('explains a rejected %s request, keeps its diagnostic and can retry', async request => {
     const { fetch } = github({ apiStatus: request === 'public release page' ? 403 : undefined });
     const answer = fetch.getMockImplementation()!;
-    const target = request === 'API' ? 'https://api.github.com/repos/totec448-spec/chat-on-steroids/releases/latest'
-      : request === 'public release page' ? 'https://github.com/totec448-spec/chat-on-steroids/releases/latest'
-      : `https://github.com/totec448-spec/chat-on-steroids/releases/download/v${NEXT}/${WINDOWS_ASSET}`;
+    const target = request === 'API' ? 'https://api.github.com/repos/mvclaudianobj/chat-on-steroids/releases/latest'
+      : request === 'public release page' ? 'https://github.com/mvclaudianobj/chat-on-steroids/releases/latest'
+      : `https://github.com/mvclaudianobj/chat-on-steroids/releases/download/v${NEXT}/${WINDOWS_ASSET}`;
     fetch.mockImplementation(async input => {
       if (String(input) === target) {
         throw new TypeError('fetch failed', { cause: new Error('connect ECONNREFUSED') });
@@ -814,23 +1355,69 @@ describe('a check or download that goes wrong on a bad connection', () => {
     expect(online.asked).toEqual([]);
     await vi.advanceTimersByTimeAsync(2_000);
     await vi.waitFor(() => expect(updateStatus().checkedAt).not.toBeNull());
+    // checkedAt records GitHub's answer before staging finishes: drain the prior pass so
+    // its still-running download cannot reach into the next test's fresh platform mock.
+    await checkForUpdates();
     expect(updateStatus().error).toBeNull();
     const calls = online.asked.length;
     await vi.advanceTimersByTimeAsync(60 * 60_000);
     expect(online.asked).toHaveLength(calls);
   });
 
+  /**
+   * A pass still waiting for the installer when the state is reset belongs to the reset before it.
+   * It used to finish anyway: it wrote the installer into the staging folder and set it as staged,
+   * so the next check announced "ready" without downloading anything (CodeRabbit on #2018).
+   */
+  it('leaves no file and no staged update behind from a pass that outlived a reset', async () => {
+    const { fetch } = github();
+    const answer = fetch.getMockImplementation()!;
+    let release: (() => void) | null = null;
+    fetch.mockImplementation(async (input: string | URL) => {
+      if (!String(input).endsWith(WINDOWS_ASSET)) return answer(input);
+      // Answers only when the test says so, and as the real fetch would even if the pass was told to stop.
+      await new Promise<void>(resolve => { release = resolve; });
+      return answer(input);
+    });
+    const old = asPlatform('win32', undefined, () => checkForUpdates());
+    await vi.waitFor(() => expect(release).not.toBeNull(), { timeout: 10_000 });
+    resetUpdateForTests();
+    release!();
+    await old;
+    expect(updateStatus().stage).toBe('idle');
+    expect(existsSync(path.join(userData, 'updates', NEXT))
+      ? readdirSync(path.join(userData, 'updates', NEXT)) : []).toEqual([]);
+    // The next check has nothing staged to fall back on: it fetches the installer itself.
+    const next = github({ fail: 'asset' });
+    await asPlatform('win32', undefined, () => checkForUpdates());
+    expect(next.asked).toContain(WINDOWS_ASSET);
+    expect(updateStatus().stage).toBe('failed');
+  });
+
   it('gives up on a download only when no data arrives for a minute, however long the whole file takes', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
     const body = 'installer bytes';
-    // One chunk, then silence: the connection is still open but nothing comes.
-    const stalled = new ReadableStream<Uint8Array>({ start(controller) { controller.enqueue(new TextEncoder().encode(body.slice(0, 5))); } });
+    // One chunk, then silence: the connection is still open but nothing comes. `pull` runs once the
+    // chunk has been taken, and the download restarts its 60-second watch on each chunk, so the clock
+    // moves only after that: on a slow runner the chunk used to arrive after the jump, the watch
+    // restarted there, and the test waited out its timeout (14 retries in 15 CI runs, 2026-11-01).
+    let taken = false;
+    // A fresh stream per request: a pass left over from an earlier test can still reach this fake and
+    // took the one shared stream first, so this test's own download found it used ("Response body object
+    // should not be disturbed or locked") and failed — every other run on Windows (#2008).
+    const stalled = () => new ReadableStream<Uint8Array>({
+      start(controller) { controller.enqueue(new TextEncoder().encode(body.slice(0, 5))); },
+      pull() { taken = true; return new Promise<void>(() => undefined); }
+    });
     const { fetch } = github({ body });
     const answer = fetch.getMockImplementation()!;
-    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled, { status: 200 }) : answer(input));
+    fetch.mockImplementation(async (input: string | URL) => String(input).endsWith(WINDOWS_ASSET) ? new Response(stalled(), { status: 200 }) : answer(input));
     let done = false;
     const pass = asPlatform('win32', undefined, () => checkForUpdates()).then(() => { done = true; });
-    await vi.waitFor(() => expect(updateStatus().stage).toBe('downloading'));
+    await vi.waitFor(() => expect(taken).toBe(true), { timeout: 10_000, interval: 5 });
+    expect(updateStatus().stage).toBe('downloading');
+    // The chunk's 'data' event (which restarts the watch) runs on Node's own queue, not the faked timers.
+    await new Promise(resolve => setImmediate(resolve));
     await vi.advanceTimersByTimeAsync(59_000);
     expect(done).toBe(false);
     await vi.advanceTimersByTimeAsync(2_000);
@@ -839,4 +1426,3 @@ describe('a check or download that goes wrong on a bad connection', () => {
     expect(updateStatus().error).toContain('no data for 60 seconds');
   });
 });
-

@@ -363,7 +363,7 @@ it('preserves native Desktop permissions when saving unrelated settings on Linux
   const desktopGroup = w.document.querySelector<HTMLElement>('[data-group="desktop"]')!;
   expect(desktopGroup.hidden).toBe(false);
   expect(w.document.querySelector<HTMLInputElement>('[data-cap="control"]')!.disabled).toBe(false);
-  expect(w.document.querySelector<HTMLInputElement>('[data-cap="clipboardWrite"]')!.disabled).toBe(true);
+  expect(w.document.querySelector<HTMLInputElement>('[data-cap="clipboardWrite"]')!.disabled).toBe(false);
 
   const autoConnect = w.document.getElementById('autoConnect') as HTMLInputElement;
   autoConnect.checked = true;
@@ -581,7 +581,7 @@ it('asks what ChatGPT can do in Setup, and read-only keeps it open with the reas
 
   // An unpublished Desktop card leads to the same step, not to Settings.
   const noDesktop = structuredClone(mounted.state);
-  noDesktop.status.surfaces = [{ id: 'desktop', connectorName: 'Chat On Steroids Desktop', state: 'off', available: false, optional: true,
+  noDesktop.status.surfaces = [{ id: 'desktop', connectorName: 'Chat Marks Desktop', state: 'off', available: false, optional: true,
     detail: 'Turn on a Desktop permission.', cardSummary: 'Browser and desktop apps.', tools: [], lastRequestAt: null, lastToolCallAt: null }];
   mounted.push(noDesktop);
   [...doc.querySelectorAll<HTMLButtonElement>('#connectorCards .btn')].find(button => button.textContent === 'Change access')!.click();
@@ -769,7 +769,7 @@ it('walks the Firefox add-on install, without Developer mode or a folder', async
   (document.querySelector('[data-external-browser="firefox"]') as HTMLButtonElement).click();
   expect([shown('extensionStepOpen'), shown('extensionStepDev'), shown('extensionStepLoad'), shown('extensionStepAddon'), shown('extensionStepChatGpt')])
     .toEqual([false, false, false, true, true]);
-  expect(document.getElementById('extensionStepAddon')!.textContent).toBe('Add the Chat On Steroids add-on to Firefox');
+  expect(document.getElementById('extensionStepAddon')!.textContent).toBe('Add the Chat Marks add-on to Firefox');
   expect(document.getElementById('extensionStepChatGpt')!.textContent).toBe('Open ChatGPT in Firefox');
   expect(document.querySelector<HTMLImageElement>('#setupExternalIcon')!.src).toContain('firefox');
   // The unpacked folder and its ZIP are for Chromium browsers only.
@@ -1185,6 +1185,25 @@ it('keeps the app-wide options on the General page, not in Setup, and saves them
   await waitFor(() => expect(mounted.calls.at(-1)?.ui.followOutput).toBe(false));
 });
 
+// Message times (user request 2026-10-30): each chat row always carried its time, hidden. A General
+// switch, off unless chosen, shows it beside every message.
+it('shows message times only once the General switch is on, and hides them again when it is off', async () => {
+  const mounted = await mountChat();
+  const doc = mounted.window.document;
+  const box = doc.getElementById('showMessageTimes') as HTMLInputElement;
+  expect(doc.querySelector('[data-panel="general"]')!.contains(box)).toBe(true);
+  expect(box.checked).toBe(false);
+  expect(doc.documentElement.classList.contains('show-message-times')).toBe(false);
+  box.checked = true;
+  box.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.showMessageTimes).toBe(true));
+  await waitFor(() => expect(doc.documentElement.classList.contains('show-message-times')).toBe(true));
+  box.checked = false;
+  box.dispatchEvent(new mounted.window.Event('change', { bubbles: true }));
+  await waitFor(() => expect(mounted.calls.at(-1)?.ui.showMessageTimes).toBe(false));
+  await waitFor(() => expect(doc.documentElement.classList.contains('show-message-times')).toBe(false));
+});
+
 // #924 / #1401: stable connector URLs for a tunnel of one's own, opt-in, only with secure storage.
 it('saves the stable connector URL option from For developers, and only with secure storage', async () => {
   const mounted = await mountChat();
@@ -1289,7 +1308,7 @@ it('says nothing about being current until the check has actually answered', asy
   // Green, both versions, and the same sentence as the one notification this window shows.
   expect(line.hidden).toBe(false);
   expect(line.className).toBe('upline is-ok');
-  expect(line.textContent).toBe('Up to date! Chat On Steroids 2.0.2 · extension 2.0.2');
+  expect(line.textContent).toBe('Up to date! Chat Marks 2.0.2 · extension 2.0.2');
   expect(doc.querySelector('.toast')!.textContent).toBe(line.textContent);
   // Nothing to act on, so the header bar stays out of the way.
   expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
@@ -1298,7 +1317,7 @@ it('says nothing about being current until the check has actually answered', asy
   doc.querySelector('.toast')!.remove();
   mounted.push(structuredClone(checked) as any);
   expect(doc.querySelector('.toast')).toBeNull();
-  expect(line.textContent).toBe('Up to date! Chat On Steroids 2.0.2 · extension 2.0.2');
+  expect(line.textContent).toBe('Up to date! Chat Marks 2.0.2 · extension 2.0.2');
 });
 
 /**
@@ -1571,7 +1590,7 @@ it('says when the last update did not install, in place of the ready line', asyn
   state.update = { current: '2.0.2', latest: '2.0.3', stage: 'ready', error: null, checkedAt: Date.now(), notInstalled: '2.0.3' };
   mounted.push(state);
   const line = mounted.window.document.getElementById('updateLine')!;
-  expect(line.textContent).toContain('Chat On Steroids 2.0.3 did not install; this is still 2.0.2.');
+  expect(line.textContent).toContain('Chat Marks 2.0.3 did not install; this is still 2.0.2.');
   // The same version ready again: the notice already says to choose Install, once.
   expect(line.textContent).not.toContain('is downloaded and ready');
   expect(line.className).toContain('bad');
@@ -1621,4 +1640,31 @@ it('reports a staged update in the Activity line and the header bar', async () =
   // A check that could not reach GitHub is a diagnostic, not something the user can act on.
   expect(doc.getElementById('updateNotice')!.hidden).toBe(true);
   expect((doc.getElementById('installUpdate') as HTMLButtonElement).hidden).toBe(true);
+});
+
+// 2026-11-01: every state push rebuilt the hidden Setup lists (about 1,000 nodes a minute of garbage,
+// Blink's heap at 1.1 GB with 180 MB in use). Hidden Setup waits and paints the newest state when shown.
+it('leaves hidden Setup lists alone on state pushes and paints the newest state when Setup is shown', async () => {
+  const mounted = await mountChat();
+  const w = mounted.window;
+  const doc = w.document;
+  let setupShown = false;
+  let notify: (() => void) | null = null;
+  (w.Element.prototype as any).checkVisibility = function (this: Element) { return setupShown || !this.closest('#wizard'); };
+  (globalThis as any).ResizeObserver = class { constructor(callback: () => void) { notify = callback; } observe() {} unobserve() {} disconnect() {} };
+  try {
+    const surface = (connectorName: string) => ({ id: 'desktop', connectorName, description: 'Desktop control', cardSummary: '', optional: true,
+      available: true, localUrl: null, publicUrl: null, tools: ['observe'], state: 'off', detail: '', lastRequestAt: null, lastToolCallAt: null });
+    const before = doc.getElementById('connectorCards')!.innerHTML;
+    mounted.push({ ...mounted.state, status: { ...mounted.state.status, surfaces: [surface('First name')] } });
+    mounted.push({ ...mounted.state, status: { ...mounted.state.status, surfaces: [surface('Newest name')] } });
+    expect(doc.getElementById('connectorCards')!.innerHTML).toBe(before);
+    setupShown = true;
+    notify!();
+    expect(doc.getElementById('connectorCards')!.textContent).toContain('Newest name');
+    expect(doc.getElementById('connectorCards')!.textContent).not.toContain('First name');
+  } finally {
+    delete (w.Element.prototype as any).checkVisibility;
+    delete (globalThis as any).ResizeObserver;
+  }
 });

@@ -1,17 +1,20 @@
+import './dev-profile.js';
 import { closeRemoteSessions } from './remote/ssh.js';
-import { stopInputStartup } from './session/start-input.js';
-import { browserExtensionRequired } from '../shared/types.js';
+import { sendDesktopInput, stopInputStartup } from './session/start-input.js';
+import { steerFromTelegram } from './telegram-steer.js';
+import { browserExtensionRequired, isNewer } from '../shared/types.js';
 import { requestSessionFinishGoal, setFinishNotifier } from './session/finish.js';
 /**
  * Main process entry: window, tray, and the security posture for the renderer.
  */
 
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { app, Notification, BrowserWindow, ipcMain, Menu, Tray, nativeImage, nativeTheme, net, powerMonitor, powerSaveBlocker, screen, session } from 'electron';
 import { createKeepAwake, installKeepAwake } from './keep-awake.js';
 import { getConfig, initConfigPath, loadConfig } from './config.js';
 import { initConnectorProofPath, loadConnectorProof, notePluginInstalled } from './connector-proof.js';
-import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives, WORKER_ARCHIVE_AFTER_FINISH_MS } from './worker-archive.js';
+import { initWorkerArchivePath, loadWorkerArchive, queueWorkerArchives, workerArchiveFinishDelayMs } from './worker-archive.js';
 import { initBrowserProofPath, loadBrowserProof } from './browser-proof.js';
 import { enrolledPluginSurfaces } from './plugin-refresh.js';
 import {
@@ -26,7 +29,8 @@ import {
 } from './connection.js';
 import { setSystemProxyResolver } from './tunnel/index.js';
 import { configureAppProxy, refreshAppProxy } from './app-proxy.js';
-import { openSessionChat, registerIpc } from './ipc.js';
+import { openSessionChat, registerIpc, deleteRecordedSession } from './ipc.js';
+import { runArchiveRetentionSweep } from './session/archive-retention.js';
 import { getChatModels, restoreChatModels, startChatModelDiscovery } from './chat-models.js';
 import { flushLogBeforeExit, initLogFile, logError, logInfo, logWarn, onLog, snapshotLogOnCrash } from './logger.js';
 import { noteRuntimeEvent, tallyLogEntry } from './diagnostics-facts.js';
@@ -34,18 +38,32 @@ import { unifiedExecManager } from './codex/manager.js';
 import { workspaceTerminalsExited } from './workspace-terminal.js';
 import { getSecret, initSecretsPath, keychainReadPending } from './secrets.js';
 import { installPhonePush, pushToPhone } from './phone-push.js';
+import { noteAutomationChanged, startTelegram, stopTelegram, telegramDestination } from './telegram-app.js';
+import { statusChatsFrom } from './telegram-status.js';
 import { createSoundReadiness, installSoundCues, soundCue, soundQuietHours } from './sound-cues.js';
 import { DEFAULT_PHONE_PUSH } from '../shared/phone-push.js';
+import { initRemoteHosts } from './remote/hosts.js';
+import { initMarksVault, warmVaultRedaction } from './marks-vault.js';
+import { initBrain } from './brain/store.js';
+import { initBrainSettings, loadBrainSettings } from './brain/settings.js';
+import { initBrainEngineMcp, stopBrainEngineMcp } from './brain/engine-mcp.js';
 import { mainText, mainTextTranslations, onMainTextsChange, restoreMainTextTranslations } from './main-texts.js';
 import { isMainText } from '../shared/main-texts.js';
 import { executableFingerprint, initKeychainNotice } from './keychain-notice.js';
 import { pluginManager } from './plugins/manager.js';
-import { sessionActivityExpiresAt, setBrowserOpener, setBrowserWorkArea, shutdownBridge, startBridge } from './bridge.js';
+import { onSessionAutomationChange, sessionActivityExpiresAt, sessionControlsFor, sessionHoldsTurn, setBrowserOpener, setBrowserWorkArea, setSessionAutomation, shutdownBridge, startBridge, stopSessionTurn } from './bridge.js';
 import { setStuckNotifier } from './stuck-notice.js';
-import { flushSessions, getSession, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
-import { runDueSchedules, type RunnerDeps } from './scheduled-runs.js';
-import { enqueueInput, listInputs } from './session/input.js';
+import { flushSessions, getSession, getSessionOrNullIfMissing, initSessionStore, listSessions, readRecentEvents, setRecordingStorageLimit } from './session/store.js';
+import { runDueSchedules, safeFailureReason, type RunnerDeps } from './scheduled-runs.js';
+import { deliveryProof, enqueueInput, listInputs } from './session/input.js';
 import { createTurnNotifier } from './turn-notifications.js';
+import { createOutboundTurnWatcher } from './notification-events.js';
+import { getWhatsAppWebStatus, getWhatsAppWebDeliveryStatus, resumeWhatsAppWeb, sendWhatsAppWeb, setWhatsAppWebInbound, stopWhatsAppWeb } from './notification-whatsapp-web.js';
+import { createWhatsAppDuplex, lastRelayableWhatsAppAnswer, completedWhatsAppAnswers } from './whatsapp-duplex.js';
+import { redactSecretText } from './redaction.js';
+import { watchWhatsAppResumeOnGreen } from './whatsapp-resume-on-green.js';
+import { notificationSettings, queueOutboundNotice, setWhatsAppApprovalCodes } from './notification-center.js';
+import { listProjects } from './projects.js';
 import { DEFAULT_RECORDING_STORAGE_GIB } from '../shared/session.js';
 import { initSkillsPath } from './skills.js';
 import { initUvRuntime } from './plugins/uv-runtime.js';
@@ -55,6 +73,7 @@ import { shownTheme, watchSystemTheme } from './theme.js';
 import { usageOverview } from './session/usage.js';
 import {
   flushRecorder,
+  activeSessionId,
   onSessionChange,
   queueDeterministicAttributionRepair,
   setAgentBinder,
@@ -86,6 +105,9 @@ import { performance } from 'node:perf_hooks';
 import { createStartupTiming, installStartupTiming, markStartup, STARTUP_STATE } from './startup-timing.js';
 import { loadConnectorIdentity } from './connector-identity.js';
 import { initControlApiPath, shutdownControlApi, startControlApi } from './control-api.js';
+import { startMobilePanel, type MobilePanelInstance } from './mobile-panel.js';
+import { getCompany } from './company-store.js';
+import { approvalCardView, approvalWaitingChats, requestApprovalAnswer, approvalDecisionStatus } from './approval-wait.js';
 import { restoreRequestCorrelations } from './session/correlation.js';
 import { restoreBlockedChats } from './session/blocked-chats.js';
 import { restoreTrustedChats } from './session/trusted-chats.js';
@@ -99,6 +121,7 @@ import {
   GOAL_HELPER_SIZE_STATE,
   restoreGoalHelperSize,
   goalSwitchEnabledFor,
+  goalSwitchFor,
   restoreGoalObjectives,
   restoreGoalOutcomes,
   restoreGoalReplies,
@@ -117,7 +140,7 @@ import {
 import { runShutdownSequence } from './shutdown.js';
 import { startAgentRuntimeGc, stopAgentRuntimeGc } from './runtime-gc.js';
 import { restoreManagedWorktrees } from './worktrees/index.js';
-import { applyStagedUpdate, ELEVATION_ANSWER_MS, installingVersion, onInstallerTakeover, onUpdateHandoffStep, startUpdateChecks } from './update.js';
+import { applyStagedUpdate, ELEVATION_ANSWER_MS, installingVersion, onInstallerTakeover, onUpdateHandoffStep, startUpdateChecks, onUpdateChange, updateStatus } from './update.js';
 import { setUpdateProgressStep, showUpdateProgress, untilInstallerTakesOver } from './update-progress.js';
 import { resumeUpdateRefresh } from './update-all.js';
 import { UI_BASE_ZOOM, windowLayoutForDisplays, windowPlacementWasMaximized, titleBarOverlayForTheme, windowBackgroundForTheme } from './window-layout.js';
@@ -134,10 +157,13 @@ import {
   shouldQuitOnWindowAllClosed
 } from './window-lifecycle.js';
 import { trayGuidArgsForPlatform, trayImageSpec } from './tray-image.js';
-import { browserWindowIconPath } from './window-icon.js';
+import { browserWindowIconPath, WINDOWS_APP_USER_MODEL_ID } from './window-icon.js';
 import { approvedChatGptImageRequest, RENDERER_CONTENT_SECURITY_POLICY } from './renderer-csp.js';
+import { allowJarvisMicrophone } from './jarvis-permissions.js';
+import { restoreJarvisMicrophoneConsent, jarvisMicrophoneConsented } from './jarvis-microphone-consent.js';
 import { editContextMenuTemplate } from './edit-context-menu.js';
 import { connectionLossLine, showConnectionLossNotice } from './connection-loss-notice.js';
+import { requireMarkspanelLogin, startMarkspanelSessionMonitor } from './markspanel-auth.js';
 
 /** Durable state file holding the multi-agent run. Hashes only, never credentials. */
 const SWARM_STATE = 'swarm';
@@ -147,12 +173,17 @@ const WINDOW_BOUNDS_STATE = 'window-bounds';
 const MAIN_TEXTS_STATE = 'main-texts';
 
 let window: BrowserWindow | null = null;
+let mobilePanel: MobilePanelInstance | null = null;
 let savedWindowBounds: unknown = null;
 let tray: Tray | null = null;
 let quitting = false;
 let shutdownStarted = false;
 let shutdownComplete = false;
 const usageWarmup = new AbortController();
+let stopMarkspanelMonitor: (() => void) | null = null;
+let completingMarkspanelLogin = false;
+
+if (process.platform === 'win32') app.setAppUserModelId(WINDOWS_APP_USER_MODEL_ID);
 
 // One instance only: two copies would fight over the tunnel and the config file.
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -192,7 +223,7 @@ function createWindow(): void {
     ...(process.platform === 'darwin' ? { titleBarStyle: 'hidden' as const, titleBarOverlay: true } : {}),
     // Painted before the renderer loads, so a dark window never flashes white.
     backgroundColor: windowBackgroundForTheme(shownTheme(getConfig().ui.theme), getConfig().ui.appearance),
-    title: 'Chat On Steroids',
+    title: 'Chat Marks',
     webPreferences: {
       zoomFactor: UI_BASE_ZOOM,
       preload: path.join(__dirname, '../preload/index.js'),
@@ -205,6 +236,10 @@ function createWindow(): void {
     }
   });
 
+  // Some Linux window managers ignore Electron's constructor icon during the first
+  // native mapping; Windows taskbar grouping can also fall back to a generic icon.
+  // Publish the same Marks artwork explicitly once the native window exists.
+  if (icon) window.setIcon?.(icon);
   if (process.platform === 'win32') window.removeMenu();
   const owner = window;
 
@@ -292,8 +327,13 @@ const chatNoticeAt = new Map<string, number>();
 /** A chat that waits for the person, for the phone: its own rules decide whether it goes out. */
 const phoneNeedsYou = (sessionId: string): void => {
   soundCue('needs-you', sessionId);
-  void getSession(sessionId).catch(() => null).then(summary => pushToPhone({ kind: 'needs-you', sessionId,
-    chatTitle: summary?.title || 'Chat On Steroids', conversationId: summary?.conversationId ?? null }));
+  void getSession(sessionId).catch(() => null).then(summary => {
+    // An approval card that waits, unanswered: Telegram offers Deny under the message (#1934).
+    const card = summary?.conversationId ? approvalCardView(summary.conversationId) : null;
+    return pushToPhone({ kind: 'needs-you', sessionId,
+      chatTitle: summary?.title || 'Chat Marks', conversationId: summary?.conversationId ?? null,
+      ...(card && !card.answer ? { approval: { sessionId, cardId: card.id } } : {}) });
+  });
 };
 
 function showWindow(): void {
@@ -398,7 +438,7 @@ function refreshTray(): void {
   const label = mainText(connected ? 'Connected' : offline ? (getStatus().offlineCause === 'service' ? 'OpenAI outage' : 'No internet') : 'Not connected');
   tray.setImage(trayIcon(running));
   // Not lowercased: that would break translated nouns ("Keine Internetverbindung").
-  tray.setToolTip(`Chat On Steroids — ${label}`);
+  tray.setToolTip(`Chat Marks — ${label}`);
   const cosBrowser = loadedCosBrowser();
   tray.setContextMenu(
     Menu.buildFromTemplate([
@@ -460,6 +500,12 @@ void app.whenReady().then(async () => {
   initWorkerArchivePath(userData);
   initBrowserProofPath(userData);
   initSecretsPath(userData);
+  initMarksVault(userData);
+  // Chat Marks: initialize the local Brain paths without reading any other app's data.
+  initBrain(userData);
+  initBrainSettings(userData);
+  initBrainEngineMcp(userData);
+  initRemoteHosts(userData);
   initKeychainNotice(userData, {
     platform: process.platform,
     contents: () => (window && !window.isDestroyed() ? window.webContents : null),
@@ -471,6 +517,8 @@ void app.whenReady().then(async () => {
   try { await initSkillsPath(userData); }
   catch (error) { logWarn(`Skills library unavailable: ${error instanceof Error ? error.message : String(error)}`); }
   initDurableStore(userData);
+  try { await loadBrainSettings(); }
+  catch { logWarn('Brain settings unavailable; all model-facing Brain integrations remain disabled'); }
   startupTiming.restore(await readDurable<unknown>(STARTUP_STATE));
   savedWindowBounds = await readDurable<unknown>(WINDOW_BOUNDS_STATE);
   restoreMainTextTranslations(await readDurable<unknown>(MAIN_TEXTS_STATE));
@@ -485,12 +533,48 @@ void app.whenReady().then(async () => {
   if (windowActivation.isDisabled()) return;
   await loadConfig();
   markStartup('config');
+  // The login page opens before the ordinary renderer CSP/permissions setup.
+  // It never requires OS permissions; deny them before creating that window.
+  session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
+  // Access to the local workspace and its MCP endpoints begins only after the
+  // Markspanel account has been validated by the service. A cancelled login
+  // leaves this startup closed rather than continuing in an anonymous session.
+  let loginApproved = false;
+  completingMarkspanelLogin = true;
+  try {
+    loginApproved = await requireMarkspanelLogin({
+      loginPage: path.join(__dirname, '../renderer/markspanel-login.html'),
+      ...(process.env.ELECTRON_RENDERER_URL ? {
+        loginUrl: new URL('/markspanel-login.html', process.env.ELECTRON_RENDERER_URL).toString()
+      } : {}),
+      preload: path.join(__dirname, '../preload/markspanel-login.js'),
+      isQuitting: () => quitting || windowActivation.isDisabled()
+    });
+  } finally {
+    completingMarkspanelLogin = false;
+  }
+  if (!loginApproved) {
+    if (!quitting) app.quit();
+    return;
+  }
+  if (windowActivation.isDisabled()) return;
+  await warmVaultRedaction();
+  // Refresh and revalidate the Markspanel session throughout the app lifetime.
+  // A revoked token or unavailable identity service closes this runtime through
+  // the existing bounded shutdown, rather than continuing to publish local tools.
+  stopMarkspanelMonitor = startMarkspanelSessionMonitor({
+    isQuitting: () => quitting || windowActivation.isDisabled(),
+    onAccessLost: reason => {
+      logWarn(`Markspanel session ${reason}; stopping local access`);
+      app.quit();
+    }
+  });
   setRecordingStorageLimit(getConfig().sessions.storageLimitGiB ?? DEFAULT_RECORDING_STORAGE_GIB);
   await loadConnectorProof();
   await loadWorkerArchive();
   // Worker chats are archived in ChatGPT when the setting is on: a little after their worker reports
   // its task done (#1701), and once the broker retired them for good (#1460).
-  onWorkerFinished((conversationId) => queueWorkerArchives([conversationId], Date.now(), WORKER_ARCHIVE_AFTER_FINISH_MS));
+  onWorkerFinished((conversationId) => queueWorkerArchives([conversationId], Date.now(), workerArchiveFinishDelayMs()));
   onWorkerChatsRetired((conversationIds) => queueWorkerArchives(conversationIds));
   await loadBrowserProof();
   // Plugins ChatGPT already showed the refresh feature are created: Setup need not wait for a call.
@@ -538,8 +622,61 @@ void app.whenReady().then(async () => {
       const reply = await net.fetch(url, { method: 'POST', body, headers, signal: AbortSignal.timeout(10_000) });
       return { ok: reply.ok, status: reply.status };
     },
-    log: logInfo
+    log: logInfo,
+    telegram: telegramDestination
   });
+  // Telegram's pause stands only until the person's own control changes the switch (#1990).
+  onSessionAutomationChange((sessionId, on, from) => { if (from !== 'Telegram') noteAutomationChanged(sessionId, on); });
+  // A Telegram bot of the person's own, as a second phone destination (#1934): outgoing requests only.
+  void startTelegram({
+    fetch: (url, init) => net.fetch(url, init),
+    log: logInfo,
+    mainText,
+    details: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }).includeDetails,
+    chats: async () => statusChatsFrom(await listSessions(),
+      { goal: goalSwitchFor, card: approvalCardView, activityExpiresAt: sessionActivityExpiresAt,
+        held: sessionHoldsTurn }, Date.now()),
+    // Phase 2 (2026-10-31): the app's own Stop and Goal/Loop switch, and the composer's send path.
+    stop: async sessionId => {
+      try {
+        const controls = await sessionControlsFor(sessionId);
+        const turnId = controls.activeTurnId ?? controls.heldTurnId;
+        if (!turnId) return 'nothing';
+        await stopSessionTurn(sessionId, turnId, { from: 'Telegram' });
+        logInfo(`telegram: Stop requested for session ${sessionId}, turn ${turnId}`);
+        return 'done';
+      } catch (error) {
+        logWarn(`telegram: could not stop session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+        return 'failed';
+      }
+    },
+    setAutomation: async (sessionId, on) => {
+      const conversationId = (await getSession(sessionId).catch(() => null))?.conversationId;
+      if (!conversationId) return false;
+      try {
+        // Off keeps which of Goal and Loop it was; on brings that one back.
+        await setSessionAutomation(sessionId, on ? goalSwitchFor(conversationId).mode : 'off', undefined, 'Telegram');
+        return true;
+      } catch (error) {
+        logWarn(`telegram: could not turn ${on ? 'on' : 'off'} Goal/Loop for session ${sessionId}: ${error instanceof Error ? error.message : String(error)}`);
+        return false;
+      }
+    },
+    steer: (sessionId, text) => steerFromTelegram({
+      allowed: () => ({ ...DEFAULT_PHONE_PUSH, ...getConfig().ui.phonePush }).telegramSteer === true,
+      session: getSession,
+      followUpQueues: () => getConfig().ui.followUp === 'queue',
+      send: sendDesktopInput,
+      log: logInfo
+    }, sessionId, text),
+    deny: async (sessionId, cardId) => {
+      const conversationId = (await getSession(sessionId).catch(() => null))?.conversationId;
+      if (!conversationId) return 'already';
+      const answer = requestApprovalAnswer(conversationId, cardId, 'deny');
+      if (answer.ok) { logInfo(`approval card: the user chose deny in Telegram for ${conversationId}`); return 'denied'; }
+      return answer.error === 'no_card' || answer.error === 'card_changed' || answer.error === 'answer_pending' ? 'already' : 'failed';
+    }
+  }).catch(error => logWarn(`telegram: could not start: ${error instanceof Error ? error.message : String(error)}`));
   // Codex's turn-completion notifications: a finished answer in a background window.
   const turnNotifier = createTurnNotifier({
     getSession,
@@ -570,16 +707,44 @@ void app.whenReady().then(async () => {
   });
   turnNotifier.seed(await listSessions().catch(() => []));
   onSessionChange(change => void turnNotifier.handle(change.sessionIds ?? []));
+  const outboundTurnNotifier = createOutboundTurnWatcher(getSession, queueOutboundNotice, {
+    projectName: async projectId => (await listProjects()).find(project => project.id === projectId)?.name ?? 'Chat Marks',
+    excerpt: async sessionId => {
+      const [answer] = await readRecentEvents(sessionId, 1, { kinds: ['assistant_message'] });
+      return answer?.kind === 'assistant_message' ? answer.message.text : null;
+    }
+  });
+  outboundTurnNotifier.seed(await listSessions().catch(() => []));
+  onSessionChange(change => void outboundTurnNotifier.changed(change.sessionIds ?? []).catch(() => undefined));
+  // The updater owns availability: notify only when its observed latest version changes.
+  let announcedRelease = updateStatus().latest;
+  onUpdateChange(() => {
+    const status = updateStatus();
+    const latest = status.latest;
+    if (!latest || latest === announcedRelease || !isNewer(latest, status.current)) return;
+    announcedRelease = latest;
+    void queueOutboundNotice({ event: 'app-release', title: `Chat Marks ${latest}`, project: 'Chat Marks' }).catch(() => undefined);
+  });
   // #1826: scheduled runs. Checked every 30 s and right after the computer wakes; a run missed
   // while it slept or the app was closed goes out once, labelled late.
   const scheduleDeps: RunnerDeps = {
     // A lookup that fails is not a deleted chat: the runner keeps the schedule and asks again.
-    session: async id => { const summary = await getSession(id); return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null; },
-    enqueue: input => enqueueInput(input),
-    pending: async () => new Set((await listInputs()).filter(row => ['queued', 'browser', 'tool'].includes(row.state)).map(row => row.id)),
-    log: logInfo
+    session: async id => {
+      const summary = await getSessionOrNullIfMissing(id);
+      return summary ? { id: summary.id, conversationId: summary.conversationId ?? null, activeTurnId: summary.activeTurnId ?? null } : null;
+    },
+    enqueue: (input, options) => enqueueInput(input, undefined, options),
+    inputs: async () => (await listInputs()).map(row => ({
+      id: row.id, state: row.state, deliveredAt: row.deliveredAt, scheduled: row.scheduled,
+      sendAuthorizedAt: row.sendAuthorizedAt, deliveryProof: deliveryProof(row)
+    })),
+    log: logInfo,
+    changed: () => {
+      const target = window;
+      if (target && !target.isDestroyed()) target.webContents.send('session:changed');
+    }
   };
-  const checkSchedules = () => void runDueSchedules(Date.now(), scheduleDeps).catch(error => logWarn(`scheduled runs: the check failed (${error instanceof Error ? error.message : String(error)})`));
+  const checkSchedules = () => void runDueSchedules(Date.now(), scheduleDeps).catch(error => logWarn(`scheduled runs: the check failed (${safeFailureReason(error)})`));
   setInterval(checkSchedules, 30_000).unref();
   powerMonitor.on('resume', checkSchedules);
   checkSchedules();
@@ -679,6 +844,18 @@ void app.whenReady().then(async () => {
       // self-asserting filesystem markers left from unaccepted or pruned allocations.
       const recovered = await restoreManagedWorktrees(getConfig().roots, managedWorkerRecoveryIdentities());
       logInfo(`worktrees: restored ${recovered.restored.length} worker workspace(s); refused ${recovered.rejected.length} invalid marker(s)`);
+      if (recovered.rejected.length) {
+        // The reason is actionable, whereas "invalid marker" hides missing
+        // directories and changed filesystem identities behind one count.
+        // Do not log native paths or adopt a marker without broker proof.
+        const failures = new Map<string, number>();
+        for (const { error } of recovered.rejected) {
+          const code = /^([A-Z][A-Z0-9_]+):/.exec(error)?.[1] ??
+            (/^ENOENT:/.test(error) ? 'ENOENT' : 'OTHER');
+          failures.set(code, (failures.get(code) ?? 0) + 1);
+        }
+        logWarn(`worktrees: restore refusals by cause: ${[...failures].map(([code, count]) => `${code}=${count}`).join(', ')}`);
+      }
     } catch (error) {
       // No marker is accepted on failure; workspace resolution must still require an
       // exact active lease rather than silently sending this worker into the prime cwd.
@@ -736,14 +913,110 @@ void app.whenReady().then(async () => {
     });
   });
 
-  // Deny every permission request; the UI needs none of them.
-  session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
+  await restoreJarvisMicrophoneConsent();
+  // Both Electron permission gates enforce the same durable, app-wide consent.
+  // This never starts capture; getUserMedia is still invoked by Jarvis PTT.
+  session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+    const main = window && !window.isDestroyed() ? window.webContents : null;
+    callback(jarvisMicrophoneConsented() && allowJarvisMicrophone({
+      permission, fromMainWindow: !!main && contents === main, isMainFrame: details.isMainFrame === true,
+      requestingUrl: details.requestingUrl ?? '', appUrl: main?.getURL() ?? '',
+      mediaTypes: (details as { mediaTypes?: string[] }).mediaTypes
+    }));
+  });
+  session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) => {
+    const main = window && !window.isDestroyed() ? window.webContents : null;
+    return jarvisMicrophoneConsented() && allowJarvisMicrophone({
+      permission, fromMainWindow: !!main && contents === main,
+      isMainFrame: details.isMainFrame === true,
+      requestingUrl: details.requestingUrl ?? '', appUrl: main?.getURL() ?? '',
+      mediaTypes: details.mediaType ? [details.mediaType] : []
+    });
+  });
 
   // From here on a second launch may safely focus/recreate the window: renderer security policy
   // is installed and the renderer's fixed IPC methods already have handlers before it can load.
   // The same quit the tray's Quit performs. It has to go through `quitting` for the window's
   // close-to-tray handler to let go: without it, quitting to install would hide the window and
   // leave the app running, which is exactly the trap the Install button exists to end.
+  const whatsappDuplex = createWhatsAppDuplex({
+    // Notification recipients form an explicit owner whitelist. No sender is
+    // authorized by pairing alone, and the channel is completely off by default.
+    allowed: async () => {
+      const channel = (await notificationSettings()).channels['whatsapp-web'];
+      return channel.enabled && channel.config.duplex === 'on'
+        ? channel.destinations.filter(number => /^\d{8,15}$/.test(number)) : [];
+    },
+    sessions: async () => (await listSessions()).filter(item => !item.archivedAt && item.conversationId).map(item => ({
+      id: item.id, title: item.title, conversationId: item.conversationId, updatedAt: item.updatedAt
+    })),
+    active: async () => activeSessionId(),
+    sendText: sendWhatsAppWeb,
+    deliveryStatus: getWhatsAppWebDeliveryStatus,
+    send: async (sessionId, text) => {
+      const entry = await sendDesktopInput({ id: randomUUID(), sessionId, text, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null });
+      return { id: entry.id, state: entry.state };
+    },
+    approvals: () => approvalWaitingChats().flatMap(conversationId => {
+      const card = approvalCardView(conversationId);
+      return card ? [{ conversationId, cardId: card.id, title: 'Solicitação ChatGPT',
+        details: redactSecretText(card.lines.slice(0, 3).join(' · ')), allow: card.allow,
+        // A command awaiting the exact host acknowledgement must not reappear
+        // as a fresh approval every eight seconds.
+        outcome: card.answer?.outcome === null ? 'pending'
+          : card.answer?.outcome === 'clicked' || card.answer?.outcome === 'dismissed'
+            ? card.answer.outcome : null }] : [];
+    }),
+    approvalStatus: approvalDecisionStatus,
+    answer: (conversationId, cardId, choice) => {
+      const result = requestApprovalAnswer(conversationId, cardId, choice);
+      return result.ok ? { ok: true } : { ok: false, error: result.error };
+    },
+    latest: async sessionId => {
+      const session = await getSession(sessionId);
+      // A new streaming turn may already have started by the time the WhatsApp
+      // poll runs. The previous *completed* answer is still valid, but a
+      // streaming revision must never displace it in a limit-one query.
+      if (!session || session.lastTurnOutcome !== 'completed' || !session.lastTurnEndAt) return null;
+      const answers = await readRecentEvents(sessionId, 32, { kinds: ['assistant_message'] });
+      return lastRelayableWhatsAppAnswer(answers, session.lastTurnEndAt);
+    },
+    delivered: async (sessionId, inputId) => {
+      const events = await readRecentEvents(sessionId, 100, { kinds: ['user_message'] });
+      return events.find(event => event.kind === 'user_message' && event.inputId === inputId && event.inputDelivery !== 'offered')?.seq ?? null;
+    },
+    completedSince: async (sessionId, afterSeq) => {
+      const events = await readRecentEvents(sessionId, 200, { kinds: ['assistant_message', 'turn_end'] });
+      return completedWhatsAppAnswers(events, events, afterSeq);
+    },
+    load: () => readDurable('whatsapp-duplex-control'),
+    save: state => writeDurableNow('whatsapp-duplex-control', state)
+  });
+  setWhatsAppWebInbound((number, messageId, text) => whatsappDuplex.incoming(number, messageId, text));
+  setWhatsAppApprovalCodes(whatsappDuplex.approvalCode);
+  onSessionChange(change => {
+    if (change.sessionIds?.length) void whatsappDuplex.changed(change.sessionIds).catch(() => undefined);
+  });
+  // The green connector transition is an independent opportunity to restore
+  // an already paired Baileys session (including QR credentials). Explicit logout deletes
+  // the saved auth and cannot be undone by this listener.
+  const resumeEnabledWhatsApp = async (): Promise<void> => {
+    if (quitting) return;
+    if (!(await notificationSettings()).channels['whatsapp-web'].enabled) {
+      logInfo('WhatsApp resume: channel disabled');
+      return;
+    }
+    await resumeWhatsAppWeb();
+  };
+  watchWhatsAppResumeOnGreen(getStatus, onStatusChange, resumeEnabledWhatsApp, () => !quitting);
+  void resumeEnabledWhatsApp().catch(() => logWarn('WhatsApp resume: startup check failed'));
+  setInterval(() => {
+    if (quitting) return;
+    void getWhatsAppWebStatus().then(status => {
+      if (status.state !== 'connected') return;
+      return whatsappDuplex.pollApprovals().then(() => whatsappDuplex.changed([]));
+    }).catch(() => undefined);
+  }, 8_000).unref();
   registerIpc(
     () => window,
     () => {
@@ -751,6 +1024,13 @@ void app.whenReady().then(async () => {
       app.quit();
     }
   );
+  const archiveRetentionSweep = () => {
+    if (quitting || windowActivation.isDisabled()) return;
+    void runArchiveRetentionSweep(async id => { await deleteRecordedSession(id); })
+      .catch(error => logWarn(`archive retention: sweep failed: ${error instanceof Error ? error.message : String(error)}`));
+  };
+  archiveRetentionSweep();
+  setInterval(archiveRetentionSweep, 6 * 60 * 60_000).unref();
   // Chats are restored here; the window, once enabled, can ask for its state before the pet overlay is ready.
   markStartup('restored');
   windowActivation.enable();
@@ -791,6 +1071,72 @@ void app.whenReady().then(async () => {
   if (getConfig().controlApi.enabled) {
     startControlApi().catch((error: Error) => logWarn(`control API did not start: ${error.message}`));
   }
+  // Off by default; never publish a LAN listener unless HTTPS was explicitly
+  // configured. The user's Markspanel login was verified before reaching here.
+  if (process.env.CHAT_MARKS_MOBILE_PANEL === '1') {
+    const host = process.env.CHAT_MARKS_MOBILE_HOST || '127.0.0.1';
+    const port = Number(process.env.CHAT_MARKS_MOBILE_PORT || '17893');
+    void startMobilePanel({
+      userData, host, port,
+      ...(process.env.CHAT_MARKS_MOBILE_TLS_CERT ? { tlsCert: process.env.CHAT_MARKS_MOBILE_TLS_CERT } : {}),
+      ...(process.env.CHAT_MARKS_MOBILE_TLS_KEY ? { tlsKey: process.env.CHAT_MARKS_MOBILE_TLS_KEY } : {})
+    }, {
+      snapshot: async () => {
+        const [sessions, company] = await Promise.all([listSessions(), getCompany()]);
+        const recent = sessions.slice(0, 30);
+        return {
+          sessions: recent.map(s => ({
+            id: s.id, title: s.title.slice(0, 160), updatedAt: s.updatedAt,
+            state: s.activeTurnId ? 'working' : s.endedAt ? 'finished' : 'idle',
+            conversationId: s.conversationId
+          })),
+          company: {
+            name: company.company.name, demo: company.demo,
+            seats: company.company.seats.slice(0, 20).map(seat => ({
+              seat, state: 'unverified', tickets: company.requests.filter(req => req.seat === seat && req.status !== 'done').length
+            })),
+            requests: company.requests.slice(-40).map(req => ({ title: req.title, status: req.status, seat: req.seat }))
+          },
+          approvals: approvalWaitingChats().slice(0, 40).flatMap(conversationId => {
+            const card = approvalCardView(conversationId);
+            const title = sessions.find(s => s.conversationId === conversationId)?.title ?? 'Aprovação ChatGPT';
+            return card ? [{
+              conversationId, cardId: card.id, title: title.slice(0, 160),
+              choiceEnabled: card.allow, outcome: card.answer?.outcome ?? null
+            }] : [];
+          })
+        };
+      },
+      answer: (conversationId, cardId, choice) => {
+        const result = requestApprovalAnswer(conversationId, cardId, choice);
+        return result.ok ? { ok: true } : { ok: false, error: result.error };
+      },
+      history: async sessionId => {
+        const events = await readRecentEvents(sessionId, 40, { kinds: ['user_message', 'assistant_message'] });
+        return events.flatMap(event => {
+          if (event.kind !== 'user_message' && (event.kind !== 'assistant_message' || !event.final)) return [];
+          return [{
+            seq: event.seq,
+            kind: event.kind === 'user_message' ? 'user' as const : 'assistant' as const,
+            text: redactSecretText(event.message.text).slice(0, 4000)
+          }];
+        });
+      },
+      send: async (sessionId, text) => {
+        const session = (await listSessions()).find(item => item.id === sessionId && !item.archivedAt && !!item.conversationId);
+        if (!session) throw new Error('session_not_available');
+        const queued = await sendDesktopInput({
+          id: randomUUID(), sessionId, text, mode: 'auto', dueAt: Date.now(), model: null, reasoningEffort: null
+        });
+        return { id: queued.id, state: queued.state };
+      }
+    }).then(async panel => {
+      if (quitting || windowActivation.isDisabled()) { await panel.stop(); return; }
+      mobilePanel = panel;
+      logInfo('mobile panel started (opt-in, authenticated)');
+    })
+      .catch(() => logWarn('mobile panel unavailable; check opt-in listener or TLS settings'));
+  }
   if (getConfig().ui.autoConnect) void connect();
   void resumeUpdateRefresh().catch((error: Error) => logWarn(`update refresh did not resume: ${error.message}`));
 
@@ -807,6 +1153,8 @@ void app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  stopMarkspanelMonitor?.();
+  stopMarkspanelMonitor = null;
   if (!ownsAppRuntime(hasSingleInstanceLock)) return;
   quitting = true;
   // From this point `will-quit` owns a bounded teardown. A Dock click/relaunch arriving while
@@ -814,6 +1162,8 @@ app.on('before-quit', () => {
   windowActivation.disable();
   usageWarmup.abort();
   void stopAgentRuntimeGc();
+  // Its long poll would otherwise hold a request open while the app goes.
+  stopTelegram();
 });
 
 app.on('window-all-closed', () => {
@@ -821,7 +1171,7 @@ app.on('window-all-closed', () => {
   // macOS convention: closing the last window is not quitting the application. The Dock/menu
   // bar stay alive and `activate` recreates it. Windows/Linux retain the explicit close-to-tray
   // preference; Cmd+Q / app.quit bypasses this event and still enters the shutdown sequence.
-  if (shouldQuitOnWindowAllClosed(process.platform, getConfig().ui.minimizeToTray)) app.quit();
+  if (shouldQuitOnWindowAllClosed(process.platform, getConfig().ui.minimizeToTray, completingMarkspanelLogin)) app.quit();
 });
 
 /**
@@ -863,13 +1213,13 @@ app.on('will-quit', (event) => {
       {
         name: 'admission/drain',
         budgetMs: 40_000,
-        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), stopAgentRuntimeGc()]
+        run: () => [shutdownConnection(), shutdownBridge(), shutdownControlApi(), mobilePanel ? mobilePanel.stop() : Promise.resolve(), stopAgentRuntimeGc(), stopBrainEngineMcp()]
       },
       // Phase 2: only after request handlers are done may their owned child processes go.
       {
         name: 'process cleanup',
         budgetMs: 15_000,
-        run: () => [unifiedExecManager.terminateAllProcesses(), workspaceTerminalsExited(), stopComputerHelper(), shutdownPetOverlay(), pluginManager.close(),
+        run: () => [unifiedExecManager.terminateAllProcesses(), workspaceTerminalsExited(), stopComputerHelper(), shutdownPetOverlay(), stopWhatsAppWeb(), pluginManager.close(),
           // SFTP sessions of projects on a server (#1469): their ssh would outlive the app on Windows.
           Promise.resolve().then(() => closeRemoteSessions()),
           Promise.resolve().then(() => loadedCosBrowser()?.stop())]

@@ -18,7 +18,7 @@ let progress: BrowserWindow | null = null;
 
 const stepText = (step: UpdateHandoffStep): string => step === 'permission'
   ? mainText('Waiting for your permission in Windows…')
-  : mainText('Starting the installer. Chat On Steroids opens again by itself.');
+  : mainText('Starting the installer. Chat Marks opens again by itself.');
 
 export function showUpdateProgress(version: string): void {
   if (progress && !progress.isDestroyed()) return;
@@ -29,7 +29,7 @@ export function showUpdateProgress(version: string): void {
     // On top: the main window is already gone, and on Windows another app has the foreground by
     // then, so a plain window opened behind it (measured on the VM, 2026-10-15).
     width: 420, height: 176, frame: false, resizable: false, minimizable: false, maximizable: false, alwaysOnTop: true,
-    fullscreenable: false, show: false, center: true, title: 'Chat On Steroids', backgroundColor: palette.background,
+    fullscreenable: false, show: false, center: true, title: 'Chat Marks', backgroundColor: palette.background,
     webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, webSecurity: true }
   });
   progress = win;
@@ -38,7 +38,7 @@ export function showUpdateProgress(version: string): void {
   win.once('ready-to-show', () => { if (progress === win && !win.isDestroyed()) { win.show(); win.moveTop(); } });
   win.on('closed', () => { if (progress === win) progress = null; });
   const query = {
-    version, title: mainText('Updating Chat On Steroids'), step: mainText('Saving your work…'),
+    version, title: mainText('Updating Chat Marks'), step: mainText('Saving your work…'),
     theme, background: palette.background, accent: palette.accent, lang: ui.language ?? 'en'
   };
   if (process.env.ELECTRON_RENDERER_URL) {

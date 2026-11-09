@@ -630,4 +630,3 @@ it('logs a refused checkpoint comparison once, with the checkpoint and the reaso
     warn.mockRestore();
   }
 });
-

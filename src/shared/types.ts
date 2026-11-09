@@ -147,6 +147,10 @@ export const CHAT_BROWSERS = ['chrome', 'edge', 'brave', 'firefox', 'cos'] as co
 export type ChatBrowser = (typeof CHAT_BROWSERS)[number];
 
 export interface UiPrefs {
+  /** Short general Marks persona prompt, enabled for new chats unless explicitly disabled. */
+  marksSystemPromptEnabled?: boolean;
+  /** How Marks should address the person; no personal name is inferred when absent. */
+  marksPreferredName?: string;
   /** Recover an unfinished silent executor turn only while Goal and Loop are both off. */
   autoContinue?: boolean;
   /** Preferred account-observed model for a fresh ordinary chat; omitted keeps the catalog fallback. */
@@ -189,7 +193,9 @@ export interface UiPrefs {
   sendCheckUrl?: string;
   /** Keep the chat at its end while it grows, here and on ChatGPT, until the reader scrolls up. On unless false. */
   followOutput?: boolean;
-  /** Add the Chat On Steroids Core mention to the user's own prompts sent from the app. On unless false. */
+  /** Show each chat message's time above it (the full date on hover). Off unless true (2026-10-30). */
+  showMessageTimes?: boolean;
+  /** Add the Chat Marks Core mention to the user's own prompts sent from the app. On unless false. */
   mentionCore?: boolean;
   /** Prefer the installed Plugins app on regular COS-managed sends; worker/recovery sends still use Core. Off by default. */
   mentionPlugins?: boolean;
@@ -211,6 +217,11 @@ export interface UiPrefs {
   startAtLogin?: boolean;
   /** A notification when a chat finishes a turn while the window is in the background. Missing means on. */
   turnNotifications?: boolean;
+  /** Days without activity after local archive before safe deletion; 0 disables it. */
+  archiveRetentionDays?: number;
+  /** Last renderer-confirmed pin set. Retention stays paused until this authority is initialized. */
+  archiveRetentionPins?: string[];
+  archiveRetentionPinsReady?: boolean;
   /** #1802: a short sound when a chat needs you, something failed or a chat finished in the background. Missing means off. */
   sounds?: boolean;
   /**
@@ -224,6 +235,8 @@ export interface UiPrefs {
    * message once the stop shows. Missing means off.
    */
   rotateStopFallback?: boolean;
+  /** The default-on stop fallback was applied to this config once (2.1.49). */
+  rotateStopFallbackAdopted?: boolean;
   /** Usage › Other apps: read Codex's and Claude Code's local logs (numbers only). Missing means on. */
   localAppUsage?: boolean;
   /** Codex's "Follow-up behavior": a message typed during a turn joins it (`steer`, the default) or waits for its end (`queue`). */
@@ -254,6 +267,8 @@ export interface UiPrefs {
   desktopAsk?: 'off' | 'active' | 'always';
   /** Desktop control for a call the app cannot tie to a chat. Off unless chosen. */
   desktopUnattributed?: boolean;
+  /** Separately authorize native Linux accessibility/screenshot access. Missing means off. */
+  linuxDesktopEnabled?: boolean;
   /** Light or Dark stays as chosen; System follows the operating system (#1914). */
   theme: import('./appearance.js').ThemeChoice;
   appearance?: import('./appearance.js').AppearanceSettings;
@@ -416,6 +431,8 @@ export interface MultiAgentSettings {
    * queue ordinary prompts, switch Goal work, or evict workers that are already running.
    */
   globalMaxWorkers?: number;
+  /** Chats working at once (#1694): 0 is off; 1–10 holds the app's automatic sends beyond that many working chats. */
+  chatsAtOnce?: number;
   /** Permit self-contained calls when browser evidence cannot identify their conversation. */
   allowUnattributedCalls: boolean;
   /** Default-deny local tools to exact trusted conversations. */
@@ -448,6 +465,8 @@ export interface MultiAgentSettings {
    * archive; nothing is deleted. Off by default.
    */
   archiveWorkerChats?: boolean;
+  /** Minutes after a verified worker finish before ChatGPT archive is attempted. */
+  archiveWorkerDelayMinutes?: number;
 }
 
 /** The user's own additions to what each MCP connector tells the model about itself. */
@@ -486,7 +505,7 @@ export interface ProjectsSettings {
 export interface Config {
   /**
    * Names this computer's connectors in ChatGPT, for one ChatGPT account used on several
-   * computers: "Windows" makes them "Chat On Steroids Core (Windows)" and so on. Empty keeps the
+   * computers: "Windows" makes them "Chat Marks Core (Windows)" and so on. Empty keeps the
    * plain names. It belongs to the install, not to a setup profile.
    */
   connectorSuffix?: string;
@@ -664,6 +683,8 @@ export interface LogEntry {
 
 /** What the renderer needs to know about the extension bridge, without any secrets. */
 export interface BridgeStatus {
+  /** "Chats working at once" (#1694): ChatGPT asked the app to slow down; automatic sends wait until then. Null otherwise. */
+  automaticPauseUntil?: number | null;
   /** Effective environment override, independent of the saved Settings choice. */
   portOverridden?: boolean;
   /** Last startup failure; a rejected settings change keeps the working bridge status. */
@@ -736,6 +757,8 @@ export interface CompanionDiagnostics {
   tab: CompanionTabDiagnostics | null;
   /** For the diagnostics report: names, versions, counts and booleans only. Absent from older extensions. */
   environment?: CompanionEnvironment | null;
+  /** The app language this extension worker applied, the one in its storage, and why not (2026-10-30). */
+  language?: { applied: string | null; stored: string | null; error: string | null } | null;
 }
 
 export interface CompanionEnvironment {
@@ -835,10 +858,22 @@ export interface UpdateStatus {
 export type UpdateAllResult = 'restarting' | 'manual' | 'checking-connectors' | 'confirm';
 
 /** Where an installation that cannot update itself gets the new version by hand. */
-export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/releases/latest';
+export const RELEASES_PAGE = 'https://github.com/mvclaudianobj/chat-on-steroids/releases/latest';
 
 /**
- * Whether `candidate` is a later release than `current`, compared as three numbers.
+ * A release version: three community numbers and an optional fourth Marks revision (2.1.42.1).
+ * Every version check in the app goes through this one pattern; a copy that forgets the fourth
+ * number rejects every Marks build (Setup refused extension 2.1.42.1, 2026-10-20), and
+ * test/release-version-format.test.ts fails when one appears.
+ */
+export const RELEASE_VERSION_PATTERN = String.raw`\d+\.\d+\.\d+(?:\.\d+)?`;
+const RELEASE_VERSION = new RegExp(`^${RELEASE_VERSION_PATTERN}$`);
+export function isReleaseVersion(value: unknown): value is string {
+  return typeof value === 'string' && RELEASE_VERSION.test(value);
+}
+
+/**
+ * Whether `candidate` is a later release, including an optional fourth revision number.
  *
  * String inequality is not enough: a downgrade published by mistake, or a pre-release tag left
  * as `latest`, would otherwise make this app install an older build over a newer one. It lives
@@ -846,9 +881,10 @@ export const RELEASES_PAGE = 'https://github.com/totec448-spec/chat-on-steroids/
  * copies of a comparison are two chances to read a version difference the wrong way round.
  */
 export function isNewer(candidate: string, current: string): boolean {
+  if (!isReleaseVersion(candidate) || !isReleaseVersion(current)) return false;
   const left = candidate.split('.').map(Number);
   const right = current.split('.').map(Number);
-  for (let index = 0; index < 3; index += 1) {
+  for (let index = 0; index < 4; index += 1) {
     const a = left[index] ?? 0;
     const b = right[index] ?? 0;
     if (a !== b) return a > b;
@@ -913,6 +949,8 @@ export interface AppState {
   hasCustomProviderKey: boolean;
   /** An ntfy access token is saved (never the token itself). */
   hasPhonePushToken?: boolean;
+  /** The Telegram bot (#1934): linked or not, its @name and the account; never the token. */
+  telegram?: { state: 'off' | 'pairing' | 'linked' | 'conflict' | 'token-refused'; botName: string | null; userName: string | null; code?: string; codeUntil?: number };
   /** Resolved path of the tunnel binary we would run, or null if we cannot find one. */
   resolvedBinary: string | null;
   /** Version of the tunnel-client copy shipped inside the app, for diagnostics. */
@@ -1012,6 +1050,11 @@ export function capabilityTools(capability: Capability, platform?: PlatformFamil
   const browser = capability === 'screen' ? BROWSER_READ_TOOLS : capability === 'control' ? BROWSER_WRITE_TOOLS : [];
   if (!DESKTOP_CAPABILITIES.includes(capability)) return CAPABILITY_TOOLS[capability];
   if (platform === 'macos') return [...browser, ...CAPABILITY_TOOLS[capability]];
+  if (platform === 'linux') {
+    if (capability === 'clipboardRead') return ['read_clipboard'];
+    if (capability === 'clipboardWrite') return ['write_clipboard'];
+    return browser;
+  }
   if (platform !== 'windows') return browser;
   switch (capability) {
     case 'screen': return [...browser, ...WINDOWS_COMPUTER_READ_METHODS];

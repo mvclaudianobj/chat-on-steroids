@@ -17,10 +17,29 @@ const tools: PluginToolSchema[] = [{ name: 'read', description: 'Read a file', i
 let directory = '';
 beforeEach(async () => { vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); wake.mockClear(); resetPluginRefreshForTests(); setPluginRefreshTunnelGraceForTests(0); resetDurableForTests(); directory = await makeTempDir(); initDurableStore(directory); });
 afterEach(async () => { resetPluginRefreshForTests(); resetDurableForTests(); vi.restoreAllMocks(); await removeTempDir(directory); vi.useRealTimers(); });
-const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat On Steroids Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
-const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat On Steroids Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
-const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: declarations });
+const publish = (version = '1', declarations = tools) => { publishPluginSurface('core', 'Chat Marks Core', version, 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
+const publishPlugins = (declarations: PluginToolSchema[]) => { publishPluginSurface('plugins', 'Chat Marks Plugins', '1', 'Instructions', declarations); vi.advanceTimersByTime(20_000); };
+const claim = (request: { id: string }, declarations = [{ ...tools[0]!, description: 'Older declaration' }]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Core', tools: declarations });
 const consumeStartup = consumeRequestedPluginRefreshStartup;
+it('rediscovers an enrolled Core by its exact native App ID when another connector shares its name', async () => {
+  const source = readFileSync(new URL('../extension/content.js', import.meta.url), 'utf8');
+  const section = source.slice(source.indexOf('  let pluginRefreshBusy = false;'), source.indexOf('  function catalogPageReady('));
+  const request = { id: '12345678-1234-4123-8123-123456789abc', appId, surface: 'core', connectorName: 'Chat Marks Core', tools };
+  const destination = `https://chatgpt.com/settings/plugins-settings/plugin_${appId}`;
+  const link = { tagName: 'A', isConnected: true, href: destination, disabled: false };
+  const location = { href: `https://chatgpt.com/settings/plugins-settings?cos-plugin-refresh=${request.id}`,
+    pathname: '/settings/plugins-settings', assign: vi.fn() };
+  const installed = vi.fn((_name: string, exactId: string | null, surface: string | null) =>
+    exactId === appId && surface === 'core' ? [link] : [link, { ...link, href: destination + '_foreign' }]);
+  const context = vm.createContext({ URL, location, alive: true, generating: false, epoch: 1,
+    t: (_key: string, fallback: string) => fallback,
+    CLF_DOM: { generating: () => false, pluginManagementIdle: () => true, pluginInstalledButtons: installed },
+    ask: vi.fn() });
+  vm.runInContext(`${section}\nwaitPageView = async (read, current) => current() ? read() : null; globalThis.run = refreshManagedPlugin;`, context);
+  expect(await (context.run as Function)(request)).toBe(true);
+  expect(installed).toHaveBeenCalledWith('Chat Marks Core', appId, 'core', true);
+  expect(location.assign).toHaveBeenCalledWith(`${destination}?cos-plugin-refresh=${request.id}`);
+});
 it.each(['claimed', 'manual', 'completed'] as const)('keeps the scoped enrolled App ID in an explicit %s observation without another Refresh claim', async state => {
   publish(); const first = (await pendingPluginRefreshes())[0]!;
   if (state === 'manual') await requireManualPluginRefresh({ ...first, appId, connectorName: first.connectorName,
@@ -335,20 +354,20 @@ it('consumes unpublished explicit startup work once durably without expiring bro
 it('allows one explicit refresh round while automatic refresh stays off and fences later schema edits', async () => {
   publish(); const automatic = (await pendingPluginRefreshes())[0]!;
   expect(await pendingPluginRefreshes(false)).toEqual([]);
-  expect(await claimPluginRefresh({ ...automatic, appId, connectorName: 'Chat On Steroids Core', tools }, false)).toBe(false);
+  expect(await claimPluginRefresh({ ...automatic, appId, connectorName: 'Chat Marks Core', tools }, false)).toBe(false);
   await requestPluginRefreshes(APP_VERSION);
   const explicit = (await pendingPluginRefreshes(false))[0]!;
   expect(explicit.schemaId).toBe(automatic.schemaId); expect(explicit.id).not.toBe(automatic.id);
   publishPluginSurface('desktop', 'Desktop', '1', '', tools);
   expect((await pendingPluginRefreshes(false)).map(row => row.surface)).toEqual(['core']);
   expect((await authorizedPluginRefreshPublications(false)).map(row => row.surface)).toEqual(['core']);
-  expect(await claimPluginRefresh({ ...explicit, appId, connectorName: 'Chat On Steroids Core', tools, alreadyCurrent: true }, false)).toBe(true);
+  expect(await claimPluginRefresh({ ...explicit, appId, connectorName: 'Chat Marks Core', tools, alreadyCurrent: true }, false)).toBe(true);
   expect(await hasRequestedPluginRefresh()).toBe(false);
   publish('1', [{ ...tools[0]!, description: 'Later settings edit' }]);
   expect(await pendingPluginRefreshes(false)).toEqual([]);
   expect(await authorizedPluginRefreshPublications(false)).toEqual([]);
   const later = (await pendingPluginRefreshes())[0]!;
-  expect(await claimPluginRefresh({ ...later, appId, connectorName: 'Chat On Steroids Core', tools }, false)).toBe(false);
+  expect(await claimPluginRefresh({ ...later, appId, connectorName: 'Chat Marks Core', tools }, false)).toBe(false);
 });
 it('keeps both state projections on committed evidence when a write fails', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
@@ -428,7 +447,7 @@ it.each(['malformed', 'null', 'invalid', 'duplicate'] as const)('preserves a %s 
 });
 it('debounces only changed declarations for twenty seconds and fences stale claims', async () => {
   publish(); const old = (await pendingPluginRefreshes())[0]!;
-  const change = (description: string) => publishPluginSurface('core', 'Chat On Steroids Core', '1', 'Instructions', [{ ...tools[0]!, description }]);
+  const change = (description: string) => publishPluginSurface('core', 'Chat Marks Core', '1', 'Instructions', [{ ...tools[0]!, description }]);
   change('A');
   expect(await claim(old)).toBe(false);
   vi.advanceTimersByTime(19_000); expect(await pendingPluginRefreshes()).toEqual([]);
@@ -444,7 +463,7 @@ it('keeps Desktop independent and debounces shape changes across reconnects', as
   publish();
   publishPluginSurface('desktop', 'Desktop', '1', '', tools);
   unpublishPluginSurface('core');
-  publishPluginSurface('core', 'Chat On Steroids Core', '1', '', [{ ...tools[0]!, description: 'Reconnected shape' }]);
+  publishPluginSurface('core', 'Chat Marks Core', '1', '', [{ ...tools[0]!, description: 'Reconnected shape' }]);
   expect((await pendingPluginRefreshes()).map(row => row.surface)).toEqual(['desktop']);
   vi.advanceTimersByTime(20_000);
   expect((await pendingPluginRefreshes()).map(row => row.surface).sort()).toEqual(['core', 'desktop']);
@@ -452,11 +471,11 @@ it('keeps Desktop independent and debounces shape changes across reconnects', as
 it('wakes a settled publication restored after its deadline elapsed while disconnected', async () => {
   publish();
   const changed = [{ ...tools[0]!, description: 'Changed declaration' }];
-  publishPluginSurface('core', 'Chat On Steroids Core', '1', '', changed);
+  publishPluginSurface('core', 'Chat Marks Core', '1', '', changed);
   unpublishPluginSurface('core');
   vi.advanceTimersByTime(20_000);
   expect(wake).toHaveBeenCalledTimes(1);
-  publishPluginSurface('core', 'Chat On Steroids Core', '1', '', changed);
+  publishPluginSurface('core', 'Chat Marks Core', '1', '', changed);
   expect(wake).toHaveBeenCalledTimes(2);
   expect((await pendingPluginRefreshes())[0]?.tools).toEqual(changed);
 });
@@ -469,7 +488,7 @@ it('persists one explicit retry with a fresh id while retaining the exact pendin
   expect(next.id).not.toBe(first.id);
   expect(next.schemaId).toBe(first.schemaId);
   expect(wake).toHaveBeenCalledTimes(2);
-  const proof = { appId, connectorName: 'Chat On Steroids Plugins', tools: [{ ...tools[0]!, description: 'Older declaration' }] };
+  const proof = { appId, connectorName: 'Chat Marks Plugins', tools: [{ ...tools[0]!, description: 'Older declaration' }] };
   expect(await claimPluginRefresh({ ...proof, id: first.id })).toBe(false);
   resetPluginRefreshForTests();
   publishPlugins(tools);
@@ -483,7 +502,7 @@ it.each(['missing', 'unpublished', 'changed', 'claimed', 'manual', 'completed'])
   if (state === 'missing') { expect(await rearmPluginRefresh('plugins')).toBe(false); return; }
   publishPlugins(tools);
   const request = (await pendingPluginRefreshes())[0]!;
-  const proof = { ...request, appId, connectorName: 'Chat On Steroids Plugins', tools: [{ ...tools[0]!, description: 'Older declaration' }] };
+  const proof = { ...request, appId, connectorName: 'Chat Marks Plugins', tools: [{ ...tools[0]!, description: 'Older declaration' }] };
   if (state === 'unpublished') unpublishPluginSurface('plugins');
   if (state === 'changed') publishPlugins([{ ...tools[0]!, description: 'Changed publication' }]);
   if (state === 'claimed' || state === 'completed') await claimPluginRefresh(proof);
@@ -560,7 +579,7 @@ it.each([{ count: 118, codeMode: false }, { count: 118, codeMode: true }, { coun
   publishPlugins(catalog);
   const request = (await pendingPluginRefreshes())[0]!;
   expect(request.surface).toBe('plugins');
-  expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Plugins', tools: legacy })).toBe(true);
+  expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Plugins', tools: legacy })).toBe(true);
   expect(await completePluginRefresh({ ...request, appId, tools: legacy })).toBe(false);
   expect(await completePluginRefresh({ ...request, appId, tools: catalog })).toBe(true);
 });
@@ -572,26 +591,26 @@ it('rejects a foreign declaration inside a legacy Plugins subset', async () => {
   legacy[63] = { ...legacy[63]!, description: 'Changed foreign declaration' };
   publishPlugins(catalog);
   const request = (await pendingPluginRefreshes())[0]!;
-  expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Plugins', tools: legacy })).toBe(false);
+  expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Plugins', tools: legacy })).toBe(false);
 });
 it('enrolls already-current tools without granting a refresh click, including after restart', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
   expect(await claim(request, tools)).toBe(false);
-  expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools, alreadyCurrent: true })).toBe(true);
+  expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Core', tools, alreadyCurrent: true })).toBe(true);
   expect(await pendingPluginRefreshes()).toEqual([]);
   resetPluginRefreshForTests();
-  publishPluginSurface('core', 'Chat On Steroids Core', 'a-new-app-version', 'Different runtime instructions', tools);
+  publishPluginSurface('core', 'Chat Marks Core', 'a-new-app-version', 'Different runtime instructions', tools);
   expect(await pendingPluginRefreshes()).toEqual([]);
 });
 it('does not settle a changed contract as already current', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
-  expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: [{ ...tools[0]!, description: 'Old' }], alreadyCurrent: true })).toBe(false);
+  expect(await claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Core', tools: [{ ...tools[0]!, description: 'Old' }], alreadyCurrent: true })).toBe(false);
   expect(await claim(request)).toBe(true);
 });
 it('durably suppresses automatic retries when the provider requires manual recreation', async () => {
   publish(); const request = (await pendingPluginRefreshes())[0]!;
   const installed = [{ ...tools[0]!, description: 'Older installed declaration' }];
-  expect(await requireManualPluginRefresh({ ...request, appId, connectorName: 'Chat On Steroids Core', tools: installed, error: 'Recreate the custom app manually.' })).toBe(true);
+  expect(await requireManualPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Core', tools: installed, error: 'Recreate the custom app manually.' })).toBe(true);
   expect(await pendingPluginRefreshes()).toEqual([]);
   const stored = (await readDurable('plugin-refresh') as any[])[0];
   expect(stored).toMatchObject({ appId, attempted: false, manual: true, error: 'Recreate the custom app manually.' });
@@ -607,7 +626,7 @@ it('keeps an exact app mapping and refuses another installed same-name plugin', 
   expect(await completePluginRefresh({ ...a, appId: 'asdk_app_other', tools })).toBe(false);
   publish('2', [{ ...tools[0]!, description: 'New contract' }]); const b = (await pendingPluginRefreshes())[0]!;
   expect(b.appId).toBe(appId);
-  expect(await claimPluginRefresh({ ...b, appId: 'asdk_app_other', connectorName: 'Chat On Steroids Core', tools })).toBe(false);
+  expect(await claimPluginRefresh({ ...b, appId: 'asdk_app_other', connectorName: 'Chat Marks Core', tools })).toBe(false);
 });
 it('enrolls an older Core subset only with two unchanged full declarations, then requires the enabled tool at completion', async () => {
   const plan = { name: 'update_plan', description: 'Update the displayed plan.', inputSchema: { type: 'object', properties: { plan: { type: 'array', items: { type: 'object' } } } } };
@@ -652,9 +671,21 @@ it('requires readable declarations before claiming even an enrolled exact app', 
   await claim(first);
   publish('2', [{ ...tools[0]!, description: 'New schema' }]);
   const next = (await pendingPluginRefreshes())[0]!;
-  expect(await claimPluginRefresh({ ...next, appId, connectorName: 'Chat On Steroids Core', tools: null })).toBe(false);
+  expect(await claimPluginRefresh({ ...next, appId, connectorName: 'Chat Marks Core', tools: null })).toBe(false);
   expect((await readDurable('plugin-refresh') as any[])[0].attempted).toBe(false);
   expect(await claim(next)).toBe(true);
+});
+it('enrolls a recognizable stale Desktop subset only when two declarations remain identical', async () => {
+  const first = { name: 'browser_tabs', description: 'Observe tabs', inputSchema: { type: 'object' } };
+  const second = { name: 'browser_snapshot', description: 'Read tab', inputSchema: { type: 'object' } };
+  const third = { name: 'browser_click', description: 'Click tab', inputSchema: { type: 'object' } };
+  publishPluginSurface('desktop', 'Chat Marks Desktop', '1', '', [first, second, third]);
+  const request = (await pendingPluginRefreshes())[0]!;
+  const attempt = (observed: PluginToolSchema[]) => claimPluginRefresh({ ...request, appId, connectorName: 'Chat Marks Desktop', tools: observed });
+  expect(await attempt([first, { ...second, description: 'Foreign declaration' }])).toBe(false);
+  expect(await attempt([first, second, { ...third, name: 'foreign_tool' }])).toBe(false);
+  expect(await attempt([first, second])).toBe(true);
+  expect(await completePluginRefresh({ ...request, appId, tools: [first, second, third] })).toBe(true);
 });
 it('enrolls an older known Core superset when a user disabled a tool, never a foreign tool', async () => {
   const plan = { name: 'update_plan', description: 'Update the displayed plan.', inputSchema: { type: 'object' } };
@@ -736,7 +767,7 @@ it('enrolls a stale connector by a tunnel this app serves, never by the page alo
   publish(); const request = (await pendingPluginRefreshes())[0]!;
   const stale = [{ name: 'observe', description: 'Old', inputSchema: { type: 'object' } }];
   const ours = (surface: string, id: string) => surface === 'core' && id === 'tunnel_ours0001';
-  const enroll = (extra: object) => claimPluginRefresh({ id: request.id, appId, connectorName: 'Chat On Steroids Core', tools: stale, ...extra });
+  const enroll = (extra: object) => claimPluginRefresh({ id: request.id, appId, connectorName: 'Chat Marks Core', tools: stale, ...extra });
   expect(await enroll({})).toBe(false);
   expect(await enroll({ tunnelId: 'tunnel_ours0001' })).toBe(false);
   expect(await enroll({ tunnelId: 'tunnel_foreign01', ownsTunnel: ours })).toBe(false);
@@ -749,7 +780,7 @@ it('hands out a refresh only after the surface tunnel has been live for its grac
   // Measured 2026-09-27: a Refresh clicked ~4 s after the Desktop tunnel came up never reached
   // this app, three app starts out of three; ~20 s later, and at runtime, it always did.
   setPluginRefreshTunnelGraceForTests(PLUGIN_REFRESH_TUNNEL_GRACE_MS);
-  publishPluginSurface('desktop', 'Chat On Steroids Desktop', '1', '', tools);
+  publishPluginSurface('desktop', 'Chat Marks Desktop', '1', '', tools);
   expect(await pendingPluginRefreshes()).toEqual([]);
   expect(wake).not.toHaveBeenCalled();
   vi.advanceTimersByTime(PLUGIN_REFRESH_TUNNEL_GRACE_MS - 1);
@@ -759,11 +790,11 @@ it('hands out a refresh only after the surface tunnel has been live for its grac
   expect((await pendingPluginRefreshes()).map(row => row.surface)).toEqual(['desktop']);
   // A reconnect of the same declaration starts a new grace, and a runtime change keeps its debounce.
   unpublishPluginSurface('desktop');
-  publishPluginSurface('desktop', 'Chat On Steroids Desktop', '1', '', tools);
+  publishPluginSurface('desktop', 'Chat Marks Desktop', '1', '', tools);
   expect(await pendingPluginRefreshes()).toEqual([]);
   vi.advanceTimersByTime(PLUGIN_REFRESH_TUNNEL_GRACE_MS);
   expect(await pendingPluginRefreshes()).toHaveLength(1);
-  publishPluginSurface('desktop', 'Chat On Steroids Desktop', '1', '', [{ ...tools[0]!, description: 'Changed at runtime' }]);
+  publishPluginSurface('desktop', 'Chat Marks Desktop', '1', '', [{ ...tools[0]!, description: 'Changed at runtime' }]);
   vi.advanceTimersByTime(19_000); expect(await pendingPluginRefreshes()).toEqual([]);
   vi.advanceTimersByTime(1_000); expect((await pendingPluginRefreshes())[0]?.tools[0]?.description).toBe('Changed at runtime');
 });
@@ -773,7 +804,7 @@ it('hands out a refresh only after the surface tunnel has been live for its grac
 // kept the old tools; the click is spent, so nothing tried again.
 it('waits out the previous tunnel client before handing out a refresh after the app starts', async () => {
   setPluginRefreshTunnelGraceForTests(PLUGIN_REFRESH_TUNNEL_GRACE_MS);
-  publishPluginSurface('core', 'Chat On Steroids Core', '1', '', tools);
+  publishPluginSurface('core', 'Chat Marks Core', '1', '', tools);
   vi.advanceTimersByTime(130_000);
   expect(await pendingPluginRefreshes()).toEqual([]);
   expect(wake).not.toHaveBeenCalled();
@@ -870,4 +901,25 @@ it.each(['copyFile', 'writeFile', 'rename'] as const)('retains the unreadable le
   expect(wake).not.toHaveBeenCalled();
   await resetPluginRefreshLedger();
   expect(await pluginRefreshUnreadable()).toBe(false);
+});
+
+it.each(['claim', 'manual', 'current'] as const)('checks a reported native tunnel again for a scoped enrolled %s', async action => {
+  const original = configOwner.getConfig(), tunnelId = 'tunnel_enrolled00001';
+  vi.spyOn(configOwner, 'getConfig').mockReturnValue({ ...original, tunnel: { ...original.tunnel, kind: 'openai', tunnelId } });
+  publish(); const first = (await pendingPluginRefreshes())[0]!;
+  expect(await claimPluginRefresh({ ...first, appId, connectorName: first.connectorName,
+    tools, alreadyCurrent: true, tunnelId, ownsTunnel: () => true })).toBe(true);
+  const changed = [{ ...tools[0]!, description: 'Changed publication' }];
+  publish('2', changed);
+  const next = (await pendingPluginRefreshes())[0]!;
+  expect(next.appId).toBe(appId);
+  const input = { ...next, appId, connectorName: next.connectorName, tools: action === 'current' ? changed : tools,
+    tunnelId: 'tunnel_other0000001', ownsTunnel: (surface: string, id: string) => surface === 'core' && id === tunnelId };
+  const saved = await readDurable('plugin-refresh');
+  const perform = (value: typeof input) => action === 'manual'
+    ? requireManualPluginRefresh({ ...value, error: 'No native Refresh control' })
+    : claimPluginRefresh({ ...value, alreadyCurrent: action === 'current' });
+  expect(await perform(input)).toBe(false);
+  expect(await readDurable('plugin-refresh')).toEqual(saved);
+  expect(await perform({ ...input, tunnelId })).toBe(true);
 });

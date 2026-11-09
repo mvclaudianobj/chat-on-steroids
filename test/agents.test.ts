@@ -52,6 +52,7 @@ const {
   offerMessages,
   offerMessagesForConversation,
   onSpawnRequest,
+  onRetiredWorkersPersistNow,
   onSwarmEnd,
   onWorkerChatsRetired,
   onWorkerFinished,
@@ -121,6 +122,7 @@ const {
   workerRevivalClaimed
 } = await import('../src/main/agents.js');
 const { startMcpServer } = await import('../src/main/mcp/server.js');
+const { spawnAgentWorkers } = await import('../src/main/agent-admission.js');
 const { runningToolCalls } = await import('../src/main/mcp/call-context.js');
 const { flushDurable, initDurableStore, readDurable, writeDurableNow, writeDurableSoon } = await import('../src/main/durable.js');
 const { createSession, getSession, findSessionByConversation, initSessionStore, readRecentEvents, requestTurnOwnershipCutoff, resetSessionStoreForTests } = await import(
@@ -130,6 +132,10 @@ const { recordChatObservations, resetRecorderForTests } = await import('../src/m
 const { resetWorkspaces, setWorkspaceFor, workspaceForChat } = await import('../src/main/workspace.js');
 const { DEFAULT_CAPABILITIES } = await import('../src/shared/types.js');
 const { makeTempDir, removeTempDir } = await import('./helpers.js');
+const { initCompanyStore } = await import('../src/main/company-store.js');
+const { initCompanyLocalGrants } = await import('../src/main/company-local-grants.js');
+const { initWorkerArchivePath, resetWorkerArchiveForTests } = await import('../src/main/worker-archive.js');
+const { archiveAllOwnedWorkers } = await import('../src/main/worker-cleanup.js');
 
 let dir: string;
 
@@ -151,6 +157,9 @@ beforeAll(async () => {
   initConfigPath(dir);
   initSessionStore(dir);
   initDurableStore(dir);
+  initCompanyStore(dir);
+  initCompanyLocalGrants(dir);
+  initWorkerArchivePath(dir);
   await setEnabled(true);
 });
 
@@ -168,10 +177,67 @@ beforeEach(() => {
   // tests exercise that production contract rather than an intentionally half-wired broker;
   // durability-specific cases below replace this no-op sink with controlled writers.
   onSwarmPersistNow(async () => undefined);
+  onRetiredWorkersPersistNow(async () => undefined);
+  resetWorkerArchiveForTests();
 });
 
 const PRIME_CHAT = 'c-prime';
 const prime: Caller = { conversationId: PRIME_CHAT };
+
+it('retires only exact owner workers, including parked history, preserving their identities and checkout metadata', async () => {
+  const { ownedWorkerFleet, retireOwnedWorkerFleet } = await import('../src/main/agents.js');
+  const cleanupOwner = { conversationId: PRIME_CHAT };
+  const a = spawn({ caller: prime, workers: [{ task: 'first' }, { task: 'second' }] });
+  const bOwner = { conversationId: 'c-unrelated-cleanup-prime' };
+  const b = spawn({ caller: bOwner, workers: [{ task: 'unrelated' }] });
+  expect(bindConversation('worker-1', 'c-cleanup-one', a.runId)).toBe(true);
+  expect(bindConversation('worker-2', 'c-cleanup-two', a.runId)).toBe(true);
+  expect(bindConversation('worker-1', 'c-cleanup-foreign', b.runId)).toBe(true);
+  expect(ownedWorkerFleet(cleanupOwner)).toHaveLength(2);
+  expect(ownedWorkerFleet(bOwner)).toHaveLength(1);
+  expect(retireOwnedWorkerFleet(cleanupOwner)).toBe(2);
+  expect(ownedWorkerFleet(cleanupOwner).map(w => w.state)).toEqual(['finished', 'finished']);
+  expect(ownedWorkerFleet(bOwner)[0]?.state).not.toBe('finished');
+  const saved = JSON.parse(JSON.stringify(snapshotSwarm()));
+  resetAgentsForTests();
+  restoreSwarm(saved);
+  expect(ownedWorkerFleet(cleanupOwner).map(w => w.conversationId).sort()).toEqual(['c-cleanup-one', 'c-cleanup-two']);
+  expect(ownedWorkerFleet(cleanupOwner).every(w => w.state === 'finished')).toBe(true);
+  expect(ownedWorkerFleet(bOwner)[0]?.state).not.toBe('finished');
+});
+
+it('archives an exact owner fleet with a durable app-authored orphan stop, not touching foreign workers', async () => {
+  const { appendEvent, readRecentEvents } = await import('../src/main/session/store.js');
+  const run = spawn({ caller: prime, workers: [{ task: 'orphan' }, { task: 'idle' }] });
+  const foreign = spawn({ caller: { conversationId: 'c-cleanup-other-prime' }, workers: [{ task: 'leave alone' }] });
+  const one = 'aaaaaaaa-1111-4222-8333-444444444444';
+  const two = 'bbbbbbbb-1111-4222-8333-444444444444';
+  const other = 'cccccccc-1111-4222-8333-444444444444';
+  bindConversation('worker-1', one, run.runId);
+  bindConversation('worker-2', two, run.runId);
+  bindConversation('worker-1', other, foreign.runId);
+  const parent = await createSession({ conversationId: PRIME_CHAT });
+  const first = await createSession({ conversationId: one, origin: { kind: 'worker', fromSessionId: parent.id, agentId: 'worker-1', task: 'orphan' } });
+  const second = await createSession({ conversationId: two, origin: { kind: 'worker', fromSessionId: parent.id, agentId: 'worker-2', task: 'idle' } });
+  const foreignSession = await createSession({ conversationId: other, origin: { kind: 'worker', fromSessionId: parent.id, agentId: 'worker-1', task: 'leave alone' } });
+  await appendEvent(first.id, { kind: 'turn_start', source: 'extension', turnId: 'ghost-1', time: Date.now() });
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(Date.now() + 6 * 60_000);
+    const result = await archiveAllOwnedWorkers({ conversationId: PRIME_CHAT });
+    expect(result.workers).toBe(2);
+    expect(result.stoppedLocally).toBe(1);
+    expect(result.archived, JSON.stringify(result.pending)).toBe(2);
+    expect(result.pending).toEqual([]);
+    expect((await getSession(first.id))?.archivedAt).toBeDefined();
+    expect((await getSession(second.id))?.archivedAt).toBeDefined();
+    expect((await getSession(foreignSession.id))?.archivedAt).toBeUndefined();
+    expect((await readRecentEvents(first.id, 10)).filter(e => e.kind === 'turn_end')).toEqual([
+      expect.objectContaining({ source: 'app', outcome: 'stopped', turnId: 'ghost-1' })
+    ]);
+    expect(workerPrimeOwner(other).primeConversationId).toBe('c-cleanup-other-prime');
+  } finally { vi.useRealTimers(); }
+});
 
 it('returns an empty exact-caller status without creating a family or exposing another prime', () => {
   const empty = { self: null, runId: null, state: { running: false, retainedHistory: false, agents: [] } };
@@ -234,6 +300,46 @@ function startWorker(id: string, conversationId = `c-${id}`): { caller: Caller }
 function fillContext(conversationId: string): void {
   noteAgentContextTokens(conversationId, WORKER_CONTEXT_CEILING_TOKENS);
 }
+
+it('recycles an exactly named sleeping worker through durable messaging, keeping its id and chat', async () => {
+  startSwarm(1);
+  const worker = startWorker('worker-1', 'c-reusable-worker');
+  finishAgent(worker.caller, 'previous report');
+  const revived: string[] = [];
+  onReviveRequest(workers => revived.push(...workers.map(item => item.id)));
+  const before = swarmStateForCaller(prime).agents.filter(info => info.role === 'worker');
+  expect(before).toHaveLength(1);
+  const result = await spawnAgentWorkers({
+    caller: prime, workers: [{ label: 'Worker 1', task: 'Do the next task' }], context: 'Preserve the project'
+  }, async () => null, () => false);
+  expect(result.created).toMatchObject([{ id: 'worker-1', state: 'waking', conversationId: 'c-reusable-worker' }]);
+  expect(swarmStateForCaller(prime).agents.filter(info => info.role === 'worker')).toHaveLength(1);
+  expect(revived).toContain('worker-1');
+  expect(offerMessages('worker-1').map(message => message.text).join(' ')).toContain('Do the next task');
+});
+
+it('reuses a named worker from parked history without opening a replacement chat', async () => {
+  startSwarm(1);
+  const worker = startWorker('worker-1', 'c-reusable-parked');
+  finishAgent(worker.caller, 'parked report');
+  expect(releaseQuiescentRun()).toBe(true);
+  const result = await spawnAgentWorkers({ caller: prime,
+    workers: [{ label: 'Worker 1', task: 'Continue in original conversation' }] }, async () => null, () => false);
+  expect(result.created).toMatchObject([{ id: 'worker-1', state: 'waking', conversationId: 'c-reusable-parked' }]);
+  expect(swarmStateForCaller(prime).agents.filter(info => info.role === 'worker')).toHaveLength(1);
+});
+
+it('recycles the oldest idle member at the family limit and preserves its conversation', async () => {
+  await setEnabled(true, 1);
+  startSwarm(1);
+  const worker = startWorker('worker-1', 'c-cap-reusable');
+  finishAgent(worker.caller, 'first assignment complete');
+  const answer = await spawnAgentWorkers({ caller: prime,
+    workers: [{ label: 'New assignment', task: 'Continue the next assignment' }] }, async () => null, () => false);
+  expect(answer.created).toMatchObject([{ id: 'worker-1', state: 'waking', label: 'New assignment', conversationId: 'c-cap-reusable' }]);
+  expect(swarmStateForCaller(prime).agents.filter(row => row.role === 'worker')).toHaveLength(1);
+  await setEnabled(true);
+});
 
 describe('exact worker prime provenance', () => {
   it('keeps the same exact prime through active, sleeping and dormant worker states', () => {
@@ -498,12 +604,13 @@ describe('a worker wake ChatGPT restored as the chat draft (#882)', () => {
     return { dom, box, api: (dom.window as unknown as { CLF_DOM: { clearRevivalResidue(): boolean; composerSubmitReady(): boolean } }).CLF_DOM };
   };
 
-  it('lets the page reclaim an unsent wake, and only that', () => {
+  it.each(['current', 'legacy'] as const)('lets the page reclaim an unsent %s wake, and only that', (brand) => {
     startSwarm(1);
     const worker = startWorker('worker-1');
     finishAgent(worker.caller, 'first round done');
     stageMessages(prime, [{ to: 'worker-1', text: 'Regenerate PAGE-EVID_MASTER_v0.2.csv; keep raw source_status.' }]).commit();
-    const wake = pendingWorkerRevivals()[0]!.text;
+    const currentWake = pendingWorkerRevivals()[0]!.text;
+    const wake = brand === 'legacy' ? currentWake.replace('(Chat Marks:', '(Chat On Steroids:') : currentWake;
 
     const left = domWithDraft(wake);
     expect(left.api.composerSubmitReady()).toBe(false);
@@ -524,7 +631,7 @@ describe('a worker wake ChatGPT restored as the chat draft (#882)', () => {
 
   it('reclaims the wake on a computer whose Core carries a name suffix', async () => {
     // With a connector suffix the closing sentence names this computer's Core ("Report with the
-    // agents tool of Chat On Steroids Core (Windows): …"); a leftover of that wake has to be
+    // agents tool of Chat Marks Core (Windows): …"); a leftover of that wake has to be
     // reclaimed exactly like the plain one, or every later wake into the chat fails.
     const previous = getConfig();
     await saveConfig({ ...previous, connectorSuffix: 'Windows' });
@@ -534,7 +641,7 @@ describe('a worker wake ChatGPT restored as the chat draft (#882)', () => {
       finishAgent(worker.caller, 'first round done');
       stageMessages(prime, [{ to: 'worker-1', text: 'Check the R11 inputs read-only and report.' }]).commit();
       const wake = pendingWorkerRevivals()[0]!.text;
-      expect(wake).toContain('the agents tool of Chat On Steroids Core (Windows):');
+      expect(wake).toContain('the agents tool of Chat Marks Core (Windows):');
 
       const left = domWithDraft(wake);
       expect(left.api.clearRevivalResidue()).toBe(true);
@@ -2502,7 +2609,7 @@ describe('a worker that is sleeping', () => {
 });
 
 describe('restart', () => {
-  it('drops parked histories beyond the newest sixteen or older than a week, retiring their worker chats', async () => {
+  it('retains parked workers for thirty days while bounding history to 128 families', async () => {
     vi.useFakeTimers();
     try {
       await setEnabled(true, 1);
@@ -2513,22 +2620,26 @@ describe('restart', () => {
         expect(releaseQuiescentRun()).toBe(true);
         vi.setSystemTime(Date.now() + 1_000);
       };
-      for (let n = 1; n <= 17; n++) park(n);
-      expect(snapshotSwarm()!.dormantRuns).toHaveLength(16);
+      for (let n = 1; n <= 129; n++) park(n);
+      expect(snapshotSwarm()!.dormantRuns).toHaveLength(128);
       expect(dormantWorkerNotice('c-worker-1')).toBeNull();
       expect(retiredWorkerForConversation('c-worker-1')?.id).toBe('worker-1');
       expect(dormantWorkerNotice('c-worker-2')).toContain('WORKER_SLEEPING');
 
-      // A week later the rest are history too, on the next parking and on a restart alike.
+      // A full month later the rest expire on the next parking and on restart alike.
       const saved = snapshotSwarm()!;
-      vi.setSystemTime(Date.now() + 7 * 24 * 60 * 60_000);
-      park(18);
-      expect(snapshotSwarm()!.dormantRuns?.map((entry) => entry.primeConversationId)).toEqual(['c-prime-18']);
+      vi.setSystemTime(Date.now() + 29 * 24 * 60 * 60_000);
+      resetAgentsForTests();
+      restoreSwarm(saved);
+      expect(snapshotSwarm()?.dormantRuns).toHaveLength(128);
+      vi.setSystemTime(saved.savedAt + 30 * 24 * 60 * 60_000 + 1);
+      park(130);
+      expect(snapshotSwarm()!.dormantRuns?.map((entry) => entry.primeConversationId)).toEqual(['c-prime-130']);
 
       resetAgentsForTests();
       restoreSwarm(saved);
       expect(snapshotSwarm()?.dormantRuns ?? []).toHaveLength(0);
-      expect(retiredWorkerForConversation('c-worker-17')?.id).toBe('worker-1');
+      expect(retiredWorkerForConversation('c-worker-129')?.id).toBe('worker-1');
     } finally {
       vi.useRealTimers();
       await setEnabled(true);
@@ -3163,7 +3274,7 @@ describe('restart', () => {
     resetAgentsForTests();
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      vi.setSystemTime(saved!.savedAt + 31 * 24 * 60 * 60_000);
       restoreSwarm(saved);
       expect(managedWorktreeCleanupOffers()).toEqual([
         expect.objectContaining({ runId: staged.runId, agentId: 'worker-1', reason: 'evicted' })
@@ -3220,7 +3331,7 @@ describe('restart', () => {
     resetAgentsForTests();
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      vi.setSystemTime(saved!.savedAt + 31 * 24 * 60 * 60_000);
       restoreSwarm(saved);
       expect(managedWorkerRecoveryIdentities()).toEqual([]);
       expect(managedWorkerAllocationIdentity({ conversationId })).toBeNull();
@@ -3313,7 +3424,7 @@ describe('restart', () => {
     resetAgentsForTests();
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(dormant!.savedAt + 8 * 24 * 60 * 60_000);
+      vi.setSystemTime(dormant!.savedAt + 31 * 24 * 60 * 60_000);
       restoreSwarm(dormant);
       expect(managedWorkerRecoveryIdentities()).toEqual([]);
       const evicted = structuredClone(snapshotSwarm());
@@ -3476,6 +3587,17 @@ describe('restart', () => {
     const spawned: string[] = [];
     onSpawnRequest((workers) => spawned.push(...workers.map((worker) => worker.id)));
     expect(spawned).toEqual(['worker-1', 'worker-2']);
+  });
+
+  it('persists an explicitly temporary worker and preserves its native creation intent after restart', () => {
+    const staged = stageSpawn({ caller: prime, workers: [{ task: 'Temporary isolated worker', temporary_chat: true }] });
+    staged.commit();
+    expect(pendingWorkerSpawns()).toContainEqual(expect.objectContaining({ id: 'worker-1', temporaryChat: true }));
+    const snapshot = snapshotSwarm()!;
+    expect(snapshot.agents.find(entry => entry.info.id === 'worker-1')?.info.temporaryChat).toBe(true);
+    resetAgentsForTests();
+    restoreSwarm(snapshot);
+    expect(pendingWorkerSpawns()).toContainEqual(expect.objectContaining({ id: 'worker-1', temporaryChat: true }));
   });
 
   it('repairs only the exact durable prime A→B recovery transition after transfer state was lost', () => {
@@ -3803,6 +3925,13 @@ describe('through the MCP endpoint', () => {
       expect(offerMessagesForConversation('mcp-original-worker')?.messages).toEqual([]);
       expect(offerMessagesForConversation('mcp-recovered-worker')?.messages[0]?.text).toBe('Only recovered worker');
       await asChat('mcp-recovered-worker', 'finish', { result: 'Done with first task' });
+      // As a prime does: it hears the finish (its status call delivers the report), and the family is parked
+      // before it is woken. Under CI load the wake used to race the parking and found the run still active,
+      // so it came back with the same incarnation (Windows, 2026-11-02, both attempts).
+      await vi.waitFor(async () => {
+        const families = (await replyWithRequestId('wfr_mcp_recovered_fleet', 'status', {})).result.structuredContent.available_runs as Array<{ run_id: string; running: boolean }>;
+        expect(families.find(family => family.run_id === recoveredRun)?.running).toBe(false);
+      }, { timeout: 15_000 });
       const wake = await replyWithRequestId('wfr_mcp_recovered_fleet', 'message', { run_id: recoveredRun, to: 'worker-1', text: 'Follow-up task' });
       expect(wake.result?.isError, textOfReply(wake)).not.toBe(true);
       const newRun = wake.result.structuredContent.run_id;
@@ -5207,6 +5336,54 @@ describe('simultaneous independent prime families', () => {
     }
   });
 
+  it('refuses workers past "Chats working at once", passing the calling prime\'s own slot to them (#1694)', async () => {
+    const slots = await import('../src/main/chats-at-once.js');
+    const before = slots.workingChatsSourceForTests();
+    slots.resetChatsAtOnceForTests();
+    slots.setWorkingChatsSource(() => new Set([PRIME_CHAT, 'someone-elses-chat']));
+    await setEnabled(true, 4);
+    getConfig().multiAgent.chatsAtOnce = 2;
+    try {
+      // The prime delegates and ends its turn: its slot is the worker's. Two workers would make three.
+      expect(() => recruit(prime, 2)).toThrow(/CHATS_AT_ONCE: 1 other chats are working and the limit is 2/);
+      const a = recruit(prime, 1);
+      // That worker holds its slot until its own chat shows as working: a second one does not fit.
+      expect(() => spawn({ caller: prime, workers: [{ task: 'one too many' }] })).toThrow(/CHATS_AT_ONCE/);
+      expect(a.created).toHaveLength(1);
+      // Off again: no limit.
+      getConfig().multiAgent.chatsAtOnce = 0;
+      expect(spawn({ caller: prime, workers: [{ task: 'no limit' }] }).created).toHaveLength(1);
+    } finally {
+      getConfig().multiAgent.chatsAtOnce = 0;
+      slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(before);
+      await setEnabled(true);
+    }
+  });
+
+  it('counts a running worker\'s chat once, and frees a failed or refused worker\'s slot at once (Haz on #2051)', async () => {
+    const slots = await import('../src/main/chats-at-once.js');
+    const before = slots.workingChatsSourceForTests();
+    slots.resetChatsAtOnceForTests();
+    const working = new Set([PRIME_CHAT]);
+    slots.setWorkingChatsSource(() => working);
+    await setEnabled(true, 4);
+    getConfig().multiAgent.chatsAtOnce = 3;
+    try {
+      const a = recruit(prime, 2);
+      // worker-1's chat opens and works: the prime, worker-1 and worker-2's reservation are three, not four.
+      expect(bindConversation('worker-1', 'slot-worker-1', a.runId)).toBe(true);
+      working.add('slot-worker-1');
+      expect(slots.automaticSendRefusal('input:other', 'other-chat')).toMatch(/3 chats are working/);
+      // worker-2 never started: its slot is free at once, not after two minutes.
+      failAgent('worker-2', 'tab never opened', undefined, {}, a.runId);
+      expect(slots.automaticSendRefusal('input:other', 'other-chat')).toBeNull();
+    } finally {
+      getConfig().multiAgent.chatsAtOnce = 0;
+      slots.resetChatsAtOnceForTests(); slots.setWorkingChatsSource(before);
+      await setEnabled(true);
+    }
+  });
+
   it('counts an unpublished staged spawn as a global admission reservation', async () => {
     await setEnabled(true, 2, false, 1);
     try {
@@ -5563,11 +5740,11 @@ describe('one ChatGPT account on several computers', () => {
     // Seen live (2026-10-04): a Windows worker reported through the Mac's Core, which answered only
     // "No sub-agent run is active". Naming the connector lets the model see it called the wrong one.
     const stranger: Caller = { conversationId: 'a-chat-of-another-computer' };
-    expect(() => sendMessage(stranger, PRIME_ID, 'done')).toThrow('No sub-agent run is active in Chat On Steroids Core. ');
+    expect(() => sendMessage(stranger, PRIME_ID, 'done')).toThrow('No sub-agent run is active in Chat Marks Core. ');
     const previous = getConfig();
     await saveConfig({ ...previous, connectorSuffix: 'Windows' });
     try {
-      expect(() => sendMessage(stranger, PRIME_ID, 'done')).toThrow('No sub-agent run is active in Chat On Steroids Core (Windows). ');
+      expect(() => sendMessage(stranger, PRIME_ID, 'done')).toThrow('No sub-agent run is active in Chat Marks Core (Windows). ');
     } finally { await saveConfig(previous); }
   });
 });
@@ -5583,16 +5760,18 @@ it('archives accepted renamed assignments before broker expiry and restores save
   rejected.rollback();
   // The archive follows the durable write in the background; it never holds up acceptance.
   await persistCriticalSwarmNow();
-  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment?.label).toBe('Worker 1'));
+  // A slow Windows runner took over a second for that background write (2026-11-05, CI on #2072),
+  // past vi.waitFor's default; the same condition is awaited longer.
+  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment?.label).toBe('Worker 1'), { timeout: 10_000 });
   const staged = stageMessages(prime, [{ to: 'worker-1', text: 'New task', label: 'Review' }]);
   await persistCriticalSwarmNow(); staged.commit();
-  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' }));
+  await vi.waitFor(async () => expect((await getSession(session.id))?.workerAssignment).toMatchObject({ label: 'Review', task: 'New task' }), { timeout: 10_000 });
   noteAgentAlive('c-worker-archive', 'call'); finishAgent(worker.caller, 'done'); releaseQuiescentRun();
   const saved = snapshotSwarm()!;
   resetAgentsForTests();
   vi.useFakeTimers();
   try {
-    vi.setSystemTime(saved.savedAt + 8 * 24 * 60 * 60_000);
+    vi.setSystemTime(saved.savedAt + 31 * 24 * 60 * 60_000);
     // Startup projects the last accepted disk snapshot before restoring/pruning authority.
     await archiveWorkerAssignments(saved);
     restoreSwarm(saved);
@@ -5664,7 +5843,7 @@ describe('retired worker chats', () => {
     expect(retired).toEqual([['c-worker-1']]);
   });
 
-  it('names the workers of a parked run when its history expires after a week (polish 2.1.37)', () => {
+  it('names the workers of a parked run when its history expires after thirty days', () => {
     const retired: string[][] = [];
     startSwarm(1);
     const worker = startWorker('worker-1');
@@ -5677,7 +5856,7 @@ describe('retired worker chats', () => {
     onWorkerChatsRetired((ids) => retired.push([...ids]));
     vi.useFakeTimers();
     try {
-      vi.setSystemTime(saved!.savedAt + 8 * 24 * 60 * 60_000);
+      vi.setSystemTime(saved!.savedAt + 31 * 24 * 60 * 60_000);
       restoreSwarm(saved);
       expect(retired).toEqual([['c-worker-1']]);
     } finally { vi.useRealTimers(); }

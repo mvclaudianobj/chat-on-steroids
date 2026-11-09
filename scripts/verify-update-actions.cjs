@@ -14,7 +14,7 @@ app.whenReady().then(async () => {
     localStorage.setItem('cos.ui.language', ${JSON.stringify(lang)});
     const state={config:fixtureConfig({roots:[{name:'fixture',path:'/fixture/project'}],ui:{theme:'${theme}',lastSeenVersion:'${version}'},multiAgent:{enabled:false}}),
       hasApiKey:true,hasGoalKey:false,connectorSchemas:{core:'fixture-schema'},connectorRefresh:{core:{schemaId:'fixture-schema',state:'current'}},
-      status:{state:'connected',detail:'',health:null,surfaces:[{id:'core',connectorName:'Chat On Steroids Core',description:'Core',cardSummary:'Local tools',optional:false,available:true,tools:['read'],state:'live',detail:'',localUrl:null,publicUrl:null,lastRequestAt:1,lastToolCallAt:1}]},
+      status:{state:'connected',detail:'',health:null,surfaces:[{id:'core',connectorName:'Chat Marks Core',description:'Core',cardSummary:'Local tools',optional:false,available:true,tools:['read'],state:'live',detail:'',localUrl:null,publicUrl:null,lastRequestAt:1,lastToolCallAt:1}]},
       bridge:{running:true,paired:true,present:true,extensionVersion:'${version}'},update:{current:'${version}',latest:null,stage:'idle',checkedAt:1,error:null}};
     const ok=data=>Promise.resolve({ok:true,data});let listener=()=>{};window.calls=[];window.fixtureState=state;
     window.api=new Proxy({getState:()=>ok(state),getLog:()=>ok(Array.from({length:200},(_,i)=>({time:Date.now()+i,level:'info',message:'Fixture event '+i}))),

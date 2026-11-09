@@ -156,4 +156,3 @@ it('shows the reviewer\'s last findings in the chat when the Goal ends without a
   const clean = await draftWith('c-met-clean', { text: 'No problems found.' }, decision('stop'));
   expect((await readRecentEvents(clean.sessionId, 20)).filter(event => event.kind === 'note')).toEqual([]);
 });
-

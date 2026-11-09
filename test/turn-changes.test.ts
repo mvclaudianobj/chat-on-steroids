@@ -141,4 +141,3 @@ it('says once why a recorded edit could not be shown, never its content (CodeRab
     expect(lines.join()).not.toContain('secret-content');
   } finally { warn.mockRestore(); store.resetSessionStoreForTests(); await removeTempDir(dir); }
 });
-

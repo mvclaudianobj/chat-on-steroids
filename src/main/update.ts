@@ -1,5 +1,5 @@
 /**
- * Whether a newer Chat On Steroids has been published, and the file that becomes it.
+ * Whether a newer Chat Marks has been published, and the file that becomes it.
  *
  * This is the whole updater: one pass, run at startup and repeated on a slow timer, that asks
  * GitHub for the latest release, stages the artifact this installation can actually apply, and
@@ -22,12 +22,10 @@
  *   belongs to, so the next start recognises the file it already has and reverifies it rather
  *   than spending another hundred megabytes on the same installer.
  *
- * **What updates itself, and what does not.** Windows, and Linux installed as an AppImage. A
- * Linux `.deb` is owned by the system package manager and cannot be replaced without root, and
- * asking for a password during quit is not something this app will do — so a `.deb` install is
- * *told* a new version exists and is given the release page, and nothing is downloaded behind
- * it. That is a real limitation, not parity, and the notice says so rather than implying an
- * update is on its way. macOS is out entirely: those artifacts ship unsigned and unnotarized
+ * **What updates itself, and what does not.** Windows and Linux AppImage stage updates
+ * automatically; Linux `.deb` also stages its verified installer, but invokes the system
+ * package manager via PolicyKit only when the user explicitly presses Install. The password
+ * is entered in the system dialog, never handled by this app. macOS is out entirely: those artifacts ship unsigned and unnotarized
  * (see electron-builder.yml), so an app that silently replaced itself there would be handing
  * Gatekeeper a binary the user never chose to trust.
  *
@@ -37,19 +35,21 @@
  * wrong.
  */
 
-import { execFile, spawn } from 'node:child_process';
+import { AsyncLocalStorage } from 'node:async_hooks';
+import { execFile, execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, copyFile, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
-import { createReadStream, createWriteStream, existsSync } from 'node:fs';
+import { chmod, copyFile, lstat, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { createReadStream, createWriteStream, existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { app } from 'electron';
 import { logInfo, logWarn } from './logger.js';
 import { APP_VERSION } from './version.js';
-import { isNewer, type UpdateStatus } from '../shared/types.js';
+import { isNewer, isReleaseVersion, type UpdateStatus } from '../shared/types.js';
 
-const REPO = 'totec448-spec/chat-on-steroids';
+// Fork releases are the only safe update authority for the Marks-branded build.
+const REPO = 'mvclaudianobj/chat-on-steroids';
 const LATEST_RELEASE_API = `https://api.github.com/repos/${REPO}/releases/latest`;
 
 const CHECK_TIMEOUT_MS = 15_000;
@@ -79,32 +79,54 @@ export const STALE_CHECK_MS = 10 * 60_000;
 /**
  * The artifact this exact installation can apply to itself, or null for one that cannot.
  *
- * Null is a normal answer, not a failure: macOS is out by policy, a Linux `.deb` belongs to the
- * system package manager and would need root to replace, and an architecture with no published
+ * Null is a normal answer, not a failure: macOS is out by policy, and an architecture with no published
  * artifact has nothing to fetch. Those installations are still told a newer version exists —
  * that is what `latest` with a stage of `idle` means, and the notice turns it into a download
  * link — they are simply not updated for.
  *
- * `APPIMAGE` is the environment variable the AppImage runtime sets to the path of the file that
- * is running. Its absence is exactly what distinguishes a portable AppImage from a `.deb`
- * install, so it is both the eligibility test and the target of the swap.
+ * `APPIMAGE` identifies an AppImage runtime. Without it, require dpkg to prove the exact
+ * running executable belongs to the installed chat-on-steroids package: a generic Linux
+ * tarball, Snap or development build must never ask root to install a Debian update.
  *
  * An unpackaged run — `electron-vite dev`, or a maintainer's working tree — is not an
  * installation. Its version is whatever the source says, so it reads as out of date the moment a
  * release ships, and staging for it would let quitting a dev session silently run an installer
  * over the real per-user install. It is told what is published and replaces nothing.
  */
+/** A package database entry alone is insufficient: dpkg must own this exact executable. */
+export function installedDebBinary(executable: string = process.execPath): boolean {
+  if (process.platform !== 'linux') return false;
+  try {
+    const status = execFileSync('/usr/bin/dpkg-query', ['--show', '--showformat=${Status}', 'chat-on-steroids'],
+      { encoding: 'utf8', timeout: 5000 });
+    if (status.trim() !== 'install ok installed') return false;
+    const owner = execFileSync('/usr/bin/dpkg-query', ['--search', '--', realpathSync(executable)],
+      { encoding: 'utf8', timeout: 5000 });
+    return owner.split('\n').some(line => /^chat-on-steroids(?::[a-z0-9-]+)?:\s/.test(line));
+  } catch {
+    return false;
+  }
+}
+
+let debPackageProof = installedDebBinary;
+/** Test seam: simulate dpkg-confirmed and unrelated packaged Linux installations. */
+export function setDebPackageProofForTests(probe: () => boolean): void {
+  debPackageProof = probe;
+}
+
 export function stagedArtifact(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
   appImage: string | undefined = process.env.APPIMAGE,
   packaged: boolean = app.isPackaged
-): { name: string; kind: 'installer' | 'appimage'; target: string } | null {
+): { name: string; kind: 'installer' | 'appimage' | 'deb'; target: string } | null {
   if (!packaged) return null;
   if (arch !== 'x64' && arch !== 'arm64') return null;
-  if (platform === 'win32') return { name: `Chat-On-Steroids-Setup-${arch}.exe`, kind: 'installer', target: '' };
-  if (platform === 'linux' && appImage) {
-    return { name: `Chat-On-Steroids-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
+  if (platform === 'win32') return { name: `ChatMarks-Setup-${arch}.exe`, kind: 'installer', target: '' };
+  if (platform === 'linux') {
+    if (appImage) return { name: `ChatMarks-Linux-${arch}.AppImage`, kind: 'appimage', target: appImage };
+    if (debPackageProof()) return { name: `ChatMarks-Linux-${arch}.deb`, kind: 'deb', target: '' };
+    return null;
   }
   return null;
 }
@@ -112,7 +134,7 @@ export function stagedArtifact(
 /**
  * The published file an installation that cannot update itself should download, or null.
  *
- * macOS and a Linux `.deb` are told about a release but never replaced from here (see above).
+ * macOS is told about a release but cannot be replaced from here (see above).
  * Pointing their "Get update" at the exact file for this machine, instead of the release page,
  * saves the search for the right one of thirteen assets. The download still happens in the
  * user's browser, so macOS applies its normal quarantine and Gatekeeper checks to it.
@@ -120,32 +142,31 @@ export function stagedArtifact(
 export function manualDownloadName(
   platform: NodeJS.Platform = process.platform,
   arch: string = process.arch,
-  appImage: string | undefined = process.env.APPIMAGE,
+  _appImage: string | undefined = process.env.APPIMAGE,
   packaged: boolean = app.isPackaged
 ): string | null {
   if (!packaged || (arch !== 'x64' && arch !== 'arm64')) return null;
-  if (platform === 'darwin') return `Chat-On-Steroids-macOS-${arch}.dmg`;
-  if (platform === 'linux' && !appImage) return `Chat-On-Steroids-Linux-${arch}.deb`;
+  if (platform === 'darwin') return `ChatMarks-macOS-${arch}.dmg`;
   return null;
 }
 
 /** Where "Get update" sends this installation: its exact file for `version`, else the page. */
 export function manualDownloadUrl(version: string | null, name: string | null = manualDownloadName()): string {
   const page = `https://github.com/${REPO}/releases/latest`;
-  return version && /^\d+\.\d+\.\d+$/.test(version) && name ? `https://github.com/${REPO}/releases/download/v${version}/${name}` : page;
+  return version && releaseVersion(version) === version && name ? `https://github.com/${REPO}/releases/download/v${version}/${name}` : page;
 }
 
 /** `v2.0.3` -> `2.0.3`, and anything that is not a release tag -> null. */
 export function releaseVersion(tag: unknown): string | null {
   if (typeof tag !== 'string') return null;
   const version = tag.trim().replace(/^v/, '');
-  return /^\d+\.\d+\.\d+$/.test(version) ? version : null;
+  return isReleaseVersion(version) ? version : null;
 }
 
 const CLEAR: UpdateStatus = { current: APP_VERSION, latest: null, stage: 'idle', error: null, checkedAt: null };
 
 let status: UpdateStatus = CLEAR;
-let staged: { version: string; file: string; kind: 'installer' | 'appimage'; target: string; digest: string } | null = null;
+let staged: { version: string; file: string; kind: 'installer' | 'appimage' | 'deb'; target: string; digest: string } | null = null;
 let pass: Promise<void> | null = null;
 /** Set by `markInstallOnQuit`: the user pressed Install, so bring the app back afterwards. */
 let runAfterInstall = false;
@@ -164,7 +185,28 @@ export function updateStatus(): UpdateStatus {
   return { ...status };
 }
 
+/**
+ * Which reset an update pass started under. A pass still waiting on the network when the state is
+ * reset (between tests) must not write the next one's status: on Windows a pass left from an earlier
+ * test fetched the installer again, failed, and turned a running download to "failed" (#2008).
+ */
+let generation = 0;
+const passGeneration = new AsyncLocalStorage<number>();
+const stale = (): boolean => { const own = passGeneration.getStore(); return own !== undefined && own !== generation; };
+/** Aborted by the reset: the requests of a pass from before it stop rather than finish. */
+let resetSignal = new AbortController();
+/**
+ * Called after every wait in a pass, before it writes a file or the staged update: a pass that
+ * outlived a reset wrote the installer and staged it for the next state (CodeRabbit on #2018).
+ */
+/** Never shown: the pass that throws it can no longer write the status (`set` and the catch both check). */
+class SupersededPass extends Error {}
+function stillCurrent(): void {
+  if (stale()) throw new SupersededPass('the update state was reset while this pass was waiting');
+}
+
 function set(next: Partial<UpdateStatus>): void {
+  if (stale()) return;
   status = { ...status, ...next };
   for (const listener of listeners) listener();
 }
@@ -188,7 +230,7 @@ export async function restoreUpdateHandoff(): Promise<void> {
   let note: { version?: unknown } | null = null;
   try { note = JSON.parse(await readFile(handoffNote(), 'utf8')); } catch { return; }
   await rm(handoffNote(), { force: true }).catch(() => undefined);
-  const version = typeof note?.version === 'string' && /^\d+\.\d+\.\d+$/.test(note.version) ? note.version : null;
+  const version = isReleaseVersion(note?.version) ? note.version : null;
   if (version && isNewer(version, APP_VERSION)) {
     set({ notInstalled: version });
     logWarn(`update: ${version} was handed to its installer, but this is still ${APP_VERSION}; it did not install`);
@@ -205,6 +247,7 @@ export function startUpdateChecks(): void {
 
 /** After a pass: a failure is asked again soon, a success ends the waiting. */
 function scheduleRetry(): void {
+  if (stale()) return;
   if (retry) { clearTimeout(retry); retry = null; }
   if (!recheck) return;
   if (status.stage !== 'failed') { failures = 0; return; }
@@ -233,25 +276,37 @@ export function checkForUpdatesIfStale(now = Date.now()): Promise<void> {
  */
 export function checkForUpdates(): Promise<void> {
   if (pass) return pass;
-  const run = runPass()
+  // The pass, its failure and its retry all belong to the reset they started under.
+  const run = passGeneration.run(generation, () => runPass()
+    .then(async () => {
+      // All successful staging paths share this publication boundary, including an
+      // already-ready candidate. A failed pass never retires another download.
+      stillCurrent();
+      if (staged) await pruneUpdateCache(staged.version);
+    })
     .catch((err: Error) => {
       // This pass owns GitHub requests; keep its transport failure readable without
       // relabeling HTTP, filesystem or other diagnostics. The log keeps the original.
       const reason = err instanceof TypeError && err.message === 'fetch failed' ? 'GitHub could not be reached' : err.message;
+      if (stale()) return;
       set({ stage: 'failed', error: reason });
       logWarn(`update check failed: ${err.message}`);
     })
     .finally(() => {
       if (pass === run) pass = null;
       scheduleRetry();
-    });
+    }));
   pass = run;
   return run;
 }
 
 async function runPass(): Promise<void> {
   set({ stage: 'checking', error: null });
+  // Installed downloads are obsolete even when the release server is unreachable.
+  if (app.isPackaged) await pruneUpdateCache();
+  stillCurrent();
   const release = { version: await latestVersion() };
+  stillCurrent();
   // GitHub answered. From here the UI can tell "current" from "not asked yet", whatever the
   // rest of this pass does with the answer.
   set({ checkedAt: Date.now() });
@@ -280,8 +335,10 @@ async function runPass(): Promise<void> {
   // both the manifest of what the release contains and the proof of what may be executed, so
   // neither adopting a file nor fetching one happens without it.
   const expected = (await releaseDigests(release.version)).get(artifact.name);
+  stillCurrent();
   if (!expected) throw new Error(`release ${release.version} publishes no ${artifact.name}`);
   const carried = await adopt(release.version, artifact.name, expected);
+  stillCurrent();
   if (carried) {
     staged = { version: release.version, file: carried, kind: artifact.kind, target: artifact.target, digest: expected };
     set({ latest: release.version, stage: 'ready' });
@@ -290,6 +347,7 @@ async function runPass(): Promise<void> {
   }
   set({ latest: release.version, stage: 'downloading' });
   const file = await download(release.version, artifact.name, expected);
+  stillCurrent();
   staged = { version: release.version, file, kind: artifact.kind, target: artifact.target, digest: expected };
   set({ stage: 'ready' });
   logInfo(`update: ${release.version} is downloaded and ready to install`);
@@ -298,6 +356,40 @@ async function runPass(): Promise<void> {
 /** Where one release's artifact is kept. Versioned, so no build is ever taken for another. */
 function stagingDir(version: string): string {
   return path.join(app.getPath('userData'), 'updates', version);
+}
+
+/** Version directories in the updater-exclusive cache; never scan app copies or backups elsewhere. */
+async function pruneUpdateCache(keepVersion?: string): Promise<void> {
+  stillCurrent();
+  const root = path.join(app.getPath('userData'), 'updates');
+  try {
+    // A linked cache root is not authority to recursively clean somebody else's directory.
+    const stat = await lstat(root);
+    stillCurrent();
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      logWarn('update: cache cleanup skipped because the updates root is not an ordinary directory');
+      return;
+    }
+    const entries = await readdir(root, { withFileTypes: true });
+    stillCurrent();
+    for (const entry of entries) {
+      if (!entry.isDirectory() || !isReleaseVersion(entry.name) || entry.name === keepVersion) continue;
+      if (isNewer(entry.name, APP_VERSION) && !keepVersion) continue;
+      try {
+        stillCurrent();
+        await rm(path.join(root, entry.name), { recursive: true, force: true });
+        stillCurrent();
+        logInfo(`update: removed obsolete ${entry.name} download from the update cache`);
+      } catch (err) {
+        if (err instanceof SupersededPass) throw err;
+        // Windows may still have its installer open. Leave it for the next ordinary pass.
+        logWarn(`update: obsolete ${entry.name} download is still in use or cannot be removed; cleanup deferred`);
+      }
+    }
+  } catch (err) {
+    if (err instanceof SupersededPass) throw err;
+    if ((err as NodeJS.ErrnoException).code !== 'ENOENT') logWarn('update: cache could not be read; cleanup deferred');
+  }
 }
 
 /** The SHA-256 of a file already on disk. */
@@ -341,13 +433,23 @@ async function latestVersion(): Promise<string> {
     });
   } catch (err) {
     // GitHub's API refuses unauthenticated calls once an address has spent its hourly quota, and
-    // some networks get 403 outright (#1253). The public release page has no such quota.
-    if (!/ answered (403|429)$/.test((err as Error).message)) throw err;
+    // some networks get 403 outright (#1253). GitHub also returns 404 for repositories with no
+    // API-visible stable release. The public release page is a separate stable-release selector.
+    if (!/ answered (403|404|429)$/.test((err as Error).message)) throw err;
     return latestVersionFromPage();
   }
-  const body = (await response.json()) as { tag_name?: unknown };
-  const version = releaseVersion(body.tag_name);
-  if (!version) throw new Error('the latest release has no usable version tag');
+  const body = (await response.json().catch(() => null)) as
+    { tag_name?: unknown; draft?: unknown; prerelease?: unknown } | null;
+  // A draft, prerelease, missing/non-SemVer tag or malformed API payload must never be selected
+  // as an installable update. Resolve GitHub's public latest *stable* page instead, without
+  // enumerating drafts or guessing from tag names in a release list.
+  const version = body?.draft === false && body.prerelease === false &&
+    typeof body.tag_name === 'string' && body.tag_name.startsWith('v')
+    ? releaseVersion(body.tag_name) : null;
+  if (!version) {
+    logWarn('update: GitHub latest release API returned no usable published stable Marks tag; checking the public latest release page');
+    return latestVersionFromPage();
+  }
   return version;
 }
 
@@ -366,7 +468,9 @@ async function latestVersionFromPage(): Promise<string> {
   if (!response.ok) throw new Error(`the release page answered ${response.status}`);
   let landed: URL | null = null;
   try { landed = new URL(response.url); } catch { landed = null; }
-  const tag = landed?.origin === 'https://github.com' ? /\/releases\/tag\/([^/]+)$/.exec(landed.pathname)?.[1] : undefined;
+  // Redirects to another repository (or a similarly named page) cannot authorize a Marks update.
+  const tag = landed?.origin === 'https://github.com'
+    ? new RegExp(`^/${REPO}/releases/tag/([^/]+)$`).exec(landed.pathname)?.[1] : undefined;
   const version = releaseVersion(tag ? decodeURIComponent(tag) : undefined);
   if (!version) throw new Error('the release page named no usable version tag');
   return version;
@@ -381,13 +485,48 @@ async function latestVersionFromPage(): Promise<string> {
  * something to download, and a file whose digest is not in here is not something to run.
  */
 async function releaseDigests(version: string): Promise<Map<string, string>> {
-  const response = await get(assetUrl(version, 'SHA256SUMS.txt'), CHECK_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await get(assetUrl(version, 'SHA256SUMS.txt'), CHECK_TIMEOUT_MS);
+  } catch (error) {
+    // Some Marks releases were published with binaries but no SHA256SUMS.txt. GitHub computes
+    // SHA-256 on upload and exposes it via the same repository's release-assets API. Accept that
+    // digest only when the manifest is truly absent; never bypass an existing, contradictory or
+    // malformed checksum manifest. Every downloaded artifact is still hashed locally.
+    if ((error as Error).message !== 'SHA256SUMS.txt answered 404') throw error;
+    return releaseDigestsFromGitHub(version);
+  }
   const digests = new Map<string, string>();
   for (const line of (await response.text()).split('\n')) {
     // `sha256sum` writes "<64 hex>  <name>", with a binary/text marker on the second space.
     const match = /^([0-9a-f]{64})\s+[*\s]?(\S+)\s*$/.exec(line.trim());
     if (match) digests.set(match[2]!, match[1]!);
   }
+  return digests;
+}
+
+/** Validated GitHub asset digests are an equivalent SHA-256 authority for releases without sums. */
+async function releaseDigestsFromGitHub(version: string): Promise<Map<string, string>> {
+  const response = await get(`https://api.github.com/repos/${REPO}/releases/tags/v${encodeURIComponent(version)}`,
+    CHECK_TIMEOUT_MS, { accept: 'application/vnd.github+json' });
+  const release = (await response.json()) as {
+    tag_name?: unknown; draft?: unknown; prerelease?: unknown;
+    assets?: Array<{ name?: unknown; digest?: unknown; state?: unknown; size?: unknown; browser_download_url?: unknown }>;
+  };
+  if (release?.tag_name !== `v${version}` || release.draft !== false || release.prerelease !== false ||
+      !Array.isArray(release.assets)) throw new Error(`release ${version} has no verified published asset metadata`);
+  const digests = new Map<string, string>();
+  for (const asset of release.assets) {
+    if (typeof asset.name !== 'string' || typeof asset.digest !== 'string' ||
+        asset.state !== 'uploaded' || typeof asset.size !== 'number' || asset.size <= 0 ||
+        asset.browser_download_url !== assetUrl(version, asset.name)) continue;
+    const digest = /^sha256:([0-9a-f]{64})$/.exec(asset.digest)?.[1];
+    if (!digest) continue;
+    if (digests.has(asset.name)) throw new Error(`release ${version} has duplicate published asset names`);
+    digests.set(asset.name, digest);
+  }
+  if (!digests.size) throw new Error(`release ${version} has no usable GitHub SHA-256 asset digests`);
+  logInfo(`update: release ${version} has no SHA256SUMS.txt; using verified GitHub asset SHA-256 metadata`);
   return digests;
 }
 
@@ -423,28 +562,48 @@ async function get(url: string, timeout: number | AbortSignal, headers: Record<s
  * interrupted or is not the right file can never be handed to an installer.
  */
 async function download(version: string, name: string, expected: string): Promise<string> {
+  stillCurrent();
   const dir = stagingDir(version);
-  // One staged build at a time. Anything already here is either this same download starting
-  // over or an artifact for a release nobody is going to install now.
-  await rm(path.join(app.getPath('userData'), 'updates'), { recursive: true, force: true });
+  // Removing the whole cache used to unlink these entries before writing. Preserve
+  // that destination boundary without following a relocated root/version directory.
+  for (const directory of [path.dirname(dir), dir]) {
+    const entry = await lstat(directory).catch((err: NodeJS.ErrnoException) => {
+      if (err.code === 'ENOENT') return null;
+      throw err;
+    });
+    stillCurrent();
+    if (entry && (!entry.isDirectory() || entry.isSymbolicLink())) {
+      throw new Error('the update staging path must use ordinary directories');
+    }
+  }
+  // Keep the previous verified download and handoff note until a successor is verified.
+  // An interrupted transfer owns only this version's .part file, never the entire cache.
   await mkdir(dir, { recursive: true });
+  stillCurrent();
   const file = path.join(dir, name);
+  // Start with a fresh inode: truncating an existing .part could follow a file link.
+  // Non-recursive removal never erases an unexpected directory stored at this name.
+  await rm(`${file}.part`, { force: true });
+  stillCurrent();
   // Stopped when the connection goes quiet, not when the file is simply large for the line.
   const quiet = new AbortController();
   const stalled = new Error(`downloading ${name} stopped: no data for ${DOWNLOAD_STALL_MS / 1000} seconds`);
   const watch = setTimeout(() => quiet.abort(stalled), DOWNLOAD_STALL_MS);
   const hash = createHash('sha256');
+  const signal = AbortSignal.any([quiet.signal, resetSignal.signal]);
   try {
-    const response = await get(assetUrl(version, name), quiet.signal);
+    const response = await get(assetUrl(version, name), signal);
+    stillCurrent();
     if (!response.body) throw new Error(`downloading ${name} returned no content`);
     const body = Readable.fromWeb(response.body as Parameters<typeof Readable.fromWeb>[0]);
     body.on('data', (chunk: Buffer) => { hash.update(chunk); watch.refresh(); });
-    await pipeline(body, createWriteStream(`${file}.part`), { signal: quiet.signal });
+    await pipeline(body, createWriteStream(`${file}.part`, { flags: 'wx' }), { signal });
   } catch (err) {
     throw quiet.signal.aborted ? stalled : err;
   } finally {
     clearTimeout(watch);
   }
+  stillCurrent();
   const digest = hash.digest('hex');
   if (digest !== expected) {
     await rm(`${file}.part`, { force: true });
@@ -559,6 +718,75 @@ export function onInstallerTakeover(wait: () => Promise<void>): void {
   installerTakeover = wait;
 }
 
+/**
+ * pkexec runs this fixed program as root, never a shell command assembled from downloaded data.
+ * It snapshots the untrusted download into a private root-owned directory, verifies the release
+ * digest over the snapshot, then passes ONLY that private file to apt. The original user-writable
+ * pathname can change at any time without changing the bytes apt reads. TemporaryDirectory
+ * removes the snapshot after apt exits; root never executes or relaunches this app.
+ */
+export const DEBIAN_ROOT_INSTALL_SCRIPT = [
+  'import hashlib, hmac, os, stat, subprocess, sys, tempfile',
+  'source, expected = sys.argv[1:]',
+  'if len(expected) != 64 or any(c not in "0123456789abcdef" for c in expected):',
+  '    raise ValueError("Invalid expected Debian release digest")',
+  'with tempfile.TemporaryDirectory(prefix="chat-marks-deb-", dir="/var/tmp") as private:',
+  '    target = os.path.join(private, "ChatMarks-update.deb")',
+  '    fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC)',
+  '    with os.fdopen(fd, "rb") as untrusted:',
+  '        size = os.fstat(untrusted.fileno())',
+  '        if not stat.S_ISREG(size.st_mode) or size.st_size > 1024 * 1024 * 1024:',
+  '            raise ValueError("Debian source must be a regular file no larger than 1 GiB")',
+  '        digest = hashlib.sha256()',
+  '        copied = 0',
+  '        with open(target, "xb") as sealed:',
+  '            while True:',
+  '                block = untrusted.read(1024 * 1024)',
+  '                if not block:',
+  '                    break',
+  '                copied += len(block)',
+  '                if copied > 1024 * 1024 * 1024:',
+  '                    raise ValueError("Debian source grew beyond 1 GiB")',
+  '                digest.update(block)',
+  '                sealed.write(block)',
+  '            sealed.flush()',
+  '            os.fsync(sealed.fileno())',
+  '    os.chmod(target, 0o600)',
+  '    if not hmac.compare_digest(digest.hexdigest(), expected):',
+  '        raise ValueError("Debian package changed since verification; apt was not invoked")',
+  '    subprocess.run(["/usr/bin/apt-get", "install", "--assume-yes", "--only-upgrade", target], check=True)'
+].join('\n');
+
+/** Runs detached after Electron exits; the only authority for apt is the verified root copy. */
+export const DEBIAN_HANDOFF_SH = [
+  'deb=$1; digest=$2; executable=$3; logfile=$4; old_pid=$5; helper=$6',
+  // Ensure the app really has quit before dpkg can replace its executable or a relaunch races it.
+  'attempts=0',
+  'while kill -0 "$old_pid" 2>/dev/null; do',
+  '  attempts=$((attempts + 1))',
+  '  if [ "$attempts" -ge 120 ]; then',
+  '    printf "Chat Marks .deb update aborted: previous process did not quit.\\n" >> "$logfile"',
+  '    exit 1',
+  '  fi',
+  '  sleep 0.25',
+  'done',
+  'if /usr/bin/pkexec /usr/bin/python3 -c "$helper" "$deb" "$digest" >> "$logfile" 2>&1; then',
+  '  printf "Chat Marks .deb update completed; restarting.\\n" >> "$logfile"',
+  'else',
+  '  result=$?',
+  '  if [ "$result" -eq 126 ]; then',
+  '    printf "Chat Marks .deb update cancelled in the PolicyKit prompt.\\n" >> "$logfile"',
+  '  else',
+  '    printf "Chat Marks .deb update failed (pkexec exit %s); restarting existing app.\\n" "$result" >> "$logfile"',
+  '  fi',
+  'fi',
+  'if [ ! -x "$executable" ]; then',
+  '  printf "Chat Marks could not restart: executable is missing or not executable.\\n" >> "$logfile"',
+  '  exit 1',
+  'fi',
+  '"$executable" >/dev/null 2>&1 &'
+].join('\n');
+
 export async function applyStagedUpdate(): Promise<void> {
   const ready = staged;
   const relaunch = runAfterInstall;
@@ -597,6 +825,19 @@ export async function applyStagedUpdate(): Promise<void> {
         installer.unref();
         if (relaunch) await installerTakeover();
       }
+    } else if (ready.kind === 'deb') {
+      if (!relaunch) return; // Package updates require an explicit click and OS authorization.
+      // The unprivileged detached shell waits for Electron to exit, records pkexec cancellation
+      // or failure and restarts as the user. Root snapshots and hashes the .deb before apt sees it.
+      // All paths/digests/code are separate argv data, never interpolated shell source.
+      await writeFile(handoffNote(), JSON.stringify({ version: ready.version, at: Date.now() }));
+      handoffStep('permission');
+      const installer = spawn('/bin/sh', ['-c', DEBIAN_HANDOFF_SH, 'chat-marks-update', ready.file, ready.digest,
+        app.getPath('exe'), path.join(app.getPath('userData'), 'update-install.log'), String(process.pid), DEBIAN_ROOT_INSTALL_SCRIPT], {
+        detached: true, stdio: 'ignore'
+      });
+      installer.on('error', (err: Error) => logWarn(`the ${ready.version} package installer did not start: ${err.message}`));
+      installer.unref();
     } else {
       const next = `${ready.target}.new`;
       await copyFile(ready.file, next);
@@ -620,6 +861,9 @@ export async function applyStagedUpdate(): Promise<void> {
 
 /** Test seam: forgets the pass, the staged file and everything reported about them. */
 export function resetUpdateForTests(): void {
+  generation += 1;
+  resetSignal.abort();
+  resetSignal = new AbortController();
   installFolderAccess = probeInstallFolder;
   status = CLEAR;
   staged = null;

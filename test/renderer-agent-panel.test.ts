@@ -7,6 +7,32 @@ import { workerBrief } from '../src/shared/worker-brief.js';
 let dom: JSDOM;
 afterEach(() => dom?.window.close());
 
+it('answers a waiting worker inline without opening its chat or nesting action buttons', () => {
+  dom = new JSDOM('<main></main>');
+  Object.assign(globalThis, { document: dom.window.document });
+  const openMain = vi.fn();
+  const answer = vi.fn();
+  const panel = createAgentPanel({ host: document.querySelector('main')!,
+    load: async () => ({ events: [] }), render: () => [], openMain, working: () => true,
+    approvalPanel: id => {
+      const button = document.createElement('button');
+      button.textContent = 'Allow once';
+      button.onclick = () => answer(id);
+      return button;
+    }
+  });
+  const worker = { id: 'worker-session', title: 'worker-1', conversationId: 'host-conversation',
+    startedAt: 1, updatedAt: 2, approvalWaitingAt: Date.now() } as SessionSummary;
+  panel.update('prime', [worker]); panel.show();
+  const controls = document.querySelector<HTMLElement>('[data-approval-session="worker-session"]')!;
+  expect(controls).toBeTruthy();
+  expect(controls.closest('button.agent-panel-row')).toBeNull();
+  controls.querySelector('button')!.click();
+  expect(answer).toHaveBeenCalledOnce();
+  expect(answer).toHaveBeenCalledWith('worker-session');
+  expect(openMain).not.toHaveBeenCalled();
+});
+
 it('highlights only round workers in the existing overview and loads history on selection', async () => {
   dom = new JSDOM('<main></main>');
   Object.assign(globalThis, { document: dom.window.document });

@@ -4,7 +4,7 @@ import { el, icon } from './dom.js';
 import { t, ui } from './i18n.js';
 import { skillDirectives } from '../shared/skill-invocation.js';
 
-type Completion = { start: number; end: number; query: string; kind: 'command' | 'skill' | 'file'; directory?: string };
+type Completion = { start: number; end: number; query: string; kind: 'command' | 'skill' | 'file' | 'remote'; directory?: string };
 
 function inCodeOrLink(text: string, position: number): boolean {
   const before = text.slice(0, position);
@@ -38,6 +38,9 @@ function referenceSearchStart(before: string): number {
 export function skillCompletion(text: string, start: number, end = start): Completion | null {
   if (start !== end || /\S/.test(text.slice(end).split(/\s/, 1)[0] ?? '')) return null;
   const before = text.slice(0, start);
+  const remote = /^\s*\/remotemode\s+(?:"([^"]*)|([^\n]*))$/i.exec(before);
+  if (remote && !inCodeOrLink(text, start)) return { start: remote[1] !== undefined ? start - remote[1].length - 1 : start - (remote[2] ?? '').length,
+    end, query: (remote[1] ?? remote[2] ?? '').trim().toLocaleLowerCase(), kind: 'remote' };
   // The search starts just after whitespace, so ^ there stands for the \s it follows.
   const file = /(?:^|\s)(@(?:\\+[^\r\n\u2028\u2029\\]|[^\s\\])*\\*)$/i.exec(before.slice(referenceSearchStart(before)));
   if (file) {
@@ -73,6 +76,7 @@ type Options = {
   saveDraft: (authored: string) => void;
   list: (scope: SkillsDraftScope) => Promise<Reply<SkillLibrary>>;
   listFiles: (projectId: string, directory: string) => Promise<ProjectDirectoryListing>;
+  listRemoteProfiles?: () => Promise<Array<{ id: string; name: string; type: string }>>;
   command?: (name: string) => void;
   commandAvailable?: (name: string) => boolean;
   deferCommand?: (name: string) => boolean;
@@ -95,7 +99,11 @@ export const APP_COMMANDS = [
   { command: 'plan', name: 'Plan', description: 'Turn the next composer request into editable stages.', glyph: 'i-steps' },
   { command: 'goal', name: 'Goal', description: 'Pursue a saved objective and stop when it is complete.', glyph: 'i-target' },
   { command: 'loop', name: 'Loop', description: 'Keep continuing toward the saved objective.', glyph: 'i-loop' },
+  { command: 'remotemode', name: 'Remote mode', description: 'Bind this chat to an SSH profile; /remotemode off to disconnect.', glyph: 'i-terminal' },
   { command: 'compact', name: 'Compact', description: 'Compact this chat and resume it in a fresh conversation.', glyph: 'i-copy' },
+  { command: 'recall', name: 'Recall', description: 'Search local Brain memories and insert selected context into this draft.', glyph: 'i-search' },
+  { command: 'remember', name: 'Remember', description: 'Ask this chat to save what matters in the conversation as Brain memories, or save the text typed after /remember.', glyph: 'i-pin' },
+  { command: 'remember-answer', name: 'Remember last answer', description: 'Save the last answer in this chat as a Brain memory, without asking the model.', glyph: 'i-pin' },
   { command: 'image', name: 'Image', description: 'Ask ChatGPT for a picture: this message goes without the app, so ChatGPT can draw.', glyph: 'i-image' },
   // Codex's slash commands, each opening what the app already has.
   { command: 'model', name: 'Model', description: 'Choose the model for this chat.', glyph: 'i-sparkle' },
@@ -109,7 +117,7 @@ export const APP_COMMANDS = [
   { command: 'usage', name: 'Usage', description: 'Open usage and token statistics.', glyph: 'i-chart' },
   { command: 'plugins', name: 'Plugins', description: 'Open the plugins and their status.', glyph: 'i-plug' },
   { command: 'pet', name: 'Pet', description: 'Open the pets.', glyph: 'i-paw' },
-  { command: 'feedback', name: 'Feedback', description: 'Report a problem or suggest an idea.', glyph: 'i-warning' },
+  { command: 'feedback', name: 'Feedback', description: 'Report a problem.', glyph: 'i-warning' },
   // The open chat's answer copy, Markdown export, web page to share and Find in chat.
   { command: 'copy', name: 'Copy', description: 'Copy the newest answer in this chat.', glyph: 'i-copy' },
   { command: 'export', name: 'Export', description: 'Save this chat as a Markdown file.', glyph: 'i-export' },
@@ -128,10 +136,12 @@ export function initSkills(options: Options) {
   let epoch = 0, surfaceOwner = '', loadedKey: string | null = null, loading = false, error = '', composing = false;
   type CommandChoice = { command: string; name: string; description: string; glyph: string };
   type FileChoice = { file: ProjectFileEntry };
+  type RemoteChoice = { remote: string };
   type IndexedFile = { entry: ProjectFileEntry; normalizedName: string };
   let library: SkillLibrary | null = null, files: ProjectDirectoryListing | null = null;
   let indexedFiles: IndexedFile[] = [];
-  let choices: Array<LibrarySkill | CommandChoice | FileChoice> = [], selected = 0, painted = '';
+  let choices: Array<LibrarySkill | CommandChoice | FileChoice | RemoteChoice> = [], selected = 0, painted = '';
+  let remoteProfiles: string[] = [];
   // This is only the current textarea projection. The existing draft map holds the
   // complete authored command block across navigation, failures and retries.
   let displayedPrefix = '', prefixOwner = options.owner();
@@ -189,6 +199,18 @@ export function initSkills(options: Options) {
       : new view.Event('input', { bubbles: true }));
   };
   const choose = (skill: typeof choices[number]): void => {
+    if ('remote' in skill) {
+      const range = fragment();
+      if (!current() || range?.kind !== 'remote' || painted !== selectionKey() || composing) { close(); return; }
+      const value = skill.remote === 'off' ? 'off' : `"${skill.remote}"`;
+      const text = input.value.slice(0, range.start) + value + input.value.slice(range.end);
+      // /remotemode is an app command, not a Skill directive: never pass it through
+      // split()/project(), which would strip its leading command into a chip.
+      close(); input.value = text; input.setSelectionRange(range.start + value.length, range.start + value.length);
+      options.saveDraft((prefixOwner === options.owner() ? displayedPrefix : '') + text);
+      input.dispatchEvent(new input.ownerDocument.defaultView!.Event('input', { bubbles: true }));
+      input.focus(); return;
+    }
     if ('file' in skill) {
       const range = fragment(), projectId = options.scope().projectId;
       const key = `files:${projectId ?? ''}:${range?.directory ?? ''}`;
@@ -246,10 +268,11 @@ export function initSkills(options: Options) {
     const query = range?.query ?? '';
     const commands = range.kind === 'command' && options.command ? APP_COMMANDS.filter(row => (row.command.includes(query) || t(row.name).toLocaleLowerCase().includes(query)) &&
       (options.commandAvailable?.(row.command) ?? true)) : [];
-    const matchingSkills = range.kind !== 'file' && !(loading && !library) ? filtered(query).slice(0, 64) : [];
+    const matchingSkills = range.kind !== 'file' && range.kind !== 'remote' && !(loading && !library) ? filtered(query).slice(0, 64) : [];
     const matchingFiles = range.kind === 'file' && files !== null && files.projectId === options.scope().projectId && files.directory === (range.directory ?? '')
       ? filteredFiles(query).slice(0, 64).map(file => ({ file })) : [];
-    choices = [...commands, ...matchingSkills, ...matchingFiles];
+    const remoteChoices = range.kind === 'remote' ? ['off', ...remoteProfiles].filter(name => name.toLocaleLowerCase().includes(query)).map(remote => ({ remote })) : [];
+    choices = [...commands, ...matchingSkills, ...matchingFiles, ...remoteChoices];
     selected = Math.min(selected, Math.max(0, choices.length - 1)); painted = selectionKey();
     const exact = range.kind !== 'file' && query && !loading && !commands.some(row => row.command === query)
       ? library?.skills.find(skill => skill.id.toLocaleLowerCase() === query)
@@ -268,7 +291,14 @@ export function initSkills(options: Options) {
     host.replaceChildren(); host.hidden = false;
     input.setAttribute('aria-expanded', 'true'); input.setAttribute('aria-controls', host.id);
     for (const [index, skill] of choices.entries()) {
-      const command = 'command' in skill, file = 'file' in skill;
+      const command = 'command' in skill, file = 'file' in skill, remote = 'remote' in skill;
+      if (remote) {
+        const row = control('', 'skill-choice skill-autocomplete-option slash-menu-option');
+        row.id = `skill-option-${index}`; row.setAttribute('role', 'option'); row.setAttribute('aria-selected', String(index === selected));
+        row.append(icon('i-terminal', 'ico slash-menu-icon'), el('strong', '', skill.remote));
+        row.addEventListener('pointerdown', event => event.preventDefault()); row.addEventListener('click', () => chooseCurrent(skill));
+        host.append(row); continue;
+      }
       if (index === 0 || index === commands.length && !command && !file || index === commands.length + matchingSkills.length && file)
         host.append(el('div', 'slash-menu-section-title', () => t(command ? 'Commands' : file ? 'Files' : 'Skills')));
       const row = control('', 'skill-choice skill-autocomplete-option slash-menu-option');
@@ -294,6 +324,14 @@ export function initSkills(options: Options) {
   const load = async (): Promise<void> => {
     const request = ++epoch, owner = options.owner(), scope = options.scope(), range = fragment();
     surfaceOwner = owner; loading = true; error = '';
+    if (range?.kind === 'remote') {
+      loadedKey = 'remote'; paintInline();
+      try {
+        remoteProfiles = (await options.listRemoteProfiles?.() ?? []).filter(host => host.type === 'ssh').map(host => host.name);
+      } catch { remoteProfiles = []; error = 'Could not load SSH profiles.'; }
+      finally { if (request === epoch && current() && fragment()?.kind === 'remote') { loading = false; paintInline(); } }
+      return;
+    }
     if (range?.kind === 'file') {
       const projectId = scope.projectId, directory = range.directory ?? '', key = `files:${projectId ?? ''}:${directory}`;
       loadedKey = key; files = null; indexedFiles = []; paintInline();
@@ -329,7 +367,7 @@ export function initSkills(options: Options) {
     if (!range) { hideInline(); loadedKey = null; return; }
     if (range.kind === 'file' && !options.scope().projectId) { close(); return; }
     selected = 0;
-    const key = range.kind === 'file' ? `files:${options.scope().projectId ?? ''}:${range.directory ?? ''}` : `skills:${scopeKey()}`;
+    const key = range.kind === 'remote' ? 'remote' : range.kind === 'file' ? `files:${options.scope().projectId ?? ''}:${range.directory ?? ''}` : `skills:${scopeKey()}`;
     if (loadedKey !== key || !current()) void load(); else paintInline();
   };
   input.addEventListener('compositionstart', () => { composing = true; hideInline(); });

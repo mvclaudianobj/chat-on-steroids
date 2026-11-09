@@ -234,6 +234,12 @@ interface Continuation {
   sourceProgress: number;
   /** Auto-compaction ticket: survives page/retry clocks until commit or explicit Off/cancel. */
   automatic: boolean;
+  /** Number of rejected incomplete briefs in this Compact & Resume chain. */
+  briefRetries: number;
+  /** Durable count and deadline for replacement pages that never reached Send. */
+  openingFailures: number;
+  openingRetryAt: number | null;
+  openingFallbackModel: boolean;
   /** When the brief request first went on its way; the automatic clock starts here. */
   askedAt: number | null;
   state: ContinuationState;
@@ -271,6 +277,9 @@ interface Continuation {
 
 /** At most one continuation per session, and at most one open per prime chat. */
 const byToken = new Map<string, Continuation>();
+// A restored claimant existed in the previous process. Only the durable pre-Send
+// checkpoint proves its page did not dispatch, so a new command can take over.
+const recoveredPreSendClaims = new Set<string>();
 const openingBySession = new Map<string, Promise<ContinuationView>>();
 const commitLocks = new Map<string, { to: string; promise: Promise<ContinuationCommitResult> }>();
 const checkpointLocks = new Map<string, Promise<unknown>>();
@@ -291,6 +300,10 @@ interface ContinuationRecord {
   sourceProgress?: number;
   /** Absent in records written before durable auto-compaction tickets existed. */
   automatic?: boolean;
+  briefRetries?: number;
+  openingFailures?: number;
+  openingRetryAt?: number | null;
+  openingFallbackModel?: boolean;
   /** Absent in records written before automatic handovers had a deadline. */
   askedAt?: number | null;
   /** Absent in records written before Project affinity was carried; null means the site root. */
@@ -325,6 +338,10 @@ function durableRecord(entry: Continuation): ContinuationRecord {
     touchedAt: entry.touchedAt,
     sourceProgress: entry.sourceProgress,
     automatic: entry.automatic,
+    briefRetries: entry.briefRetries,
+    openingFailures: entry.openingFailures,
+    openingRetryAt: entry.openingRetryAt,
+    openingFallbackModel: entry.openingFallbackModel,
     askedAt: entry.askedAt,
     project: entry.project,
     state: entry.state,
@@ -380,6 +397,10 @@ function publishRecord(entry: Continuation, record: ContinuationRecord): void {
   entry.touchedAt = Math.max(entry.touchedAt, record.touchedAt ?? record.openedAt);
   entry.sourceProgress = record.sourceProgress ?? 0;
   entry.automatic = record.automatic === true;
+  entry.briefRetries = record.briefRetries ?? 0;
+  entry.openingFailures = record.openingFailures ?? 0;
+  entry.openingRetryAt = record.openingRetryAt ?? null;
+  entry.openingFallbackModel = record.openingFallbackModel === true;
   entry.state = record.state;
   entry.summary = record.summary;
   entry.handoffId = record.handoffId;
@@ -459,6 +480,10 @@ export interface ContinuationView {
   error: string | null;
   openedAt: number;
   automatic: boolean;
+  briefRetries: number;
+  openingFailures: number;
+  openingRetryAt: number | null;
+  openingFallbackModel: boolean;
   /** When the brief request first went on its way, or null while it has not. */
   askedAt: number | null;
   /** The Project the replacement chat belongs in, or null for the site root. */
@@ -479,6 +504,10 @@ const view = (entry: Continuation): ContinuationView => ({
   error: entry.error,
   openedAt: entry.openedAt,
   automatic: entry.automatic,
+  briefRetries: entry.briefRetries,
+  openingFailures: entry.openingFailures,
+  openingRetryAt: entry.openingRetryAt,
+  openingFallbackModel: entry.openingFallbackModel,
   askedAt: entry.askedAt,
   project: entry.project,
   sourceSend: { ...entry.sourceSend },
@@ -526,12 +555,14 @@ function sweep(): void {
     // to *waiting*, and once the durable phase starts there is nothing left to wait for.
     if (entry.state === 'committing' || commitLocks.has(entry.token) || checkpointLocks.has(entry.token)) continue;
     if (entry.state === 'committed' || entry.state === 'aborted') {
+      recoveredPreSendClaims.delete(entry.token);
       // Kept briefly so a repeated ack can be answered with "already done" rather than with
       // a fresh transaction, then forgotten.
       if (Date.now() - entry.touchedAt > CONTINUATION_TTL_MS * 2) byToken.delete(entry.token);
       continue;
     }
     if (expired(entry)) {
+      recoveredPreSendClaims.delete(entry.token);
       abortContinuation(
         entry.token,
         entry.automatic ? 'the handover never landed and was given up on' : 'it took too long and was given up on'
@@ -741,8 +772,11 @@ export async function repairPrimeFromResumeShadow(conversationId: string): Promi
   // The chat's own Goal/Loop switch travels with its objective. A loop that was running in A
   // is still running in B — the whole point of Compact & Resume is that the work continues —
   // and leaving the override behind would silently hand B back to the app-wide setting.
-  if (goalSwitchFor(conversationId).own) clearGoalSwitch(fromConversationId);
-  else if (moveGoalSwitch(fromConversationId, conversationId)) goalChanged = true;
+  if (goalSwitchFor(conversationId).own) {
+    const kept = goalSwitchFor(conversationId), dropped = goalSwitchFor(fromConversationId);
+    if (dropped.own) logInfo(`goal: ${conversationId} already had its own ${kept.enabled ? kept.mode : 'Normal'} switch, so ${fromConversationId}'s ${dropped.enabled ? dropped.mode : 'Normal'} was dropped (Compact & Resume)`);
+    clearGoalSwitch(fromConversationId);
+  } else if (moveGoalSwitch(fromConversationId, conversationId)) goalChanged = true;
   // The recovery hook uses success semantics: replaying an already-repaired target returns true
   // by design. Here this boolean means "changed on this call" and drives a user-visible warning,
   // so an already-owned target must not be counted as a fresh broker mutation. Missing Goal or
@@ -778,6 +812,10 @@ function makeContinuation(sessionId: string, fromConversationId: string, automat
     touchedAt: Date.now(),
     sourceProgress: 0,
     automatic,
+    briefRetries: 0,
+    openingFailures: 0,
+    openingRetryAt: null,
+    openingFallbackModel: false,
     askedAt: null,
     state: 'awaiting-summary',
     summary: '',
@@ -833,6 +871,49 @@ export async function openContinuationNow(
   } finally {
     if (openingBySession.get(sessionId) === work) openingBySession.delete(sessionId);
   }
+}
+
+/**
+ * Replace a rejected source request with a NEW marked turn in the SAME chat. Persist the
+ * retirement and fresh token together: after a crash neither a duplicate Send nor an
+ * abandoned source can be resurrected. Concurrent reports of the old final all get the
+ * same successor. The source request was already answered; this is never a transport retry.
+ */
+export async function retryIncompleteHandoffNow(
+  token: string,
+  reason: string,
+  maxRetries: number
+): Promise<{ next: ContinuationView | null; exhausted: boolean } | null> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry) return null;
+    if (entry.state === 'aborted') {
+      const successor = [...byToken.values()].find(other => other.sessionId === entry.sessionId &&
+        other.from === entry.from && isOpen(other) && other.briefRetries === entry.briefRetries + 1);
+      return successor ? { next: view(successor), exhausted: false } : null;
+    }
+    if (entry.state !== 'awaiting-summary' || entry.handoffId || entry.capture) return null;
+    if (entry.briefRetries >= maxRetries) return { next: null, exhausted: true };
+    const next = makeContinuation(entry.sessionId, entry.from, entry.automatic, entry.project);
+    next.briefRetries = entry.briefRetries + 1;
+    next.requestedModel = entry.requestedModel;
+    next.sourceTurnId = entry.sourceTurnId;
+    const old = { ...durableRecord(entry), state: 'aborted' as const, error: reason, touchedAt: Date.now() };
+    const snapshot = snapshotContinuations();
+    snapshot.entries = snapshot.entries.map(record => record.token === token ? old : record);
+    snapshot.entries.push(durableRecord(next));
+    try {
+      await writeDurableNow(CONTINUATIONS_STATE, snapshot);
+    } catch (err) {
+      writeDurableSoon(CONTINUATIONS_STATE, snapshotContinuations());
+      throw err;
+    }
+    publishRecord(entry, old);
+    byToken.set(next.token, next);
+    // The prime transfer remains reserved for the same source; do not cancel it between turns.
+    logInfo(`continuation ${token.slice(0, 8)} rejected incomplete brief; requesting attempt ${next.briefRetries + 1} with ${next.token.slice(0, 8)}`);
+    return { next: view(next), exhausted: false };
+  });
 }
 
 async function withCheckpointLock<T>(token: string, work: () => Promise<T>): Promise<T> {
@@ -1064,6 +1145,40 @@ export async function releaseContinuationDestinationSendNow(token: string, unatt
   });
 }
 
+/** The failed browser attempt and its next due time are one durable transition. */
+export async function failResumeOpeningNow(token: string, claimant: string, reason: string,
+  failedModel: boolean, maxAttempts: number, backoffMs: readonly number[]): Promise<{ failures: number; retryAt: number | null } | null> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || !['claimed', 'awaiting-chat'].includes(entry.state) ||
+        (entry.claimedBy !== claimant && entry.claimedBy !== null) ||
+        entry.destinationSend.state !== 'not-attempted') return null;
+    const failures = entry.openingFailures + 1;
+    const retryAt = failures >= maxAttempts ? null : Date.now() + backoffMs[Math.min(failures - 1, backoffMs.length - 1)]!;
+    await transitionNow(entry, current => ({ ...current,
+      state: 'awaiting-chat', claimedBy: null,
+      destinationSend: { state: 'not-attempted', conversationId: null, messageId: null },
+      openingFailures: failures, openingRetryAt: retryAt,
+      openingFallbackModel: current.openingFallbackModel || failedModel,
+      error: failures >= maxAttempts ? `Resume could not open after ${failures} attempts: ${reason}` : null
+    }));
+    endResumeClaim(token);
+    return { failures, retryAt };
+  });
+}
+
+/** The user's explicit Retry starts a new bounded series on the same saved brief. */
+export async function retryResumeOpeningNow(token: string, maxAttempts: number): Promise<boolean> {
+  return withCheckpointLock(token, async () => {
+    const entry = byToken.get(token);
+    if (!entry || !isOpen(entry) || entry.state !== 'awaiting-chat' || entry.claimedBy !== null ||
+        entry.destinationSend.state !== 'not-attempted' || entry.openingFailures < maxAttempts) return false;
+    await transitionNow(entry, current => ({ ...current, openingFailures: 0, openingRetryAt: null,
+      openingFallbackModel: true, error: null }));
+    return true;
+  });
+}
+
 /** Binds the marked bootstrap to its exact ChatGPT conversation and user-message identity. */
 export async function bindContinuationDestinationMessageNow(
   token: string,
@@ -1127,6 +1242,27 @@ export async function attachSummary(token: string, text: string): Promise<Handof
   );
 }
 
+/** The internal durable fallback uses the same WAL/provenance gate, with no model-content floor. */
+export async function attachDurableFallback(token: string, text: string): Promise<Handoff | null> {
+  const brief = text.trim();
+  if (!brief) return null;
+  return capture(token, brief, async entry => prepareHandoff({
+    sessionId: entry.sessionId,
+    text: brief,
+    continuationToken: entry.token,
+    sourceConversationId: entry.from,
+    sourceTurnId: entry.sourceTurnId,
+    durableFallback: true,
+    notes: ['App-generated fallback from the durable session history; model brief incomplete']
+  }));
+}
+/** Leads a summary written in an earlier chat of the session, so the new chat checks what changed since. */
+export function earlierSummaryNote(createdAt: number): string {
+  return `This summary was written in an earlier chat of this conversation (${new Date(createdAt).toISOString().slice(0, 16).replace('T', ' ')} UTC). ` +
+    'Work may have continued after it in later chats. Before redoing anything, check the current state of the files, the version ' +
+    'history, deployments and running services, and continue from what is actually there.';
+}
+
 /** The plan notice prepareHandoff appends; a reused brief gets the current one instead. */
 const PLAN_NOTICE_HEAD = '\n\nSaved task plan at handoff (reported progress, not verification evidence):\n';
 
@@ -1140,16 +1276,40 @@ const PLAN_NOTICE_HEAD = '\n\nSaved task plan at handoff (reported progress, not
  * the replacement chat is claimed and committed exactly as after any capture. Refused (null)
  * unless it is the session's latest handoff, written in its current chat, with nothing open.
  */
+/**
+ * The session's latest saved summary when a new chat can start from it: still the latest, readable, written
+ * in this session's current chat or an earlier one of its chats, with a brief left after the plan notice.
+ * The summary of an earlier chat is accepted too: the current chat may never have written one, because
+ * ChatGPT stopped serving it (2026-11-01: "temporarily limited access to this conversation history" for
+ * hours, at about 400k tokens). Its brief then says that work went on after it.
+ */
+async function usableSummary(sessionId: string, handoffId: string): Promise<{ saved: Handoff; brief: string } | null> {
+  const session = await getSession(sessionId);
+  if (!session?.conversationId || session.lastHandoffId !== handoffId) return null;
+  const saved = await readHandoff(sessionId, handoffId).catch(() => null);
+  if (!saved || saved.id !== handoffId) return null;
+  const source = saved.provenance?.sourceConversationId;
+  const earlier = !!source && source !== session.conversationId;
+  if (earlier && !session.chatIds.includes(source)) return null;
+  const cut = saved.text.lastIndexOf(PLAN_NOTICE_HEAD);
+  const written = (cut >= 0 ? saved.text.slice(0, cut) : saved.text).trim();
+  if (!written) return null;
+  return { saved, brief: earlier ? `${earlierSummaryNote(saved.createdAt)}\n\n${written}` : written };
+}
+
+/** Whether a new chat could start from this saved summary now, open continuations aside. */
+export async function savedSummaryUsable(sessionId: string, handoffId: string): Promise<boolean> {
+  return (await usableSummary(sessionId, handoffId)) !== null;
+}
+
 export async function reopenWithHandoffNow(sessionId: string, handoffId: string): Promise<ContinuationView | null> {
   sweep();
   const session = await getSession(sessionId);
-  if (!session?.conversationId || session.lastHandoffId !== handoffId) return null;
+  if (!session?.conversationId) return null;
   if ([...byToken.values()].some((entry) => entry.sessionId === sessionId && isOpen(entry))) return null;
-  const saved = await readHandoff(sessionId, handoffId);
-  if (!saved || (saved.provenance && saved.provenance.sourceConversationId !== session.conversationId)) return null;
-  const cut = saved.text.lastIndexOf(PLAN_NOTICE_HEAD);
-  const brief = (cut >= 0 ? saved.text.slice(0, cut) : saved.text).trim();
-  if (!brief) return null;
+  const usable = await usableSummary(sessionId, handoffId);
+  if (!usable) return null;
+  const { saved, brief } = usable;
   // Chat B belongs beside chat A: reuse the Project the abandoned run carried, when it is still known.
   const prior = saved.provenance?.continuationId
     ? [...byToken.values()].find((entry) => handoffContinuationId(entry.token) === saved.provenance?.continuationId)
@@ -1301,7 +1461,15 @@ export async function claimContinuationNow(token: string, claimant: string): Pro
     const entry = byToken.get(token);
     if (!entry || !isOpen(entry)) return null;
     if (entry.state === 'awaiting-summary') return null;
-    if (entry.claimedBy !== null && entry.claimedBy !== claimant) return null;
+    if (entry.claimedBy !== null && entry.claimedBy !== claimant) {
+      if (!recoveredPreSendClaims.has(token) || entry.state !== 'claimed' ||
+          !['not-attempted', 'attempted-unresolved'].includes(entry.destinationSend.state)) return null;
+      await transitionNow(entry, current => ({ ...current, claimedBy: claimant,
+        destinationSend: { state: 'not-attempted', conversationId: null, messageId: null } }));
+      recoveredPreSendClaims.delete(token);
+      endResumeClaim(token);
+    }
+    if (entry.claimedBy === claimant) recoveredPreSendClaims.delete(token);
     if (entry.state === 'awaiting-chat') {
       await transitionNow(entry, (current) => ({ ...current, claimedBy: claimant, state: 'claimed' }));
     } else if (entry.state === 'claimed' && entry.claimedBy === null) {
@@ -1708,6 +1876,7 @@ const SEND_STATES = new Set<ContinuationSendState>([
  */
 export async function restoreContinuations(snapshot: ContinuationSnapshot | null): Promise<void> {
   byToken.clear();
+  recoveredPreSendClaims.clear();
   if (!snapshot || snapshot.version !== 1 || !Array.isArray(snapshot.entries)) return;
   const now = Date.now();
   const validStates = new Set<ContinuationState>([
@@ -1750,6 +1919,10 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       sourceProgress: Number.isSafeInteger(raw.sourceProgress) && raw.sourceProgress! >= 0 && raw.sourceProgress! <= 4_000_000 ? raw.sourceProgress! : 0,
       touchedAt: Number.isFinite(raw.touchedAt) && raw.touchedAt! >= raw.openedAt && raw.touchedAt! <= now ? Number(raw.touchedAt) : raw.openedAt,
       automatic: raw.automatic === true,
+      briefRetries: Number.isSafeInteger(raw.briefRetries) && raw.briefRetries! >= 0 && raw.briefRetries! <= 8 ? raw.briefRetries! : 0,
+      openingFailures: Number.isSafeInteger(raw.openingFailures) && raw.openingFailures! >= 0 && raw.openingFailures! <= 50 ? raw.openingFailures! : 0,
+      openingRetryAt: Number.isFinite(raw.openingRetryAt) && raw.openingRetryAt! > 0 ? raw.openingRetryAt! : null,
+      openingFallbackModel: raw.openingFallbackModel === true,
       askedAt: null,
       state: raw.state,
       summary: typeof raw.summary === 'string' ? raw.summary.slice(0, 512 * 1024) : '',
@@ -1917,6 +2090,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
       if (entry.destinationSend.state === 'dispatched-unresolved' || entry.destinationSend.state === 'sent') {
         noteResumeDispatch(entry.token, entry.sessionId);
       } else {
+        if (entry.claimedBy) recoveredPreSendClaims.add(entry.token);
         noteResumeClaim(entry.token);
       }
     }
@@ -1934,6 +2108,7 @@ export async function restoreContinuations(snapshot: ContinuationSnapshot | null
 /** Test seam. */
 export function resetContinuationsForTests(): void {
   byToken.clear();
+  recoveredPreSendClaims.clear();
   openingBySession.clear();
   commitLocks.clear();
   checkpointLocks.clear();

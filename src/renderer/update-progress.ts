@@ -13,5 +13,5 @@ const text = (id: string, value: string | null): void => { document.getElementBy
 text('title', query.get('title'));
 text('version', query.get('version'));
 text('step', query.get('step'));
-document.title = query.get('title')?.slice(0, 200) || 'Chat On Steroids';
+document.title = query.get('title')?.slice(0, 200) || 'Chat Marks';
 (window as unknown as { cosUpdateStep: (value: string) => void }).cosUpdateStep = value => text('step', value);

@@ -6,7 +6,7 @@
     "message": "アプリが応答しませんでした"
   },
   "content_app_not_running": {
-    "message": "この PC で Chat On Steroids が実行されていません。"
+    "message": "この PC で Chat Marks が実行されていません。"
   },
   "content_auto_compaction": {
     "message": "自動圧縮"
@@ -37,9 +37,6 @@
   },
   "content_bootstrap_composer_replaced": {
     "message": "初期メッセージの挿入中に ChatGPT が入力欄を置き換えました"
-  },
-  "content_bootstrap_composer_never_ready": {
-    "message": "ChatGPTが開始用の使用可能な入力欄を表示しませんでした"
   },
   "content_bootstrap_composer_unavailable": {
     "message": "モデル選択後にChatGPTが使用可能な入力欄を再表示しませんでした"
@@ -84,7 +81,7 @@
     "message": "開いたページには別の会話が表示されていました"
   },
   "content_browser_disconnected": {
-    "message": "Chat On Steroids のブラウザー接続が切れています。"
+    "message": "Chat Marks のブラウザー接続が切れています。"
   },
   "content_cancel": {
     "message": "キャンセル"
@@ -93,7 +90,7 @@
     "message": "チャットはブロックされています"
   },
   "content_chat_blocked_tip": {
-    "message": "このチャットは Chat On Steroids アプリでブロックされています。ツール呼び出しは拒否され、ゴール、ループ、自動圧縮も無効です。解除するには、アプリのサイドバーでこのチャットの ⋯ メニューを開き、「ブロックを解除」を選んでください。"
+    "message": "このチャットは Chat Marks アプリでブロックされています。ツール呼び出しは拒否され、ゴール、ループ、自動圧縮も無効です。解除するには、アプリのサイドバーでこのチャットの ⋯ メニューを開き、「ブロックを解除」を選んでください。"
   },
   "content_chat_still_opening": {
     "message": "このチャットはまだ開いています。もう一度お試しください"
@@ -325,9 +322,6 @@
   },
   "content_delivery_existing_draft": {
     "message": "ChatGPT に未送信の下書きがあります。再試行する前に Chrome でその下書きを送信するか削除してください。"
-  },
-  "content_delivery_signed_out": {
-    "message": "このブラウザーでは ChatGPT にサインインしていません。そこで ChatGPT にサインインしてから、もう一度送信してください。"
   },
   "content_delivery_model_unconfirmed": {
     "message": "指定したモデルまたは推論強度を確認できませんでした"
@@ -597,7 +591,7 @@
     "message": "保存中…"
   },
   "content_settings_aria": {
-    "message": "Chat On Steroids の設定"
+    "message": "Chat Marks の設定"
   },
   "content_stage_handoff_attention": {
     "message": "引き継ぎの応答を確認する必要があります"
@@ -744,13 +738,13 @@
     "message": "作成中…"
   },
   "extension_action_title": {
-    "message": "Chat On Steroids"
+    "message": "Chat Marks"
   },
   "extension_description": {
-    "message": "ChatGPT を Chat On Steroids に接続し、DOM、スクリーンショット、開発者ツールを使ってバックグラウンドでブラウザータブを操作します。"
+    "message": "ChatGPT を Chat Marks に接続し、DOM、スクリーンショット、開発者ツールを使ってバックグラウンドでブラウザータブを操作します。"
   },
   "extension_name": {
-    "message": "Chat On Steroids ブラウザー拡張機能"
+    "message": "Chat Marks ブラウザー拡張機能"
   },
   "popup_advanced": {
     "message": "詳細"
@@ -888,10 +882,10 @@
     "message": "待機中"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "アプリは $1 件の呼び出しをリクエスト ID で割り当てられなかったため、$2 を使用しました。"
+    "message": "アプリはリクエスト ID で割り当てられなかった $1 件の呼び出し: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "アプリは呼び出しをリクエスト ID で割り当てられなかったため、$1 を使用しました。"
+    "message": "アプリはリクエスト ID で割り当てられなかった呼び出し: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "アプリが接続され、プロトコルの互換性が確認されるまで送信をブロックします。"
@@ -954,7 +948,7 @@
     "message": "セッションの取得"
   },
   "popup_secure_storage_unavailable": {
-    "message": "安全な認証情報ストレージを利用できません。設定手順を確認するには Chat On Steroids を開いてください。"
+    "message": "安全な認証情報ストレージを利用できません。設定手順を確認するには Chat Marks を開いてください。"
   },
   "popup_sent_to_app": {
     "message": "アプリに送信済み"
@@ -1044,7 +1038,7 @@
     "message": "再試行"
   },
   "popup_version_mismatch_help": {
-    "message": "アプリ v$1（プロトコル $2）、拡張機能 v$3（プロトコル $4）。ブラウザーの拡張機能ページを開いてデベロッパーモードを有効にし、この拡張機能を更新または再読み込みしてください。まだ一致しない場合は、Chat On Steroids の「拡張機能フォルダーを開く」でそのフォルダーを読み込んでください。ChatGPT タブの作業が終わったら再読み込みしてください。"
+    "message": "アプリ v$1（プロトコル $2）、拡張機能 v$3（プロトコル $4）。ブラウザーの拡張機能ページを開いてデベロッパーモードを有効にし、この拡張機能を更新または再読み込みしてください。まだ一致しない場合は、Chat Marks の「拡張機能フォルダーを開く」でそのフォルダーを読み込んでください。ChatGPT タブの作業が終わったら再読み込みしてください。"
   },
   "popup_yes": {
     "message": "はい"
@@ -1083,7 +1077,7 @@
     "message": "カスタム継続エンドポイントが無効です。設定で URL を確認し、HTTPS またはローカル HTTP エンドポイントを使用してください。"
   },
   "content_history_rate_limited": {
-    "message": "ChatGPT がこの会話履歴へのアクセスを一時的に制限しました。待機時間が終了するまで、Chat On Steroids は自動復旧を一時停止します。"
+    "message": "ChatGPT がこの会話履歴へのアクセスを一時的に制限しました。待機時間が終了するまで、Chat Marks は自動復旧を一時停止します。"
   },
   "content_goal_error_rate_limited": {
     "message": "継続プロバイダーがリクエストをレート制限しています。表示されている再試行まで待つか、別の継続モデルを選択してください。"
@@ -1176,7 +1170,13 @@
     "message": "失敗しました。CoS からログインをやり直してください。"
   },
   "popup_app_not_running_help": {
-    "message": "このコンピューターで Chat On Steroids が開いていることを確認してください。拡張機能は自動的に接続します。"
+    "message": "このコンピューターで Chat Marks が開いていることを確認してください。拡張機能は自動的に接続します。"
+  },
+  "content_bootstrap_composer_never_ready": {
+    "message": "ChatGPTが開始用の使用可能な入力欄を表示しませんでした"
+  },
+  "content_delivery_signed_out": {
+    "message": "このブラウザーでは ChatGPT にサインインしていません。そこで ChatGPT にサインインしてから、もう一度送信してください。"
   },
   "content_workers_finished": {
     "message": "$1 完了"
@@ -1215,6 +1215,15 @@
     "message": "アプリの応答を待っています"
   },
   "content_task_waiting_app": {
-    "message": "Chat On Steroids の応答を待っています。"
+    "message": "Chat Marks の応答を待っています。"
+  },
+  "content_goal_wait_slots": {
+    "message": "空きを待っています（同時に作業するチャット数）"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT から速度を落とすよう求められました · 指定時刻まで待機"
+  },
+  "content_revival_draft_appeared": {
+    "message": "ワーカーの起動を準備している間にチャットに入力があったため、起動メッセージはそれを置き換えませんでした。"
   }
 }

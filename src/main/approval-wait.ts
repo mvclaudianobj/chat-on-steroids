@@ -2,7 +2,7 @@
  * Chats whose ChatGPT page shows ChatGPT's own tool approval card.
  *
  * Found by the VM stress test on 2026-10-06: a Loop ran ten clean turns, then ChatGPT asked
- * "Allow ChatGPT to use Chat On Steroids Core?" before an `echo` and flagged it as suspicious.
+ * "Allow ChatGPT to use Chat Marks Core?" before an `echo` and flagged it as suspicious.
  * Only a person can answer that card. No call reached the app, silence recovery found nothing it
  * could repair, and the chat stood still with nobody told.
  *
@@ -16,16 +16,20 @@
  * A click in the app files one answer for that card id, which the same page's next poll carries
  * back; the page presses the button only if the card it shows is still that card. A replaced card,
  * a second click or an answer nobody took within `APPROVAL_ANSWER_MS` sends nothing.
+ *
+ * Chat Marks (2026-10-29): the one other filer of that same answer is marks-coo, only for chats the
+ * Company provably owns and only while the CEO's revocable authority is on (company-coo-approval.ts).
  */
 import { randomUUID } from 'node:crypto';
 import { APPROVAL_ANSWERED_TEXT, APPROVAL_PROGRESS_PREFIX, APPROVAL_WAITING_TEXT, type ApprovalCardView } from '../shared/approval-wait.js';
+import { queueOutboundNotice } from './notification-center.js';
 
 /** Hidden idle tabs poll every 30 s; two missed polls end the episode. */
 export const APPROVAL_FRESH_MS = 75_000;
 /** Time for a person looking at the card to answer it before a desktop notice interrupts them. */
 export const APPROVAL_NOTICE_GRACE_MS = 30_000;
-/** How long an answer waits for the card's page to take it; a visible card's page polls every 2 s. */
-export const APPROVAL_ANSWER_MS = 30_000;
+/** Hidden pages poll every 30s: allow scheduler jitter without treating the click as acceptance. */
+export const APPROVAL_ANSWER_MS = 70_000;
 /**
  * ChatGPT sometimes redraws the card: gone for a poll, then back with the same words (VM,
  * 2026-10-20: 1.2 s). Back within this long, it is the same request, not an answer and a new one.
@@ -35,12 +39,13 @@ export const APPROVAL_GONE_MS = 4_000;
 /** What the page reports about the card it shows. */
 export interface ApprovalCardFacts { id: string; lines: string[]; allow: boolean }
 export type ApprovalChoice = 'allow' | 'deny';
-export type ApprovalOutcome = 'clicked' | 'card_changed' | 'unavailable' | 'expired';
+export type ApprovalOutcome = 'clicked' | 'dismissed' | 'not_confirmed' | 'card_changed' | 'unavailable' | 'expired';
 interface ApprovalAnswer { token: string; cardId: string; choice: ApprovalChoice; at: number; outcome: ApprovalOutcome | null }
 
 export interface ApprovalWaitDeps {
   record(sessionId: string, progressId: string, text: string, anchor?: { seq: number; time: number }): Promise<{ seq: number; time: number } | null>;
-  notify(sessionId: string): void;
+  /** One desktop notice; `false` means none was shown (the window had focus), so a later poll tries again. */
+  notify(sessionId: string): boolean | void;
   log(message: string): void;
   /** A chat started or stopped waiting, so the session list's `approval` changed. */
   changed?(): void;
@@ -54,7 +59,11 @@ export interface ApprovalWaitDeps {
 interface Wait {
   since: number;
   seenAt: number;
+  /** The first report without a card; a transient React remount does not dismiss consent. */
+  missingSince: number | null;
   noticed: boolean;
+  /** Chat Marks: the Notification center was told of this wait (once, unlike the desktop notice). */
+  outboundNoticed?: boolean;
   progressId: string;
   sessionId: string | null;
   row: Promise<{ seq: number; time: number } | null> | null;
@@ -65,8 +74,30 @@ interface Wait {
 }
 
 const waits = new Map<string, Wait>();
-/** The episode a page last reported answered, kept for `APPROVAL_GONE_MS` in case the card was only redrawn. */
+/** The previous episode, kept briefly to distinguish a redraw from a separately dismissed request. */
 const answered = new Map<string, { wait: Wait; at: number; anchor: { seq: number; time: number } | null }>();
+/** Only a receipt of what the page observed, not a grant or host authorization. */
+const decisionReceipts = new Map<string, { token: string; at: number; outcome: ApprovalOutcome | null }>();
+const DECISION_RECEIPT_MS = 5 * 60_000;
+const decisionKey = (conversationId: string, cardId: string): string => JSON.stringify([conversationId, cardId]);
+
+/** Exposes the exact card's page observation to an authorized outbound channel. */
+export function approvalDecisionStatus(conversationId: string, cardId: string, now = Date.now()): ApprovalOutcome | 'pending' | null {
+  const key = decisionKey(conversationId, cardId);
+  const receipt = decisionReceipts.get(key);
+  if (!receipt) return null;
+  if (now - receipt.at >= DECISION_RECEIPT_MS || now < receipt.at - 60_000) {
+    decisionReceipts.delete(key);
+    return null;
+  }
+  if (receipt.outcome === null && now - receipt.at >= APPROVAL_ANSWER_MS) receipt.outcome = 'expired';
+  return receipt.outcome ?? 'pending';
+}
+
+function receiptOutcome(conversationId: string, answer: ApprovalAnswer, outcome: ApprovalOutcome): void {
+  const receipt = decisionReceipts.get(decisionKey(conversationId, answer.cardId));
+  if (receipt?.token === answer.token) receipt.outcome = outcome;
+}
 
 function sameWords(a: ApprovalCardFacts | null, b: ApprovalCardFacts | null | undefined): boolean {
   if (!a || !b) return !a && !b;
@@ -97,40 +128,59 @@ export async function noteApprovalCard(
   card?: ApprovalCardFacts | null
 ): Promise<void> {
   let wait = waits.get(conversationId);
-  if (wait && (!waiting || now - wait.seenAt >= APPROVAL_FRESH_MS)) {
+  let changedCard = false;
+  const stale = !!wait && now - wait.seenAt >= APPROVAL_FRESH_MS;
+  const replacedAfterGap = !!wait && waiting && wait.missingSince !== null && !!card &&
+    (wait.answer?.outcome === 'dismissed' || !sameWords(wait.card, card));
+  if (wait && !waiting && !stale && wait.card && wait.answer?.outcome !== 'dismissed') {
+    // A disappearing card is often just an intermediate React frame. Preserve the
+    // consent episode and its actionable app card through that short gap.
+    wait.missingSince ??= now;
+    if (now - wait.missingSince < APPROVAL_GONE_MS) return;
+  }
+  if (wait && (!waiting || stale || replacedAfterGap)) {
     waits.delete(conversationId);
     if (wait.stale) clearTimeout(wait.stale);
     deps.log(`bridge: ${conversationId} no longer shows ChatGPT's tool approval card`);
     try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
+    // Kept before anything is awaited: the redrawn card's poll can come while the row is still
+    // being written, and must find this episode rather than start a new one with a new notice.
+    const gone = waiting ? null : { wait, at: wait.missingSince ?? now, anchor: null as { seq: number; time: number } | null };
+    if (gone) {
+      for (const [id, entry] of answered) if (now - entry.at >= APPROVAL_GONE_MS) answered.delete(id);
+      answered.set(conversationId, gone);
+    }
     // Only an answer seen on the page itself rewrites the row; a page that stopped reporting
     // says nothing about the card.
-    const anchor = waiting ? null : await wait.row;
-    if (anchor && wait.sessionId) await deps.record(wait.sessionId, wait.progressId, APPROVAL_ANSWERED_TEXT, anchor).catch(() => null);
-    if (!waiting) {
-      for (const [id, entry] of answered) if (now - entry.at >= APPROVAL_GONE_MS) answered.delete(id);
-      answered.set(conversationId, { wait, at: now, anchor });
-    }
+    const anchor = gone ? await wait.row : null;
+    if (gone) gone.anchor = anchor;
+    // Redrawn meanwhile: the episode goes on, and its row must keep saying waiting.
+    if (anchor && wait.sessionId && waits.get(conversationId) !== wait)
+      await deps.record(wait.sessionId, wait.progressId, APPROVAL_ANSWERED_TEXT, anchor).catch(() => null);
     wait = undefined;
   }
   if (!waiting) return;
   const before = answered.get(conversationId);
   answered.delete(conversationId);
-  if (!wait && before && now - before.at < APPROVAL_GONE_MS && sameWords(before.wait.card, card) && !waits.has(conversationId)) {
-    // Only redrawn: the same episode goes on, its row says waiting again and no second notice comes.
+  if (!wait && before && now - before.at < APPROVAL_GONE_MS && before.wait.answer?.outcome !== 'dismissed' &&
+    sameWords(before.wait.card, card) && !waits.has(conversationId)) {
+    // Only an unresolved card can be redrawn. An observed host dismissal closes
+    // this consent episode even if the next separate request has identical words.
     wait = before.wait;
     wait.seenAt = now;
     waits.set(conversationId, wait);
+    changedCard = true;
     deps.log(`bridge: ${conversationId} shows the same tool approval card again; it was redrawn, not answered`);
-    try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
     if (before.anchor && wait.sessionId) await deps.record(wait.sessionId, wait.progressId, APPROVAL_WAITING_TEXT, before.anchor).catch(() => null);
   }
   if (!wait) {
-    wait = { since: now, seenAt: now, noticed: false, progressId: `${APPROVAL_PROGRESS_PREFIX}${conversationId}:${now}`, sessionId: null, row: null, card: null, answer: null, stale: null };
+    wait = { since: now, seenAt: now, missingSince: null, noticed: false, progressId: `${APPROVAL_PROGRESS_PREFIX}${conversationId}:${now}`, sessionId: null, row: null, card: null, answer: null, stale: null };
     waits.set(conversationId, wait);
+    changedCard = true;
     deps.log(`bridge: ${conversationId} waits for the user to answer ChatGPT's tool approval card`);
-    try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
   }
   wait.seenAt = now;
+  wait.missingSince = null;
   if (deps.changed) {
     // A page that stops reporting ends the wait with no poll left to say so.
     const current = wait;
@@ -150,18 +200,28 @@ export async function noteApprovalCard(
     arm(APPROVAL_FRESH_MS);
   }
   if (card) {
+    if (wait.card?.id !== card.id || !sameWords(wait.card, card) || wait.card.allow !== card.allow) changedCard = true;
     // Another card replaces this one: an answer filed for the old card must never reach it.
-    if (wait.card && wait.card.id !== card.id) wait.answer = null;
+    if (wait.card && wait.card.id !== card.id) {
+      if (wait.answer?.outcome === null) receiptOutcome(conversationId, wait.answer, 'card_changed');
+      wait.answer = null;
+    }
     wait.card = card;
+  }
+  // Publish an atomic snapshot: the list says "needs approval" only after its exact
+  // card is available. A replacement also wakes already-rendered home/worker controls.
+  if (changedCard) {
+    try { deps.changed?.(); } catch { /* The list is reread on the next push. */ }
   }
   if (sessionId && !wait.sessionId) {
     wait.sessionId = sessionId;
     const current = wait;
     const own = `${APPROVAL_PROGRESS_PREFIX}${conversationId}:`;
+    const dismissedId = before?.wait.answer?.outcome === 'dismissed' ? before.wait.progressId : null;
     current.row = (async () => {
       // Only this chat's row: after Compact & Resume the session's earlier rows belong to the chat it left.
       const earlier = deps.previous ? await deps.previous(sessionId).catch(() => null) : null;
-      if (earlier?.progressId.startsWith(own)) {
+      if (earlier?.progressId.startsWith(own) && earlier.progressId !== dismissedId) {
         current.progressId = earlier.progressId;
         return earlier.anchor;
       }
@@ -170,8 +230,17 @@ export async function noteApprovalCard(
     await current.row;
   }
   if (wait.sessionId && !wait.noticed && now - wait.since >= APPROVAL_NOTICE_GRACE_MS) {
-    wait.noticed = true;
-    try { deps.notify(wait.sessionId); } catch { /* The row still says it. */ }
+    // A notice the desktop did not show (the app's window had focus, perhaps on another chat) is
+    // tried again on a later poll, so leaving the window still tells the person.
+    try { wait.noticed = deps.notify(wait.sessionId) !== false; } catch { wait.noticed = true; /* The row still says it. */ }
+    // Chat Marks: the outbound channels (Notification center) hear of each wait once, retries or not.
+    if (!wait.outboundNoticed) {
+      wait.outboundNoticed = true;
+      // Keyed per card: the per-minute throttle otherwise swallowed a second card (and its reply code).
+      void queueOutboundNotice({ event: 'approval-pending', title: 'Approval pending', project: 'Chat Marks',
+        dedupeKey: wait.card ? `${conversationId}:${wait.card.id}` : conversationId,
+        ...(wait.card ? { approvals: [{ conversationId, cardId: wait.card.id, allow: wait.card.allow }] } : {}) }).catch(() => undefined);
+    }
   }
 }
 
@@ -194,6 +263,8 @@ export function requestApprovalAnswer(conversationId: string, cardId: string, ch
   expire(wait, now);
   if (wait.answer && wait.answer.outcome === null) return { ok: false, error: 'answer_pending' };
   wait.answer = { token: randomUUID(), cardId, choice, at: now, outcome: null };
+  decisionReceipts.set(decisionKey(conversationId, cardId), { token: wait.answer.token, at: now, outcome: null });
+  if (decisionReceipts.size > 150) decisionReceipts.delete(decisionReceipts.keys().next().value!);
   return { ok: true, token: wait.answer.token };
 }
 
@@ -206,11 +277,30 @@ export function approvalAnswerFor(conversationId: string, now = Date.now()): { t
   return answer && answer.outcome === null ? { token: answer.token, cardId: answer.cardId, choice: answer.choice } : null;
 }
 
+/**
+ * Takes back an answer no page has reported on yet, so its card stays for a person: the CEO's
+ * revocation of the COO's authority (company-coo-approval.ts). A page that already took the answer
+ * from its last poll may still press it; its report then settles nothing here.
+ */
+export function withdrawApprovalAnswer(conversationId: string, token: string): boolean {
+  const wait = waits.get(conversationId);
+  const answer = wait?.answer;
+  if (!wait || !answer || answer.token !== token || answer.outcome !== null) return false;
+  wait.answer = null;
+  const key = decisionKey(conversationId, answer.cardId);
+  if (decisionReceipts.get(key)?.token === token) decisionReceipts.delete(key);
+  return true;
+}
+
 /** The page's report on an answer it was given: pressed, or why not. Unknown tokens are ignored. */
 export function settleApprovalAnswer(conversationId: string, token: string, outcome: Exclude<ApprovalOutcome, 'expired'>): boolean {
-  const answer = waits.get(conversationId)?.answer;
+  // The page can report stable dismissal after its earlier activity poll has
+  // already told us the card is gone. Retain that exact token for the short
+  // redraw window without ever applying it to a subsequent card/episode.
+  const answer = waits.get(conversationId)?.answer ?? answered.get(conversationId)?.wait.answer;
   if (!answer || answer.token !== token || answer.outcome !== null) return false;
   answer.outcome = outcome;
+  receiptOutcome(conversationId, answer, outcome);
   return true;
 }
 
@@ -232,17 +322,23 @@ export function parseApprovalResult(raw: string | null): { token: string; outcom
   try {
     const value = JSON.parse(raw) as { token?: unknown; outcome?: unknown };
     if (typeof value?.token !== 'string' || !/^[A-Za-z0-9-]{8,64}$/.test(value.token)) return null;
-    return value.outcome === 'clicked' || value.outcome === 'card_changed' || value.outcome === 'unavailable'
+    return value.outcome === 'clicked' || value.outcome === 'dismissed' || value.outcome === 'not_confirmed' || value.outcome === 'card_changed' || value.outcome === 'unavailable'
       ? { token: value.token, outcome: value.outcome } : null;
   } catch { return null; }
 }
 
 function expire(wait: Wait, now: number): void {
-  if (wait.answer && wait.answer.outcome === null && now - wait.answer.at >= APPROVAL_ANSWER_MS) wait.answer.outcome = 'expired';
+  if (wait.answer && wait.answer.outcome === null && now - wait.answer.at >= APPROVAL_ANSWER_MS) {
+    wait.answer.outcome = 'expired';
+    // No host confirmation was received in time.
+    const receipt = [...decisionReceipts.values()].find(value => value.token === wait.answer!.token);
+    if (receipt) receipt.outcome = 'expired';
+  }
 }
 
 export function resetApprovalWaits(): void {
   for (const wait of waits.values()) if (wait.stale) clearTimeout(wait.stale);
   waits.clear();
   answered.clear();
+  decisionReceipts.clear();
 }

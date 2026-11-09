@@ -47,11 +47,11 @@ it('opens a small window in the app\'s own colors and language, isolated like ev
   const { options, loaded } = windows[0]!;
   // Above other windows: the main window is gone, and on Windows another app has the foreground
   // by then, so a plain window opened behind it (measured on the VM).
-  expect(options).toMatchObject({ frame: false, resizable: false, show: false, alwaysOnTop: true, backgroundColor: '#101418', title: 'Chat On Steroids' });
+  expect(options).toMatchObject({ frame: false, resizable: false, show: false, alwaysOnTop: true, backgroundColor: '#101418', title: 'Chat Marks' });
   expect(options.webPreferences).toMatchObject({ contextIsolation: true, nodeIntegration: false, sandbox: true });
   expect(options.webPreferences.preload).toBeUndefined();
   expect(loaded!.file).toMatch(/renderer[\\/]update-progress\.html$/);
-  expect(loaded!.query).toEqual({ version: '2.1.39', title: '[Updating Chat On Steroids]', step: '[Saving your work…]',
+  expect(loaded!.query).toEqual({ version: '2.1.39', title: '[Updating Chat Marks]', step: '[Saving your work…]',
     theme: 'dark', background: '#101418', accent: '#c0d0ee', lang: 'de' });
   windows[0]!.handlers['ready-to-show']!();
   expect(windows[0]!.shown).toBe(true);
@@ -74,7 +74,7 @@ it('says each step of the handoff in the open window', async () => {
   await Promise.resolve();
   expect(windows[0]!.scripts).toEqual([
     `window.cosUpdateStep?.(${JSON.stringify('[Waiting for your permission in Windows…]')})`,
-    `window.cosUpdateStep?.(${JSON.stringify('[Starting the installer. Chat On Steroids opens again by itself.]')})`
+    `window.cosUpdateStep?.(${JSON.stringify('[Starting the installer. Chat Marks opens again by itself.]')})`
   ]);
 });
 

@@ -33,7 +33,7 @@ const sources = {
     '2026-10-04T06:48:22.158Z  info   multi-agent: created 1 worker(s) in run 6c578026-18d5-4efe-8c88-c63da86e6b3c',
     "2026-10-04T06:48:23.000Z  warn   tool read rejected in 3 ms: ENOENT, open '/Users/jane/Clients/Acme Corp/invoices.xlsx'",
     '2026-10-04T06:48:24.000Z  info   approved folder /ClientWork',
-    '2026-10-04T06:48:24.500Z  info   plugin refresh: Chat On Steroids Core (Janes-MacBook) is current',
+    '2026-10-04T06:48:24.500Z  info   plugin refresh: Chat Marks Core (Janes-MacBook) is current',
     '2026-10-04T06:48:25.000Z  info   worker-2 task: Audit the Q3 invoices for jane.doe@example.com',
     '2026-10-04T06:49:53.818Z  warn   bridge: gave up on worker:6c578026-18d5-4efe-8c88-c63da86e6b3c:worker-2 — the chat this app opened did not report back in time'
   ].join('\n'),
@@ -99,6 +99,13 @@ describe('the diagnostics report', () => {
     const none = renderDiagnosticsReport({ ...sources, extension: { status: {}, environment: { browser: { name: 'Firefox', version: '144.0' },
       tabs: { open: 0, discarded: 0, frozen: 0, loading: 0, grouped: 0, inBackgroundWindow: 0 }, page: null } } });
     expect(none).toContain('Page checks: no awake ChatGPT tab answered');
+  });
+
+  it('says which language the extension stored and applied, and why not (2026-10-30)', () => {
+    const report = renderDiagnosticsReport({ ...sources, extension: { status: {}, language: { applied: null, stored: null, error: 'storage read did not answer within 5 s' } } });
+    expect(report).toContain("Extension language: stored none (uses the browser's), applied by this worker not yet, last attempt: storage read did not answer within 5 s");
+    const fine = renderDiagnosticsReport({ ...sources, extension: { status: {}, language: { applied: 'en', stored: 'en', error: null } } });
+    expect(fine).toContain('Extension language: stored en, applied by this worker en');
   });
 
   it('scrubs Windows paths inside JSON sections, where backslashes are doubled', () => {

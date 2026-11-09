@@ -1,6 +1,8 @@
 import { expect, it } from 'vitest';
 import type { SessionEvent } from '../src/shared/session.js';
 import { chatErrorPresentation, duplicateChatErrors } from '../src/renderer/chat-error.js';
+import { setLanguage } from '../src/renderer/i18n.js';
+import { JSDOM } from 'jsdom';
 
 const error = (text: string, extra = {}): Extract<SessionEvent, { kind: 'chat_error' }> => ({
   seq: 1, time: 100, source: 'extension', kind: 'chat_error', turnId: 'turn-a',
@@ -9,6 +11,22 @@ const error = (text: string, extra = {}): Extract<SessionEvent, { kind: 'chat_er
 const repair = (text: string, extra = {}): Extract<SessionEvent, { kind: 'progress' }> => ({
   seq: 2, time: 101, source: 'app', kind: 'progress', turnId: 'turn-a', progressId: 'browser-repair:one',
   message: { text, chars: text.length, truncated: false }, ...extra
+});
+
+it('presents API engine route/authentication failures with translated recovery steps', () => {
+  const old = { window: globalThis.window, document: globalThis.document };
+  const dom = new JSDOM('<!doctype html><html><body></body></html>');
+  Object.assign(globalThis, { window: dom.window, document: dom.window.document });
+  setLanguage('pt-BR');
+  try {
+    const direct = chatErrorPresentation(error('Claude Code has no account of its own for direct chats. Run "claude auth login" in a terminal, or choose Via Claude Code Router.'));
+    expect(direct.title).toBe('Motor de chat indisponível');
+    expect(direct.message).toContain('Execute "claude auth login"');
+    expect(direct.next).toContain('Via Claude Code Router');
+    const stopped = chatErrorPresentation(error('Claude Code Router is not running. Start it from Settings > Modules.'));
+    expect(stopped.message).toContain('Configurações > Módulos');
+    expect(stopped.next).toContain('Inicie o Claude Code Router');
+  } finally { setLanguage('en'); Object.assign(globalThis, old); dom.window.close(); }
 });
 
 it('projects one recoverable notice across reloads and uses the eventual canonical final', () => {
@@ -149,4 +167,18 @@ it('keeps a resolved notice resolved when the rows that prove it leave the loade
   expect(chatErrorPresentation(failed, [question, failed]).resolved).toBe(true);
   // Another notice of that page is not resolved by it.
   expect(chatErrorPresentation({ ...failed, seq: 42 }, [question, failed]).resolved).toBe(false);
+});
+
+it('shows a recoverable ChatGPT notice without the label of its own Retry button (2.1.51 polish pass)', () => {
+  expect(chatErrorPresentation(error('Message delivery timed out. Please try again. Retry', { recoverable: true })).message)
+    .toBe('Message delivery timed out. Please try again.');
+  expect(chatErrorPresentation(error('Verbindung unterbrochen. Warten auf die vollständige Antwort. Erneut versuchen', { recoverable: true })).message)
+    .toBe('Verbindung unterbrochen. Warten auf die vollständige Antwort.');
+  // A notice not classified recoverable keeps its words.
+  expect(chatErrorPresentation(error('Unknown Retry')).message).toBe('Unknown Retry');
+});
+
+it('keeps a notice that is not recoverable exactly as recorded, spaces included (CodeRabbit on #2084)', () => {
+  const text = '  Something  went wrong.\nRetry ';
+  expect(chatErrorPresentation(error(text)).message).toBe(text);
 });

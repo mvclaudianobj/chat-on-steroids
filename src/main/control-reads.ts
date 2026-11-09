@@ -149,6 +149,7 @@ export function projectSession(summary: SessionSummary): ControlApiSession {
     id: summary.id,
     title: line(summary.title, TITLE_CAP),
     conversationId: summary.conversationId,
+    ...(summary.temporaryChat ? { temporaryChat: true } : {}),
     projectId: summary.projectId ?? null,
     startedAt: summary.startedAt,
     updatedAt: summary.updatedAt,
@@ -270,7 +271,7 @@ async function sessionDetail(id: string, params: URLSearchParams): Promise<Contr
       }
       return { session, live: projectLive(controls) };
     } catch (error) {
-      if (error instanceof Error && !/^(session_not_recorded|conversation_superseded|conversation_changed)$/.test(error.message)) {
+      if (error instanceof Error && !/^(session_not_recorded|conversation_superseded|conversation_changed|api_chat_session)$/.test(error.message)) {
         logWarn('control API: live state unavailable for a session: ' + error.message);
       }
       return { session, live: null };

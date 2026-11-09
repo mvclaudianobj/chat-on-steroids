@@ -1,18 +1,19 @@
 /**
- * Generates every icon the project ships, with no image dependencies.
+ * Generates Marks application icons from the original transparent colour artwork,
+ * with no image dependencies.
  *
  *   build/icon.ico            the Windows app icon (6 sizes in one file)
  *   build/icon.png            1024px source for macOS/Linux packaging (Retina-ready ICNS input)
  *   build/icon-preview.png    256px preview, for looking at what changed
- *   build/runtime-icon.png    256px Linux BrowserWindow icon, packaged as a real resource
+ *   build/runtime-icon.png    256px Linux/Windows BrowserWindow icon, packaged as a real resource
+ *   build/icons/NxN.png       Linux hicolor set: menus, launchers and the taskbar look the icon up
+ *                             by size, and themes list no 1024px folder (only 1024px was blank)
  *   extension/icons/*.png     16/32/48/128 for the Chrome extension
+ *   src/renderer/browser-icons/cos.png  in-app browser and brand logo
  *
- *   artwork/app-icon-source.png  selected ImageGen concept (the one source image)
+ *   icon_marks.png           user's original transparent full-colour artwork
  *
- * The selected concept is a single continuous ribbon that folds into both a folder
- * pocket and a conversation tail. It keeps the old product meaning while matching the
- * monochrome, generously rounded app redesign. The source is decoded, reduced to the
- * UI's ink/paper palette, and area-resampled here so every shipped size is reproducible.
+ * Preserve the original colours, transparency and fine details at every resolution.
  */
 
 import { deflateSync, inflateSync } from 'node:zlib';
@@ -23,9 +24,8 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ICO_SIZES = [256, 128, 64, 48, 32, 16];
 const EXTENSION_SIZES = [128, 48, 32, 16];
-const SOURCE_PATH = path.join(root, 'artwork', 'app-icon-source.png');
-const INK = [12, 12, 14];
-const PAPER = [244, 244, 246];
+const LINUX_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512];
+const SOURCE_PATH = path.join(root, 'icon_marks.png');
 
 // ------------------------------------------------------------- source png
 
@@ -42,7 +42,7 @@ function paeth(left, up, upperLeft) {
 function decodeSourcePng(encoded) {
   const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
   if (encoded.length < signature.length || !encoded.subarray(0, 8).equals(signature)) {
-    throw new Error('artwork/app-icon-source.png is not a PNG');
+    throw new Error('icon_marks.png is not a PNG');
   }
 
   let width = 0;
@@ -101,59 +101,11 @@ function decodeSourcePng(encoded) {
 
 const source = decodeSourcePng(readFileSync(SOURCE_PATH));
 
-/**
- * Image generation left a handful of isolated opaque flecks outside the mark. Keep the
- * largest alpha-connected component only; the ribbon, its outline and the local dot are
- * one continuous component, while dust is not. The threshold also discards the model's
- * near-transparent shadow matte before any downsampling can turn it into a grey halo.
- */
-function sourceMask() {
-  const count = source.width * source.height;
-  const labels = new Uint32Array(count);
-  const queue = new Int32Array(count);
-  let nextLabel = 0;
-  let largestLabel = 0;
-  let largestSize = 0;
-  for (let start = 0; start < count; start++) {
-    if (labels[start] !== 0 || source.pixels[start * 4 + 3] < 32) continue;
-    const label = ++nextLabel;
-    let head = 0;
-    let tail = 0;
-    queue[tail++] = start;
-    labels[start] = label;
-    while (head < tail) {
-      const index = queue[head++];
-      const x = index % source.width;
-      const neighbours = [
-        x > 0 ? index - 1 : -1,
-        x + 1 < source.width ? index + 1 : -1,
-        index >= source.width ? index - source.width : -1,
-        index + source.width < count ? index + source.width : -1
-      ];
-      for (const neighbour of neighbours) {
-        if (
-          neighbour < 0 ||
-          labels[neighbour] !== 0 ||
-          source.pixels[neighbour * 4 + 3] < 32
-        ) {
-          continue;
-        }
-        labels[neighbour] = label;
-        queue[tail++] = neighbour;
-      }
-    }
-    if (tail > largestSize) {
-      largestLabel = label;
-      largestSize = tail;
-    }
-  }
-  if (largestLabel === 0) throw new Error('app icon source contains no visible component');
-  const mask = new Uint8Array(count);
-  for (let index = 0; index < count; index++) if (labels[index] === largestLabel) mask[index] = 1;
-  return mask;
+// Keep disconnected whiskers and highlights as well as the main silhouette.
+const visibleSource = new Uint8Array(source.width * source.height);
+for (let index = 0; index < visibleSource.length; index++) {
+  visibleSource[index] = source.pixels[index * 4 + 3] >= 8 ? 1 : 0;
 }
-
-const visibleSource = sourceMask();
 
 /** Tight square crop with deliberate breathing room, derived from visible source alpha. */
 function sourceCrop() {
@@ -172,7 +124,7 @@ function sourceCrop() {
   }
   if (right < left || bottom < top) throw new Error('app icon source contains no visible pixels');
   const visible = Math.max(right - left + 1, bottom - top + 1);
-  const side = visible / 0.84; // 8% transparent padding on every side.
+  const side = visible / 0.92; // 4% transparent padding on every side.
   return {
     left: (left + right + 1 - side) / 2,
     top: (top + bottom + 1 - side) / 2,
@@ -183,8 +135,8 @@ function sourceCrop() {
 const crop = sourceCrop();
 
 /**
- * Area-resample the generated concept after collapsing its near-monochrome shading to
- * the exact renderer palette. Premultiplied accumulation keeps transparent edges clean.
+ * Area-resample the source in its original RGB palette. Premultiplied accumulation
+ * keeps transparent edges clean when downsizing the wolf and its fine whiskers.
  */
 function render(size) {
   const pixels = Buffer.alloc(size * size * 4);
@@ -209,11 +161,8 @@ function render(size) {
           if (visibleSource[sourceIndex] === 0) continue;
           const at = sourceIndex * 4;
           const alpha = source.pixels[at + 3] / 255;
-          const luminance =
-            source.pixels[at] * 0.2126 + source.pixels[at + 1] * 0.7152 + source.pixels[at + 2] * 0.0722;
-          const colour = luminance >= 128 ? PAPER : INK;
           for (let channel = 0; channel < 3; channel++) {
-            premultiplied[channel] += colour[channel] * alpha * weight;
+            premultiplied[channel] += source.pixels[at + channel] * alpha * weight;
           }
           alphaWeight += alpha * weight;
           totalWeight += weight;
@@ -365,10 +314,15 @@ writeFileSync(path.join(root, 'build', 'icon-preview.png'), pngFor(256));
 writeFileSync(path.join(root, 'build', 'runtime-icon.png'), pngFor(256));
 // The installer an update shows (2.1.38): header on the window's white, sidebar in the app's ink.
 writeFileSync(path.join(root, 'build', 'installerHeader.bmp'), encodeBmp(150, 57, iconOn(150, 57, [255, 255, 255], 45, 150 - 45 - 6, 6)));
-writeFileSync(path.join(root, 'build', 'installerSidebar.bmp'), encodeBmp(164, 314, iconOn(164, 314, INK, 96, 34, 56)));
+writeFileSync(path.join(root, 'build', 'installerSidebar.bmp'), encodeBmp(164, 314, iconOn(164, 314, [21, 28, 42], 96, 34, 56)));
 console.log(
   `Wrote build/icon.ico (${ICO_SIZES.join(', ')}), build/icon.png, build/icon-preview.png, build/runtime-icon.png, build/installerHeader.bmp and build/installerSidebar.bmp`
 );
+
+const linuxDir = path.join(root, 'build', 'icons');
+mkdirSync(linuxDir, { recursive: true });
+for (const size of LINUX_SIZES) writeFileSync(path.join(linuxDir, `${size}x${size}.png`), pngFor(size));
+console.log(`Wrote build/icons/{${LINUX_SIZES.map((size) => `${size}x${size}`).join(',')}}.png`);
 
 const iconsDir = path.join(root, 'extension', 'icons');
 mkdirSync(iconsDir, { recursive: true });
@@ -376,3 +330,6 @@ for (const size of EXTENSION_SIZES) {
   writeFileSync(path.join(iconsDir, `icon${size}.png`), pngFor(size));
 }
 console.log(`Wrote extension/icons/icon{${EXTENSION_SIZES.join(',')}}.png`);
+
+writeFileSync(path.join(root, 'src', 'renderer', 'browser-icons', 'cos.png'), pngFor(128));
+console.log('Wrote src/renderer/browser-icons/cos.png');

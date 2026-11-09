@@ -37,6 +37,33 @@
   // remove and reinsert each other's controls, starving transport/timers and freezing the tab.
   // A healthy incumbent in this context still wins the static/recovery injection race.
   const RECORDER_VERSION = 22;
+  // A user who opened ChatGPT directly using "Temporary chat without local recording"
+  // has no outbox/session in Chat Marks. Follow the provider's SPA transition to its
+  // temporary conversation in this tab, and stop reporting that chat to our service worker.
+  // This marker contains a route, never authored text; a different chat clears it.
+  const NO_LOCAL_STORAGE = 'clf-no-local-temporary-route';
+  let noLocalRoute = '';
+  try { noLocalRoute = sessionStorage.getItem(NO_LOCAL_STORAGE) || ''; } catch { /* storage unavailable */ }
+  function localRecordingDisabled() {
+    const url = new URL(location.href);
+    const temporary = url.searchParams.get('temporary-chat') === 'true';
+    if (temporary && url.pathname === '/' && url.searchParams.get('clf-no-local-recording') === 'true') {
+      noLocalRoute = 'opening';
+    } else if (noLocalRoute === 'opening' && /^\/c\/[0-9a-f-]{36}$/i.test(url.pathname)) {
+      noLocalRoute = url.pathname;
+    } else if ((noLocalRoute === 'opening' && (!temporary || url.pathname !== '/')) ||
+      (noLocalRoute.startsWith('/c/') && url.pathname !== noLocalRoute)) {
+      noLocalRoute = '';
+    }
+    try {
+      if (noLocalRoute) sessionStorage.setItem(NO_LOCAL_STORAGE, noLocalRoute);
+      else sessionStorage.removeItem(NO_LOCAL_STORAGE);
+    } catch { /* current document still remembers */ }
+    // ChatGPT may discard the query during SPA navigation. After the private
+    // opening binds to a conversation, prevent recording on its exact route.
+    return !!noLocalRoute &&
+      (noLocalRoute === 'opening' ? url.pathname === '/' : url.pathname === noLocalRoute);
+  }
   const recorderHandle = {
     version: RECORDER_VERSION,
     healthy: () => false,
@@ -452,6 +479,17 @@
    */
   let quietSince = 0;
   /**
+   * When ChatGPT's approval card was last seen. Right after the person answers it, the turn goes on,
+   * but the last message's native final can still be on the page for a moment; closing on it lost
+   * every later section (#1977, CodeRabbit on #1992). Finals wait out this window after the card.
+   */
+  let approvalSeenAt = -Infinity;
+  const APPROVAL_SETTLE_MS = 10_000;
+  function approvalHolding() {
+    if (CLF_DOM.approvalWaiting()) { approvalSeenAt = Date.now(); return true; }
+    return Date.now() - approvalSeenAt < APPROVAL_SETTLE_MS;
+  }
+  /**
    * How the turn looked when its stop button first went missing, and the turn it described.
    *
    * The outcome is read on the first quiet observation rather than at the close, because the
@@ -777,6 +815,7 @@
   /** Exact request id -> one durable local turn, null when the retained stream conflicts. */
   const streamRequestTurnOwners = new Map();
   let pulling = false;
+  let approvalPullQueued = false;
 
   /**
    * `'resume' | 'worker' | null` — whether this chat was opened by the app, and how.
@@ -986,7 +1025,7 @@
       ? event.data.candidates.slice(0, 16).filter(entry => typeof entry?.name === 'string' && entry.name.length <= 80)
         .map(entry => ({ name: entry.name, path: valid(entry.path) }))
       // An observer from before suffixes names only the plain Core.
-      : event.data.name === 'Chat On Steroids Core' ? [{ name: event.data.name, path: valid(event.data.path) }] : [];
+      : event.data.name === 'Chat Marks Core' ? [{ name: event.data.name, path: valid(event.data.path) }] : [];
     corePluginList = event.data.pluginList === true;
     reportCorePlugin();
   });
@@ -1179,6 +1218,10 @@
    * /activity poll as everything else.
    */
   let goalConfig = null;
+  /** The app's word on this chat's Retry (#2076): null from an older app, which keeps the page's own rule. */
+  let appHistoryRetry = null;
+  /** The chat the app last answered about at all, with or without that word (CodeRabbit on #2080). */
+  let appHistoryAnsweredFor = null;
   let goalDraft = null;
   /**
    * The generation the goal loop has already acted on.
@@ -1399,7 +1442,7 @@
   let documentReady = null;
 
   async function sendToWorker(message) {
-    if (!alive) return null;
+    if (!alive || localRecordingDisabled()) return null;
     try {
       return await chrome.runtime.sendMessage(message);
     } catch (err) {
@@ -1469,6 +1512,7 @@
 
   /** Talks to the service worker. Returns null once the extension is reloaded. */
   async function ask(message, current = null) {
+    if (typeof localRecordingDisabled === 'function' && localRecordingDisabled()) return null;
     // A new/reloaded document claims its browser-supplied MessageSender.documentId before
     // any observation or mutation. This is what lets the worker retain a terminal tombstone
     // across external navigation and still admit the genuinely new page, without accepting
@@ -1532,7 +1576,7 @@
     const takeUtf8 = (value, budget) => {
       if (typeof value !== 'string') return value;
       if (utf8Bytes(value) <= budget) return value;
-      const marker = '\n\n[Chat On Steroids: browser observation truncated to fit transport.]';
+      const marker = '\n\n[Chat Marks: browser observation truncated to fit transport.]';
       const markerBytes = utf8Bytes(marker);
       let low = 0;
       let high = value.length;
@@ -1654,7 +1698,7 @@
    * renames them when bindConversation() reports the real id.
    */
   async function flush() {
-    if (temporaryPlannerPage()) { while (queue.length) removeQueueEntry(0); return true; }
+    if (temporaryPlannerPage() || localRecordingDisabled()) { while (queue.length) removeQueueEntry(0); return true; }
     if (commandJournalGate) return false;
     if (queue.length === 0) return true;
     if (flushWork) return flushWork;
@@ -1674,7 +1718,8 @@
         type: 'events',
         entries: batch,
         projectInput,
-        conversationId: conversationId || undefined
+        conversationId: conversationId || undefined,
+        ...(CLF_DOM.temporaryChatReady() ? { temporaryChat: true } : {})
       });
       // `ok` means the service worker handled the message, not necessarily that its journal
       // reached chrome.storage.session. Release page ownership only when the worker says the
@@ -3267,7 +3312,13 @@
       }
     }
 
-    if (generating && nowGenerating && quietSince > 0) {
+    // ChatGPT's tool approval card hides Stop while the turn waits for a person. That is a held
+    // turn, not a quiet one: closing it after the settle window lost every answer section that
+    // followed the person's answer (#1977, 2.1.49 on Windows). It counts as still generating here.
+    // The app's Stop still ends it: with the card standing there is no native Stop to press, and
+    // the stop is recorded as the page sees it, as before (CodeRabbit on #1992).
+    const heldForApproval = CLF_DOM.approvalWaiting() && !stopRequestedAt;
+    if (generating && (nowGenerating || heldForApproval) && quietSince > 0) {
       // The stop button came back, so it never went away in the sense that matters: this is
       // one turn that flickered, not two turns. Everything the generation holds — its id,
       // its baselines, its reported-progress map — is still the right state to carry on
@@ -3277,7 +3328,7 @@
       quietOutcome = null;
     }
 
-    if (generating && !nowGenerating) {
+    if (generating && !nowGenerating && !heldForApproval) {
       // The turn as it stood on the first quiet observation, read once. See quietOutcome.
       if (quietSince === 0) {
         quietSince = Date.now();
@@ -4934,7 +4985,11 @@
       // are progress. A known call drawn again with another request id or owner is reported
       // again, but counting it kept every repair refused while ChatGPT's stream was gone (#1787).
       const advanced = [];
-      const fresh = turn.calls.filter((call) => {
+      const callRequests = new Set((turn.calls || []).map((call) => call?.requestId).filter(Boolean));
+      const candidates = index === activeTurnIndex && activeLocalTurnId
+        ? [...turn.calls, ...(turn.requests || []).filter((req) => req?.requestId && !callRequests.has(req.requestId))]
+        : turn.calls;
+      const fresh = candidates.filter((call) => {
         // A mismatched owned turn is admissible only as a provisional-first-turn candidate.
         // Its request id must have survived the app's explicit owner read-back before the
         // transcript channel may repeat that evidence. A rejected/stale id is simply omitted;
@@ -4944,11 +4999,12 @@
           (!call.requestId || requestOwnersConfirmed.get(call.requestId) !== askedConversation)
         ) return false;
         const owner = index === activeTurnIndex ? activeLocalTurnId || '' : '';
-        const signature = `${call.tool}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
-        const previous = callsReported.get(call.messageId);
+        const key = call.tool ? call.messageId : `request:${call.requestId}`;
+        const signature = `${call.tool || ''}\u0000${call.requestId || ''}\u0000${call.answered ? '1' : '0'}\u0000${owner}`;
+        const previous = callsReported.get(key);
         if (previous?.signature === signature) return false;
-        if (previous === undefined || (call.answered && !previous.answered)) advanced.push(call);
-        callsReported.set(call.messageId, { signature, answered: Boolean(call.answered) });
+        if (call.tool && (previous === undefined || (call.answered && !previous.answered))) advanced.push(call);
+        callsReported.set(key, { signature, answered: Boolean(call.answered) });
         return true;
       });
       if (fresh.length > 0) {
@@ -4961,17 +5017,19 @@
             (previous.calls || []).some(seen => turn.calls.some(call => call.messageId === seen.messageId))));
         const witnessedSend = Boolean(newestUser?.id && openedUserMessageId === newestUser.id);
         if (advanced.length && generating && index === activeTurnIndex && (knownTurn || witnessedSend)) noteTurnProgress(turnId, 'page-call');
-        emit({
-          kind: 'tool_evidence',
-          ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
-          ...(turn.conversationId && !(
-            turn === ownedPageTurn &&
-            askedConversation &&
-            concreteConversation(turn.conversationId) &&
-            concreteConversation(turn.conversationId) !== askedConversation
-          ) ? { fiberConversationId: turn.conversationId } : {}),
-          calls: fresh
-        });
+        for (let offset = 0; offset < fresh.length; offset += 200) {
+          emit({
+            kind: 'tool_evidence',
+            ...(index === activeTurnIndex ? { turnId: activeLocalTurnId } : {}),
+            ...(turn.conversationId && !(
+              turn === ownedPageTurn &&
+              askedConversation &&
+              concreteConversation(turn.conversationId) &&
+              concreteConversation(turn.conversationId) !== askedConversation
+            ) ? { fiberConversationId: turn.conversationId } : {}),
+            calls: fresh.slice(offset, offset + 200)
+          });
+        }
       }
     }
     // What the settle window is waiting for, decided from the scan itself rather than from a
@@ -5168,8 +5226,15 @@
         // like a sequence of finished answers and could let recovery treat the wrong one as
         // completion evidence.
         const terminalMessageId = turn.endMessageId;
+        // The running turn's last message is not final while ChatGPT's approval card waits: the
+        // recorder would close the turn on it, and the turn goes on once the person answers (#1977,
+        // CodeRabbit on #1992). The message's state is part of its signature, so the refresh after
+        // the card goes publishes it as final.
+        // The running turn, or the last one while its owner is not resolved yet (as liveAssistant below).
+        const heldForApproval = generating && (index === activeTurnIndex || (activeTurnIndex < 0 && index === answer.turns.length - 1)) &&
+          approvalHolding();
         const exactTerminal = Boolean(
-          terminalMessageId &&
+          terminalMessageId && !heldForApproval &&
             (message.rawMessageId === terminalMessageId || message.messageId === terminalMessageId)
         );
         const state = terminalMessageId
@@ -5273,7 +5338,10 @@
       activeTurnIndex >= 0 &&
       activeLocalTurnId === turnId &&
       Boolean(answer.turns[activeTurnIndex]?.endMessageId) &&
-      !settledFinals.has(answer.turns[activeTurnIndex].endMessageId)
+      !settledFinals.has(answer.turns[activeTurnIndex].endMessageId) &&
+      // A turn waiting on ChatGPT's approval card is not over, whatever its last message says
+      // (#1977), nor in the moment after it is answered; a refresh after that reads the final again.
+      !approvalHolding()
     ) {
       fiberTerminalMessageId = answer.turns[activeTurnIndex].endMessageId;
       settledFinals.add(fiberTerminalMessageId);
@@ -6533,10 +6601,10 @@
    * like a stranger's — so it produced no attribution evidence and, worse, local rows were
    * classified as ChatGPT-native activity and re-recorded as the assistant's own captions.
    * The names are this install's: the plain ones, or with this computer's suffix when one
-   * ChatGPT account is used on several computers ("Chat On Steroids Core (Windows)"). The other
+   * ChatGPT account is used on several computers ("Chat Marks Core (Windows)"). The other
    * computer's calls run there, so they are not ours here (CLF_DOM.connectorNames).
    *
-   * Exact names, never a prefix: `Chat On Steroids Backup` would be somebody else's
+   * Exact names, never a prefix: `Chat Marks Backup` would be somebody else's
    * connector, and a prefix test would have this app vouch for its traffic.
    */
   const LEGACY_CONNECTORS = ['TobisComputer'];
@@ -7113,18 +7181,38 @@
   const approvalCardIds = new WeakMap();
   const approvalTokensDone = new Set();
   let approvalResult = null;
+  let latestApprovalCard = null;
+  const APPROVAL_REDRAW_MS = 4_000;
   function currentApprovalCard() {
     const card = CLF_DOM.approvalCard();
-    if (!card) return null;
-    if (!approvalCardIds.has(card.node)) approvalCardIds.set(card.node, crypto.randomUUID());
-    return { id: approvalCardIds.get(card.node), lines: card.lines, allow: card.allow, node: card.node };
+    const now = Date.now();
+    if (!card) {
+      // React briefly removes the card while rebuilding it. Report the last observed
+      // consent for the redraw window, so an activity poll cannot close/reopen its row.
+      if (latestApprovalCard && now - latestApprovalCard.seenAt < APPROVAL_REDRAW_MS)
+        return latestApprovalCard;
+      latestApprovalCard = null;
+      return null;
+    }
+    if (!approvalCardIds.has(card.node)) {
+      const before = latestApprovalCard;
+      const sameRedraw = before && before.node !== card.node && !before.node.isConnected &&
+        now - before.seenAt < APPROVAL_REDRAW_MS && before.allow === card.allow &&
+        before.lines.length === card.lines.length && before.lines.every((line, index) => line === card.lines[index]);
+      approvalCardIds.set(card.node, sameRedraw ? before.id : crypto.randomUUID());
+    }
+    latestApprovalCard = { id: approvalCardIds.get(card.node), lines: card.lines, allow: card.allow, node: card.node, seenAt: now };
+    return latestApprovalCard;
   }
-  function answerApproval(answer) {
+  async function answerApproval(answer) {
     if (!answer || typeof answer.token !== 'string' || approvalTokensDone.has(answer.token)) return;
     approvalTokensDone.add(answer.token);
     const card = currentApprovalCard();
-    const outcome = card && card.id === answer.cardId ? CLF_DOM.answerApprovalCard(card.node, answer.choice) : 'card_changed';
+    const outcome = card && card.id === answer.cardId ? await CLF_DOM.answerApprovalCard(card.node, answer.choice) : 'card_changed';
     approvalResult = { token: answer.token, outcome };
+    // A confirmed host dismissal ends this consent. A new identical request
+    // must get a new identity and an independent decision.
+    if (outcome === 'dismissed') latestApprovalCard = null;
     setTimeout(() => void pullActivity(), 400);
   }
 
@@ -7162,6 +7250,9 @@
         ...(sentResult ? { approvalResult: sentResult } : {})
       });
       if (sentResult && reply && reply.ok === true && approvalResult === sentResult) approvalResult = null;
+      // Any answer for this chat, even a failure, ends the wait for the app's first word on its
+      // history Retry (#2076): an app that cannot be reached leaves the page's own rule.
+      if (CLF_DOM.conversationId() === forId) appHistoryAnsweredFor = forId;
       if (!reply || reply.ok !== true || !reply.data) {
         // Keep waiting only for failures that can genuinely mean "the local app/worker is
         // not reachable yet". A structured application refusal is an answer to the identity
@@ -7172,7 +7263,7 @@
       }
       if (!current()) return;
       const data = reply.data;
-      if (data.approvalAnswer) answerApproval(data.approvalAnswer);
+      if (data.approvalAnswer) void answerApproval(data.approvalAnswer);
       // Popup-only. `sessionId` is the app saying it has a session for this exact chat,
       // which is the difference between "delivered" and "the app is actually recording it".
       observed.session = typeof data.sessionId === 'string' ? data.sessionId : null;
@@ -7350,6 +7441,15 @@
       // finished and the page has been repainted with what the draft is doing.
       const goalBefore = JSON.stringify([goalConfig?.enabled ?? null, goalConfig?.objective ?? null, bootstrap]);
       goalConfig = data.goal && typeof data.goal === 'object' ? data.goal : null;
+      // Whether the app still owes this chat work, and its own hold on the chat's history (#2076).
+      // Bound to the chat this reply was asked for, and only while the page still shows it
+      // (CodeRabbit on #2080): a reply for chat A never speaks for chat B.
+      if (CLF_DOM.conversationId() === forId) {
+        appHistoryAnsweredFor = forId;
+        appHistoryRetry = data.historyRetry && typeof data.historyRetry === 'object'
+          ? { conversationId: forId, wanted: data.historyRetry.wanted !== false,
+            until: Number.isFinite(data.historyRetry.until) ? data.historyRetry.until : 0, at: Date.now() } : null;
+      }
       if (goalConfig) goalDraft = goalConfig.draft || null;
       const nextBootstrap = data.bootstrap === 'resume' || data.bootstrap === 'worker' ? data.bootstrap : null;
       bootstrapOwner = nextBootstrap && typeof data.bootstrapMessageId === 'string' && data.bootstrapMessageId
@@ -7395,6 +7495,12 @@
       armNextActivityPull();
     } finally {
       pulling = false;
+      if (approvalPullQueued) {
+        approvalPullQueued = false;
+        // A wake that raced an in-flight poll must not be lost until the 2-30s
+        // periodic timer. Re-check the same document after the older read settles.
+        queueMicrotask(() => { if (current() && CLF_DOM.conversationId() === forId) void pullActivity(); });
+      }
     }
     // Outside the guard, and last: startCompact runs for tens of seconds and polls this
     // same endpoint while it works, so firing it with `pulling` still set would deadlock
@@ -7512,7 +7618,7 @@
       return {
         mode: 'off',
         label: t('content_compact', 'Compact'),
-        hint: t('content_browser_disconnected', 'Browser connection is disconnected in Chat On Steroids.'),
+        hint: t('content_browser_disconnected', 'Browser connection is disconnected in Chat Marks.'),
         action: 'none'
       };
     }
@@ -7520,7 +7626,7 @@
       return {
         mode: 'off',
         label: t('content_compact', 'Compact'),
-        hint: t('content_app_not_running', 'Chat On Steroids is not running on this PC.'),
+        hint: t('content_app_not_running', 'Chat Marks is not running on this PC.'),
         action: 'none'
       };
     }
@@ -7813,7 +7919,7 @@
             : blocked === 'blocked'
               ? t('content_task_blocked_unavailable', 'This chat is blocked in the app. Release it there to drive it again.')
               : goalUnknown
-              ? t('content_task_waiting_app', 'Waiting for Chat On Steroids to answer.')
+              ? t('content_task_waiting_app', 'Waiting for Chat Marks to answer.')
               : !hasKey
               ? t('content_task_api_key_unavailable', 'Add an OpenRouter API key in the app first.')
               : ''
@@ -8164,7 +8270,7 @@
       'data-clf-tip',
       t(
         'content_chat_blocked_tip',
-        'This chat is blocked in the Chat On Steroids app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”.'
+        'This chat is blocked in the Chat Marks app: its tool calls are refused and Goal, Loop and auto-compaction are off. To release it, open this chat’s ⋯ menu in the app’s sidebar and choose “Release chat”.'
       )
     );
     blocked.hidden = true;
@@ -8257,7 +8363,7 @@
     root.className = 'clf-menu';
     root.dataset.clfMenu = '1';
     root.setAttribute('role', 'dialog');
-    root.setAttribute('aria-label', t('content_settings_aria', 'Chat On Steroids settings'));
+    root.setAttribute('aria-label', t('content_settings_aria', 'Chat Marks settings'));
     root.hidden = true;
     (document.body || document.documentElement).append(root);
     return root;
@@ -9019,7 +9125,7 @@
     // Never disabled any more: it opens a sheet, and a sheet that explains why compaction is
     // unavailable is exactly what somebody clicking a dead button wanted to be told.
     control.button.disabled = false;
-    setAttr(control.button, 'aria-label', t('content_settings_aria', 'Chat On Steroids settings'));
+    setAttr(control.button, 'aria-label', t('content_settings_aria', 'Chat Marks settings'));
     setAttr(control.button, 'aria-haspopup', 'dialog');
     if (!control.button.hasAttribute('aria-expanded')) control.button.setAttribute('aria-expanded', 'false');
     // The meter only while the button is a button. During a run the control is saying what
@@ -9339,6 +9445,20 @@
           ? t('content_goal_backend_custom_endpoint', 'custom endpoint')
           : 'OpenRouter';
     const bar = (at, done = false) => ({ steps: GOAL_STEPS, at, done });
+    // Chats working at once (#1694): a ready message waits for a free slot or ChatGPT's pause before
+    // Send. Said as such, not as written or settling (CodeRabbit on #2051).
+    if (draft?.stage === 'ready' && goal.slotWait) {
+      const paused = String(goal.slotWait).startsWith('ChatGPT asked to slow down');
+      return {
+        stage: paused
+          ? t('content_goal_wait_paused', 'ChatGPT asked to slow down · waits until it says')
+          : t('content_goal_wait_slots', 'Waiting for a free slot (Chats working at once)'),
+        detail: '',
+        body: draft.reply || '',
+        kind: 'goal',
+        ...bar(2)
+      };
+    }
     const failure = goal.error || (draft && draft.stage === 'failed'
       ? goalFailureText(draft) || draft.error || t('content_goal_backend_no_answer', '$1 did not answer', dest)
       : '');
@@ -9732,10 +9852,11 @@
     }, 0);
   }
 
-  function reportDeferredCompaction(forId, token, why) {
+  function reportDeferredCompaction(forId, token, why, code = null) {
     if (!token || !why) return;
     helperDeferral = fiberPresent === true ? null : { forId, forEpoch: epoch, why };
-    void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why }).catch(() => undefined);
+    void ask({ type: 'compact', conversationId: forId, token, sourceDeferred: true, sourceError: why,
+      ...(code ? { sourceErrorCode: code } : {}) }).catch(() => undefined);
   }
 
   async function startCompact(automatic = false) {
@@ -9916,11 +10037,15 @@
     // summary of a machine state that had already moved on.
     // Automatic runs stop the turn exactly like a press does. They are *started* by a turn
     // being in flight, so refusing to interrupt one would refuse every automatic run.
-    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic);
+    // Why this attempt stopped at the receipt, kept with this attempt only (CodeRabbit on #2056).
+    const receipt = { code: null };
+    const barrier = await stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, automatic && filed.data.waiveReceipt === true, receipt);
     // Every await above can span an SPA navigation. `conversationId` is mutable global
     // state, so continuing after A -> B would otherwise post B to /compact and type A's
     // handoff instruction into B's composer. The new chat's reset already owns its UI state;
     // a stale continuation must not repaint or cancel anything there.
+    // The tab moved to another chat meanwhile: nothing is reported for the old one, because a report
+    // naming it would bind this tab to it again in the relay (CodeRabbit on #2056). Its next attempt counts.
     if (!current()) return;
     if (barrier) {
       pressedAt = 0;
@@ -9928,7 +10053,7 @@
       nativePhase = '';
       localError = barrier;
       if (!automatic) await retireUnsentCompaction(forId, String(filed.data.token || ''), barrier, current);
-      else reportDeferredCompaction(forId, String(filed.data.token || ''), barrier);
+      else reportDeferredCompaction(forId, String(filed.data.token || ''), barrier, receipt.code);
       if (!current()) return;
       renderControl();
       void pullActivity();
@@ -10109,7 +10234,15 @@
    * not hear about it, and the handoff would describe a machine that no longer exists by
    * the time the fresh chat reads it.
    */
-  async function stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic) {
+  /**
+   * `receipt.code` says why an automatic attempt stopped at the tool-result receipt, for the app's count
+   * (2026-11-03): 'results-unconfirmed' after the whole wait with nothing running here,
+   * 'results-wait-changed' when the chat changed during it, and 'local-tools-running' when this
+   * machine's own calls (or the app's activity answer) kept the receipt from being checked at all,
+   * which the app does not count.
+   */
+  async function stopAndSettle(forId, forEpoch, forRun, sameTurn, automatic, waiveReceipt = false, receipt = { code: null }) {
+    receipt.code = null;
     const current = () =>
       alive &&
       nativeRun === forRun &&
@@ -10120,6 +10253,11 @@
       'content_compact_chat_changed_before_start',
       'This chat changed before compaction could start.'
     );
+    // The app waives the receipt once earlier attempts of this ticket could not get it (2026-11-03: a
+    // chat whose history ChatGPT limited never showed its results answered, and every attempt for two
+    // days ended here while the chat grew past its limit). Stopping now may cost the brief the very
+    // last result; never compacting cost the whole chat. The app logs that it waived it. Local calls
+    // still running on this machine are still waited for (#825): only ChatGPT's receipt is waived.
     if (automatic && CLF_DOM.generating()) {
       // A local result can file the ticket before ChatGPT receives that result. Stopping
       // here used to lose completed work from the brief. Require native receipt first;
@@ -10176,16 +10314,21 @@
       renderControl();
       let endedPolls = 0;
       let sent = null;
+      // Whether the last check found this machine's own calls still running (or no answer from the
+      // app at all): then the receipt was never the thing waited for.
+      let localBusy = true;
       const ready = await waitUntil(async () => {
         if (!current()) return true;
         const peek = await peekCompactionActivity(forId);
         const count = peek ? peek.pendingTools : null;
         sent = peek ? peek.sentResults : null;
         if (!current()) return true;
+        localBusy = count !== 0;
         if (count !== 0) {
           endedPolls = 0;
           return false;
         }
+        if (waiveReceipt) return true;
         // ChatGPT ending the turn by itself is its own receipt: it answered after the last
         // result and there is nothing left to stop. A retry started now skips this wait for
         // the same reason, yet the first attempt waited out the whole budget on a row it
@@ -10206,14 +10349,20 @@
         return !!fresh && seen.calls > 0 && !seen.answered && awaitingRequests.size === 0 &&
           sent?.settled === true && Number.isInteger(sent.count) && sent.count >= seen.calls;
       }, AUTO_RECEIPT_SETTLE_MS, AUTO_RECEIPT_QUICK_MS);
-      if (!current()) return t(
-        'content_compact_chat_changed_waiting_results',
-        'This chat changed while compaction was waiting for tool results.'
-      );
-      if (!ready) return t(
-        'content_compact_results_unconfirmed',
-        'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.'
-      );
+      if (!current()) {
+        receipt.code = 'results-wait-changed';
+        return t(
+          'content_compact_chat_changed_waiting_results',
+          'This chat changed while compaction was waiting for tool results.'
+        );
+      }
+      if (!ready) {
+        receipt.code = localBusy ? 'local-tools-running' : 'results-unconfirmed';
+        return t(
+          'content_compact_results_unconfirmed',
+          'ChatGPT has not confirmed receiving the latest tool results. Nothing was compacted.'
+        );
+      }
     }
     // INTERRUPTING — stop the turn rather than wait it out. That is the whole request, by
     // hand or automatically: this happens because the turn is long, not because it is
@@ -10517,7 +10666,7 @@
    * the person's draft again, which is preserved (#134).
    */
   // ChatGPT's editor keeps paragraphs as elements, so in its text the marker runs straight into the
-  // instruction ("]]Chat On Steroids…"); CONTINUATION_MARKER, which wants a space, missed it live.
+  // instruction ("]]Chat Marks…"); CONTINUATION_MARKER, which wants a space, missed it live.
   const HANDOFF_MARKED = /^\s*\[\[CLF-HANDOFF:[A-Za-z0-9_-]{16,64}\]\]/;
   /** A composer holding a handoff request this app typed (any attempt's), and no attachment. */
   function handoffMarked(box) {
@@ -10653,6 +10802,14 @@
       renderControl();
       return 'committed';
     }
+    if (bound.data?.retryBrief === true && bound.data?.prompt && bound.data?.token) {
+      if (bound.data.job) job = bound.data.job;
+      nativeRun++;
+      const retryRun = nativeRun;
+      void runNativeCompaction(String(bound.data.prompt), String(bound.data.token),
+        conversationId, epoch, retryRun);
+      return 'committed';
+    }
     // The answer turn, not the prompt's — see answerTurnFor. Its calls are the ones that have
     // to be finished, too: a brief cut while the compaction turn is still running a tool
     // describes a machine that is still changing.
@@ -10674,6 +10831,14 @@
     renderControl();
     const delivered = await ask({ type: 'compact', conversationId, token: marked.token, summary });
     if (!delivered || delivered.ok !== true) return false;
+    if (delivered.data?.retryBrief === true && delivered.data?.prompt && delivered.data?.token) {
+      if (delivered.data.job) job = delivered.data.job;
+      nativeRun++;
+      const retryRun = nativeRun;
+      void runNativeCompaction(String(delivered.data.prompt), String(delivered.data.token),
+        conversationId, epoch, retryRun);
+      return 'committed';
+    }
     if (delivered.data && delivered.data.job) job = delivered.data.job;
     nativePhase = '';
     localError = '';
@@ -11162,6 +11327,13 @@
         void retryGoalDraft(forTurn, true);
         return;
       }
+      // "Chats working at once" (#1694): other chats hold every slot, or ChatGPT asked the app to
+      // slow down. The same as above: keep the turn, show the settling step, ask again shortly.
+      if (failure.error === 'chats_at_once') {
+        setGoalPhase('settling');
+        void retryGoalDraft(forTurn, true);
+        return;
+      }
       // The phase is kept rather than collapsed into `failed`: it names the step that
       // stopped, so the bar draws the run where it ended instead of back at the beginning.
       setGoalPhase('requesting', replyError(reply) || t('content_app_did_not_answer_lower', 'the app did not answer'));
@@ -11230,6 +11402,9 @@
     }
     if (goalWasSpent(conversationId, `busy:${draft.token}`)) return deferGoalDraftForWork(draft);
     if (goalConfig?.queuePending) return;
+    // Chats working at once (#1694): the app says this ready message waits for a slot or ChatGPT's
+    // pause. Keep it, untyped, and try again on a later pull.
+    if (goalConfig?.slotWait) return;
     if (!goalUsable()) {
       // Settings are live. Turning Goal Mode off (or removing its key) while OpenRouter is
       // drafting must revoke permission to type the result, even if that result becomes ready
@@ -11341,7 +11516,7 @@
         const ready = allowed?.draft;
         if (!allowed || !ready || ready.token !== draft.token || ready.stage !== 'ready' || ready.reply !== draft.reply ||
             !(allowed.enabled === true || (allowed.own !== true && allowed.objective)) || allowed.hasKey !== true ||
-            allowed.blocked || allowed.queuePending || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
+            allowed.blocked || allowed.queuePending || allowed.slotWait || authorization.data.job?.busy || authorization.data.pendingTools > 0 ||
             goalSourceGenerating() || CLF_DOM.generating() || nativeBusy || job?.busy) return false;
         // The page inserted this reply, and ChatGPT stores inserted text Markdown-escaped: a raw
         // comparison never matched a reply with `code` or *emphasis*, and its turn never opened.
@@ -11516,7 +11691,7 @@
     if (data.error) return String(data.error).slice(0, 160);
     if (reply.error === 'app_not_found') return t(
       'content_app_not_running',
-      'Chat On Steroids is not running on this PC.'
+      'Chat Marks is not running on this PC.'
     );
     return reply.error ? String(reply.error).slice(0, 160) : '';
   }
@@ -11867,6 +12042,22 @@
    * immediately when the composer already exists, otherwise wake the instant React mounts
    * one, with only a bounded timer as the failure deadline.
    */
+  /**
+   * Closes ChatGPT announcements over this page (CLF_DOM.dismissAnnouncements) and tells the app which.
+   * Not while ChatGPT limits this page's history: its access-limit notice is a dialog like any other,
+   * recognized by wording in only some languages, and must stay for the person (CodeRabbit on #1939).
+   */
+  async function closeAnnouncements(stillCurrent = () => true) {
+    const chat = CLF_DOM.conversationId();
+    if (historyLimitSeen && historyLimitSeen.conversationId === chat && Date.now() - historyLimitSeen.at < 10 * 60_000) return [];
+    const closed = await CLF_DOM.dismissAnnouncements(stillCurrent).catch(() => []);
+    // Reported for the chat it was closed on; a page that moved on meanwhile says nothing.
+    if (stillCurrent() && CLF_DOM.conversationId() === chat) {
+      for (const heading of closed) void ask({ type: 'page_note', note: 'announcement-closed', heading, conversationId: chat }).catch(() => undefined);
+    }
+    return closed;
+  }
+
   function waitForComposer(timeoutMs = 12_000, stillCurrent = () => true) {
     if (!stillCurrent()) return Promise.resolve(null);
     const current = CLF_DOM.composer();
@@ -12181,9 +12372,13 @@
     // resource finished loading, not whether this editing host is usable, and waiting on it
     // is what turned a fresh resume tab into a blank tab for a minute on a throttled page.
     step('composer');
+    // A ChatGPT announcement over the fresh page hides the message box behind its modal (2026-10-30).
+    if (!(CLF_DOM.composerVisible() && CLF_DOM.composerWritable())) await closeAnnouncements(stillOnTarget);
     // A worker's hidden tab can take longer than 12 s to show the box on a busy machine; it has the
     // rest of its own budget, less what model, insert and Send need (#1086). A resume or wake keeps 12 s.
-    const readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000);
+    let readyComposer = await waitForComposer(boot.type === 'worker' ? commandWaitMs(12_000, 20_000) : 12_000);
+    // One that opened after the page loaded gets the same treatment, once.
+    if (!readyComposer && (await closeAnnouncements(stillOnTarget)).length) readyComposer = await waitForComposer(5_000, stillOnTarget);
     // `transient`: this page redeemed the command, loaded the chat and typed nothing, so a wake
     // may be tried again without counting against the chat (#1086).
     if (!readyComposer) return void (await fail(t(
@@ -12191,9 +12386,31 @@
       'ChatGPT never exposed a usable composer for bootstrap'
     ), 'transient'));
     if (await failIfRetargeted()) return;
+    if (boot.type === 'worker' && boot.temporaryChat === true) {
+      const nativeTemporary = async () => { await askFiber(); return CLF_DOM.temporaryChatSurface() && CLF_DOM.temporaryChatReady(); };
+      if (!await nativeTemporary()) {
+        CLF_DOM.confirmTemporaryChatIntroduction();
+        await waitPageView(nativeTemporary, stillOnTarget, 3000);
+      }
+      if (!await nativeTemporary()) return void (await fail(t(
+        'content_delivery_temporary_chat_unconfirmed',
+        'Temporary Chat was not confirmed. Open the helper tab and complete its Temporary Chat introduction.'
+      )));
+    }
 
     if (boot.model || boot.reasoningEffort) step('model');
-    if ((boot.model || boot.reasoningEffort) && !(await CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget))) {
+    // An announcement that opened over the picker refuses the choice; closing it earns one more try.
+    const chooseModel = () => CLF_DOM.selectModelSettings(boot.model, boot.reasoningEffort, stillOnTarget);
+    // Confirmed is what the picker proved; only that is ever reported as the chat's model.
+    const modelConfirmed = !!(boot.model || boot.reasoningEffort) && (await chooseModel() ||
+      ((await closeAnnouncements(stillOnTarget)).length > 0 && stillOnTarget() && await chooseModel()));
+    let mayGoOn = !(boot.model || boot.reasoningEffort) || modelConfirmed;
+    // A wake or a Compact & Resume goes out on ChatGPT's current model rather than not at all: a worker
+    // that never wakes stops its whole run (#1952), and an abandoned resume stops its chat for good
+    // (2026-11-01, Mac). A resume tries the model again in its new chat (publishBootstrapSelection).
+    // The app logs which model it could not confirm. A new worker's chat still refuses.
+    if (!mayGoOn && (boot.type === 'revive' || boot.type === 'resume') && stillOnTarget()) { step('model-unconfirmed'); mayGoOn = true; }
+    if (!mayGoOn) {
       return void (await fail(t(
         'content_bootstrap_model_unavailable',
         'The requested model or reasoning is unavailable or could not be confirmed in ChatGPT'
@@ -12247,7 +12464,8 @@
       // Accepted Send owns the first turn even when no model was explicitly selected and no
       // further native mutation will wake a hidden document.
       observe();
-      if (!boot.model) return;
+      // A wake that went on without the picker's proof reports nothing (CodeRabbit on #1972).
+      if (!boot.model || !modelConfirmed) return;
       // The picker proved this selection before the new worker had a conversation.
       // Once Send supplies its identity, journal that proof through the ordinary
       // model-selection owner. The closed picker cannot rediscover it passively.
@@ -12261,6 +12479,14 @@
         'content_delivery_signed_out',
         'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
       )));
+    }
+    // A wake types into the person's own chat: text or a file put in the box while the model was
+    // being chosen is theirs, so the wake waits for its next try (CodeRabbit on #1972).
+    if (boot.type === 'revive' && (!CLF_DOM.composerSubmitReady?.() || CLF_DOM.hasComposerAttachments?.())) {
+      return void (await fail(t(
+        'content_revival_draft_appeared',
+        'Something was typed in the chat while the worker\'s wake was getting ready, so the wake did not replace it.'
+      ), 'transient'));
     }
     let insertionFailure = '';
     step('inserting');
@@ -12566,14 +12792,92 @@
    * alive: measured 2026-10-11, each press after Retry-After drew another 429 with a longer
    * Retry-After (11 s → 47 s) and the chat stayed unreadable for half an hour. The first press
    * still comes when ChatGPT said it may; the ones after it back off further, to one every 15
-   * minutes, and still never stop.
+   * minutes, and still never stop. A limit that outlasts that grows to 30 and then 60 minutes,
+   * the same steps as the app's own hold (bridge.ts PROVIDER_HISTORY_STREAK_HOLDS_MS).
    */
-  const LOAD_FAILURE_LIMITED_BACKOFF_MS = [0, 120_000, 240_000, 480_000, 900_000];
+  const LOAD_FAILURE_LIMITED_BACKOFF_MS = [0, 120_000, 240_000, 480_000, 900_000, 1_800_000, 3_600_000];
+  /*
+   * The step reached survives a reload of the same chat in this tab. The app reloads a limited
+   * chat after each of its holds, and a fresh page used to start again at the first step: every
+   * reload came with presses after 0, 2 and 4 minutes, 23 rounds in 8.5 hours (#1882,
+   * 2026-11-05). A step older than the longest one plus a quarter hour is forgotten, the same
+   * quiet period after which the app starts its own count over.
+   */
+  const LOAD_FAILURE_LIMITED_STORAGE = 'clf-history-limit-v1';
+  const LOAD_FAILURE_LIMITED_MEMORY_MS = 3_600_000 + 15 * 60_000;
   let loadFailureSince = 0;
   let loadFailureRetries = 0;
   let loadFailureLimited = false;
   let loadFailureRoute = null;
   let loadFailureToldAt = 0;
+  let loadFailureStored = false;
+  let loadFailureLastPress = 0;
+  /** How long the app's word holds without a newer activity reply. */
+  const APP_HISTORY_RETRY_FRESH_MS = 2 * 60_000;
+  /** How long a newly shown chat waits for the app's first answer before the page's own rule applies. */
+  const APP_HISTORY_FIRST_ANSWER_MS = 60_000;
+  let historyRouteSince = 0;
+  let historyRetryHeldToldAt = 0;
+  /**
+   * ChatGPT's Retry on a history that could not load is pressed only while the app still owes this
+   * chat work, and never before the app's own hold for it ends (#2076): each press is another history
+   * request, and an idle chat leaves Retry to the person.
+   */
+  function appAllowsHistoryRetry(route, now) {
+    const word = appHistoryRetry;
+    // Until the app has answered for this chat once, wait (at most a minute); an app that answers
+    // without the word is an older one, and the page's own rule applies (CodeRabbit on #2080).
+    const unanswered = appHistoryAnsweredFor !== route && now - historyRouteSince < APP_HISTORY_FIRST_ANSWER_MS;
+    const applies = word && word.conversationId === route && now - word.at <= APP_HISTORY_RETRY_FRESH_MS;
+    const why = unanswered ? 'waiting for the app\'s first answer about this chat'
+      // A Stop since the app's last word revokes it: a newer answer is needed (CodeRabbit on #2080).
+      : applies && stopRequestedAt && word.at <= stopRequestedAt ? 'Stop was pressed; waiting for the app\'s next answer'
+      : !applies ? ''
+      : word.until > now ? 'the app holds this chat\'s history until its wait ends'
+      : !word.wanted ? 'this chat has no work waiting, so Retry is left to you' : '';
+    if (!why) return true;
+    if (now - historyRetryHeldToldAt >= 60_000) {
+      historyRetryHeldToldAt = now;
+      console.info(`Chat On Steroids: not pressing Retry: ${why}.`);
+    }
+    return false;
+  }
+  function restoreLimitedLoadFailure(route, now) {
+    try {
+      const raw = sessionStorage.getItem(LOAD_FAILURE_LIMITED_STORAGE);
+      if (raw === null) return;
+      loadFailureStored = true;
+      const saved = raw.length <= 512 ? JSON.parse(raw) : null;
+      if (saved && typeof saved === 'object' && route && saved.conversationId === route &&
+          Number.isInteger(saved.retries) && saved.retries > 0 && saved.retries <= 1000 &&
+          Number.isFinite(saved.at) && saved.at <= now && now - saved.at <= LOAD_FAILURE_LIMITED_MEMORY_MS) {
+        loadFailureRetries = saved.retries;
+        loadFailureLimited = true;
+        loadFailureLastPress = saved.at;
+      } else if (route) {
+        // Another chat's, an expired or a damaged entry: removed, so it cannot come back when the
+        // tab returns to its chat later. A page between routes keeps it.
+        sessionStorage.removeItem(LOAD_FAILURE_LIMITED_STORAGE);
+        loadFailureStored = false;
+      }
+    } catch {
+      // A corrupt or blocked entry costs only the remembered step; the page starts at the first one.
+    }
+  }
+  function rememberLimitedLoadFailure(route, now) {
+    try {
+      if (loadFailureLimited && route) {
+        sessionStorage.setItem(LOAD_FAILURE_LIMITED_STORAGE,
+          JSON.stringify({ conversationId: route, retries: loadFailureRetries, at: now }));
+        loadFailureStored = true;
+      } else if (loadFailureStored) {
+        sessionStorage.removeItem(LOAD_FAILURE_LIMITED_STORAGE);
+        loadFailureStored = false;
+      }
+    } catch {
+      // This document still keeps its own step.
+    }
+  }
   function recoverConversationLoad(now = Date.now()) {
     const route = CLF_DOM.conversationId();
     if (route !== loadFailureRoute) {
@@ -12582,6 +12886,9 @@
       loadFailureSince = 0;
       loadFailureRetries = 0;
       loadFailureLimited = false;
+      loadFailureLastPress = 0;
+      historyRouteSince = now;
+      restoreLimitedLoadFailure(route, now);
     }
     // The provider has already told this exact history read when it may be tried again.
     // Do not spend the page's own Retry button inside that window: each click is another
@@ -12595,7 +12902,11 @@
     const retry = CLF_DOM.conversationLoadFailure ? CLF_DOM.conversationLoadFailure() : null;
     if (!retry) {
       loadFailureSince = 0;
-      if (CLF_DOM.turns().length) { loadFailureRetries = 0; loadFailureLimited = false; }
+      if (CLF_DOM.turns().length) {
+        loadFailureRetries = 0;
+        loadFailureLimited = false;
+        if (loadFailureStored) rememberLimitedLoadFailure(route, now);
+      }
       return false;
     }
     // Whoever presses Retry here, the tab may leave this chat for ChatGPT's home page. Say so first,
@@ -12604,12 +12915,24 @@
       loadFailureToldAt = now;
       void ask({ type: 'load_failure', conversationId: route }).catch(() => undefined);
     }
+    // A page that stayed open on this chat forgets a step whose last press is as old as a stored
+    // one would be, and starts over, the same as after a reload.
+    if (loadFailureLastPress && now - loadFailureLastPress > LOAD_FAILURE_LIMITED_MEMORY_MS) {
+      loadFailureRetries = 0;
+      loadFailureLimited = false;
+      loadFailureLastPress = 0;
+      loadFailureSince = 0;
+      rememberLimitedLoadFailure(route, now);
+    }
     if (!loadFailureSince) loadFailureSince = now;
     const schedule = loadFailureLimited ? LOAD_FAILURE_LIMITED_BACKOFF_MS : LOAD_FAILURE_BACKOFF_MS;
     const wait = LOAD_FAILURE_SETTLE_MS + schedule[Math.min(loadFailureRetries, schedule.length - 1)];
     if (now - loadFailureSince < wait) return false;
+    if (!appAllowsHistoryRetry(route, now)) return false;
     loadFailureRetries++;
     loadFailureSince = now;
+    loadFailureLastPress = now;
+    if (loadFailureLimited) rememberLimitedLoadFailure(route, now);
     retry.click();
     return true;
   }
@@ -12805,6 +13128,8 @@
     endDeletedTurn();
   });
   let pendingHistoryRateLimit = null;
+  /** The chat whose history ChatGPT last limited on this page, and when; see closeAnnouncements. */
+  let historyLimitSeen = null;
   function publishHistoryRateLimit() {
     const limit = pendingHistoryRateLimit;
     if (!limit || limit.retryAt <= Date.now() || limit.published === limit.retryAt) return;
@@ -12812,7 +13137,7 @@
     limit.published = limit.retryAt;
     emit({
       kind: 'chat_error',
-      text: t('content_history_rate_limited', 'ChatGPT temporarily limited access to this conversation history. Chat On Steroids is pausing automatic recovery until the retry wait ends.'),
+      text: t('content_history_rate_limited', 'ChatGPT temporarily limited access to this conversation history. Chat Marks is pausing automatic recovery until the retry wait ends.'),
       recoverable: false,
       blocking: true,
       retryAt: limit.retryAt
@@ -12827,6 +13152,7 @@
     const retryAt = Number(event.data.retryAt), observedAt = Number(event.data.observedAt);
     if (!Number.isFinite(retryAt) || !Number.isFinite(observedAt) || retryAt <= observedAt ||
         retryAt - observedAt > 24 * 60 * 60_000 || retryAt <= Date.now()) return;
+    historyLimitSeen = { conversationId: claimed, at: Date.now() };
     if (!pendingHistoryRateLimit || pendingHistoryRateLimit.conversationId !== claimed ||
         retryAt > pendingHistoryRateLimit.retryAt) {
       pendingHistoryRateLimit = { conversationId: claimed, retryAt, observedAt, published: 0 };
@@ -13133,6 +13459,34 @@
     return false;
   }
 
+  /**
+   * After a reload ChatGPT can put the app's own already-sent automatic message back into the message
+   * box, and every repair was then held as if it were the person's draft, for hours (#2074). The app
+   * names its own automatic sends in this chat with their ChatGPT message ids. The box is the app's
+   * leftover only when the chat's latest user message is one of those exact messages and the box holds
+   * exactly its text (line breaks and outer spaces aside, or in ChatGPT's own Markdown-escaped form),
+   * with nothing attached. It is removed only while unchanged (captureComposerDraft's lease); anything
+   * else stays a draft and holds the repair as before (CodeRabbit on #2079: no whitespace-blind match,
+   * and an unsent text or a text without its message proves nothing).
+   */
+  function clearOwnSentResidue(values) {
+    const own = (Array.isArray(values) ? values : []).filter(value => value && typeof value.text === 'string' &&
+      value.text.trim() && typeof value.messageId === 'string' && value.messageId).slice(0, 10);
+    if (!own.length || desktopInputBusy || CLF_DOM.hasComposerAttachments() || handoffMarked(CLF_DOM.composer())) return false;
+    const latest = CLF_DOM.messages().filter(row => row.role === 'user').at(-1);
+    const sent = latest?.id ? own.find(value => value.messageId === latest.id) : undefined;
+    if (!sent) return false;
+    const lines = (value) => String(value || '').replace(/\r\n?/g, '\n').replace(/\u00a0/g, ' ')
+      .split('\n').map(line => line.trim()).join('\n').replace(/\n{2,}/g, '\n').trim();
+    // Read with its line breaks: textContent joins a multiline send's paragraphs into one (CodeRabbit on #2079).
+    const shown = CLF_DOM.composerText() || '';
+    const shownLines = (CLF_DOM.composerLines ? CLF_DOM.composerLines() : shown) || '';
+    const want = lines(sent.text);
+    if (lines(shownLines) !== want && lines(unescapeMarkdown(shownLines)) !== want) return false;
+    const lease = CLF_DOM.captureComposerDraft(shown);
+    try { return lease.withdraw() === true; } finally { lease.dispose(); }
+  }
+
   async function inspectRepairPage(message) {
     const target = conversationId, forEpoch = epoch;
     const current = () => alive && target === message.conversationId && conversationId === target &&
@@ -13146,9 +13500,10 @@
     // Holding here instead left the chat's handoff waiting with nothing on screen (2026-10-10).
     const draft = () => !handoffMarked(CLF_DOM.composer()) &&
       Boolean((CLF_DOM.composerText() || '').trim() || CLF_DOM.hasComposerAttachments());
+    const cleared = current() && clearOwnSentResidue(message.ownSent);
     const verdict = (holds, extra) => {
       const why = holds.find(([held]) => held)?.[1];
-      return { safe: !why, ...(why ? { why } : {}), ...extra };
+      return { safe: !why, ...(why ? { why } : {}), ...(cleared ? { cleared: 'own-sent' } : {}), ...extra };
     };
     if (message.draftOnly === true) {
       const questionId = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id ?? null;
@@ -13353,7 +13708,25 @@
     if (message.branch && !message.conversationId && !await prepareBranchPage(message)) return false;
     const silencePickup = typeof message.silenceTurnId === 'string';
     let sourceQuiet = silencePickup;
-    if (desktopInputBusy || modelCatalogBusy || !alive || (generating && !message.directTurn && !silencePickup) || (pendingTools > 0 && !message.directTurn) || goalBusy || job?.busy) return false;
+    // Why this page holds the message back, for one app log line a minute (2026-10-30: a queued
+    // Continue sat unsent for 17 minutes on a page that looked healthy, and nothing said why).
+    // Never for a stopped automatic Continue (the person's own Stop is no hold), and only while this
+    // page is still on the message's chat: another chat's state is not this message's reason.
+    const held = (reason) => {
+      if (message.recovery && stopRequestedAt) return false;
+      const chat = message.conversationId || null, heldEpoch = epoch;
+      if (!alive || CLF_DOM.conversationId() !== chat) return false;
+      // Sent only while this document is still on the same chat and navigation: a registration that
+      // is still pending must not let the note go out stamped for a page that moved on (CodeRabbit).
+      void ask({ type: 'page_note', note: 'input-held', reason, inputId: message.id, conversationId: chat },
+        () => alive && epoch === heldEpoch && CLF_DOM.conversationId() === chat).catch(() => undefined);
+      return false;
+    };
+    if (desktopInputBusy || modelCatalogBusy || !alive || goalBusy || job?.busy) return false;
+    // A turn this page still holds although ChatGPT shows no Stop (its history stopped loading,
+    // 2026-10-28) is not "an answer running" on the page: it is said apart.
+    if (generating && !message.directTurn && !silencePickup) return held(CLF_DOM.generating() ? 'still-answering' : 'turn-held');
+    if (pendingTools > 0 && !message.directTurn) return held('tool-running');
     const target = message.conversationId || null;
     const forEpoch = epoch;
     const sourceTurn = turnId;
@@ -13373,8 +13746,10 @@
       if (!alive) return 'page-closed';
       if (epoch !== forEpoch || CLF_DOM.conversationId() !== target) return 'left-chat';
       if (message.recovery && !sendAttempted && stopRequestedAt) return 'stop-requested';
-      const newUser = !(message.directTurn && sourceUser === undefined) &&
-        CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id !== sourceUser;
+      const lastUser = CLF_DOM.messages().filter(row => row.role === 'user').at(-1)?.id;
+      // A question captured before that is no longer on the page is not a new one (CodeRabbit on #1947).
+      if ((sourceQuiet || message.directTurn) && !sendAttempted && sourceUser !== undefined && lastUser === undefined) return 'source-question-missing';
+      const newUser = !(message.directTurn && sourceUser === undefined) && lastUser !== sourceUser;
       if ((sourceQuiet || message.directTurn) && !sendAttempted && newUser) return 'new-user-message';
       if ((sourceQuiet || message.directTurn) && !sendAttempted && turnId && turnId !== sourceTurn) return 'turn-changed';
       // Named with what moved it: a pickup withdrawn for minutes otherwise cannot say by what (#1586).
@@ -13384,14 +13759,17 @@
       return 'off-target';
     };
     if (!onTarget()) return false;
-    if (message.recovery && (!sourceUser || sourceUser !== message.recovery.questionId || stopRequestedAt)) return false;
+    if (message.recovery && !stopRequestedAt && (!sourceUser || sourceUser !== message.recovery.questionId)) {
+      return held(sourceUser ? 'recovery-question-changed' : 'recovery-question-unreadable');
+    }
+    if (message.recovery && stopRequestedAt) return false;
     if (message.recovery) {
       let veto = '';
       if (!await recoveryPageUnfinished(onTarget, why => { veto = why; })) {
         // Never claimed, so no release report follows. A visible native final will not go away,
         // and unsaid it kept the app reloading this chat for hours (2026-10-02): say it once here.
         if (veto === 'page-final' && onTarget()) await ask({ type: 'desktop_input', id: message.id, conversationId: target, recoveryVeto: 'page-final' });
-        return false;
+        return veto && veto !== 'page-final' ? held('recovery-not-ready') : false;
       }
     }
     if (silencePickup && CLF_DOM.generating() && !await confirmedProviderTerminal()) {
@@ -13451,6 +13829,9 @@
       (project ? CLF_DOM.projectHomeId() === project : location.pathname === '/') &&
       (project ? freshMarker() : new URL(location.href).searchParams.get('cos-input') === message.id) && !CLF_DOM.turns().length));
     if (!target && !ownsFreshPage()) return false;
+    // A normal root composer can never spend a temporary opening. The browser must
+    // prove the provider's own temporary route before it may claim the first Send.
+    if (!target && message.temporaryChat === true && !CLF_DOM.temporaryChatSurface()) return false;
     // A linked Project ChatGPT no longer has (#1759). ChatGPT used to send its page home, which the
     // extension reports; since October 2026 the page stays on "loading", with no composer, for good.
     // Gone only when the page has had its time and the open Projects list does not name it.
@@ -13478,6 +13859,8 @@
       // Settings/plan dialogs retain the editor behind aria-hidden/inert. Claiming
       // that editor turns ordinary page unavailability into a false model failure.
       // Keep the input queued until this same document exposes its composer again.
+      // An announcement is not a dialog the person is using: close it so the message is not held behind it.
+      if (!writableComposer()) await closeAnnouncements(onTarget);
       const composer = await waitPageView(() => (message.directTurn || !CLF_DOM.generating()) &&
         (message.directTurn ? CLF_DOM.composerVisible() && CLF_DOM.composer() : writableComposer()),
         () => onTarget() && (message.directTurn || ((silencePickup || !generating) && pendingTools === 0)), 15000);
@@ -13496,10 +13879,27 @@
         await flush();
         return false; // No claim, insertion or Send: queued input survives recovery.
       }
-      if (!composer || !onTarget() || (!message.directTurn && ((!silencePickup && generating) || CLF_DOM.generating())) || !CLF_DOM.composerVisible()) return false;
+      const stillAnswering = !message.directTurn && ((!silencePickup && generating) || CLF_DOM.generating());
+      if (!composer || !onTarget() || stillAnswering || !CLF_DOM.composerVisible()) {
+        // Say why this page held the message back. On 2026-10-30 a queued Continue sat unsent for 17
+        // minutes on a page that looked healthy, and nothing anywhere said why.
+        // page-moved is said only while the tab is still on this chat (a reload or a new turn moved
+        // it on); a tab now on another chat stays silent, as does a stopped automatic Continue.
+        // A new question or progress on this chat is not the tab leaving it (CodeRabbit on #1947).
+        const moved = !onTarget() ? offTarget() : null;
+        const reason = moved ? (moved === 'source-question-missing' ? 'question-gone'
+          : ['new-user-message', 'turn-changed'].includes(moved) || moved.startsWith('turn-progressed') ? 'chat-moved-on' : 'page-moved')
+          : stillAnswering ? (CLF_DOM.generating() ? 'still-answering' : 'turn-held')
+          : pendingTools > 0 && !message.directTurn ? 'tool-running' : !CLF_DOM.composer() ? 'no-composer' : 'composer-hidden';
+        return held(reason);
+      }
       const reply = await ask({ type: 'desktop_input', id: message.id, conversationId: target, requiresAuthorization: true,
         ...(project ? { project: CLF_DOM.projectHomeId() } : {}) });
       const input = reply?.data?.input;
+      // Texts the app put into this chat that never reached Send (#1922): exactly one of them in the composer
+      // is the app's own leftover, not the person's draft, and this message replaces it.
+      const ownUnsent = (Array.isArray(reply?.data?.ownUnsent) ? reply.data.ownUnsent : [])
+        .filter(value => typeof value === 'string' && value.trim()).slice(0, 5).map(sendText);
       if (input?.silenceBoundary || input?.completedTurnId) { claimedSilence = input; sourceQuiet = true; }
       if (!input) return false;
       if (!onTarget()) { noteWithdraw(offTarget()); return false; }
@@ -13538,7 +13938,13 @@
         'ChatGPT is not signed in in this browser. Sign in to ChatGPT there, then send again.'
       ));
       const ownResidue = sendText(CLF_DOM.composerText(composer)) === sendText(input.text);
-      if ((!ownsFreshPage() && CLF_DOM.composerText(composer).trim() && !ownResidue) || CLF_DOM.hasComposerAttachments()) return fail(t(
+      // ChatGPT can keep inserted text with its Markdown escaped; either form is the same leftover.
+      const ownLeftover = () => {
+        const shown = CLF_DOM.composerText() || '';
+        return ownUnsent.includes(sendText(shown)) || ownUnsent.includes(sendText(unescapeMarkdown(shown)));
+      };
+      const leftover = !ownResidue && ownLeftover();
+      if ((!ownsFreshPage() && CLF_DOM.composerText(composer).trim() && !ownResidue && !leftover) || CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_existing_draft',
         'ChatGPT already contains an unsent draft. Send or clear that draft in Chrome before trying again.'
       ));
@@ -13559,7 +13965,7 @@
       }
       // A message for the running turn keeps that turn's model: the picker belongs to the next turn.
       const intoRunningTurn = () => !!message.directTurn && CLF_DOM.generating();
-      const temporary = input.lifetime === 'temporary-planner';
+      const temporary = input.lifetime === 'temporary-planner' || input.temporaryChat === true;
       // On the newer shell an empty temporary chat is proven only by the page-model stamp, and
       // nothing else scans a document with no conversation yet: ask for one before judging.
       const temporaryProven = async () => { await askFiber(); return CLF_DOM.temporaryChatReady(); };
@@ -13567,7 +13973,7 @@
         CLF_DOM.confirmTemporaryChatIntroduction();
         await waitPageView(temporaryProven, onTarget, 3000);
       }
-      if (temporary && (!temporaryPlannerPage() || !CLF_DOM.temporaryChatReady())) return fail(t(
+      if (temporary && (!(input.temporaryChat === true ? CLF_DOM.temporaryChatSurface() : temporaryPlannerPage()) || !CLF_DOM.temporaryChatReady())) return fail(t(
         'content_delivery_temporary_chat_unconfirmed',
         'Temporary Chat was not confirmed. Open the helper tab and complete its Temporary Chat introduction.'
       ));
@@ -13594,13 +14000,15 @@
       // model selection and the writability wait sit between the two and can replace the editor.
       if (!onTarget() || (CLF_DOM.generating() && !message.directTurn) ||
           (!ownsFreshPage() && (CLF_DOM.composerText() || '').trim() &&
-            sendText(CLF_DOM.composerText()) !== sendText(input.text)) ||
+            sendText(CLF_DOM.composerText()) !== sendText(input.text) && !ownLeftover()) ||
           CLF_DOM.hasComposerAttachments()) return fail(t(
         'content_delivery_composer_changed',
         'The ChatGPT composer changed before sending'
       ));
       let insertionFailure = '';
-      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage(), reason => { insertionFailure = reason; }))
+      // The app's own leftover is replaced as a whole, also one ChatGPT restored only during model selection
+      // (CodeRabbit on #2028); any other text keeps the usual rule.
+      if (!CLF_DOM.insertPrompt(input.text, ownsFreshPage() || ownLeftover(), reason => { insertionFailure = reason; }))
         return fail(t(
           'content_delivery_text_not_accepted',
           'ChatGPT did not accept the text$1',
@@ -13985,23 +14393,32 @@
       const listUrl = new URL(location.href);
       const pathList = listUrl.pathname === '/settings/plugins-settings' && !listUrl.hash;
       if (pathList || (listUrl.pathname === '/' && listUrl.hash === '#settings/Plugins')) {
-        const installedAppId = request.observeOnly === true ? request.appId ?? null : null;
-        const installedSurface = installedAppId ? request.surface ?? null : null;
-        if (request.appId && !installedAppId) {
+        // A completed refresh already bound this surface to one exact installed app. Reuse
+        // that identity for the next schema, including automatic clicks: rediscovery by name
+        // can collide with another installed connector and permanently park the known one.
+        const installedAppId = request.appId ?? null;
+        const installedSurface = request.surface ?? null;
+        // The older hash settings page has buttons rather than exact installed links.
+        // A previously enrolled ID can navigate directly, then still has to pass the
+        // exact-ID settings and schema checks before any click is claimed.
+        if (installedAppId && !pathList) {
           const url = new URL(location.href);
-          if (pathList) url.pathname = `/settings/plugins-settings/plugin_${request.appId}`;
-          else url.hash = `settings/Plugins/plugin_${request.appId}`;
+          url.hash = `settings/Plugins/plugin_${installedAppId}`;
           if (!current()) return false;
           location.assign(url.href); return true;
         }
-        let linkHref = null;
+        let linkHref = null, unavailableInstalled = false;
         const buttons = await waitPageView(() => {
-          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface);
+          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface, true);
+          // Native discovery distinguishes no observed row from an installed target that
+          // cannot be used. Let hydration resolve it within the existing wait, then report
+          // the known failure rather than leaving the request silently pending forever.
+          unavailableInstalled = pathList && Array.isArray(found) && found.length === 0;
           linkHref = found?.length === 1 && found[0].tagName === 'A' ? found[0].href : null;
-          return found;
+          return unavailableInstalled ? null : found;
         }, current, 8000);
         if (!current()) return false;
-        if (!buttons && !installedAppId) return false;
+        if (!buttons && !installedAppId && !unavailableInstalled) return false;
         if (!buttons || buttons.length !== 1 || (installedAppId && buttons[0].tagName !== 'A')) {
           await fail(t(
             'content_connector_identity_ambiguous',
@@ -14014,7 +14431,7 @@
           // The native installed link already names an exact management route. Recheck
           // the same visible owner across the await and carry custody into navigation;
           // reading the destination's schema is a later step, not a prerequisite here.
-          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface);
+          const found = CLF_DOM.pluginInstalledButtons(request.connectorName, installedAppId, installedSurface, true);
           if (!current() || !button.isConnected || found?.length !== 1 || found[0] !== button || button.href !== linkHref) return false;
           const url = new URL(linkHref, requestHref);
           const route = /^\/settings\/plugins-settings\/plugin_(asdk_app_[a-zA-Z0-9_-]+)$/.exec(url.pathname);
@@ -14028,7 +14445,7 @@
         // claim Refresh until the management document has its marker again.
         const discovered = await waitPageView(async () => {
           const href = location.href, appId = pluginViewAppId(href);
-          const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools);
+          const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, null, request.surface);
           return appId && next?.appId === appId ? href : null;
         }, () => alive && epoch === requestEpoch && !generating && !CLF_DOM.generating() &&
           new URL(location.href).origin === 'https://chatgpt.com' && CLF_DOM.pluginManagementIdle(), 8000);
@@ -14038,13 +14455,14 @@
       }
       // Identity and Refresh paint before the tool declarations. A partial settings
       // panel is neither an old schema nor permission to click; wait on the existing
-      // DOM observer and leave an unclaimed request available if hydration times out.
+      // DOM observer and polling, with the same one-minute bound as post-refresh reads.
+      // Slow native settings hydration can exceed 12 seconds; no click is claimed yet.
       const settle = settledPluginView();
       const view = await waitPageView(async () => {
-        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId);
+        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, request.appId, request.surface);
         const appId = pluginViewAppId(location.href);
         return settle(appId && next?.appId === appId && Array.isArray(next.tools) && (next.tools.length > 0 || next.settled === true) ? next : null);
-      }, current, 12000, 250);
+      }, current, 60000, 250);
       if (!view) {
         // Say so. `pluginSnapshot()` refuses for two different reasons — the page has not
         // rendered the card yet, and the page renders a card this build cannot read — and
@@ -14104,7 +14522,7 @@
       // a refresh that had worked as failed in 2 of 3 runs. Look every half second, for up to a
       // minute (the worker leaves a busy tab open); the one click stays one click.
       const after = await waitPageView(async () => {
-        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, appId);
+        const next = await CLF_DOM.pluginRefreshView(request.connectorName, request.tools, appId, request.surface);
         return next && before !== expected && schemaKey(next.tools) === expected ? next : null;
       }, stillCurrent, 60000, 500);
       if (!after) {
@@ -14300,6 +14718,16 @@
         if (recorderHandle.healthy()) {
           try { observe(); } catch { /* The regular tick observes again. */ }
         }
+        sendResponse({ ok: true });
+        return false;
+      }
+      if (message.type === 'clf-approval-pull') {
+        const id = message.conversationId;
+        if (typeof id !== 'string' || !/^[0-9a-f-]{8,64}$/i.test(id) || conversationId !== id || CLF_DOM.conversationId() !== id) {
+          sendResponse({ ok: false }); return false;
+        }
+        if (pulling) approvalPullQueued = true;
+        else void pullActivity();
         sendResponse({ ok: true });
         return false;
       }
@@ -14675,6 +15103,7 @@
       streamRootKeys: () => [...streamRootsByKey.keys()],
       /** So a test settles a turn by the real window rather than a copy of the number. */
       TURN_SETTLE_MS,
+      APPROVAL_SETTLE_MS,
       DESKTOP_RECEIPT_MS,
       STALL_MS,
       GOAL_RETRY_MS,

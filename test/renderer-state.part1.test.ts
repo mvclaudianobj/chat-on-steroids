@@ -436,8 +436,8 @@ it('starts project groups collapsed and deliberately expands the project selecte
   const group = () => mounted.window.document.querySelector<HTMLDetailsElement>(`[data-project-id="${project.id}"]`)!;
   await waitFor(() => expect(group()).not.toBeNull());
   expect(group().open).toBe(false);
-  // A new chat is the row's own button, beside its menu, not an item inside it.
-  expect(rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')).toBeNull();
+  // A new chat is available from the row's quick button and its project menu.
+  expect(rowMenuItem(group().querySelector('.project-heading')!, 'new-chat')!.textContent).toContain('New chat in this project');
   const create = group().querySelector<HTMLButtonElement>('.project-heading > .project-new')!;
   expect(create.getAttribute('aria-label')).toBe('New chat in this project');
   expect(create.nextElementSibling?.classList.contains('project-menu')).toBe(true);
@@ -914,7 +914,7 @@ it('ranks the inbox by what each chat needs: approval, stopped recovery, blocked
   expect(inboxCardIds(doc)).toEqual(['approval', 'recovery', 'blocked', 'failed', 'stalled', 'working', 'unseen', 'rest']);
   // Each state in one word or two on the meta line, with its own glyph, the title and the button's own text saying it too.
   const expected: Array<[string, string, string]> = [
-    ['approval', 'Needs approval', 'ph-lock-key'], ['recovery', 'Recovery stopped', 'ph-arrow-clockwise'],
+    ['approval', 'Needs approval', 'ph-lock-key'], ['recovery', 'Recovery slowed', 'ph-arrow-clockwise'],
     ['blocked', 'Blocked', 'ph-prohibit'], ['failed', 'Failed', 'ph-warning'], ['stalled', 'Failed', 'ph-warning']
   ];
   for (const [id, label, glyph] of expected) {
@@ -1456,13 +1456,13 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   const actions = (): Array<string | undefined> => [...doc.querySelectorAll<HTMLElement>('.row-menu .row-menu-item')].map(item => item.dataset.rowAction);
   rowMenuItem(row(chat.id), 'rename');
   // Schedule… (#1826) sits with the chat's own actions.
-  expect(actions()).toEqual(['pin', 'rename', 'open', 'copy-link', 'share', 'schedule', 'block', 'remove']);
+  expect(actions()).toEqual(['pin', 'archive', 'archive-workers', 'rename', 'open', 'copy-link', 'share', 'schedule', 'move-to-project', 'block', 'remove']);
   expect(doc.querySelector('.row-menu [data-row-action="remove"]')!.classList.contains('is-danger')).toBe(true);
   closeRowMenus(doc);
   // A row that is not a chat offers only what applies to it.
   await waitFor(() => expect(row(loose.id)).not.toBeNull());
   rowMenuItem(row(loose.id), 'block');
-  expect(actions()).toEqual(['block', 'remove']);
+  expect(actions()).toEqual(['archive', 'block', 'remove']);
   closeRowMenus(doc);
   const shown = (id: string) => `${row(id).textContent} ${[...row(id).querySelectorAll<HTMLElement>('[title]'), row(id)].map(node => node.getAttribute('title') ?? '').join(' ')}`;
   expect(shown(loose.id)).toContain('not a chat');
@@ -1476,12 +1476,12 @@ it('offers a chat\'s actions in one menu, by kind of row, and opens it with a ri
   expect(row(loose.id).closest('.session-diagnostics')).not.toBeNull();
   // Groups are kept by the chat's own id, so it can be sorted into one of its project's groups already.
   rowMenuItem(row(pending.id), 'rename');
-  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
+  expect(actions()).toEqual(['archive', 'rename', 'move-to-project', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   expect(row(renamed.id).closest('.session-diagnostics')).toBeNull();
   expect(shown(renamed.id)).not.toContain('not a chat');
   rowMenuItem(row(renamed.id), 'rename');
-  expect(actions()).toEqual(['rename', 'move-to-group', 'remove']);
+  expect(actions()).toEqual(['archive', 'rename', 'move-to-project', 'move-to-group', 'remove']);
   closeRowMenus(doc);
   // A right click opens the same menu; its items run their action.
   row(chat.id).dispatchEvent(new mounted.window.MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 30, clientY: 40 }));
@@ -1612,11 +1612,15 @@ it('offers in ⌘K only actions that can run now, walks every group by keyboard,
   const actions = () => [...results.querySelectorAll('.is-action b')].map(node => node.textContent);
   (doc.getElementById('searchChatsButton') as HTMLButtonElement).click();
   await settle();
-  // No chat and no project chosen: Find in chat, Review, Files and Sub-agents could not open, so they aren't offered.
-  for (const [typed, name] of [['find', 'Find in chat'], ['review', 'Review'], ['files', 'Files'], ['sub', 'Sub-agents']] as const) {
+  // Review and Files are available without a local project; chat-scoped actions still need a selected chat.
+  for (const [typed, name] of [['find', 'Find in chat'], ['sub', 'Sub-agents']] as const) {
     await type(typed);
     expect(actions()).not.toContain(name);
   }
+  await type('review');
+  expect(actions()).toContain('Review');
+  await type('files');
+  expect(actions()).toContain('Files');
   // Arrow keys walk the chats, then the actions, then the settings, and back up to the field.
   await type('style');
   const rows = [...results.querySelectorAll<HTMLElement>('.search-result')];
@@ -2330,6 +2334,34 @@ it('restores a rejected focused port and prevents an unrelated queued save from 
   expect(select.value).toBe('auto'); expect(background.checked).toBe(true);
 });
 
+// CodeRabbit on #1938: a box shown off while the saved value is still on would misstate what the
+// desktop tools allow, and the next unrelated save would carry the unsaved value.
+it('restores desktop control without a known chat after its save fails, though the box kept the focus', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const w = mounted.window;
+  // Saved on in the app; the failed save below reads this state back.
+  mounted.state.config.ui.desktopUnattributed = true;
+  mounted.push(mounted.state);
+  await settle();
+  const box = w.document.getElementById('desktopUnattributed') as HTMLInputElement;
+  expect(box.checked).toBe(true);
+  box.focus(); box.checked = false; box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle(); await settle();
+  expect(box.checked).toBe(true);
+});
+
+// CodeRabbit on #1948: a switch left on after a failed save would show times the saved setting hides.
+it('restores Show message times after its save fails, though the box kept the focus', async () => {
+  const mounted = await mountChat({}, [], { saveSettings: async () => ({ ok: false, error: 'Settings could not be saved.' }) });
+  const w = mounted.window;
+  const box = w.document.getElementById('showMessageTimes') as HTMLInputElement;
+  expect(box.checked).toBe(false);
+  box.focus(); box.checked = true; box.dispatchEvent(new w.Event('change', { bubbles: true }));
+  await settle(); await settle();
+  expect(box.checked).toBe(false);
+  expect(w.document.documentElement.classList.contains('show-message-times')).toBe(false);
+});
+
 it('saves the background placement from its settings control and restores it on state push', async () => {
   const mounted = await mountChat();
   const w = mounted.window;
@@ -2356,4 +2388,76 @@ it('saves the ChatGPT browser choice from its settings control and restores it o
   expect(browser.value).toBe('edge');
   mounted.push({ ...mounted.state, config: { ...mounted.state.config, ui: { ...mounted.state.config.ui, chatBrowser: 'chrome' } } });
   expect(browser.value).toBe('chrome');
+});
+
+it('moves a chat to a project from its menu and undoes it from the toast (#1919)', async () => {
+  const base = { startedAt: 1, updatedAt: 2, endedAt: null, events: 0, userMessages: 0, toolCalls: 0,
+    lastToolCallAt: null, processExitNonzero: 0, toolRejected: 0, toolInternalErrors: 0, errors: 0,
+    estimatedTokens: 0, contextTokens: 0, lastTurnOutcome: null, activeTurnId: null, agents: [], origin: null };
+  const website = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000011', docs = 'aaaaaaaa-bbbb-4ccc-8ddd-000000000012';
+  let chat: Record<string, unknown> = { ...base, id: 'move-chat-0001', title: 'A chat', conversationId: 'move-conversation-0001', chatIds: ['move-conversation-0001'] };
+  const worker = { ...base, id: 'move-worker-0001', title: 'Worker', conversationId: 'move-conversation-0002', chatIds: ['move-conversation-0002'],
+    origin: { kind: 'worker' as const, fromSessionId: 'move-chat-0001', agentId: 'worker-1', task: 'Check' } };
+  const groups = { version: 1, groups: [], members: {} };
+  const moveChatProject = vi.fn(async (_id: string, projectId: string | null) => {
+    const from = (chat.projectId as string | undefined) ?? null;
+    chat = { ...chat, projectId: projectId ?? undefined };
+    return { ok: true, data: { from, fromGroup: null, groups, summaries: [chat] } };
+  });
+  const mounted = await mountChat({}, [], {
+    listProjects: async () => ({ ok: true, data: [
+      { id: website, name: 'Website', path: '/work/website', createdAt: 1 },
+      { id: docs, name: 'Docs', path: '/work/docs', createdAt: 2, chatgpt: { state: 'linked', id: `g-p-${'d'.repeat(32)}`, updatedAt: 1 } }
+    ] }),
+    listSessions: async () => ({ ok: true, data: { sessions: [chat, worker], activeId: null, pressure: [], blocked: [], trusted: [] } }),
+    moveChatProject
+  });
+  const doc = mounted.window.document;
+  const row = () => doc.querySelector<HTMLElement>(`[data-id="${chat.id}"]`)!;
+  const toastText = () => doc.querySelector('.toast')?.firstChild?.textContent;
+  await waitFor(() => expect(row()).not.toBeNull());
+  rowMenuItem(row(), 'move-to-project')!.click();
+  const choices = () => [...doc.querySelectorAll<HTMLElement>('.row-menu')].at(-1)!.querySelectorAll<HTMLElement>('.row-menu-item');
+  expect([...choices()].map(item => item.dataset.rowAction)).toEqual([`project-${website}`, `project-${docs}`, 'project-none']);
+  expect(doc.querySelector(`[data-row-action="project-none"]`)!.getAttribute('aria-checked')).toBe('true');
+  doc.querySelector<HTMLButtonElement>(`[data-row-action="project-${website}"]`)!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenCalledWith(chat.id, website, undefined));
+  await waitFor(() => expect(row().closest(`.project-group[data-project-id="${website}"]`)).not.toBeNull());
+  expect(toastText()).toBe('Moved to Website');
+  // Undo puts it back where it was: no project.
+  doc.querySelector<HTMLButtonElement>('.toast .toast-action')!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenLastCalledWith(chat.id, null, null));
+  await waitFor(() => expect(row().closest('.project-group')).toBeNull());
+  expect(toastText()).toBe('Move undone');
+  // CodeRabbit on #1965: the keyboard on Undo keeps the toast until it leaves, and focus then returns.
+  const undoFocus = doc.createElement('button'); doc.body.append(undoFocus); undoFocus.focus();
+  const { toast } = await import('../src/renderer/dom.js');
+  vi.useFakeTimers();
+  try {
+    toast('Moved to Website', { label: 'Undo', run: () => undefined });
+    const button = doc.querySelector<HTMLButtonElement>('.toast .toast-action')!;
+    button.focus();
+    vi.advanceTimersByTime(20_000);
+    expect(doc.querySelector('.toast .toast-action')).toBe(button);
+    button.dispatchEvent(new mounted.window.FocusEvent('focusout', { bubbles: true, relatedTarget: undoFocus }));
+    undoFocus.focus();
+    vi.advanceTimersByTime(2_100);
+    expect(doc.querySelector('.toast')).toBeNull();
+    toast('Moved to Website', { label: 'Undo', run: () => undefined });
+    doc.querySelector<HTMLButtonElement>('.toast .toast-action')!.focus();
+    doc.querySelector<HTMLButtonElement>('.toast .toast-action')!.click();
+    expect(doc.activeElement).toBe(undoFocus);
+  } finally { vi.useRealTimers(); undoFocus.remove(); }
+  expect(doc.querySelector('.toast .toast-action')).toBeNull();
+  // A linked ChatGPT Project: the toast says the move is only in this app.
+  rowMenuItem(row(), 'move-to-project')!.click();
+  doc.querySelector<HTMLButtonElement>(`[data-row-action="project-${docs}"]`)!.click();
+  await waitFor(() => expect(toastText()).toBe('Moved to Docs. ChatGPT keeps it where it was.'));
+  // Out of it again from the same submenu.
+  rowMenuItem(row(), 'move-to-project')!.click();
+  expect(doc.querySelector(`[data-row-action="project-${docs}"]`)!.getAttribute('aria-checked')).toBe('true');
+  doc.querySelector<HTMLButtonElement>('[data-row-action="project-none"]')!.click();
+  await waitFor(() => expect(moveChatProject).toHaveBeenLastCalledWith(chat.id, null, undefined));
+  await waitFor(() => expect(toastText()).toBe('Moved out of its project. ChatGPT keeps it where it was.'));
+  closeRowMenus(doc);
 });
