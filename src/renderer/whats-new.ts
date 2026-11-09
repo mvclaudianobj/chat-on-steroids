@@ -14,7 +14,7 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
-  '2.1.51.2': {
+  '2.1.51.3': {
     lead: () => t("Search complete chat histories, manage scheduled messages in one place, and resume project chats reliably after a reload."),
     highlights: [
       { icon: 'i-clock', title: () => t("Scheduled chats in one list"), text: () => t("Review, pause, run now, or remove scheduled messages across your chats.") },

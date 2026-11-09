@@ -4185,7 +4185,7 @@
   "Context limit": "Лимит контекста",
   "What ChatGPT sees of your screen.": "Что ChatGPT видит на вашем экране.",
   "A cheeky whip that cracks to make Chat Marks work faster. It doesn't, but it tries.": "Дерзкий кнут, который щёлкает, чтобы Chat Marks работал быстрее. Не помогает, но он старается.",
-  "ChatMarks connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat Marks подключается через ваши собственные настройки SSH: ~/.ssh/config, агент, ключи и известные хосты. Вход возможен только по ключу, и на сервер ничего не устанавливается.",
+  "Chat Marks connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat Marks подключается через ваши собственные настройки SSH: ~/.ssh/config, агент, ключи и известные хосты. Вход возможен только по ключу, и на сервер ничего не устанавливается.",
   "When enabled, use Chat Marks Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "Если включено, Chat Marks использует Plugins вместо Core для обычных сообщений, отправляемых приложением. Цель, Цикл, воркеры и восстановление всегда используют Core. В сообщении упоминается только одно приложение. Сообщения, отправленные прямо в ChatGPT, не меняются.",
   "Marks extensions": "Расширения Marks",
   "Future Marks plugins, skills and modules will appear here for installation and activation.": "Здесь появятся будущие плагины, Skills и модули Marks, доступные для установки и активации.",

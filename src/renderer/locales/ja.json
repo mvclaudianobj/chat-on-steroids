@@ -3933,7 +3933,7 @@
   "Context limit": "コンテキスト上限",
   "What ChatGPT sees of your screen.": "ChatGPT に見える画面の範囲。",
   "A cheeky whip that cracks to make Chat Marks work faster. It doesn't, but it tries.": "Chat Marks をもっと速く働かせようとピシッと鳴らす、生意気なムチ。効き目はないけれど、がんばっています。",
-  "ChatMarks connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat Marks はあなた自身の SSH 設定（~/.ssh/config、エージェント、鍵、既知のホスト）で接続します。サインインは鍵のみで、サーバーには何もインストールされません。",
+  "Chat Marks connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat Marks はあなた自身の SSH 設定（~/.ssh/config、エージェント、鍵、既知のホスト）で接続します。サインインは鍵のみで、サーバーには何もインストールされません。",
   "When enabled, use Chat Marks Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "有効にすると、Chat Marks が送る通常のメッセージには Core ではなく Plugins を使用します。ゴール、ループ、ワーカー、復旧では常に Core を使います。メッセージで参照するアプリは1つだけです。ChatGPT から直接送るメッセージは変更されません。",
   "Marks extensions": "Marks の拡張機能",
   "Future Marks plugins, skills and modules will appear here for installation and activation.": "今後追加される Marks のプラグイン、Skills、モジュールは、インストールと有効化のためにここに表示されます。",

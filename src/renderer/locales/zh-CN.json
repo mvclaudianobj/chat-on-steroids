@@ -3933,7 +3933,7 @@
   "Context limit": "上下文上限",
   "What ChatGPT sees of your screen.": "ChatGPT 能看到你屏幕的哪些内容。",
   "A cheeky whip that cracks to make Chat Marks work faster. It doesn't, but it tries.": "一根调皮的鞭子，啪地一抽想让 Chat Marks 干得更快。没什么用，但它很努力。",
-  "ChatMarks connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat Marks 使用你自己的 SSH 配置连接：~/.ssh/config、代理、密钥和已知主机。只能使用密钥登录，服务器上不会安装任何东西。",
+  "Chat Marks connects with your own SSH setup: your ~/.ssh/config, agent, keys and known hosts. Signing in works with a key only, and nothing is installed on the server.": "Chat Marks 使用你自己的 SSH 配置连接：~/.ssh/config、代理、密钥和已知主机。只能使用密钥登录，服务器上不会安装任何东西。",
   "When enabled, use Chat Marks Plugins instead of Core for ordinary messages the app sends. Goal, Loop, workers and recovery always keep Core. Only one app is mentioned. Messages sent directly in ChatGPT are unchanged.": "启用后，Chat Marks 在应用发送的普通消息中使用 Plugins 而非 Core。目标、循环、工作代理和恢复始终使用 Core。每条消息只提及一个应用。直接在 ChatGPT 中发送的消息不受影响。",
   "Marks extensions": "Marks 扩展",
   "Future Marks plugins, skills and modules will appear here for installation and activation.": "今后推出的 Marks 插件、Skills 和模块将在此显示，供你安装和启用。",

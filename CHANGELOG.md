@@ -9,9 +9,9 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
-## [2.1.51.2] — Chat Marks integration of current community main
+## [2.1.51.3] — ChatMarks release of current community main
 
-Carries the community updates after v2.1.51, including the scheduled chats list, full-history search, and Compact & Resume recovery after reload, while preserving Chat Marks identity and modules.
+Carries the community updates after v2.1.51, including the scheduled chats list, full-history search, and Compact & Resume recovery after reload. The Marks revision is .3 because Mozilla already has add-on version 2.1.51.2; package and app identities remain compatible with existing installs.
 
 ## [2.1.51] — Steps for you, a limit on busy chats, and Telegram
 ChatGPT can now hand you a step it cannot do itself, you can limit how many chats work at once, and you can get your chat notifications in Telegram. Chats that get stuck after a Stop or a reload now end up where you expect, and the browser extension and ChatGPT's page share the app's look.
