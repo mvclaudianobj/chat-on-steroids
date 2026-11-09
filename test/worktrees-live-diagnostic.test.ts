@@ -13,7 +13,7 @@ it.skipIf(!process.env.MARKS_WORKTREE_DIAG)('diagnoses broker-owned historic wor
       agent.state === 'sleeping' && agent.revivable && !agent.managedWorktreeCleaned)
     .map((agent: any) => ({ runId: agent.workerAllocationRunId, agentId: agent.id }));
   const result = await restoreManagedWorktrees(config.roots, workers);
-  const reasons = result.rejected.map(row => row.error.split(':')[0]);
+  const reasons = result.rejected.map(row => row.error.split(':')[0] ?? 'OTHER');
   console.log('worktree restore diagnosis', {
     owned: workers.length, restored: result.restored.length,
     rejected: result.rejected.length,
