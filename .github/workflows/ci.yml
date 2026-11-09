@@ -58,7 +58,9 @@ jobs:
           - { name: Linux x64, runner: ubuntu-24.04, shard: '1/2', first: true }
           - { name: Linux x64, runner: ubuntu-24.04, shard: '2/2', first: false }
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 30
+    # Windows shard 3/3 reaches the 30-minute ceiling while still making steady test progress.
+    # Keep other OS limits at 30; the Windows runner needs a 45-minute budget for the full suite.
+    timeout-minutes: ${{ matrix.runner == 'windows-2025' && 45 || 30 }}
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
