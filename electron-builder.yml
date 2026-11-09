@@ -186,6 +186,8 @@ linux:
       filter: ['**/*']
 
 deb:
+  # Keep the binary package identity so apt upgrades existing installs while files use ChatMarks.
+  packageName: chat-on-steroids
   depends:
     # Ubuntu 24.04 renamed GTK 3's runtime package for the time64 transition. Keep the old
     # package as an alternative so the same .deb remains installable on Ubuntu 22.04/Debian.

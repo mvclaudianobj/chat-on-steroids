@@ -533,6 +533,7 @@ describe('cross-platform packaging targets', () => {
     const iconScript = readFileSync(path.join(root, 'scripts', 'make-icon.mjs'), 'utf8');
     expect(builder.toolsets.appimage).toBe('1.0.3');
     expect(builder.linux.artifactName).toBe('ChatMarks-Linux-${env.COS_PACKAGE_ARCH}.${ext}');
+    expect(builder.deb.packageName).toBe('chat-on-steroids');
     expect(builder.deb.depends).toContain('libgtk-3-0 | libgtk-3-0t64');
     expect(builder.deb.depends).toContain('libatspi2.0-0 | libatspi2.0-0t64');
     expect(builder.linux.syncDesktopName).toBe(true);
