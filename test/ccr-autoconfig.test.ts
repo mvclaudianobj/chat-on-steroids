@@ -43,7 +43,7 @@ it('checks a local API and key, writes once with private SQLite backup, and is i
   expect(config().Router.default).toBe('CLIProxy Local,gpt-6-luna');
   const backups = (await readdir(path.dirname(file))).filter(name => name.startsWith('config.marks-backup-'));
   expect(backups).toHaveLength(1);
-  expect((await stat(path.join(path.dirname(file), backups[0]!))).mode & 0o777).toBe(0o600);
+  if (process.platform !== 'win32') expect((await stat(path.join(path.dirname(file), backups[0]!))).mode & 0o777).toBe(0o600);
   expect((await readFile(path.join(path.dirname(file), backups[0]!))).length).toBeGreaterThan(0);
   expect(await configureCcrFromCliProxy(home, { fetchImpl: fakeProxy as typeof fetch, key })).toBe('unchanged');
   expect((await readdir(path.dirname(file))).filter(name => name.startsWith('config.marks-backup-'))).toHaveLength(1);

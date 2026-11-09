@@ -23,7 +23,7 @@ describe('H1a local Brain store', () => {
     const first = await brainSave({ content: 'Discussão técnica sobre integração e memória', tags: ['Projeto'] });
     const again = await brainSave({ content: '  DISCUSSÃO  técnica sobre integração e memória  ' });
     expect(again.id).toBe(first.id);
-    expect(statSync(file).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') expect(statSync(file).mode & 0o777).toBe(0o600);
     expect((await brainSearch('integracao')).map(x => x.id)).toContain(first.id);
     expect((await brainStatus()).count).toBe(1);
     expect(await brainDoctor()).toEqual({ available: true, quickCheck: true, fts: true });

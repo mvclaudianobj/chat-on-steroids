@@ -22,6 +22,7 @@ beforeEach(async () => {
   await brainSave({ content: 'The release train leaves every Thursday', title: 'release' });
 });
 afterEach(async () => {
+  configureBrainForTests(path.join(directory, 'brain-closed.sqlite'));
   resetSessionStoreForTests(); resetDurableForTests();
   await removeTempDir(directory);
 });

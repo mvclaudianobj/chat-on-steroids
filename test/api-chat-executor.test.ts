@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { makeTempDir, removeTempDir } from './helpers.js';
 
 const secrets = new Map<string, string>();
@@ -74,6 +75,8 @@ afterAll(async () => {
   resetRecorderForTests();
   store.resetSessionStoreForTests();
   resetDurableForTests();
+  const brain = await import('../src/main/brain/store.js');
+  brain.configureBrainForTests(path.join(directory, 'brain-closed.sqlite'));
   await removeTempDir(directory);
 });
 
