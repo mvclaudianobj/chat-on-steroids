@@ -834,6 +834,18 @@ void app.whenReady().then(async () => {
       // self-asserting filesystem markers left from unaccepted or pruned allocations.
       const recovered = await restoreManagedWorktrees(getConfig().roots, managedWorkerRecoveryIdentities());
       logInfo(`worktrees: restored ${recovered.restored.length} worker workspace(s); refused ${recovered.rejected.length} invalid marker(s)`);
+      if (recovered.rejected.length) {
+        // The reason is actionable, whereas "invalid marker" hides missing
+        // directories and changed filesystem identities behind one count.
+        // Do not log native paths or adopt a marker without broker proof.
+        const failures = new Map<string, number>();
+        for (const { error } of recovered.rejected) {
+          const code = /^([A-Z][A-Z0-9_]+):/.exec(error)?.[1] ??
+            (/^ENOENT:/.test(error) ? 'ENOENT' : 'OTHER');
+          failures.set(code, (failures.get(code) ?? 0) + 1);
+        }
+        logWarn(`worktrees: restore refusals by cause: ${[...failures].map(([code, count]) => `${code}=${count}`).join(', ')}`);
+      }
     } catch (error) {
       // No marker is accepted on failure; workspace resolution must still require an
       // exact active lease rather than silently sending this worker into the prime cwd.
