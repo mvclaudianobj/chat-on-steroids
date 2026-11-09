@@ -882,10 +882,10 @@
     "message": "đang chờ"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "Ứng dụng không thể gắn $1 lần gọi theo ID yêu cầu — đã chuyển sang $2."
+    "message": "Ứng dụng không thể gắn $1 lần gọi theo ID yêu cầu: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "Ứng dụng không thể gắn một lần gọi theo ID yêu cầu — đã chuyển sang $1."
+    "message": "Ứng dụng không thể gắn một lần gọi theo ID yêu cầu: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "Việc gửi bị chặn cho đến khi ứng dụng được kết nối và xác nhận khả năng tương thích giao thức."
@@ -1216,5 +1216,14 @@
   },
   "content_task_waiting_app": {
     "message": "Đang chờ Chat Marks phản hồi."
+  },
+  "content_goal_wait_slots": {
+    "message": "Đang chờ chỗ trống (Số cuộc trò chuyện làm việc cùng lúc)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT yêu cầu chậm lại · chờ đến giờ đã báo"
+  },
+  "content_revival_draft_appeared": {
+    "message": "Có nội dung được nhập vào cuộc trò chuyện trong lúc chuẩn bị đánh thức worker, nên lệnh đánh thức không thay thế nó."
   }
 }

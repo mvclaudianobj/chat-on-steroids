@@ -882,10 +882,10 @@
     "message": "待处理"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "应用无法通过请求 ID 归属 $1 次调用——已回退为 $2。"
+    "message": "应用无法通过请求 ID 归属 $1 次调用: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "应用无法通过请求 ID 归属一次调用——已回退为 $1。"
+    "message": "应用无法通过请求 ID 归属一次调用: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "在应用连接并确认协议兼容之前，发送将被阻止。"
@@ -1216,5 +1216,14 @@
   },
   "content_task_waiting_app": {
     "message": "正在等待 Chat Marks 响应。"
+  },
+  "content_goal_wait_slots": {
+    "message": "等待空位（同时工作的聊天数）"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT 要求放慢速度 · 等到它指定的时间"
+  },
+  "content_revival_draft_appeared": {
+    "message": "准备唤醒工作者时，对话中输入了内容，因此唤醒没有替换它。"
   }
 }

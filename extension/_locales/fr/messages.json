@@ -882,10 +882,10 @@
     "message": "en attente"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "L’application n’a pas pu attribuer $1 appels par ID de requête ; elle s’est rabattue sur $2."
+    "message": "L’application n’a pas pu attribuer $1 appels par ID de requête : $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "L’application n’a pas pu attribuer l’appel par ID de requête ; elle s’est rabattue sur $1."
+    "message": "L’application n’a pas pu attribuer l’appel par ID de requête : $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "La livraison est bloquée jusqu'à ce que l'application soit connectée et la compatibilité du protocole confirmée."
@@ -1233,10 +1233,10 @@
     "message": "$1 en attente dans la page"
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "L’application n’a pas pu attribuer $1 appel par ID de requête ; elle s’est rabattue sur $2."
+    "message": "L’application n’a pas pu attribuer $1 appels par ID de requête : $2"
   },
   "popup_pipeline_call_fallback_many__many": {
-    "message": "L’application n’a pas pu attribuer $1 d’appels par ID de requête ; elle s’est rabattue sur $2."
+    "message": "L’application n’a pas pu attribuer $1 appels par ID de requête : $2"
   },
   "popup_pipeline_request_id_matched_many__one": {
     "message": "$1 ID de requête associé à l'activité d'outil enregistrée."
@@ -1318,5 +1318,14 @@
   },
   "content_task_waiting_app": {
     "message": "En attente de la réponse de Chat Marks."
+  },
+  "content_goal_wait_slots": {
+    "message": "En attente d'une place libre (Chats actifs en même temps)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT a demandé de ralentir · attend l'heure indiquée"
+  },
+  "content_revival_draft_appeared": {
+    "message": "Quelque chose a été saisi dans la conversation pendant la préparation du réveil du worker, donc le réveil ne l’a pas remplacé."
   }
 }

@@ -882,10 +882,10 @@
     "message": "pendiente"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud — recurrió a $2."
+    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "La aplicación no pudo ubicar una llamada por ID de solicitud — recurrió a $1."
+    "message": "La aplicación no pudo ubicar una llamada por ID de solicitud: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "El envío está bloqueado hasta conectar la aplicación y confirmar la compatibilidad del protocolo."
@@ -1233,10 +1233,10 @@
     "message": "$1 retenidos en la página"
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "La aplicación no pudo ubicar $1 llamada por ID de solicitud — recurrió a $2."
+    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud: $2"
   },
   "popup_pipeline_call_fallback_many__many": {
-    "message": "La aplicación no pudo ubicar $1 de llamadas por ID de solicitud — recurrió a $2."
+    "message": "La aplicación no pudo ubicar $1 llamadas por ID de solicitud: $2"
   },
   "popup_pipeline_request_id_matched_many__one": {
     "message": "$1 ID de solicitud coincidió con actividad de herramientas registrada."
@@ -1318,5 +1318,14 @@
   },
   "content_task_waiting_app": {
     "message": "Esperando la respuesta de Chat Marks."
+  },
+  "content_goal_wait_slots": {
+    "message": "Esperando un hueco libre (Chats trabajando a la vez)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT pidió ir más despacio · espera hasta la hora indicada"
+  },
+  "content_revival_draft_appeared": {
+    "message": "Se escribió algo en el chat mientras se preparaba el aviso del worker, así que el aviso no lo reemplazó."
   }
 }

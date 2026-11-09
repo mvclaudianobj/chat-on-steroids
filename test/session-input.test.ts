@@ -9,7 +9,8 @@ import {
   fileSilenceInput, deferSilenceInput, revokeSilenceInputs, pendingQueuedPickups, inputBeforeGoal, inputArgs, acknowledgeBrowserInput, cancelInput, cancelSessionInputs, claimBrowserInput, completeBrowserDecision, enqueueInput,
   failBrowserInput, listInputs, offerToolInput as offerToolInputBatch, acknowledgeToolInput, pendingBrowserInputs, requestBrowserDecision, resetInputForTests, configureInputDelivery,
   authorizeBrowserHelperRetry, pausedBrowserHelpers, hasEligibleToolInput, editQueuedInput, reorderQueuedInputs, setInputAutomation, authorizeBrowserInput, sessionInputPolicy, retryUnclaimedInput,
-  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, retryStoppedQueuedPickup
+  noteInputStartupError, fileRotationInput, failBranchInput, BRANCH_ERRORS, holdInputForSendCheck, retryStoppedQueuedPickup,
+  ownUnsentTexts, noteInputHeld, withdrawOwnContinuesAfterStop
 } from '../src/main/session/input.js';
 import type { InputArgs, InputEntry } from '../src/main/session/input.js';
 import { editReplacement } from '../src/main/session/edits.js';
@@ -123,6 +124,81 @@ describe('durable user input ownership', () => {
     expect(after?.state).toBe(state);
     if (held) expect(after?.error).toBe(held);
     else expect(after?.error).toContain('did not pick up this message');
+  });
+  // 2026-11-03 (Mac): the person's Continue reached the page, which held it back because ChatGPT was
+  // still answering; a minute later it failed as "the browser did not pick up this message".
+  it('keeps a message a page holds back while ChatGPT is still answering, and says so, instead of failing it', async () => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    // Five minutes of a page reporting the hold every 45 seconds: far past the one-minute deadline.
+    for (let step = 0; step < 7; step++) {
+      now += 45_000;
+      // Every 45 s the window is told again, so its wording never lapses while the page holds it.
+      expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
+      expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'queued',
+        pageHold: { reason: 'still-answering', at: now } });
+    }
+    // Once no page has held it for a minute, the browser really did not take it.
+    now += 60_001;
+    expect((await listInputs()).find(entry => entry.id === row.id)).toMatchObject({ state: 'failed',
+      error: 'Not sent: the browser did not pick up this message within 60 seconds.' });
+    // A finished row is never marked held again.
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBeNull();
+  });
+  it('tells the window again only every 45 seconds, and takes a hold only from the message\'s own chat (CodeRabbit on #2054)', async () => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-b')).toBeNull();
+    expect(await noteInputHeld(row.id, 'still-answering', null)).toBeNull();
+    const told: string[] = [];
+    for (let step = 0; step < 5; step++) {
+      told.push(String(await noteInputHeld(row.id, 'still-answering', 'conversation-a')));
+      now += 15_000;
+    }
+    expect(told).toEqual(['new', 'held', 'held', 'new', 'held']);
+    // Another reason is news at once.
+    expect(await noteInputHeld(row.id, 'tool-running', 'conversation-a')).toBe('new');
+  });
+  it('takes a hold only from the chat the message goes to now, after the session moved on (CodeRabbit on #2054)', async () => {
+    binding.finishEnabled = false;
+    const info = vi.spyOn(logger, 'logInfo');
+    const row = await enqueueInput(input());
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
+    // A Compact & Resume moved the session to a new chat: the old chat's page no longer keeps it.
+    binding.conversationId = 'conversation-moved';
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBeNull();
+    // The new chat's first hold is news, not a repeat of the old chat's.
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-moved')).toBe('new');
+    expect(await noteInputHeld(row.id, 'still-answering', 'conversation-moved')).toBe('held');
+    expect(info).toHaveBeenCalledWith(`input ${row.id}: a hold from conversation-a does not keep it: it goes to conversation-moved`);
+    info.mockRestore();
+  });
+
+  it('counts an old chat\'s hold for nothing once the message goes to another chat (CodeRabbit on #2054)', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      binding.finishEnabled = false;
+      const row = await enqueueInput(input());
+      vi.setSystemTime(Date.now() + 50_000);
+      expect(await noteInputHeld(row.id, 'still-answering', 'conversation-a')).toBe('new');
+      binding.conversationId = 'conversation-moved';
+      // 61 s after it was queued, 11 s after A's hold: A's hold no longer keeps it.
+      vi.setSystemTime(Date.now() + 11_000);
+      expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe('failed');
+    } finally { vi.useRealTimers(); }
+  });
+  it.each([
+    ['turn-held', 'new', 'queued'], ['tool-running', 'new', 'queued'],
+    // A page with no usable message box, or one that moved on, will not send it by waiting: the minute still applies.
+    ['no-composer', null, 'failed'], ['page-moved', null, 'failed']
+  ] as const)('keeps it only for a page waiting on its own turn (%s)', async (reason, kept, state) => {
+    binding.finishEnabled = false;
+    const row = await enqueueInput(input());
+    now += 50_000;
+    expect(await noteInputHeld(row.id, reason, 'conversation-a')).toBe(kept);
+    // 80 seconds after it was queued, 30 after the hold.
+    now += 30_000;
+    expect((await listInputs()).find(entry => entry.id === row.id)?.state).toBe(state);
   });
   it('requeues one proven pre-Send browser pickup timeout on the same row, then stops retrying', async () => {
     binding.model = 'gpt-5.6-sol'; binding.finishEnabled = false;
@@ -1426,6 +1502,17 @@ describe('browser decision lifetime', () => {
     await rejection;
     expect((await listInputs())[0]?.state).toBe('failed');
   });
+  // 2026-11-01: only the picker failed; nothing was typed, so Goal may ask again.
+  it('rejects a helper whose model the page could not confirm with its own retryable code', async () => {
+    const controller = new AbortController();
+    const answer = requestBrowserDecision('Choose one', controller.signal);
+    const rejection = expect(answer).rejects.toThrow('goal_helper_model_unconfirmed: Requested model or reasoning could not be confirmed');
+    const row = (await listInputs())[0]!;
+    await claimBrowserInput(row.id, 'document', null);
+    await failBrowserInput(row.id, 'document', 'Requested model or reasoning could not be confirmed', 'model-unconfirmed');
+    await rejection;
+    expect((await listInputs())[0]?.state).toBe('failed');
+  });
   it('rejects cancellation that races a persisted answer', async () => {
     const controller = new AbortController();
     const answer = requestBrowserDecision('Choose one', controller.signal);
@@ -2464,5 +2551,62 @@ describe('pickup reads do not hold the outbox', () => {
     expect(listed).toBe(rows.length);
     release!();
     expect(await pickups).toHaveLength(1);
+  });
+});
+
+// #1922: which of the app's own messages a page may replace when it finds one left in the composer.
+describe('own messages that never reached Send', () => {
+  it('lists only claimed, never-authorized, attachment-free messages of that chat from the last day, newest first', async () => {
+    const base = { sessionId, mode: 'auto' as const, dueAt: 0, model: null, reasoningEffort: null, owner: null, conversationId: 'conversation-a', offeredAt: now, requiresAuthorization: true };
+    const row = (text: string, extra: Partial<InputEntry> = {}): InputEntry =>
+      ({ ...base, id: randomUUID(), text, state: 'cancelled', createdAt: now - 1_000, ...extra } as InputEntry);
+    const rows = [
+      row('withdrawn continue'),
+      row('failed with frozen text', { state: 'failed', deliveryText: 'frozen delivery text', createdAt: now - 500 }),
+      row('authorized, then lost', { sendAuthorizedAt: now }),
+      row('delivered', { state: 'sent', deliveredAt: now }),
+      row('never claimed', { offeredAt: undefined }),
+      row('other chat', { conversationId: 'conversation-b' }),
+      row('with an image', { images: [{ name: 'a.webp', dataUrl: 'data:image/webp;base64,AAAA' }] }),
+      row('yesterday', { createdAt: now - 25 * 60 * 60_000 }),
+      // An older saved claim that never needed Send authorization may have been sent.
+      row('old claim without authorization', { requiresAuthorization: undefined }),
+      // A message and its companion went out as one text: neither alone is listed.
+      row('combined root', { companionInputId: '00000000-0000-4000-8000-000000000001' }),
+      row('its companion', { id: '00000000-0000-4000-8000-000000000001' })
+    ];
+    await writeDurableNow('session-input', rows);
+    resetInputForTests();
+    expect(await ownUnsentTexts('conversation-a', 'someone-else', now)).toEqual(['frozen delivery text', 'withdrawn continue']);
+    // A message is never its own leftover.
+    expect(await ownUnsentTexts('conversation-a', rows[0]!.id, now)).toEqual(['frozen delivery text']);
+  });
+});
+
+// CodeRabbit on #2066: Stop for an answer that already ended withdraws the app's own unsent Continues,
+// counted in the step that withdraws them; the person's own messages and authorized sends stay.
+describe('withdrawing the app\'s own Continues after a Stop', () => {
+  it('cancels a converted Continue and the named turn\'s fresh-turn Continue, and counts only those', async () => {
+    const mine = await seedLegacyInput(input({ text: 'My own next step' }));
+    const converted = await seedLegacyInput(input({ text: 'Continue until you are fully finished.' }));
+    const rotation = await seedLegacyInput(input({ text: 'Continue the task from where you are.' }));
+    const otherTurn = await seedLegacyInput(input({ text: 'Continue the task from where you are.' }));
+    const authorized = await seedLegacyInput(input({ text: 'Continue until you are fully finished.' }));
+    const rows = await listInputs();
+    await writeDurableNow('session-input', rows.map(row =>
+      row.id === converted.id ? { ...row, continuedFrom: 'recovery' as const }
+      : row.id === rotation.id ? { ...row, purpose: 'rotation' as const, queuedTurn: { conversationId: binding.conversationId, turnId: 'ended-turn' } }
+      : row.id === otherTurn.id ? { ...row, purpose: 'rotation' as const, queuedTurn: { conversationId: binding.conversationId, turnId: 'next-turn' } }
+      : row.id === authorized.id ? { ...row, continuedFrom: 'recovery' as const, state: 'browser' as const, owner: 'page', sendAuthorizedAt: now }
+      : row));
+    resetInputForTests();
+    expect(await withdrawOwnContinuesAfterStop(sessionId, 'ended-turn')).toBe(2);
+    const after = new Map((await listInputs()).map(row => [row.id, row]));
+    expect(after.get(converted.id)).toMatchObject({ state: 'cancelled', error: 'Automatic Continue cancelled: you pressed Stop.' });
+    expect(after.get(rotation.id)?.state).toBe('cancelled');
+    expect(after.get(otherTurn.id)?.state).toBe('queued');
+    expect(after.get(mine.id)?.state).toBe('queued');
+    expect(after.get(authorized.id)?.state).toBe('browser');
+    expect(await withdrawOwnContinuesAfterStop(sessionId, 'ended-turn')).toBe(0);
   });
 });

@@ -882,10 +882,10 @@
     "message": "ausstehend"
   },
   "popup_pipeline_call_fallback_many": {
-    "message": "Die App konnte $1 Aufrufe nicht per Request-ID zuordnen – sie hat auf $2 zurückgegriffen."
+    "message": "Die App konnte $1 Aufrufe nicht per Request-ID zuordnen: $2"
   },
   "popup_pipeline_call_fallback_one": {
-    "message": "Die App konnte einen Aufruf nicht per Request-ID zuordnen – sie hat auf $1 zurückgegriffen."
+    "message": "Die App konnte einen Aufruf nicht per Request-ID zuordnen: $1"
   },
   "popup_pipeline_delivery_blocked": {
     "message": "Die Zustellung ist gesperrt, bis die App verbunden und die Protokollkompatibilität bestätigt ist."
@@ -1206,7 +1206,7 @@
     "message": "$1 in der Seite zurückgehalten"
   },
   "popup_pipeline_call_fallback_many__one": {
-    "message": "Die App konnte $1 Aufruf nicht per Request-ID zuordnen – sie hat auf $2 zurückgegriffen."
+    "message": "Die App konnte $1 Aufrufe nicht per Request-ID zuordnen: $2"
   },
   "popup_pipeline_request_id_matched_many__one": {
     "message": "$1 Request-ID der aufgezeichneten Tool-Aktivität zugeordnet."
@@ -1267,5 +1267,14 @@
   },
   "content_task_waiting_app": {
     "message": "Wartet auf eine Antwort von Chat Marks."
+  },
+  "content_goal_wait_slots": {
+    "message": "Wartet auf einen freien Platz (Gleichzeitig arbeitende Chats)"
+  },
+  "content_goal_wait_paused": {
+    "message": "ChatGPT hat um eine Pause gebeten · wartet bis zur genannten Zeit"
+  },
+  "content_revival_draft_appeared": {
+    "message": "Während der Weckruf des Workers vorbereitet wurde, wurde etwas in den Chat geschrieben, daher hat der Weckruf es nicht ersetzt."
   }
 }

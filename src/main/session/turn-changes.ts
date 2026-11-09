@@ -3,7 +3,7 @@
  *
  * A turn's recorded edits are grouped by path in the order each file was first changed, and each
  * file gets one net diff: the text before the turn's first edit of it against the text after its
- * last. Only edits Chat On Steroids made are known; a command that changed files is not, and the
+ * last. Only edits Chat Marks made are known; a command that changed files is not, and the
  * card never guesses. A worker's edits belong to the worker's own answers.
  */
 
