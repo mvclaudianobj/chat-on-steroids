@@ -221,6 +221,7 @@ jobs:
             publish/ChatMarks-Setup-arm64.exe \
             publish/ChatMarks-Linux-x64.AppImage \
             publish/ChatMarks-Linux-x64.deb \
+            publish/Chat-Marks-Linux-x64.deb \
             publish/ChatMarks-Linux-arm64.AppImage \
             publish/ChatMarks-Linux-arm64.deb \
             publish/ChatMarks-Extension.zip \

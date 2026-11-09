@@ -9,6 +9,10 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.51.4] — Legacy Linux updater compatibility
+
+Keep the ChatMarks Linux package name and publish the previous `Chat-Marks-Linux-x64.deb` filename as a checksum-verified byte-for-byte alias so installed older versions can discover and install updates.
+
 ## [2.1.51.3] — ChatMarks release of current community main
 
 Carries the community updates after v2.1.51, including the scheduled chats list, full-history search, and Compact & Resume recovery after reload. The Marks revision is .3 because Mozilla already has add-on version 2.1.51.2; package and app identities remain compatible with existing installs.

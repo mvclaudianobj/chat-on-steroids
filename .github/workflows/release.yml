@@ -409,6 +409,17 @@ jobs:
           (cd release && sha256sum "${files[@]}" > SHA256SUMS.txt)
           cat release/SHA256SUMS.txt
 
+      - name: Add the legacy Linux updater filename
+        run: |
+          set -euo pipefail
+          source=release/ChatMarks-Linux-x64.deb
+          target=release/Chat-Marks-Linux-x64.deb
+          test -s "$source"
+          cp -- "$source" "$target"
+          cmp -s "$source" "$target"
+          (cd release && sha256sum "$(basename "$target")" >> SHA256SUMS.txt)
+          (cd release && sha256sum -c SHA256SUMS.txt)
+
       # Keep electron-builder's stable internal filenames for updater compatibility,
       # but offer people a versioned download without changing those filenames.
       - name: Prepare versioned Linux installer
@@ -447,6 +458,7 @@ jobs:
           name: chatmarks-candidate-${{ github.run_id }}
           path: |
             release/ChatMarks-*
+            release/Chat-Marks-Linux-x64.deb
             release/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
