@@ -9,6 +9,10 @@ The app and the browser extension in `extension/` are versioned together. **Relo
 extension after updating the app**. If their bridge protocols are incompatible,
 the app refuses the extension and asks you to reload the matching copy.
 
+## [2.1.51.5] — Offline Jarvis voices
+
+- Restore managed local Whisper transcription and Piper speech, with selectable, previewable Brazilian Portuguese voices.
+
 ## [2.1.51.4] — Legacy Linux updater compatibility
 
 Keep the ChatMarks Linux package name and publish the previous `Chat-Marks-Linux-x64.deb` filename as a checksum-verified byte-for-byte alias so installed older versions can discover and install updates.

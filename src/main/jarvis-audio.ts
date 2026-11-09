@@ -24,6 +24,7 @@ const audio = z.object({ action: z.literal('transcribe'), engine: z.enum(['clipr
   voice: jarvisVoiceConfigSchema.optional() }).strict();
 const status = z.object({ action: z.literal('status') }).strict();
 const localInstall = z.object({ action: z.literal('local-install'), model: z.enum(['base', 'small']) }).strict();
+const localSpeak = z.object({ action: z.literal('local-speak'), text: z.string().trim().min(1).max(4000) }).strict();
 const piperVoiceId = z.enum(PIPER_PT_BR_VOICES.map(voice => voice.id) as [PiperVoiceId, ...PiperVoiceId[]]);
 const piperSettings = z.object({ voice: piperVoiceId, lengthScale: z.number().finite().min(0.7).max(1.4),
   noiseW: z.number().finite().min(0.3).max(1.4), sentenceSilence: z.number().finite().min(0).max(0.8) }).strict();
@@ -37,13 +38,13 @@ const speak = z.object({ action: z.literal('speak'), voice: jarvisVoiceConfigSch
 const speakStream = z.object({ action: z.literal('speak-stream'), voice: jarvisVoiceConfigSchema, text: z.string().min(1).max(4000), requestId: z.string().uuid(), routing: jarvisVoiceRoutingSchema.optional(), groupId: z.string().uuid().optional() }).strict();
 const trace = z.object({ action: z.literal('trace'),
   step: z.enum(['send', 'receipt', 'observed', 'gate', 'decision', 'speak-call', 'speak-result', 'wait', 'cancel', 'session-change', 'provider-status']),
-  reason: z.enum(['accepted', 'rejected', 'not-selected', 'not-eligible', 'not-confirmed', 'no-link', 'ambiguous-link', 'no-text', 'empty-sentences', 'tts-disabled', 'provider', 'system', 'unavailable', 'stream', 'audio', 'success', 'failed', 'aborted', 'stale', 'error', 'complete', 'partial']).optional(),
+  reason: z.enum(['accepted', 'rejected', 'not-selected', 'not-eligible', 'not-confirmed', 'no-link', 'ambiguous-link', 'no-text', 'empty-sentences', 'tts-disabled', 'provider', 'local', 'system', 'unavailable', 'stream', 'audio', 'success', 'failed', 'aborted', 'stale', 'error', 'complete', 'partial']).optional(),
   sessionId: z.string().min(8).max(64).regex(/^[a-zA-Z0-9-]+$/).optional(),
   inputId: z.string().uuid().optional(),
   messageId: z.string().min(1).max(180).regex(/^[a-zA-Z0-9:_-]+$/).optional(),
   turnId: z.string().min(1).max(256).regex(/^[a-zA-Z0-9:_-]+$/).optional(),
   enabled: z.boolean().optional(), tts: z.boolean().optional(), consented: z.boolean().optional(), target: z.boolean().optional(),
-  providerReady: z.boolean().optional(), providerSpeaks: z.boolean().optional(), systemSpeech: z.boolean().optional(), providerChecked: z.boolean().optional(),
+  providerReady: z.boolean().optional(), providerSpeaks: z.boolean().optional(), localSpeaks: z.boolean().optional(), systemSpeech: z.boolean().optional(), providerChecked: z.boolean().optional(),
   engine: z.enum(['auto', 'provider', 'local', 'system']).optional()
 }).strict();
 const MAX_RESPONSE = 64_000;
@@ -153,6 +154,14 @@ export function registerJarvisAudioIpc(getWindow: () => BrowserWindow | null): v
       if (status.safeParse(payload).success) return { ok: true, data: await jarvisAudioStatus() };
       const action = payload && typeof payload === 'object' ? (payload as { action?: unknown }).action : undefined;
       if (action === 'local-status') return { ok: true, data: await jarvisLocalStatus() };
+      if (action === 'local-speak') {
+        const input = localSpeak.parse(payload);
+        if (speaking.size >= 3) throw new Error('Jarvis speech is already busy.');
+        const controller = new AbortController(); speaking.add(controller);
+        const timer = setTimeout(() => controller.abort(), 60_000);
+        try { return { ok: true, data: await speakJarvisLocal(input.text, controller.signal) }; }
+        finally { clearTimeout(timer); speaking.delete(controller); }
+      }
       if (action === 'local-voices') return { ok: true, data: await listPiperVoices() };
       if (action === 'local-voice-save') return { ok: true, data: await savePiperVoiceSettings(localVoiceSave.parse(payload).settings) };
       if (action === 'local-voice-install') {

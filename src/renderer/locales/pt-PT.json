@@ -5403,5 +5403,19 @@
   "Piper voice download failed.": "Falha ao descarregar voz Piper.",
   "Preparing local voice preview…": "A preparar a pré-visualização da voz local…",
   "Local voice preview failed.": "Falha na pré-visualização da voz local.",
-  "Playing local voice preview.": "A reproduzir pré-visualização da voz local."
+  "Playing local voice preview.": "A reproduzir pré-visualização da voz local.",
+  "Local Jarvis voices": "Vozes locais do Jarvis",
+  "Jarvis can now run Whisper and Piper locally, with a choice of verified Brazilian Portuguese voices.": "O Jarvis pode agora executar Whisper e Piper localmente e disponibiliza vozes verificadas em português do Brasil.",
+  "Choose Faber, Cadu, Jeff or Edresson, preview voices, and keep speech and transcription on this computer.": "Escolha Faber, Cadu, Jeff ou Edresson, ouça uma pré-visualização e mantenha a voz e a transcrição neste computador.",
+  "Choose your local Piper voice or an online provider.": "Escolha a sua voz Piper local ou um fornecedor online.",
+  "Provider when configured, otherwise local Piper or system voice": "Fornecedor se configurado; caso contrário, Piper local ou voz do sistema",
+  "Local Piper (offline)": "Piper local (offline)",
+  "Local voice (offline)": "Voz local (offline)",
+  "Install verified whisper.cpp and Piper releases in your user profile, without administrator privileges.": "Instale versões verificadas do whisper.cpp e do Piper no seu perfil de utilizador, sem privilégios de administrador.",
+  "Whisper model": "Modelo Whisper",
+  "Base downloads faster; small generally recognizes speech more accurately.": "Base transfere mais depressa; small reconhece normalmente a fala com maior precisão.",
+  "Base": "Base",
+  "Small": "Small",
+  "Install local speech": "Instalar voz local",
+  "Checking installed local engines…": "A verificar motores locais instalados…"
 }

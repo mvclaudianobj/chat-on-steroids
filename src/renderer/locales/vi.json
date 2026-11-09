@@ -5235,5 +5235,19 @@
   "Piper voice download failed.": "Tải giọng Piper thất bại.",
   "Preparing local voice preview…": "Đang chuẩn bị nghe thử giọng cục bộ…",
   "Local voice preview failed.": "Nghe thử giọng cục bộ thất bại.",
-  "Playing local voice preview.": "Đang phát giọng cục bộ nghe thử."
+  "Playing local voice preview.": "Đang phát giọng cục bộ nghe thử.",
+  "Local Jarvis voices": "Giọng Jarvis chạy cục bộ",
+  "Jarvis can now run Whisper and Piper locally, with a choice of verified Brazilian Portuguese voices.": "Jarvis hiện có thể chạy Whisper và Piper cục bộ, với các giọng tiếng Bồ Đào Nha Brazil đã được xác minh.",
+  "Choose Faber, Cadu, Jeff or Edresson, preview voices, and keep speech and transcription on this computer.": "Chọn Faber, Cadu, Jeff hoặc Edresson, nghe thử và giữ việc đọc cùng phiên âm trên máy tính này.",
+  "Choose your local Piper voice or an online provider.": "Chọn giọng Piper cục bộ hoặc nhà cung cấp trực tuyến.",
+  "Provider when configured, otherwise local Piper or system voice": "Dùng nhà cung cấp nếu đã cấu hình, nếu không dùng Piper cục bộ hoặc giọng hệ thống",
+  "Local Piper (offline)": "Piper cục bộ (ngoại tuyến)",
+  "Local voice (offline)": "Giọng cục bộ (ngoại tuyến)",
+  "Install verified whisper.cpp and Piper releases in your user profile, without administrator privileges.": "Cài các bản whisper.cpp và Piper đã xác minh vào hồ sơ người dùng, không cần quyền quản trị.",
+  "Whisper model": "Mô hình Whisper",
+  "Base downloads faster; small generally recognizes speech more accurately.": "Base tải nhanh hơn; small thường nhận dạng lời nói chính xác hơn.",
+  "Base": "Base",
+  "Small": "Small",
+  "Install local speech": "Cài giọng cục bộ",
+  "Checking installed local engines…": "Đang kiểm tra các bộ máy cục bộ đã cài…"
 }

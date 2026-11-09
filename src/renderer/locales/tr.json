@@ -5319,5 +5319,19 @@
   "Piper voice download failed.": "Piper sesi indirilemedi.",
   "Preparing local voice preview…": "Yerel ses önizlemesi hazırlanıyor…",
   "Local voice preview failed.": "Yerel ses önizlemesi başarısız.",
-  "Playing local voice preview.": "Yerel ses önizlemesi oynatılıyor."
+  "Playing local voice preview.": "Yerel ses önizlemesi oynatılıyor.",
+  "Local Jarvis voices": "Yerel Jarvis sesleri",
+  "Jarvis can now run Whisper and Piper locally, with a choice of verified Brazilian Portuguese voices.": "Jarvis artık Whisper ve Piper’ı yerel olarak çalıştırabiliyor ve doğrulanmış Brezilya Portekizcesi sesleri sunuyor.",
+  "Choose Faber, Cadu, Jeff or Edresson, preview voices, and keep speech and transcription on this computer.": "Faber, Cadu, Jeff veya Edresson’ı seçip önizleyin; konuşma ve yazıya dökme bu bilgisayarda kalsın.",
+  "Choose your local Piper voice or an online provider.": "Yerel Piper sesinizi veya çevrimiçi bir sağlayıcıyı seçin.",
+  "Provider when configured, otherwise local Piper or system voice": "Yapılandırılmışsa sağlayıcı; değilse yerel Piper veya sistem sesi",
+  "Local Piper (offline)": "Yerel Piper (çevrimdışı)",
+  "Local voice (offline)": "Yerel ses (çevrimdışı)",
+  "Install verified whisper.cpp and Piper releases in your user profile, without administrator privileges.": "Doğrulanmış whisper.cpp ve Piper sürümlerini yönetici izni olmadan kullanıcı profilinize yükleyin.",
+  "Whisper model": "Whisper modeli",
+  "Base downloads faster; small generally recognizes speech more accurately.": "Base daha hızlı indirilir; small genellikle konuşmayı daha doğru tanır.",
+  "Base": "Base",
+  "Small": "Small",
+  "Install local speech": "Yerel konuşmayı yükle",
+  "Checking installed local engines…": "Yüklü yerel motorlar denetleniyor…"
 }

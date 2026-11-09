@@ -254,12 +254,13 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     sentenceSilence: Number(piperPause?.value)
   });
   const piperNotice = (label: string): void => { if (piperStatus) piperStatus.textContent = t(label); };
-  const refreshPiper = (): void => {
+  const refreshPiper = (keepSelected?: PiperVoiceId): void => {
     if (!api.jarvisLocalVoices) return;
     void api.jarvisLocalVoices().then(result => {
       if (!result.ok) { piperNotice('Local voice status unavailable.'); return; }
       piperInstalled = new Set(result.data.voices.filter(item => item.installed).map(item => item.id));
       showPiperSettings(result.data.settings);
+      if (keepSelected && piperVoice) piperVoice.value = keepSelected;
       if (piperVoice) {
         for (const option of Array.from(piperVoice.options)) {
           const item = result.data.voices.find(voice => voice.id === option.value);
@@ -294,7 +295,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
     piperNotice('Downloading and verifying local voice models…');
     void api.jarvisLocalVoiceInstall(chosen).then(result => {
       piperNotice(result.ok ? 'Verified Piper voice installed.' : 'Piper voice download failed.');
-      if (result.ok) refreshPiper();
+      if (result.ok) refreshPiper(chosen);
     }).catch(() => piperNotice('Piper voice download failed.'))
       .finally(() => { piperDownload.disabled = false; });
   });
@@ -342,14 +343,14 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   // completed answer; the main process owns the definitive credential check.
   const providerSpeaks = (): boolean => jarvisVoiceTtsReady(preferences.provider) && typeof api.jarvisSpeak === 'function' &&
     (preferences.ttsEngine === 'provider' || preferences.ttsEngine === 'auto');
-  const localSpeaks = (): boolean => localVoice && typeof api.jarvisSpeak === 'function' &&
+  const localSpeaks = (): boolean => localVoice && typeof api.jarvisLocalSpeak === 'function' &&
     (preferences.ttsEngine === 'local' || preferences.ttsEngine === 'auto');
   const speaks = (): boolean => preferences.tts && (providerSpeaks() || localSpeaks() || systemSpeech());
   const traceGate = (reason: JarvisTrace['reason'], sessionId?: string, turnId?: string): void => {
     trace('gate', { reason, sessionId, turnId, enabled: preferences.enabled, tts: preferences.tts,
       consented, target: !!eligible(), engine: preferences.ttsEngine,
       providerReady: jarvisVoiceTtsReady(preferences.provider), providerChecked: provider.checked,
-      providerSpeaks: providerSpeaks(), systemSpeech: systemSpeech() });
+      providerSpeaks: providerSpeaks(), localSpeaks: localSpeaks(), systemSpeech: systemSpeech() });
   };
   const liveStreams = new Set<JarvisProgressiveAudio>();
   type RouteReply = { ok: true; data: { g4f1: boolean; g4f2: boolean; error: string | null } } | { ok: false; error: string };
@@ -416,7 +417,7 @@ export function initJarvis(api: AppApi, selected: () => JarvisSelection | null, 
   const speech = new JarvisSpeechQueue<Playable>({
     synthesize: async (text, signal) => {
       if (localSpeaks() && (preferences.ttsEngine === 'local' || !providerSpeaks())) {
-        const reply = await api.jarvisSpeak(emptyJarvisVoiceConfig(), text);
+        const reply = await api.jarvisLocalSpeak(text);
         if (reply.ok && !signal.aborted) return { kind: 'audio', url: URL.createObjectURL(new Blob([new Uint8Array(reply.data.bytes)], { type: reply.data.mime })) };
         if (!reply.ok && !systemSpeech()) throw new Error(reply.error);
       }

@@ -5235,5 +5235,19 @@
   "Piper voice download failed.": "Piper 音声のダウンロードに失敗しました。",
   "Preparing local voice preview…": "ローカル音声の試聴を準備中…",
   "Local voice preview failed.": "ローカル音声の試聴に失敗しました。",
-  "Playing local voice preview.": "ローカル音声を試聴しています。"
+  "Playing local voice preview.": "ローカル音声を試聴しています。",
+  "Local Jarvis voices": "Jarvisのローカル音声",
+  "Jarvis can now run Whisper and Piper locally, with a choice of verified Brazilian Portuguese voices.": "JarvisでWhisperとPiperをローカル実行できるようになり、検証済みのブラジルポルトガル語音声を選べます。",
+  "Choose Faber, Cadu, Jeff or Edresson, preview voices, and keep speech and transcription on this computer.": "Faber、Cadu、Jeff、Edressonから選び、試聴できます。音声合成と文字起こしはこのPC内で行われます。",
+  "Choose your local Piper voice or an online provider.": "ローカルのPiper音声またはオンラインプロバイダーを選択します。",
+  "Provider when configured, otherwise local Piper or system voice": "設定済みならプロバイダー、未設定ならローカルPiperまたはシステム音声",
+  "Local Piper (offline)": "ローカルPiper（オフライン）",
+  "Local voice (offline)": "ローカル音声（オフライン）",
+  "Install verified whisper.cpp and Piper releases in your user profile, without administrator privileges.": "管理者権限なしで、検証済みのwhisper.cppとPiperをユーザープロファイルにインストールします。",
+  "Whisper model": "Whisperモデル",
+  "Base downloads faster; small generally recognizes speech more accurately.": "Baseはダウンロードが速く、smallは通常、音声認識の精度が高くなります。",
+  "Base": "Base",
+  "Small": "Small",
+  "Install local speech": "ローカル音声をインストール",
+  "Checking installed local engines…": "インストール済みのローカルエンジンを確認中…"
 }

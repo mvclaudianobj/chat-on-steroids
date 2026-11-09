@@ -5487,5 +5487,19 @@
   "Piper voice download failed.": "Не удалось скачать голос Piper.",
   "Preparing local voice preview…": "Подготовка локального прослушивания…",
   "Local voice preview failed.": "Не удалось воспроизвести голос.",
-  "Playing local voice preview.": "Воспроизводится образец голоса."
+  "Playing local voice preview.": "Воспроизводится образец голоса.",
+  "Local Jarvis voices": "Локальные голоса Jarvis",
+  "Jarvis can now run Whisper and Piper locally, with a choice of verified Brazilian Portuguese voices.": "Теперь Jarvis запускает Whisper и Piper локально и поддерживает проверенные голоса на бразильском португальском.",
+  "Choose Faber, Cadu, Jeff or Edresson, preview voices, and keep speech and transcription on this computer.": "Выберите Faber, Cadu, Jeff или Edresson, прослушайте образец и оставьте синтез речи и транскрипцию на этом компьютере.",
+  "Choose your local Piper voice or an online provider.": "Выберите локальный голос Piper или сетевой сервис.",
+  "Provider when configured, otherwise local Piper or system voice": "Сервис, если настроен; иначе локальный Piper или системный голос",
+  "Local Piper (offline)": "Локальный Piper (офлайн)",
+  "Local voice (offline)": "Локальный голос (офлайн)",
+  "Install verified whisper.cpp and Piper releases in your user profile, without administrator privileges.": "Установите проверенные версии whisper.cpp и Piper в профиль пользователя без прав администратора.",
+  "Whisper model": "Модель Whisper",
+  "Base downloads faster; small generally recognizes speech more accurately.": "Base загружается быстрее; small обычно точнее распознаёт речь.",
+  "Base": "Base",
+  "Small": "Small",
+  "Install local speech": "Установить локальную речь",
+  "Checking installed local engines…": "Проверка установленных локальных модулей…"
 }

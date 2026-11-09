@@ -5235,5 +5235,19 @@
   "Piper voice download failed.": "下载 Piper 语音失败。",
   "Preparing local voice preview…": "正在准备本地语音试听…",
   "Local voice preview failed.": "本地语音试听失败。",
-  "Playing local voice preview.": "正在播放本地语音试听。"
+  "Playing local voice preview.": "正在播放本地语音试听。",
+  "Local Jarvis voices": "Jarvis 本地语音",
+  "Jarvis can now run Whisper and Piper locally, with a choice of verified Brazilian Portuguese voices.": "Jarvis 现可在本地运行 Whisper 和 Piper，并提供经过验证的巴西葡萄牙语语音。",
+  "Choose Faber, Cadu, Jeff or Edresson, preview voices, and keep speech and transcription on this computer.": "选择 Faber、Cadu、Jeff 或 Edresson，试听语音，并让朗读和转录都在此电脑上完成。",
+  "Choose your local Piper voice or an online provider.": "选择本地 Piper 语音或在线服务。",
+  "Provider when configured, otherwise local Piper or system voice": "已配置时使用服务，否则使用本地 Piper 或系统语音",
+  "Local Piper (offline)": "本地 Piper（离线）",
+  "Local voice (offline)": "本地语音（离线）",
+  "Install verified whisper.cpp and Piper releases in your user profile, without administrator privileges.": "无需管理员权限，即可将经过验证的 whisper.cpp 和 Piper 版本安装到用户配置目录。",
+  "Whisper model": "Whisper 模型",
+  "Base downloads faster; small generally recognizes speech more accurately.": "Base 下载更快；small 通常能更准确地识别语音。",
+  "Base": "Base",
+  "Small": "Small",
+  "Install local speech": "安装本地语音",
+  "Checking installed local engines…": "正在检查已安装的本地引擎…"
 }

@@ -5235,5 +5235,19 @@
   "Piper voice download failed.": "Piper 음성 다운로드 실패.",
   "Preparing local voice preview…": "로컬 음성 미리 듣기 준비 중…",
   "Local voice preview failed.": "로컬 음성 미리 듣기 실패.",
-  "Playing local voice preview.": "로컬 음성 미리 듣기 재생 중."
+  "Playing local voice preview.": "로컬 음성 미리 듣기 재생 중.",
+  "Local Jarvis voices": "Jarvis 로컬 음성",
+  "Jarvis can now run Whisper and Piper locally, with a choice of verified Brazilian Portuguese voices.": "이제 Jarvis에서 Whisper와 Piper를 로컬로 실행하고 검증된 브라질 포르투갈어 음성을 선택할 수 있습니다.",
+  "Choose Faber, Cadu, Jeff or Edresson, preview voices, and keep speech and transcription on this computer.": "Faber, Cadu, Jeff, Edresson 중에서 선택하고 미리 들어 보세요. 음성 합성과 전사는 이 컴퓨터에서 처리됩니다.",
+  "Choose your local Piper voice or an online provider.": "로컬 Piper 음성 또는 온라인 제공자를 선택하세요.",
+  "Provider when configured, otherwise local Piper or system voice": "설정된 경우 제공자, 아니면 로컬 Piper 또는 시스템 음성",
+  "Local Piper (offline)": "로컬 Piper(오프라인)",
+  "Local voice (offline)": "로컬 음성(오프라인)",
+  "Install verified whisper.cpp and Piper releases in your user profile, without administrator privileges.": "관리자 권한 없이 검증된 whisper.cpp와 Piper를 사용자 프로필에 설치합니다.",
+  "Whisper model": "Whisper 모델",
+  "Base downloads faster; small generally recognizes speech more accurately.": "Base는 다운로드가 빠르고 small은 대체로 음성을 더 정확하게 인식합니다.",
+  "Base": "Base",
+  "Small": "Small",
+  "Install local speech": "로컬 음성 설치",
+  "Checking installed local engines…": "설치된 로컬 엔진 확인 중…"
 }

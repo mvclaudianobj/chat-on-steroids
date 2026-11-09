@@ -14,6 +14,12 @@ interface Highlight { icon: string; title: () => string; text: () => string }
 interface Release { lead: () => string; highlights: Highlight[] }
 
 const RELEASES: Readonly<Record<string, Release>> = {
+  '2.1.51.5': {
+    lead: () => t("Jarvis can now run Whisper and Piper locally, with a choice of verified Brazilian Portuguese voices."),
+    highlights: [
+      { icon: 'i-chat', title: () => t("Local Jarvis voices"), text: () => t("Choose Faber, Cadu, Jeff or Edresson, preview voices, and keep speech and transcription on this computer.") }
+    ]
+  },
   '2.1.51.3': {
     lead: () => t("Search complete chat histories, manage scheduled messages in one place, and resume project chats reliably after a reload."),
     highlights: [

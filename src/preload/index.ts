@@ -159,6 +159,7 @@ const api = {
     ? { action: 'microphone-consent' } : { action: 'microphone-consent', enabled }),
   jarvisAudioStatus: () => call<{ models: string[]; local: boolean; windows: boolean; error: string | null }>('jarvis:audio', { action: 'status' }),
   jarvisLocalStatus: () => call<import('../main/jarvis-local.js').JarvisLocalStatus>('jarvis:audio', { action: 'local-status' }),
+  jarvisLocalSpeak: (text: string) => call<{ mime: string; bytes: Uint8Array }>('jarvis:audio', { action: 'local-speak', text }),
   jarvisLocalVoices: () => call<import('../shared/jarvis-piper-voices.js').PiperVoiceView>('jarvis:audio', { action: 'local-voices' }),
   jarvisLocalVoiceSave: (settings: import('../shared/jarvis-piper-voices.js').PiperVoiceSettings) =>
     call<import('../shared/jarvis-piper-voices.js').PiperVoiceSettings>('jarvis:audio', { action: 'local-voice-save', settings }),
